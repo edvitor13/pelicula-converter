@@ -32,6 +32,7 @@ API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 SUMS_NAME = "SHA256SUMS.txt"
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+NEW_PROCESS_GROUP = 0x00000200 if sys.platform == "win32" else 0
 
 
 class UpdateError(Exception):
@@ -200,6 +201,24 @@ def _app_dir() -> Path:
     return Path(sys.executable).resolve().parent
 
 
+def _ps(text: str) -> str:
+    """Texto entre aspas simples do PowerShell (aspas simples dentro do caminho viram duas)."""
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+def spawn_powershell(script: Path) -> subprocess.Popen:
+    """Roda um .ps1 num PowerShell que continua vivo depois que o app fecha.
+
+    Não usar DETACHED_PROCESS: iniciado sem console por um app sem console (o executável do
+    PyInstaller), o powershell.exe encerra antes de rodar o script, sem erro nenhum. Com
+    CREATE_NO_WINDOW ele ganha um console próprio e invisível e sobrevive ao fim do app.
+    """
+    return subprocess.Popen(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(script)],
+        creationflags=NO_WINDOW | NEW_PROCESS_GROUP, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True)
+
+
 def install(package: str, kind: str | None = None) -> None:
     """Prepara a instalação para rodar quando o app fechar. O app deve sair logo em seguida."""
     kind = kind or install_info()["kind"]
@@ -207,11 +226,16 @@ def install(package: str, kind: str | None = None) -> None:
     exe = str(Path(sys.executable).resolve())
     work = Path(package).parent
     if sys.platform == "win32":
+        # O registro fica em atualizar.log (e instalar.log, do msiexec) na pasta do download.
+        head = (f"Start-Transcript -Path {_ps(work / 'atualizar.log')} -Append | Out-Null\n"
+                f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue\n"
+                f"Start-Sleep -Milliseconds 500\n")
+        tail = f"Start-Process -FilePath {_ps(exe)}\nStop-Transcript | Out-Null\n"
         if kind == "msi":
-            body = (f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue\n"
-                    f"$p = Start-Process msiexec.exe -ArgumentList @('/i', '\"{package}\"', '/passive', '/norestart') "
-                    f"-Wait -PassThru\n"
-                    f"Start-Process -FilePath '{exe}'\n")
+            msi_args = ", ".join(_ps(a) for a in ("/i", f'"{package}"', "/passive", "/norestart", "/l*v",
+                                                  f'"{work / "instalar.log"}"'))
+            body = (head + f"$p = Start-Process msiexec.exe -ArgumentList @({msi_args}) -Wait -PassThru\n"
+                    "Write-Output \"msiexec terminou com o código $($p.ExitCode)\"\n" + tail)
         elif kind == "zip":
             import zipfile
             new_dir = work / "novo"
@@ -223,16 +247,13 @@ def install(package: str, kind: str | None = None) -> None:
             src = next((p.parent for p in new_dir.rglob("PeliculaConverter.exe")), None)
             if src is None:
                 raise UpdateError("bad-archive")
-            body = (f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue\n"
-                    f"Start-Sleep -Milliseconds 500\n"
-                    f"robocopy '{src}' '{_app_dir()}' /MIR /R:3 /W:1 /NFL /NDL /NJH /NJS | Out-Null\n"
-                    f"Start-Process -FilePath '{exe}'\n")
+            body = (head + f"robocopy {_ps(src)} {_ps(_app_dir())} /MIR /R:3 /W:1 /NFL /NDL /NJH /NJS | Out-Null\n"
+                    "Write-Output \"robocopy terminou com o código $LASTEXITCODE\"\n" + tail)
         else:
             raise UpdateError("unsupported")
         script = work / "atualizar.ps1"
         script.write_text(body, encoding="utf-8-sig")
-        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                          "-File", str(script)], creationflags=NO_WINDOW | 0x00000008)  # DETACHED_PROCESS
+        spawn_powershell(script)
         return
     if kind == "deb":
         body = (f"#!/bin/sh\nwhile kill -0 {pid} 2>/dev/null; do sleep 0.3; done\n"

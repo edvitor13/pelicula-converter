@@ -3,7 +3,11 @@
 import hashlib
 import io
 import json
+import subprocess
+import sys
+import time
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -122,3 +126,69 @@ def test_download_requires_checksums(monkeypatch):
     rel = release(NAMES[:-1])
     with pytest.raises(updater.UpdateError, match="no-checksums"):
         updater.download(rel, (NAMES[1], rel.assets[NAMES[1]][0], 10))
+
+
+# ------------------------------------------------------------------ instalação no Windows
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="instalação por PowerShell só no Windows")
+
+_SPAWN_CHILD = r"""
+import sys
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from pelicula import updater
+updater.spawn_powershell(Path(sys.argv[2]))
+"""
+
+
+@windows_only
+def test_spawn_powershell_survives_windowless_parent(tmp_path):
+    """O app empacotado não tem console. Com DETACHED_PROCESS o PowerShell morria antes de rodar o
+    script (atualização 1.1.0 -> 1.2.0 não instalava nada). O script tem de rodar mesmo que o
+    processo que o chamou (aqui um pythonw, sem console) termine na hora."""
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not pythonw.is_file():
+        pytest.skip("pythonw.exe não encontrado")
+    marker = tmp_path / "rodou.txt"
+    script = tmp_path / "teste.ps1"
+    script.write_text(f"Start-Sleep -Milliseconds 300\nSet-Content -Path {updater._ps(marker)} -Value 'ok'\n",
+                      encoding="utf-8-sig")
+    child = tmp_path / "filho.py"
+    child.write_text(_SPAWN_CHILD, encoding="utf-8")
+    root = str(Path(updater.__file__).resolve().parents[1])
+    subprocess.run([str(pythonw), str(child), root, str(script)], timeout=60, check=True)
+    deadline = time.time() + 45
+    while time.time() < deadline and not marker.exists():
+        time.sleep(0.25)
+    assert marker.exists(), "o PowerShell lançado pelo atualizador não rodou o script"
+
+
+@windows_only
+def test_install_msi_writes_logged_script(tmp_path, monkeypatch):
+    work = tmp_path / "pasta d'Ana"  # apóstrofo no caminho precisa ser escapado
+    work.mkdir()
+    pkg = work / "PeliculaConverter-v9.0.0-windows-x64.msi"
+    pkg.write_bytes(b"x")
+    spawned = []
+    monkeypatch.setattr(updater, "spawn_powershell", spawned.append)
+    monkeypatch.setattr(updater.sys, "executable", str(tmp_path / "App d'Ana" / "PeliculaConverter.exe"))
+    updater.install(str(pkg), "msi")
+    assert spawned == [work / "atualizar.ps1"]
+    body = spawned[0].read_text(encoding="utf-8-sig")
+    assert body.startswith("Start-Transcript -Path '") and "d''Ana" in body
+    assert "msiexec.exe" in body and "'/passive'" in body and "'/l*v'" in body and "instalar.log" in body
+    assert body.index("msiexec.exe") < body.index("Start-Process -FilePath '") < body.index("Stop-Transcript")
+    assert "App d''Ana" in body
+    # Conferência de sintaxe pelo próprio PowerShell (sem executar).
+    check = ("$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("
+             f"{updater._ps(spawned[0])}, [ref]$null, [ref]$e) | Out-Null; $e.Count")
+    out = subprocess.run(["powershell", "-NoProfile", "-Command", check], capture_output=True, text=True, timeout=60)
+    assert out.stdout.strip() == "0", out.stdout + out.stderr
+
+
+def test_spawn_does_not_use_detached_process(monkeypatch):
+    calls = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda *a, **k: calls.append(k))
+    updater.spawn_powershell(Path("x.ps1"))
+    flags = calls[0]["creationflags"]
+    assert not flags & 0x00000008  # DETACHED_PROCESS derruba o PowerShell sem console
+    assert calls[0]["stdin"] is subprocess.DEVNULL
