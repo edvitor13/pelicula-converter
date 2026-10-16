@@ -7,6 +7,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Prévia em tela cheia** (botão na barra da prévia ou `F11`): só o vídeo ocupa a tela, na
+  resolução original, para ver detalhes. Barrinha flutuante com zoom e *Sair*, que some com o mouse
+  parado, e dica das teclas ao entrar. `Esc` ou `F11` saem e a qualidade de prévia escolhida volta.
+  `Shift+F11` mantém a tela cheia da janela inteira, que antes ficava no `F11`.
+- **Zoom livre de 10% a 1600%**: lupas − e + na barra da prévia, teclas `+`/`−` e roda do mouse,
+  em passos de 25%. O zoom pode ficar menor que o tamanho que cabe na janela, com a imagem
+  centralizada. O zoom atual aparece sempre na barra.
+
 ### Corrigido
 - O selo de versão do README e a versão do pacote no `pyproject.toml` tinham ficado em 1.0.0. O selo
   agora mostra a última release do GitHub, e o `pyproject.toml` lê a versão de
