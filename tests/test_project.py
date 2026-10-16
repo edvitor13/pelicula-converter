@@ -103,3 +103,13 @@ def test_bad_values_are_sanitized(tmp_path):
     assert q.values["exposicao"] == params.PARAMS["exposicao"].max
     assert q.values["bitola"] == params.PARAMS["bitola"].default
     assert "chave_desconhecida" not in q.values
+
+
+def test_open_dialog_lists_projects():
+    """O botão Abrir mostra vídeos, imagens e .plc juntos; o "localizar o vídeo" continua só com mídia."""
+    pytest.importorskip("PySide6")
+    from pelicula.ui import main_window
+    filters = main_window.open_filter().split(";;")
+    assert "*.plc" in filters[0] and "*.mp4" in filters[0] and "*.exr" in filters[0]
+    assert any(f.endswith("(*.plc)") for f in filters[1:])
+    assert "*.plc" not in main_window.media_filter()
