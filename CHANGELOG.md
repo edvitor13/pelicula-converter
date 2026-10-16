@@ -35,6 +35,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - CI: pushes em outras branches e pull requests rodam só os testes; os pacotes são gerados no
   `main`/`master`, em tags `v*` e na execução manual, e o `.msi` e o `.deb` são instalados e
   removidos de verdade no runner para conferir.
+- Os executáveis do Linux passam a ser gerados no Ubuntu 22.04: o `.deb` e o `.tar.gz` funcionam
+  no Ubuntu 22.04+ e no Debian 12+ (glibc 2.35).
 
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
