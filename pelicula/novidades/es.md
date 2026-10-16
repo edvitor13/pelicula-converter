@@ -1,3 +1,10 @@
+## Versión 1.2.2 — 16 de octubre de 2026
+
+**Pantalla completa más práctica y control del desenfoque de los formatos.**
+
+- 🖥️ **Pantalla completa con el reproductor.** En la vista previa en pantalla completa, los controles de reproducción y la barra de la vista previa siguen en pantalla. Se mantiene la resolución que elegiste, y puedes cambiarla ahí mismo.
+- 🎞️ **Desenfoque del formato.** La ligera suavidad del Super 8 y del 8 mm ahora tiene su propio interruptor en Película → Desenfoque del formato: desactívalo para mantener la nitidez del video o ajusta su intensidad.
+
 ## Versión 1.2.1 — 16 de octubre de 2026
 
 **La actualización automática vuelve a funcionar en Windows.**

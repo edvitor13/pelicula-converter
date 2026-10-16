@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.2.2] - 2026-10-16
+
 ### Adicionado
 - **Desfoque da bitola** (Película): chave para ligar e desligar a maciez natural da bitola (o que
   deixa o Super 8 e o 8 mm mais "embaçados"), com a dica mostrando quanto cada bitola desfoca. O
@@ -22,10 +28,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Atualização no Windows: o app reabre direto (sem passar pelo shell do Windows) depois de instalar.
   Com o shell, a primeira abertura do executável novo demorava ~25 s e criava uma segunda instância
   passageira.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.2.1] - 2026-10-16
 
