@@ -57,6 +57,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `build.sh` para gerar o `.tar.gz` e o `.deb` no Linux; o `build.bat` também gera o `.msi`
   quando o WiX Toolset está instalado.
 - `.dmg` para macOS preparado (o suporte ao macOS continua desativado).
+- Opção **Procurar atualizações automaticamente** em Configurações, que desliga as consultas feitas
+  ao abrir (versão nova do app no GitHub e do ffmpeg no gyan.dev).
+- Seções **Política de assinatura de código** e **Privacidade** no README (requisitos da SignPath
+  Foundation) e link para as duas no texto da release.
+- Executáveis do Windows com nome, versão, descrição e direitos autorais do produto
+  (*Propriedades → Detalhes*), lidos de `pelicula.__version__`.
 
 ### Mudado
 - CI (#9): pushes em outras branches e pull requests rodam só os testes; os pacotes são gerados no

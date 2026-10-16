@@ -38,6 +38,8 @@
 - [Solução de problemas](#solução-de-problemas)
 - [Gerar o executável (build)](#gerar-o-executável-build)
 - [Desenvolvimento](#desenvolvimento)
+- [Política de assinatura de código (Code signing policy)](#política-de-assinatura-de-código-code-signing-policy)
+- [Privacidade (Privacy policy)](#privacidade-privacy-policy)
 - [Licença](#licença)
 - [Aviso legal](#aviso-legal)
 
@@ -673,6 +675,8 @@ Quando há, aparece **Atualizar para X.Y.Z** na barra de status e na tela de boa
   instala e abre de novo sozinho. Se o arquivo não conferir, nada é instalado.
 - Também dá para *Pular esta versão*, *Agora não* ou *Abrir página da versão*.
 - **Configurações → Verificar atualizações…** verifica na hora.
+- **Configurações → Procurar atualizações automaticamente** desliga (ou religa) a consulta feita ao
+  abrir o app, tanto a do app quanto a do ffmpeg. Veja [Privacidade](#privacidade-privacy-policy).
 - Rodando pelo código-fonte, o app só avisa (atualize com `git pull`).
 - O repositório precisa ser **público** para a verificação funcionar sem login. Para testar com o
   repositório privado, defina `PELICULA_GITHUB_TOKEN` com um token de leitura.
@@ -942,6 +946,60 @@ pelicula-converter/
 ├── PeliculaConverter.spec     # PyInstaller (PeliculaConverter + pelicula-cli)
 └── pyproject.toml / requirements.txt
 ```
+
+## Política de assinatura de código (Code signing policy)
+
+Os arquivos do Windows (`PeliculaConverter.exe`, `pelicula-cli.exe` e o instalador `.msi`) serão
+assinados pelo programa gratuito da SignPath Foundation para projetos de código aberto. A inscrição
+está em análise; até a aprovação, os arquivos saem **sem assinatura** (veja
+[docs/ASSINATURA.md](docs/ASSINATURA.md)).
+
+> Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+> [SignPath Foundation](https://signpath.org/).
+
+- Só são assinados arquivos gerados pelo GitHub Actions a partir deste repositório
+  ([`.github/workflows/build.yml`](.github/workflows/build.yml)), em tags `v*`. Cada versão é
+  aprovada manualmente antes da assinatura.
+- **Autores e revisores (committers and reviewers):** [@edvitor13](https://github.com/edvitor13)
+- **Aprovadores (approvers):** [@edvitor13](https://github.com/edvitor13)
+- Quem tem acesso ao repositório e à SignPath usa autenticação em dois fatores.
+- As bibliotecas de terceiros que vão dentro do pacote (Python, Qt/PySide6, numpy, moderngl) são
+  incluídas como estão, sem a nossa assinatura.
+
+*English:* Windows binaries (`PeliculaConverter.exe`, `pelicula-cli.exe` and the `.msi` installer)
+will be signed through the SignPath Foundation program for open source projects (application under
+review; until then, files are unsigned). Only artifacts built by GitHub Actions from this
+repository, on `v*` tags, are signed, and every release is approved manually. Committers, reviewers
+and approvers: [@edvitor13](https://github.com/edvitor13). Multi-factor authentication is required
+for repository and SignPath access.
+
+## Privacidade (Privacy policy)
+
+O PeliculaConverter **não coleta dados pessoais**: não tem conta, telemetria, estatísticas de uso
+nem anúncios, e os seus vídeos, projetos e presets **nunca saem do computador**. O app só usa a
+internet nestes casos:
+
+| Quando | Para onde | O que é enviado |
+|---|---|---|
+| Ao abrir, no máximo uma vez por dia: procurar versão nova do app | `api.github.com` | Um pedido de página comum (o endereço IP, como em qualquer site, e `User-Agent: PeliculaConverter/<versão>`) |
+| Ao abrir, no Windows: ver qual é a versão mais nova do ffmpeg | `www.gyan.dev` | O mesmo tipo de pedido |
+| Quando você pede: baixar ou atualizar o ffmpeg | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo |
+| Quando você aceita uma atualização do app | `github.com` (Releases deste repositório) | Download do arquivo |
+
+- As duas consultas feitas ao abrir podem ser desligadas em **Configurações → Procurar atualizações
+  automaticamente**. Desligadas, o app só se conecta quando você pede.
+- Esses serviços têm as próprias políticas: [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)
+  e [gyan.dev](https://www.gyan.dev/).
+
+*English:* PeliculaConverter does not collect personal data: no accounts, telemetry, usage
+statistics or ads, and your videos, projects and presets never leave your computer. It only goes
+online to (1) check GitHub for a new app version at startup, at most once a day; (2) on Windows,
+check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg when you ask; and
+(4) download an app update when you accept it. These requests carry no personal data besides the
+IP address inherent to any connection and a `PeliculaConverter/<version>` user agent. The two
+startup checks can be turned off in **Settings → Check for updates automatically**; with them off,
+the program will not transfer any information to other networked systems unless specifically
+requested by the user.
 
 ## Licença
 

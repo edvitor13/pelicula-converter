@@ -355,6 +355,12 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(_("Idioma…"), self.choose_language)
         menu.addAction(_("Verificar atualizações…"), lambda: self.check_updates(manual=True))
+        self.act_auto_update = menu.addAction(_("Procurar atualizações automaticamente"))
+        self.act_auto_update.setCheckable(True)
+        self.act_auto_update.setChecked(self.auto_update_enabled())
+        self.act_auto_update.setToolTip(_("Consulta o GitHub (app) e a fonte do ffmpeg ao abrir; nada é enviado "
+                                          "além do pedido de versão"))
+        self.act_auto_update.toggled.connect(lambda on: self.settings.setValue("auto_update", "true" if on else "false"))
         menu.addAction(_("Novidades desta versão"), lambda: welcome.WhatsNewDialog(self).exec())
         menu.addAction(_("Tela de boas-vindas"), self.show_welcome)
         menu.addSeparator()
@@ -1425,8 +1431,12 @@ class MainWindow(QMainWindow):
                 self._saved_state = self._state()
                 restart_app()
 
+    def auto_update_enabled(self) -> bool:
+        """Busca automática de versões novas (app e ffmpeg); desligável em Configurações."""
+        return str(self.settings.value("auto_update", "true")) != "false"
+
     def _auto_check_update(self) -> None:
-        if str(self.settings.value("auto_update", "true")) == "false":
+        if not self.auto_update_enabled():
             return
         last = float(self.settings.value("update_last_check", 0) or 0)
         if time.time() - last < 20 * 3600:
@@ -1474,11 +1484,12 @@ class MainWindow(QMainWindow):
     # ================================================================ dependências
     def _check_deps(self) -> None:
         folder = self.settings.value("ffmpeg_dir", "") or None
+        online = self.auto_update_enabled() and deps.platform_supported()
 
         def run():
             ok = media.configure(folder)
             info = deps.inspect(media.ffmpeg()) if ok else None
-            latest = deps.latest_version(timeout=6) if deps.platform_supported() else ""
+            latest = deps.latest_version(timeout=6) if online else ""
             self._deps_bridge.result.emit(ok, info, latest)
 
         threading.Thread(target=run, daemon=True).start()
