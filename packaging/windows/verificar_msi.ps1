@@ -97,7 +97,14 @@ function Confere-Removido([string]$pasta) {
     Confere (-not (Test-Path $AtalhoMenu)) "atalho do Menu Iniciar removido"
     Confere (-not (Test-Path $AtalhoDesktop)) "atalho da Área de Trabalho removido"
     Confere (-not ((Path-Do-Usuario) -like "*$pasta*")) "pasta fora do PATH do usuário"
-    Confere (-not (Test-Path "HKCU:\Software\PeliculaConverter")) "chave HKCU\Software\PeliculaConverter removida"
+    # Só os valores do instalador somem. As preferências do app (subchave PeliculaConverter, gravada
+    # pelo próprio app ao abrir) ficam de propósito: numa atualização o MSI também desinstala a
+    # versão antiga, e apagá-las ali faria a pessoa perder idioma, recentes e opções.
+    $chave = "HKCU:\Software\PeliculaConverter"
+    $valores = if (Test-Path $chave) { @((Get-Item $chave).Property) } else { @() }
+    $doMsi = @("InstallDir", "AtalhoMenuIniciar", "AtalhoAreaDeTrabalho", "AssociacaoPlc", "PastaNoPath")
+    $sobra = @($valores | Where-Object { $doMsi -contains $_ })
+    Confere ($sobra.Count -eq 0) "valores do instalador removidos de HKCU\Software\PeliculaConverter ($($sobra -join ', '))"
 }
 
 # Um .msi mínimo (só o executável principal) com a mesma receita, para testar as atualizações.

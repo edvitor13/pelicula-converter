@@ -251,6 +251,9 @@ Os dois executáveis vão em todos os pacotes: `PeliculaConverter` (a janela) e 
    Menu Iniciar sempre é criado.
 3. Uma versão nova instalada por cima **substitui a antiga no mesmo lugar**, mantendo a pasta e
    as escolhas. Para remover: *Configurações → Aplicativos → PeliculaConverter → Desinstalar*.
+   As suas preferências (idioma, projetos recentes, opções de exportação) ficam guardadas para
+   uma próxima instalação; para apagá-las também, remova a chave
+   `HKCU\Software\PeliculaConverter` no Editor do Registro.
 4. Sem assinatura digital (ainda), o Windows SmartScreen pode avisar na primeira vez: clique em
    **Mais informações → Executar assim mesmo**. O porquê e os planos estão em
    [docs/ASSINATURA.md](docs/ASSINATURA.md).
