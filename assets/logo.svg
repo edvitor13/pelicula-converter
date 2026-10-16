@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>PeliculaConverter</title>
+  <defs>
+    <linearGradient id="pc_bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f1b17"/>
+      <stop offset="1" stop-color="#0e0d0c"/>
+    </linearGradient>
+    <linearGradient id="pc_reel" x1="0.15" y1="0.1" x2="0.85" y2="0.95">
+      <stop offset="0" stop-color="#ffc76b"/>
+      <stop offset="0.55" stop-color="#f0a63a"/>
+      <stop offset="1" stop-color="#d5871f"/>
+    </linearGradient>
+    <linearGradient id="pc_sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc76b"/>
+      <stop offset="1" stop-color="#f0a63a"/>
+    </linearGradient>
+    <radialGradient id="pc_glow" gradientUnits="userSpaceOnUse" cx="196" cy="196" r="200">
+      <stop offset="0" stop-color="#f0a63a" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#f0a63a" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#f0a63a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#pc_bg)"/>
+  <rect x="18" y="18" width="476" height="476" rx="106" fill="none" stroke="#3a332c" stroke-width="4"/>
+  <circle cx="196" cy="196" r="200" fill="url(#pc_glow)"/>
+  <g transform="translate(284 386) rotate(-12)">
+      <rect x="-200" y="-56" width="400" height="112" rx="5.6" fill="#26211c" stroke="#3a332c" stroke-width="2.24"/>
+      <rect x="-178.36" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-152.04" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-125.72" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-99.4" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-73.08" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-46.76" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-20.44" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="5.88" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="32.2" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="58.52" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="84.84" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="111.16" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="137.48" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="163.8" y="-49.84" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-178.36" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-152.04" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-125.72" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-99.4" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-73.08" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-46.76" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-20.44" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="5.88" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="32.2" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="58.52" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="84.84" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="111.16" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="137.48" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="163.8" y="39.76" width="14.56" height="10.08" rx="3.02" fill="#ffc76b"/>
+      <rect x="-189.92" y="-31.36" width="119.89" height="62.72" rx="3.92" fill="url(#pc_sky)"/>
+      <circle cx="-115.59" cy="1.25" r="10.66" fill="#fff1cf" fill-opacity="0.92"/>
+      <path d="M-189.92 10.04 Q-153.95 2.51 -123.98 10.04 T-70.03 7.53 L-70.03 27.44 Q-70.03 31.36 -73.95 31.36 L-186 31.36 Q-189.92 31.36 -189.92 27.44 Z" fill="#7a5320"/>
+      <rect x="-59.95" y="-31.36" width="119.89" height="62.72" rx="3.92" fill="url(#pc_sky)"/>
+      <circle cx="14.39" cy="1.25" r="10.66" fill="#fff1cf" fill-opacity="0.92"/>
+      <path d="M-59.95 10.04 Q-23.98 2.51 5.99 10.04 T59.95 7.53 L59.95 27.44 Q59.95 31.36 56.03 31.36 L-56.03 31.36 Q-59.95 31.36 -59.95 27.44 Z" fill="#7a5320"/>
+      <rect x="70.03" y="-31.36" width="119.89" height="62.72" rx="3.92" fill="url(#pc_sky)"/>
+      <circle cx="144.36" cy="1.25" r="10.66" fill="#fff1cf" fill-opacity="0.92"/>
+      <path d="M70.03 10.04 Q105.99 2.51 135.97 10.04 T189.92 7.53 L189.92 27.44 Q189.92 31.36 186 31.36 L73.95 31.36 Q70.03 31.36 70.03 27.44 Z" fill="#7a5320"/>
+    </g>
+  <circle cx="196" cy="196" r="128" fill="url(#pc_reel)"/>
+    <circle cx="196" cy="196" r="118.4" fill="none" stroke="#100e0c" stroke-opacity="0.22" stroke-width="2.82"/>
+    <circle cx="196" cy="128.16" r="26.24" fill="#100e0c"/>
+    <circle cx="260.52" cy="175.04" r="26.24" fill="#100e0c"/>
+    <circle cx="235.88" cy="250.88" r="26.24" fill="#100e0c"/>
+    <circle cx="156.12" cy="250.88" r="26.24" fill="#100e0c"/>
+    <circle cx="131.48" cy="175.04" r="26.24" fill="#100e0c"/>
+    <circle cx="196" cy="196" r="16" fill="#100e0c"/>
+    <circle cx="196" cy="196" r="6.4" fill="#f0a63a"/>
+  <path d="M402 78 Q407.44 106.56 436 112 Q407.44 117.44 402 146 Q396.56 117.44 368 112 Q396.56 106.56 402 78 Z" fill="#ffc76b" fill-opacity="1"/>
+  <path d="M448 171 Q450.4 183.6 463 186 Q450.4 188.4 448 201 Q445.6 188.4 433 186 Q445.6 183.6 448 171 Z" fill="#f0a63a" fill-opacity="0.85"/>
+</svg>
