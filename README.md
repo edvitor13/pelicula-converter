@@ -1,0 +1,789 @@
+<p align="center">
+  <img src="assets/banner.png" alt="PeliculaConverter — película cinematográfica para vídeos digitais" width="100%">
+</p>
+
+<p align="center">
+  <b>Transforme vídeo digital em película de cinema</b> — cor de negativos e cópias, grão, halação,
+  bitolas de 8 mm a IMAX, tremor de projetor, defeitos e até o scan da película com furos,
+  tudo processado na placa de vídeo e com prévia em tempo real.
+</p>
+
+<p align="center">
+  <img alt="Versão 1.0.0" src="https://img.shields.io/badge/vers%C3%A3o-1.0.0-f0a63a">
+  <img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-f0a63a">
+  <img alt="Python 3.15" src="https://img.shields.io/badge/Python-3.15%20(3.12%2B)-3776ab">
+  <img alt="Windows e Linux" src="https://img.shields.io/badge/sistemas-Windows%20%7C%20Linux-25211d">
+  <img alt="OpenGL 3.3" src="https://img.shields.io/badge/GPU-OpenGL%203.3-5cc48a">
+</p>
+
+---
+
+## Sumário
+
+- [O que é](#o-que-é)
+- [Capturas de tela](#capturas-de-tela)
+- [Recursos](#recursos)
+- [Como funciona](#como-funciona)
+- [Instalação](#instalação)
+  - [Jeito fácil: executável pronto](#jeito-fácil-executável-pronto)
+  - [Pelo código-fonte](#pelo-código-fonte)
+  - [Requisitos](#requisitos)
+  - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
+  - [Dependências e por que cada uma existe](#dependências-e-por-que-cada-uma-existe)
+- [Guia de uso](#guia-de-uso)
+- [Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)](#arquivos-raw-n-raw-r3d-braw-prores-raw)
+- [Bitolas e formatos de película](#bitolas-e-formatos-de-película)
+- [Perguntas frequentes](#perguntas-frequentes)
+- [Solução de problemas](#solução-de-problemas)
+- [Gerar o executável (build)](#gerar-o-executável-build)
+- [Desenvolvimento](#desenvolvimento)
+- [Licença](#licença)
+- [Aviso legal](#aviso-legal)
+
+---
+
+## O que é
+
+O **PeliculaConverter** é um aplicativo de desktop, gratuito e de código aberto, que dá a vídeos e
+fotos digitais a aparência de película cinematográfica. Ele não é um filtro de cor simples: cada
+quadro passa por uma cadeia parecida com a da película real.
+
+1. O vídeo é convertido para **luz da cena** (linear), respeitando o perfil em que foi gravado
+   (Rec.709, N-Log, S-Log3, LogC3, V-Log, Log3G10, DaVinci Intermediate, Cineon…).
+2. A luz atravessa a **lente** (maciez, aberração cromática, distorção, vinheta) e a **emulsão**
+   (halação nas luzes fortes, bloom, névoa de filtro difusor).
+3. A **curva do negativo** é aplicada canal por canal, com densidade de cor, tons de sombra e luz,
+   preto e branco com filtros e viragens.
+4. O resultado é "copiado" para uma **película de cópia** (Kodak 2383, Kodak 2393 ou Fuji 3513),
+   como numa projeção de cinema.
+5. Por cima entram o **grão** (com tamanho que depende da bitola e do ISO), os **defeitos**
+   (poeira, riscos, fio de cabelo, manchas, emendas, clarões, marcas de troca de rolo) e a
+   **moldura** ou o **scan da película** com furos reais e quadros vizinhos.
+
+Tudo roda em shaders OpenGL 3.3 na placa de vídeo. A prévia é a mesma conta da exportação, quadro a
+quadro: o que você vê é o que vai para o arquivo final.
+
+Toda a interface está em português do Brasil.
+
+## Capturas de tela
+
+> As imagens abaixo usam só a **cena de teste** que o próprio app gera (cartela de cores, rampa de
+> cinza e luzes fortes); nenhuma filmagem pessoal.
+
+**Janela principal** — presets com miniaturas à esquerda, visualizador no meio (modo *Dividido*) e
+os ajustes à direita:
+
+![Janela principal do PeliculaConverter com o preset Kodak Vision3 250D](docs/img/janela-principal.png)
+
+**Super 8 • Kodachrome 40** — bitola pequena com grão grande, tremor, poeira e janela de cantos
+arredondados:
+
+![Preset Super 8 Kodachrome comparado com o original](docs/img/super8-kodachrome-dividido.png)
+
+**Kodak Vision3 500T** no modo *Lado a lado*:
+
+![Preset Kodak Vision3 500T lado a lado com o original](docs/img/vision3-500t-lado-a-lado.png)
+
+**Scan da película** — a tira de 35 mm inteira, com furos iluminados, texto de borda e pedaços dos
+quadros vizinhos:
+
+![Scan de película 35 mm com furos e texto de borda](docs/img/scan-da-pelicula.png)
+
+<table>
+  <tr>
+    <td width="54%"><b>Exportar</b> — qualidades prontas, ajustes do arquivo, desempenho e tempo estimado medido na sua máquina<br><br>
+      <img src="docs/img/exportar.png" alt="Janela de exportação"></td>
+    <td width="46%"><b>Dependências e atualizações</b> — ffmpeg, placa de vídeo e bibliotecas<br><br>
+      <img src="docs/img/dependencias.png" alt="Janela de dependências e atualizações"></td>
+  </tr>
+</table>
+
+## Recursos
+
+### Película e cor
+- **Bitolas**: 8 mm, Super 8, 16 mm, Super 16, 35 mm, 65 mm e IMAX 70 mm (15/70). Cada uma muda
+  tamanho e força do grão, perda de nitidez, tremor, vinheta, halação e proporção.
+- **Sensibilidade** de ISO 50 a ISO 3200 (grão maior e mais visível nos filmes mais sensíveis).
+- **Cópia (print)**: Kodak 2383 (cópia de cinema clássica), Kodak 2393 (mais contraste) e
+  Fuji 3513 (mais fria e neutra), com força ajustável.
+- **Curva da emulsão** por canal: contraste, tom médio, preto e branco da película, suavidade das
+  altas luzes e das sombras, saturação, **densidade de cor**, cor das sombras e das altas luzes
+  (split toning), equilíbrio, envelhecimento (cópia desbotada).
+- **Ajustes avançados**: contraste e equilíbrio por canal (R, G, B), matiz dos verdes e dos azuis,
+  saturação da pele.
+- **Preto e branco** com filtros de lente (pancromático, vermelho, laranja, amarelo, verde, azul) e
+  **viragens** (sépia, selênio, cianótipo, ouro).
+
+### Entrada
+- **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
+  ARRI LogC3 (EI 800), Panasonic V-Log, RED Log3G10 (RWG — para R3D e Nikon N-RAW convertidos),
+  DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa.
+- **Exposição** (±3 EV), **temperatura** e **tonalidade** aplicadas em luz linear.
+
+### Luz e lente
+- **Halação**: o brilho avermelhado em volta das luzes fortes, com raio, limiar (em EV) e cor.
+- **Bloom** e **névoa** (imitação de filtros difusores tipo Pro-Mist).
+- **Lente**: maciez, recuperação de detalhe (nitidez), aberração cromática, distorção barril ou
+  almofada, vinheta com raio, suavidade e redondeza.
+
+### Projeção, defeitos e moldura
+- **Projetor**: tremor horizontal, vertical e de rotação; cintilação de brilho.
+- **Defeitos da película**, cada um liga e desliga sozinho: poeira (escura, clara ou mista),
+  riscos, fio de cabelo na janela, manchas químicas, clarões de fim de rolo, marcas de troca de rolo
+  (*cue marks*), cor instável, emendas e vazamento de luz.
+- **Moldura e proporção**: 1,33 a 2,76 (Academy, IMAX, Scope, Ultra Panavision…), cantos
+  arredondados da janela do projetor, borda suave ou irregular e cor das barras.
+- **Scan da película**: a tira inteira com **geometria real** de 35 mm (4 furos), 16 mm, Super 16
+  e Super 8 — furos, linhas entre quadros, quadros vizinhos, texto impresso na borda
+  (por exemplo `KODAK 5207 VISION3 250D`), cópia projetada (furos claros) ou negativo invertido
+  (furos escuros).
+
+### Presets e LUTs
+- **33 presets prontos** em seis grupos (Cinema 35 mm, Bitolas e formatos, Preto e branco,
+  Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro e busca.
+- **Presets do usuário**: salvar como, atualizar, excluir, voltar ao preset, importar e exportar
+  em `.json`.
+- **LUT externo** `.cube` (3D): usa os LUTs que **já estão instalados** pelo Premiere Pro e pelo
+  DaVinci Resolve, LUTs instalados no próprio app ou qualquer arquivo; escolha o espaço de entrada
+  que o LUT espera e se ele entra depois do look ou no lugar dele.
+- **Exportar LUT**: grava a parte de cor do look atual num `.cube` de 33 ou 65 pontos, ou gera um
+  **pacote de LUTs gratuito** com todos os presets.
+
+### Visualização
+- Comparação **Película / Dividido / Lado a lado / Original**, botão direito para espiar o original.
+- **Zoom** de 100% e 200%, roda do mouse até 1600%, arrastar para mover.
+- **Linha do tempo** com reprodução, entrada e saída (I/O), repetição e quadro a quadro.
+- **Histograma** RGB, **desfazer/refazer** (até 300 passos), **atalhos de teclado**, arrastar e
+  soltar vídeos, imagens, LUTs e presets.
+- **Qualidade da prévia**: 540p, 720p, 1080p ou resolução original.
+- **Salvar quadro** em PNG 16 bits, TIFF 16 bits ou JPEG, na resolução original.
+
+### Exportação
+- **Codecs**: H.264 e H.265 (x264/x265), H.264/H.265 na GPU (NVIDIA NVENC, Intel Quick Sync,
+  AMD AMF — só aparecem se funcionarem de verdade na máquina), AV1 (SVT-AV1), VP9/WebM,
+  MPEG-4 Xvid (AVI), GIF animado, Apple ProRes (Proxy, LT, 422, 422 HQ, 4444, 4444 XQ),
+  Avid DNxHR (LB, SQ, HQ, HQX, 444), **FFV1 sem perdas 16 bits**, sequências PNG/TIFF e imagens
+  PNG/TIFF/JPEG/WebP.
+- **Qualidades prontas**: *Original — mesmo formato*, MP4, MOV, MKV, YouTube 4K (H.265 10 bits ou
+  H.264), Full HD, redes sociais, leve 720p, WebM, AVI, GIF, masters ProRes/DNxHR, FFV1 e
+  sequência PNG.
+- **Áudio**: copiar o original, AAC 320/192 kb/s, MP3 320 kb/s, Opus 192 kb/s, PCM 24 bits ou sem áudio
+  (com correção automática quando o recipiente não aceita o formato).
+- Processamento em **16 bits por canal** sempre que o formato de saída tem mais de 8 bits;
+  pontilhado (*dither*) contra faixas em 8 bits; *tune grain* no x264/x265.
+- **Desempenho**: núcleos do processador, prioridade do processo, decodificação por hardware,
+  placa NVIDIA usada pelo NVENC e buffer de quadros na memória (com cálculo de RAM).
+- **Tempo estimado real**: o app exporta um trecho curto com as opções escolhidas e mede a
+  velocidade desta máquina.
+- **Fila de exportação** em segundo plano, com progresso, velocidade, tempo restante e cancelamento.
+
+### Sistema
+- **Gerenciador de dependências**: se o ffmpeg não existir ou estiver antigo, o app oferece baixar
+  a versão oficial, conferida por SHA-256, só para o seu usuário (sem administrador).
+- **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
+  enquanto.
+
+## Como funciona
+
+```mermaid
+flowchart LR
+    A["Vídeo ou imagem"] -->|ffprobe| I["Informações<br/>(resolução, fps, cor, áudio)"]
+    A -->|"ffmpeg decodifica e escala<br/>RGB 8/16 bits por pipe"| T["Textura de entrada<br/>(GPU)"]
+    P["Ajustes + número do quadro"] -->|"look.build_plan()"| U["Uniforms do quadro"]
+    T --> B["Passo base<br/>perfil → luz linear, gamut,<br/>exposição, tremor, lente,<br/>vinheta, scan da película"]
+    U --> B
+    B --> S["Maciez / nitidez"]
+    B --> G["Halação · bloom · névoa<br/>(mipmaps + desfoque)"]
+    U --> N["Ruído do grão"]
+    S --> F["Passo final<br/>curva da película, cópia, LUT,<br/>grão, defeitos, mistura,<br/>moldura, pontilhado"]
+    G --> F
+    N --> F
+    F -->|prévia 8 bits| V["Visualizador,<br/>miniaturas, histograma"]
+    F -->|"8 ou 16 bits por pipe"| E["ffmpeg codifica<br/>+ áudio do original"]
+```
+
+- **Mesmo caminho para prévia e exportação.** Os dois usam `look.build_plan()` e o mesmo
+  `Engine.render()`. Tudo o que varia no tempo (tremor, cintilação, grão animado, poeira, riscos,
+  clarões…) é calculado a partir do **número do quadro** com funções de hash determinísticas, então
+  o quadro 120 da prévia é o quadro 120 do arquivo final. Uma exportação FFV1 16 bits é idêntica,
+  bit a bit, ao render direto do motor.
+- **Independente de resolução.** Raios, larguras e tremores são definidos em "px@1080" (pixels de
+  um quadro de 1080 linhas) e convertidos para a resolução real; por isso a prévia em 720p tem a
+  mesma cara do 4K exportado.
+- **Leitura e gravação rápidas.** O ffmpeg entrega quadros RGB já na resolução pedida; no Windows a
+  troca de dados usa *named pipes* com buffer grande (bem mais rápido que stdin/stdout para 4K).
+  A exportação roda numa thread própria, com contexto OpenGL próprio, e três etapas em paralelo:
+  leitura → GPU → gravação.
+
+O mergulho técnico completo está em [docs/ARQUITETURA.md](docs/ARQUITETURA.md) e cada ajuste é
+explicado em [docs/EFEITOS.md](docs/EFEITOS.md).
+
+## Instalação
+
+### Jeito fácil: executável pronto
+
+O executável já traz o Python e todas as bibliotecas (PySide6, moderngl, numpy). Só o **ffmpeg**
+fica de fora — e o próprio app oferece baixá-lo.
+
+**Windows 10/11**
+
+1. Baixe `PeliculaConverter-<versão>-windows-x64.zip` na página de *Releases* do repositório.
+2. Extraia o `.zip` numa pasta qualquer (por exemplo `C:\Programas\PeliculaConverter`).
+3. Abra `PeliculaConverter.exe`. Na primeira vez o Windows SmartScreen pode avisar que o app não é
+   assinado: clique em **Mais informações → Executar assim mesmo**.
+4. Se o ffmpeg não for encontrado, a janela **Dependências e atualizações** abre sozinha: clique em
+   **Baixar ffmpeg** e pronto.
+
+**Linux (x64)**
+
+1. Baixe `PeliculaConverter-<versão>-linux-x64.tar.gz`.
+2. Extraia e rode:
+
+   ```bash
+   tar -xzf PeliculaConverter-*-linux-x64.tar.gz
+   ./PeliculaConverter/PeliculaConverter
+   ```
+
+3. Se a janela não abrir, instale as bibliotecas que o Qt usa (Debian/Ubuntu):
+
+   ```bash
+   sudo apt install libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3
+   ```
+
+4. Sem ffmpeg no sistema, o app oferece baixar um build estático (ou instale com
+   `sudo apt install ffmpeg`).
+
+### Pelo código-fonte
+
+**Windows** — com o [Python 3.15](https://www.python.org/downloads/) instalado (marque o *py launcher*):
+
+```bat
+instalar.bat     :: cria o .venv (py -3.15, ou py -3 se não houver) e instala as dependências
+executar.bat     :: abre o app sem janela de console (aceita arquivos como argumento)
+```
+
+**Linux**:
+
+```bash
+bash instalar.sh     # cria o .venv com o Python 3.12+ mais novo encontrado e instala as dependências
+./executar.sh        # abre o app (aceita arquivos como argumento)
+```
+
+**Manual (qualquer sistema)**:
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate      Linux: source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pelicula                      # ou: python PeliculaConverter.pyw [arquivo]
+```
+
+Também dá para instalar como pacote (gera o comando `pelicula-converter`):
+
+```bash
+python -m pip install .            # ou: python -m pip install ".[dev]" para pytest e PyInstaller
+pelicula-converter
+```
+
+Rodando pelo código-fonte, se faltar `moderngl` ou `numpy` o app avisa na abertura e oferece
+instalar com o `pip`.
+
+### Requisitos
+
+| Item | Mínimo | Observação |
+|---|---|---|
+| Sistema | Windows 10/11 64 bits ou Linux x64 | macOS: preparado, mas desativado nesta versão |
+| Placa de vídeo | **OpenGL 3.3** | Qualquer GPU dedicada ou integrada dos últimos ~12 anos com driver atualizado |
+| ffmpeg + ffprobe | 7.0 ou mais novo (recomendado) | O app baixa sozinho se não encontrar; **FFmpeg 8+** também decodifica **ProRes RAW** |
+| Python (só pelo código-fonte) | 3.12 | Recomendado **3.15**; o executável já traz o Python |
+| Memória | 8 GB | 16 GB ou mais para 4K com buffer grande |
+
+### O ffmpeg e o gerenciador de dependências
+
+O ffmpeg lê e grava todos os formatos de vídeo. O PeliculaConverter procura o `ffmpeg` e o
+`ffprobe`, nesta ordem:
+
+1. a pasta escolhida em **Configurações → Pasta do ffmpeg…** (ou *Usar outra pasta…* na janela de
+   dependências);
+2. a pasta onde o próprio app instala o ffmpeg que baixou;
+3. o `PATH` do sistema;
+4. pastas comuns — Windows: `C:\FFMPEG\ffmpeg\bin`, `C:\FFMPEG\bin`, `C:\ffmpeg\bin`,
+   `%ProgramFiles%\ffmpeg\bin`, os atalhos do WinGet e a pasta do ShareX; Linux: `/usr/local/bin`,
+   `/usr/bin`, `/snap/bin`.
+
+**Configurações → Dependências e atualizações…** mostra a versão do ffmpeg, a placa de vídeo e a
+versão do OpenGL, o processador, a memória e as versões das bibliotecas Python. Na abertura o app
+confere tudo em segundo plano:
+
+- **ffmpeg ausente** → a janela de dependências abre com o botão **Baixar ffmpeg**.
+- **ffmpeg antigo** (versão menor que 7.0, ou build de desenvolvimento com mais de ~18 meses) →
+  o app pergunta se quer atualizar (*Atualizar*, *Agora não* ou *Não perguntar de novo*). No
+  Windows ele também confere a última versão publicada no gyan.dev e avisa quando a sua é mais
+  antiga.
+
+O download automático usa só fontes confiáveis e confere a integridade antes de instalar:
+
+| Sistema | Fonte | Conferência | Pasta de instalação (sem administrador) |
+|---|---|---|---|
+| Windows | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) — build *release essentials*, o build para Windows indicado pelo ffmpeg.org | SHA-256 publicado pelo gyan.dev | `%LOCALAPPDATA%\PeliculaConverter\ffmpeg\bin` |
+| Linux | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) — build estático GPL (GitHub Releases) | `checksums.sha256` da release | `~/.local/share/PeliculaConverter/ffmpeg/bin` (respeita `$XDG_DATA_HOME`) |
+
+O arquivo é baixado numa pasta temporária, o SHA-256 é comparado e, só se conferir, os executáveis
+são copiados para a pasta acima (com um `ORIGEM.txt` registrando a URL e o hash). Se algo não
+conferir, nada é instalado. Prefere instalar por conta própria?
+
+```bash
+winget install Gyan.FFmpeg      # Windows
+sudo apt install ffmpeg         # Debian/Ubuntu
+```
+
+### Dependências e por que cada uma existe
+
+| Dependência | Para quê |
+|---|---|
+| [PySide6](https://pypi.org/project/PySide6/) (Qt 6) | Interface inteira, configurações (`QSettings`), ícones desenhados em código, texto da borda da película desenhado com `QPainter`. |
+| [moderngl](https://pypi.org/project/moderngl/) + glcontext | Contexto **OpenGL 3.3** sem janela (WGL no Windows, X11/EGL no Linux) para rodar os shaders GLSL, tanto na prévia quanto na thread de exportação. O `glcontext` vem junto com o moderngl. |
+| [numpy](https://pypi.org/project/numpy/) | Quadros em memória (8 e 16 bits), matrizes de gamut, LUTs, cena de teste e histograma. |
+| **ffmpeg / ffprobe** (programa externo) | Ler qualquer formato, converter matriz de cor e escala, codificar o vídeo final e copiar/converter o áudio. |
+| pytest (desenvolvimento) | Testes automatizados. |
+| PyInstaller (desenvolvimento) | Gerar o executável de pasta única. |
+
+Não há outras dependências: nada de Pillow, OpenCV ou SciPy. Biblioteca padrão do Python para o
+resto (downloads com `urllib`, SHA-256 com `hashlib`, pipes nomeados com `_winapi`).
+
+## Guia de uso
+
+### 1. Abrir um arquivo
+
+- Botão **Abrir** (`Ctrl+O`), arrastar e soltar na janela, ou passar o arquivo na linha de comando
+  (`executar.bat video.mov`, `./executar.sh video.mov`, ou *Abrir com* apontando para o
+  executável).
+- Formatos: tudo o que o seu ffmpeg lê — MP4, MOV, MKV, AVI, MXF, WebM, M4V, MTS/M2TS, WMV, MPG,
+  TS, ProRes, DNxHR, H.264/H.265 8/10 bits — e imagens PNG, JPEG, TIFF, BMP, WebP, DPX e EXR.
+- Sem vídeo à mão? **Usar cena de teste** gera uma cartela de cores com rampa de cinza e luzes
+  fortes, ótima para ver halação e bloom.
+- Arrastar um **`.cube`** carrega o LUT; arrastar um **`.json`** importa um preset.
+
+A barra de status mostra resolução, fps, codec, formato de pixel, profundidade de cor e taxa de
+bits do arquivo, além do tamanho da prévia, do tempo de render de cada quadro e da GPU em uso.
+
+### 2. Escolher um look
+
+O painel **Looks** (à esquerda) mostra cada preset aplicado ao **seu** quadro atual. Clique para
+aplicar, use **Buscar look…** (a busca ignora acentos) e passe o mouse para ler a descrição. O
+mesmo preset aparece na lista do painel **Ajustes**.
+
+| Grupo | Presets |
+|---|---|
+| Cinema 35 mm | Kodak Vision3 250D · Kodak Vision3 50D · Kodak Vision3 200T · Kodak Vision3 500T · Fujifilm Eterna 250D · Fujifilm Eterna Vivid 500 · Blockbuster (teal & orange) |
+| Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm |
+| Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo |
+| Fotografia | Kodak Portra 400 · Kodak Ektar 100 · Fujifilm Velvia 50 · Fujifilm Superia 400 · CineStill 800T |
+| Processos e estilos | Bleach bypass · Technicolor 3 cores · Revelação cruzada · Cópia desbotada (anos 70) |
+| Básicos | Só textura (cor original) · Original (sem efeito) |
+
+Todos os presets de película partem da mesma base (35 mm, ISO 250, cópia Kodak 2383, grão, halação,
+bloom e lente ligados) e mudam só o que os diferencia.
+
+### 3. Ajustar
+
+O painel **Ajustes** tem uma seção para cada etapa: *Película*, *Entrada e exposição*,
+*Cor da película*, *LUT externo*, *Grão*, *Halação*, *Bloom e difusão*, *Lente e nitidez*,
+*Projetor*, *Defeitos da película*, *Moldura e proporção* e *Scan da película*. Cada parâmetro é
+explicado em [docs/EFEITOS.md](docs/EFEITOS.md).
+
+- A chave no título liga e desliga a seção inteira; o botão ↺ volta a seção ao padrão.
+- **Ajustes avançados** mostra os controles finos (contraste por canal, matiz dos verdes etc.).
+- Clique no número para digitar (aceita vírgula, `%` e unidades). **Duplo clique** no slider volta
+  ao padrão; **Shift + arrastar** faz ajuste fino; com o slider em foco, as setas mudam um passo
+  (Shift = 10 passos).
+- Sementes aleatórias têm um dado (🎲 *Sortear*) para trocar o padrão do grão ou dos defeitos.
+- **Desfazer/Refazer** com `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`).
+
+Quando os ajustes ficam diferentes do preset, aparece *"Modificado — salve como novo preset para
+usar depois"*.
+
+### 4. Salvar seus próprios presets
+
+No painel **Ajustes**:
+
+- **Salvar** (ícone de disquete, `Ctrl+S`) → *Salvar como novo preset*. O preset entra no grupo
+  **Meus presets**, com miniatura.
+- **⋯ (Mais opções de preset)**:
+  - *Atualizar este preset com os ajustes atuais* (só presets do usuário);
+  - *Excluir este preset* (só presets do usuário);
+  - *Desfazer mudanças (voltar ao preset)*;
+  - *Importar preset (.json)…* e *Exportar preset (.json)…* para trocar presets com outras pessoas;
+  - *Exportar a cor como LUT .cube* (33 ou 65 pontos) e *Exportar todos os presets como LUTs (pacote)*.
+
+Os presets ficam em arquivos `.json` legíveis:
+
+| Sistema | Pasta |
+|---|---|
+| Windows | `%APPDATA%\PeliculaConverter\presets` |
+| Linux | `~/PeliculaConverter/presets` (o app usa `$APPDATA` quando existe e, sem ele, a pasta pessoal) |
+
+**Configurações → Abrir pasta dos meus presets** abre a pasta. Formato do arquivo:
+
+```json
+{
+  "nome": "Meu Vision3 500T",
+  "desc": "Criado a partir de Kodak Vision3 500T",
+  "app": "PeliculaConverter",
+  "versao": 1,
+  "valores": { "bitola": "35mm", "iso": "500", "grao_on": true, "...": "..." }
+}
+```
+
+Ao carregar, valores desconhecidos são ignorados e números fora da faixa são limitados, então
+presets antigos continuam abrindo.
+
+### 5. LUTs
+
+A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
+
+- **De onde vêm os LUTs da lista**: os que já estão instalados no computador pelo **Adobe
+  Premiere Pro** (`Lumetri/LUTs/Creative` e `Resources/LUTs/FilmEmulation`) e pelo **DaVinci
+  Resolve** (`Film Looks`), além de **Meus LUTs**. O app só **lê** esses arquivos onde eles já
+  estão; nenhum LUT de terceiros acompanha o PeliculaConverter.
+- **Instalar LUTs…** copia arquivos `.cube` (depois de conferir que são válidos) para a pasta
+  **Meus LUTs** (`%APPDATA%\PeliculaConverter\luts` no Windows; `~/PeliculaConverter/luts` no
+  Linux). Eles passam a aparecer sempre na lista. O botão **Pasta** abre essa pasta.
+- *Procurar arquivo .cube…* usa um arquivo de qualquer lugar sem copiar.
+- **O LUT espera**: o espaço de cor de entrada do LUT. LUTs de cópia do Resolve (Kodak 2383 etc.)
+  esperam **Cineon**; LUTs criativos do Premiere esperam **Rec.709**. O app adivinha pelo nome e
+  pela pasta (Cineon, LogC, S-Log3, N-Log, V-Log) e você pode trocar.
+- **Aplicar**: *Depois do look de película* ou *No lugar do look* (só o LUT, sem a curva da
+  película e sem a cópia). **Intensidade do LUT** mistura com o resultado.
+- Só LUTs 3D são aceitos (LUT 1D é recusado com aviso). `DOMAIN_MIN`/`DOMAIN_MAX` e
+  `LUT_3D_INPUT_RANGE` são respeitados.
+
+**Exportar LUTs do próprio app**: *⋯ → Exportar a cor como LUT .cube* grava a parte de cor do look
+atual (curva, cópia, tons, saturação, LUT externo e exposição/balanço) com entrada no mesmo perfil
+escolhido em *Perfil do vídeo*. *Exportar todos os presets como LUTs (pacote)* gera um `.cube` de
+33 pontos para cada preset, com entrada Rec.709 — um pacote de LUTs gratuito que funciona no
+Premiere, Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite `.cube`. Grão, halação,
+bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
+
+### 6. Comparar, dar zoom e reproduzir
+
+- **Película / Dividido / Lado a lado / Original** (tecla `C` alterna). No modo *Dividido*, arraste
+  a linha; segure o **botão direito** sobre o vídeo para ver o original em qualquer modo.
+- **Ajustar** (`F`), **100%** (`1`), **200%** (`2`), **roda do mouse** (até 1600%), **duplo
+  clique** alterna entre ajustar e 100%, **arrastar** move a imagem com zoom.
+- **Prévia**: *Rápida (540p)*, *Normal (720p)*, *Alta (1080p)* ou *Máxima (resolução original)*.
+  O grão só aparece fiel na resolução máxima com zoom 100%.
+- **Linha do tempo**: clique ou arraste; `Espaço` reproduz/pausa (a reprodução pula quadros se a
+  prévia não acompanhar, mantendo o tempo real), `←`/`→` andam um quadro, `Shift+←/→` um segundo,
+  `Home`/`End` vão para a entrada/saída (ou começo/fim).
+- **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `L` liga/desliga a repetição. O trecho
+  marcado pode ser exportado sozinho.
+- **Salvar quadro** (`Ctrl+Shift+S`): renderiza o quadro atual na resolução original em 16 bits e
+  salva em PNG 16 bits, TIFF 16 bits ou JPEG.
+
+### 7. Exportar
+
+**Exportar** (`Ctrl+E`) abre a janela de exportação com o look atual.
+
+**Qualidades prontas** (vídeo):
+
+| Qualidade | Codec e ajustes |
+|---|---|
+| Original — mesmo formato, sem perda visível | Mesmo codec, resolução, fps e profundidade do original: ProRes vira ProRes no mesmo perfil, DNxHD/DNxHR vira DNxHR HQ/HQX, VP9 vira VP9, H.265 ou >8 bits vira x265 CRF 14 (10 bits), o resto vira x264 CRF 13; áudio copiado |
+| MP4 H.264 — o formato mais comum, abre em tudo | x264 CRF 18, `medium`, 4:2:0 8 bits, AAC 320 kb/s |
+| MOV H.264 — Apple, Final Cut, iPhone | x264 CRF 17, `slow`, AAC 320 kb/s |
+| MKV H.265 — arquivo menor com boa qualidade | x265 CRF 20, 10 bits, AAC 192 kb/s |
+| YouTube 4K — H.265 10 bits | x265 CRF 16, `slow`, 2160p, AAC 320 kb/s |
+| YouTube 4K — H.264 | x264 CRF 15, `slow`, 2160p, AAC 320 kb/s |
+| Full HD 1080p — H.264 alta qualidade | x264 CRF 17, `slow`, 1080p |
+| Redes sociais 1080p — Instagram, TikTok, WhatsApp | x264 CRF 20, `medium`, 1080p, AAC 192 kb/s |
+| Leve 720p — H.264 | x264 CRF 23, 720p |
+| WebM VP9 — para sites e navegadores | VP9 CRF 30, Opus (se o ffmpeg tiver libvpx) |
+| AVI Xvid — aparelhos e players antigos | Xvid q3, MP3 (usa o `mpeg4` nativo se não houver libxvid) |
+| GIF animado (480p, 15 quadros/s) | Paleta otimizada (`palettegen`/`paletteuse`), sem áudio |
+| Master — ProRes 422 HQ (10 bits) | `prores_ks` perfil 3, PCM 24 bits |
+| Master máximo — ProRes 4444 XQ | `prores_ks` perfil 5, 4:4:4 10 bits, PCM 24 bits |
+| Master — DNxHR HQX (10 bits) | DNxHR HQX em `.mov`, PCM 24 bits |
+| Sem perdas — FFV1 16 bits RGB (.mkv) | FFV1 nível 3, RGB 48 bits, PCM 24 bits |
+| Rápido na GPU NVIDIA / Intel / AMD — H.265 | NVENC (CQ 17, `p6`, 10 bits), Quick Sync ou AMF — só aparecem se o codificador funcionar nesta máquina |
+| Sequência PNG 16 bits (para efeitos visuais) | Uma pasta com `nome_000001.png`, `nome_000002.png`… |
+
+Para **imagens**, as qualidades são PNG 16 bits, TIFF 16 bits, JPEG alta qualidade e WebP.
+
+Escolhendo **Personalizado** (ou mexendo em qualquer campo) você controla tudo:
+
+- **Codec**, **recipiente** e **formato de cor** (4:2:0, 4:2:2, 4:4:4, 8/10/12/16 bits, RGB);
+- **qualidade** (CRF, CQ, QP… — menor é melhor) ou **taxa de bits** fixa em Mb/s;
+- **velocidade** do codificador (`ultrafast`…`veryslow`, `p1`…`p7` etc.) e **perfil** (ProRes, DNxHR);
+- **resolução** (original, 8K, 4K, 1440p, 1080p, 720p, 540p, 480p, 360p) e **quadros/s**
+  (original, 12, 15, 23,976, 24, 25, 29,97, 30, 50, 59,94, 60);
+- **áudio** (copiar, AAC, MP3, Opus, PCM 24 bits, sem áudio). Se o áudio original não couber no
+  recipiente, o app converte: WebM → Opus, AVI → MP3, MOV → PCM, MP4 → AAC;
+- **Otimizar para grão** (`-tune grain` no x264/x265) e **pontilhado** em 8 bits.
+
+Detalhes que o app cuida sozinho: dimensões pares para codecs de vídeo, metadados de cor BT.709,
+`+faststart` em MP4/MOV, tag `hvc1` em H.265 (compatível com Apple), processamento em 16 bits
+sempre que a saída tem mais de 8 bits, e remoção do arquivo parcial quando a exportação é cancelada.
+
+**Trecho**: *Vídeo inteiro* ou *Só o trecho marcado* (com entrada/saída marcadas).
+
+**Desempenho** (a janela mostra processador, núcleos, memória livre e placas de vídeo):
+
+| Opção | O que faz |
+|---|---|
+| Núcleos do processador | Quantos núcleos o ffmpeg pode usar para ler, converter e codificar (*Todos* por padrão). Menos núcleos deixa o computador mais livre. |
+| Prioridade | *Normal*, *Baixa* (dá para usar o PC enquanto exporta) ou *Acima do normal*. No Linux a prioridade baixa usa `nice`. |
+| Decodificação por hardware | *Desligada*, *Automática*, NVIDIA (CUDA), DirectX 11, DXVA2 ou Intel Quick Sync — só as que o seu ffmpeg oferece. |
+| Placa para codificar | Qual placa NVIDIA o NVENC usa (máquinas com mais de uma GPU). |
+| Memória (buffer) | Quadros guardados entre leitura, efeitos e gravação (2 a 64). A janela mostra a RAM estimada e o máximo seguro com a memória livre agora. |
+
+Os efeitos rodam na placa de vídeo principal do sistema. Em notebooks com duas GPUs, escolha *Alto
+desempenho* para o PeliculaConverter (ou para o Python) em **Configurações do Windows → Sistema →
+Tela → Gráficos**.
+
+**Tempo estimado**: quase um segundo depois de você mudar uma opção, o app exporta de verdade um
+trecho de até 60 quadros (no máximo ~15 s) num arquivo temporário, com o codec e as opções
+escolhidas, ignora os primeiros quadros de aquecimento e mostra *"Tempo estimado: ≈ X •
+Y quadros/s medidos agora nesta máquina com estas opções"*. O arquivo temporário é apagado.
+
+**Fila**: *Adicionar à fila e exportar* põe o trabalho na fila (botão **Fila** no topo mostra o
+progresso). Cada item mostra quadros feitos, porcentagem, velocidade e tempo restante, com
+*Cancelar* e *Abrir pasta*. Pode continuar ajustando e enfileirando outros vídeos enquanto exporta.
+Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
+
+### 8. Atalhos do teclado
+
+| Atalho | Ação |
+|---|---|
+| `Espaço` | Reproduzir / pausar |
+| `←` / `→` | Quadro anterior / próximo |
+| `Shift + ←` / `Shift + →` | Voltar / avançar 1 segundo |
+| `Home` / `End` | Ir para a entrada (ou início) / saída (ou fim) |
+| `I` / `O` | Marcar entrada / saída |
+| `X` | Limpar entrada e saída |
+| `L` | Repetir (liga/desliga) |
+| `C` | Trocar o modo de comparação |
+| `F` | Ajustar à janela |
+| `1` / `2` | Zoom 100% / 200% |
+| Botão direito (segurar) no vídeo | Ver o original |
+| Duplo clique no slider | Voltar ao padrão |
+| `Shift` + arrastar slider | Ajuste fino |
+| `Ctrl+O` | Abrir |
+| `Ctrl+E` | Exportar |
+| `Ctrl+S` | Salvar preset |
+| `Ctrl+Shift+S` | Salvar quadro |
+| `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
+| `F11` | Tela cheia |
+
+A lista também está em **Configurações → Atalhos do teclado**.
+
+## Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)
+
+O ffmpeg **não decodifica** Nikon N-RAW (`.NEV`), RED R3D (`.R3D`) nem Blackmagic RAW (`.braw`);
+esses formatos exigem os SDKs dos fabricantes. O caminho recomendado, de graça:
+
+1. Abra o RAW no **DaVinci Resolve** (versão gratuita).
+2. No *Camera RAW*, use os valores da câmera e escolha uma saída log larga:
+   - **RED Log3G10 / REDWideGamutRGB** (R3D e Nikon N-RAW; o N-RAW usa o mesmo pipeline da RED), ou
+   - **DaVinci Intermediate / DaVinci Wide Gamut**.
+3. Na página *Deliver*, exporte em **ProRes 4444** (ou ProRes 422 HQ) ou **DNxHR 444**, sem
+   nenhuma correção de cor por cima.
+4. No PeliculaConverter, abra o arquivo e escolha em **Entrada e exposição → Perfil do vídeo** o
+   perfil correspondente: *RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE* ou *DaVinci
+   Intermediate (DaVinci Wide Gamut)*.
+5. Ajuste a **Exposição** em EV e exporte num master (ProRes 4444 XQ ou FFV1 16 bits) para
+   continuar a edição.
+
+**ProRes RAW**: o **FFmpeg 8 ou mais novo** já decodifica ProRes RAW; com ele (o app oferece
+atualizar), basta abrir o arquivo.
+
+**Por que não dá para exportar "em RAW"?** RAW é o dado do sensor **antes** do *debayer* (sem
+cor RGB definida por pixel). Depois que a imagem foi revelada, colorida e recebeu grão, não existe
+mais RAW para gravar. Para o máximo de qualidade use **ProRes 4444 XQ** (4:4:4 10 bits) ou
+**FFV1 16 bits RGB** (sem nenhuma perda).
+
+Gravou em log sem RAW (N-Log, S-Log3, LogC3, V-Log)? Abra direto e escolha o perfil da câmera.
+
+## Bitolas e formatos de película
+
+A **bitola** é a largura da película. Quanto menor o quadro, mais o grão aparece ampliado, menor a
+nitidez e maior o tremor no projetor. No app, cada bitola multiplica os ajustes de grão, maciez,
+tremor, vinheta e halação; a proporção vale quando a moldura está em *Da bitola escolhida*.
+
+| Bitola | Quadro real (aprox.) | Grão (tamanho × força) | Maciez da bitola | Tremor | Vinheta | Proporção |
+|---|---|---|---|---|---|---|
+| 8 mm (Regular 8) | ~4,5 × 3,3 mm, película de 16 mm passada duas vezes | 3,0 × 1,55 | 2,4 px | 2,8× | forte | 1,33 |
+| Super 8 | 5,79 × 4,01 mm, 1 furo por quadro (cartucho, 1965) | 2,6 × 1,45 | 1,9 px | 2,4× | forte | 1,36 |
+| 16 mm | 10,26 × 7,49 mm, 1 furo por quadro | 1,8 × 1,25 | 1,1 px | 1,6× | média | 1,33 |
+| Super 16 | 12,45 × 7,41 mm, furos só de um lado | 1,6 × 1,18 | 0,9 px | 1,5× | média | 1,66 |
+| 35 mm | 24,9 × 18,66 mm, 4 furos por quadro | 1,0 × 1,0 (referência) | 0,35 px | 1,0× | leve | 1,85 |
+| 65 mm | ~52,5 × 23 mm, 5 furos (cópia de projeção em 70 mm) | 0,6 × 0,72 | — | 0,7× | mínima | 2,20 |
+| IMAX 70 mm (15/70) | ~70 × 52 mm, 15 furos por quadro, correndo na horizontal | 0,45 × 0,55 | — | 0,55× | mínima | 1,43 |
+| Nenhuma (manual) | — | 1,0 × 1,0 | — | 1,0× | — | proporção do vídeo |
+
+"Maciez" é o desfoque gaussiano natural em px@1080; o **ISO** também mexe no grão (tamanho ∝
+(ISO/250)^0,18 e força ∝ (ISO/250)^0,35).
+
+O **Scan da película** desenha a tira com as medidas reais em milímetros:
+
+| Formato do scan | Largura | Passo do quadro | Furos | Texto de borda automático |
+|---|---|---|---|---|
+| 35 mm | 35 mm | 19,0 mm (4 furos) | 2,794 × 1,981 mm, dos dois lados | `KODAK 52xx …` conforme ISO (50D, 200T, 250D, 500T; Double-X no P&B) |
+| 16 mm | 16 mm | 7,62 mm (1 furo) | 1,829 × 1,27 mm, um lado | `KODAK 72xx …` |
+| Super 16 | 16 mm | 7,62 mm | um lado (a imagem ocupa o outro) | — |
+| Super 8 | 8 mm | 4,234 mm | 0,914 × 1,143 mm, um lado | — |
+
+8 mm usa a geometria do Super 8; 65 mm, IMAX e *Nenhuma* usam a de 35 mm.
+
+## Perguntas frequentes
+
+**Os nomes "Kodak Vision3", "Portra", "Velvia"… são os filmes de verdade?**
+Não. São **aproximações artísticas** do estilo de cada filme, feitas com os controles do app, sem
+dados nem relação com os fabricantes. Veja o [aviso legal](#aviso-legal).
+
+**O grão muda a cada quadro?**
+Sim, por padrão (*Grão muda a cada quadro*). Desligue para um grão fixo. A *Semente* troca o padrão.
+
+**A prévia é igual ao vídeo exportado?**
+Sim. Os dois usam o mesmo código e o mesmo número de quadro. A única diferença vem da resolução da
+prévia (o grão fino aparece de verdade na prévia *Máxima* com zoom 100%).
+
+**Por que o meu vídeo log ficou lavado (ou estourado)?**
+Escolha o perfil certo em *Entrada e exposição → Perfil do vídeo*. Vídeo log aberto como Rec.709
+fica sem contraste; Rec.709 aberto como log fica estourado.
+
+**Posso usar os LUTs do Premiere e do Resolve?**
+Sim, desde que esses programas estejam instalados: o app só lê os arquivos onde eles já estão.
+Ajuste *O LUT espera* (Cineon para as cópias do Resolve, Rec.709 para os criativos do Premiere).
+
+**Dá para usar os looks do PeliculaConverter em outro editor?**
+Sim, a parte de cor: *⋯ → Exportar a cor como LUT .cube* ou o pacote com todos os presets. Grão,
+halação, bloom, defeitos e moldura só existem no app.
+
+**Exporta em 10/16 bits de verdade?**
+Sim. Saídas com mais de 8 bits (H.265 10 bits, ProRes, DNxHR HQX/444, FFV1, PNG/TIFF 16 bits) são
+lidas, processadas e gravadas em 16 bits por canal.
+
+**Funciona sem placa de vídeo dedicada?**
+Funciona com qualquer GPU integrada que tenha OpenGL 3.3 (Intel HD 4000 em diante, AMD/NVIDIA
+atuais). Só é mais lento em 4K.
+
+**Funciona no macOS?**
+Ainda não. O suporte está preparado no código e no CI, mas desativado nesta versão.
+
+**Onde ficam as minhas configurações?**
+A sessão (último look, geometria da janela, modo de comparação, pasta e qualidade de exportação,
+opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Windows, no registro em
+`HKEY_CURRENT_USER\Software\PeliculaConverter\PeliculaConverter`; no Linux, em
+`~/.config/PeliculaConverter/PeliculaConverter.conf`.
+
+## Solução de problemas
+
+| Sintoma | O que fazer |
+|---|---|
+| *"Não foi possível iniciar o processamento na placa de vídeo (é preciso OpenGL 3.3)"* | Atualize o driver da GPU (NVIDIA, AMD ou Intel). Em máquinas virtuais e áreas de trabalho remotas o OpenGL 3.3 pode não existir. No Linux, confira `glxinfo \| grep "OpenGL core"` e instale os drivers Mesa. |
+| *"Não encontrei o ffmpeg neste computador"* | **Configurações → Dependências e atualizações → Baixar ffmpeg**, ou instale (`winget install Gyan.FFmpeg` / `sudo apt install ffmpeg`), ou aponte a pasta em *Pasta do ffmpeg…*. |
+| O app avisa que o ffmpeg está desatualizado | Clique em *Atualizar*. O app baixa a versão oficial para a pasta dele, sem mexer no ffmpeg do sistema. |
+| *"Não foi possível abrir o arquivo"* com `.NEV`, `.R3D` ou `.braw` | O ffmpeg não lê esses RAW. Veja [Arquivos RAW](#arquivos-raw-n-raw-r3d-braw-prores-raw). |
+| Um codec não aparece na lista | Codecs só aparecem se o seu ffmpeg tiver o codificador. NVENC/QSV/AMF são testados de verdade e somem se a placa ou o driver não suportarem. Atualize o ffmpeg pela janela de dependências. |
+| Exportação falha com erro do ffmpeg | A fila mostra a mensagem do ffmpeg. Combinações comuns: H.264/H.265 exigem dimensões pares (o app já ajusta), MP4 não aceita PCM (o app troca por AAC), NVENC exige driver recente. Tente a qualidade *MP4 H.264*. |
+| Efeitos lentos / prévia travando | Use a prévia *Rápida (540p)* ou *Normal (720p)*. Em notebooks, force a GPU dedicada (*Alto desempenho*). Halação, bloom e névoa com raios grandes custam mais. |
+| Exportação deixa o computador lento | Prioridade *Baixa* e menos núcleos na seção *Desempenho*. |
+| Faixas (*banding*) em degradês | Mantenha o *Pontilhado (dither)* ligado em 8 bits ou exporte em 10 bits (MKV H.265, YouTube 4K H.265). |
+| O LUT não muda nada ou fica estranho | Confira *O LUT espera* (Cineon × Rec.709 × log da câmera) e se a seção *LUT externo* está ligada. LUTs 1D não são suportados. |
+| Linux: `qt.qpa.plugin: Could not load the Qt platform plugin "xcb"` | Instale `libxcb-cursor0 libxkbcommon-x11-0` (e as outras bibliotecas listadas na instalação). |
+| Windows: o SmartScreen bloqueia o `.exe` | O executável não é assinado. *Mais informações → Executar assim mesmo*, ou rode pelo código-fonte. |
+
+## Gerar o executável (build)
+
+O projeto usa o **PyInstaller** em modo pasta única (*onedir*), sem console. A receita é
+[`PeliculaConverter.spec`](PeliculaConverter.spec) e funciona no Windows e no Linux (o ícone `.ico`
+é usado só no Windows; o macOS tem um `BUNDLE` preparado).
+
+**Windows**:
+
+```bat
+build.bat
+```
+
+Instala o PyInstaller no `.venv`, gera `dist\PeliculaConverter\PeliculaConverter.exe` e o pacote
+`dist\PeliculaConverter-<versão>-windows-x64.zip`.
+
+**Linux** (ou manualmente em qualquer sistema):
+
+```bash
+.venv/bin/python -m pip install "pyinstaller>=6.10"
+.venv/bin/python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
+tar -czf PeliculaConverter-linux-x64.tar.gz -C dist PeliculaConverter
+```
+
+O ffmpeg **não** vai dentro do pacote: quem usar instala pelo próprio app (download conferido)
+ou pelo sistema.
+
+**CI (GitHub Actions)** — [`.github/workflows/build.yml`](.github/workflows/build.yml):
+
+- roda em `windows-latest` e `ubuntu-latest` com Python 3.15, instala o ffmpeg (Chocolatey no
+  Windows, `apt` no Linux, junto com as bibliotecas que o Qt precisa), executa o `pytest`
+  (com `QT_QPA_PLATFORM=offscreen`; os testes de GPU se pulam sozinhos sem OpenGL 3.3), gera o
+  executável e envia o `.zip` (Windows) e o `.tar.gz` (Linux) como artefatos;
+- em tags `v*` (por exemplo `v1.0.0`), cria a **Release** no GitHub com os dois pacotes;
+- existe um job de **macOS** pronto, mas desativado (`if: false`) por enquanto.
+
+## Desenvolvimento
+
+```bash
+# testes (os de GPU e de ffmpeg se pulam sozinhos quando não há OpenGL 3.3 ou ffmpeg)
+.venv\Scripts\python -m pytest -q      # Windows
+.venv/bin/python -m pytest -q          # Linux
+```
+
+- [AGENTS.md](AGENTS.md) — arquitetura, mapa dos módulos, regras que não podem quebrar e receitas
+  (como adicionar um parâmetro, um preset ou um codec). Também serve para agentes de IA.
+- [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — pipeline de GPU, threads, pipes e exportação em detalhe.
+- [docs/EFEITOS.md](docs/EFEITOS.md) — todos os parâmetros, seção por seção.
+- [CHANGELOG.md](CHANGELOG.md) — histórico de versões.
+
+Estrutura:
+
+```
+pelicula-converter/
+├── PeliculaConverter.pyw      # abre o app sem console (duplo clique)
+├── pelicula/                  # código do app
+│   ├── app.py                 # ponto de entrada (tema, checagens, janela)
+│   ├── params.py              # esquema de todos os parâmetros (gera a interface)
+│   ├── look.py                # parâmetros → uniforms de cada quadro
+│   ├── shaders.py / engine.py # pipeline de GPU (OpenGL 3.3)
+│   ├── presets.py / luts.py   # presets prontos e do usuário; LUTs .cube
+│   ├── media.py / export.py   # ffmpeg: leitura, codecs, fila de exportação
+│   ├── deps.py / system.py    # ffmpeg (download/versão), informações da máquina
+│   ├── edgetext.py / testimage.py
+│   └── ui/                    # janelas e controles (PySide6)
+├── tests/                     # pytest
+├── assets/                    # logo, ícone e banner
+├── docs/                      # documentação e capturas de tela
+├── instalar.bat / executar.bat / build.bat
+├── instalar.sh / executar.sh
+├── PeliculaConverter.spec     # PyInstaller
+└── pyproject.toml / requirements.txt
+```
+
+## Licença
+
+[MIT](LICENSE) © 2026 Vitor Gabriel.
+
+O ffmpeg baixado pelo app não faz parte deste repositório e segue a licença do próprio ffmpeg
+(os builds *essentials* do gyan.dev e os builds do BtbN são GPL).
+
+## Aviso legal
+
+- Os nomes de filmes, processos e marcas usados nos presets (Kodak, Vision3, Eastman, Double-X,
+  Tri-X, Portra, Ektar, Ektachrome, Kodachrome, Fujifilm, Eterna, Velvia, Superia, Ilford, HP5,
+  CineStill, Technicolor e outros) **apenas descrevem o estilo** que cada preset tenta lembrar.
+  São **aproximações artísticas**, feitas com os controles do app, **sem relação, parceria ou
+  endosso** dos fabricantes, e sem uso de dados, perfis ou LUTs deles. Todas as marcas pertencem
+  aos seus donos. O texto de borda do *Scan da película* é decorativo.
+- **LUTs da Adobe e da Blackmagic Design não são distribuídos.** O PeliculaConverter apenas
+  **lê**, no próprio computador do usuário, os arquivos que o Premiere Pro e o DaVinci Resolve
+  instalaram; nenhum desses arquivos é copiado para o repositório, para o executável ou para os
+  pacotes de LUTs gerados pelo app (que contêm só os looks do próprio PeliculaConverter).
+- O software é fornecido "como está", sem garantias (veja a [licença](LICENSE)).
