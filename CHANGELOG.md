@@ -7,37 +7,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
-### Adicionado
-- **Instalador para Windows (`.msi`)**: instalação por usuário, sem administrador, em
-  `%LOCALAPPDATA%\Programs\PeliculaConverter`; atalho no Menu Iniciar e, opcionalmente, na Área de
-  Trabalho; projetos `.plc` abrem com dois cliques; pasta do app no `PATH` do usuário (para o
-  `pelicula-cli`); ícone e links em *Adicionar ou remover programas*; uma versão nova substitui a
-  antiga no mesmo lugar e lembra a pasta escolhida. Telas em português com a licença MIT.
-- **Pacote para Debian/Ubuntu (`.deb`)**: app em `/opt/pelicula-converter`, comandos
-  `pelicula-converter` e `pelicula-cli`, atalho no menu (português, inglês e espanhol), tipo de
-  arquivo `application/x-pelicula-project` para os projetos `.plc`, ícones, dependências do
-  sistema pelo `apt` e `ffmpeg` recomendado.
-- Executável de terminal **`pelicula-cli`** junto com o app em todos os pacotes (mesma pasta,
-  sem duplicar bibliotecas) e o comando `pelicula-cli` ao instalar pelo `pip`.
-- `pelicula-install.json` ao lado do executável em cada pacote (`msi`, `zip`, `deb`, `tar` ou
-  `dmg`, com a versão), para o atualizador saber como o app foi instalado.
-- Release com `SHA256SUMS.txt` de todos os arquivos e texto vindo de
-  `pelicula/novidades/release_<tag>.md`.
-- Avisos no Discord: nova versão publicada (com resumo e links dos pacotes) e build quebrado no
-  `main`.
-- Assinatura de código opcional no CI (certificado em segredos do repositório) e o guia
-  [docs/ASSINATURA.md](docs/ASSINATURA.md) com as opções e custos.
-- `build.sh` para gerar o `.tar.gz` e o `.deb` no Linux; o `build.bat` também gera o `.msi`
-  quando o WiX Toolset está instalado.
-- `.dmg` para macOS preparado (o suporte ao macOS continua desativado).
-
-### Mudado
-- CI: pushes em outras branches e pull requests rodam só os testes; os pacotes são gerados no
-  `main`/`master`, em tags `v*` e na execução manual, e o `.msi` e o `.deb` são instalados e
-  removidos de verdade no runner para conferir.
-- Os executáveis do Linux passam a ser gerados no Ubuntu 22.04: o `.deb` e o `.tar.gz` funcionam
-  no Ubuntu 22.04+ e no Debian 12+ (glibc 2.35).
-
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).
@@ -66,6 +35,35 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Som na prévia** (#11), sincronizado com o quadro mostrado, com botão de mudo (tecla M) e volume.
 - Atalhos novos: `Ctrl+N`, `Ctrl+Shift+O`, `Ctrl+S`/`Ctrl+Shift+S` para projetos; salvar preset
   passou para `Ctrl+Alt+S` e salvar quadro para `Ctrl+Shift+F`.
+- **Instalador para Windows (`.msi`)** (#6): instalação por usuário, sem administrador, em
+  `%LOCALAPPDATA%\Programs\PeliculaConverter`; atalho no Menu Iniciar e, opcionalmente, na Área de
+  Trabalho; projetos `.plc` abrem com dois cliques; pasta do app no `PATH` do usuário (para o
+  `pelicula-cli`); ícone e links em *Adicionar ou remover programas*; uma versão nova substitui a
+  antiga no mesmo lugar e lembra a pasta escolhida. Telas em português com a licença MIT.
+- **Pacote para Debian/Ubuntu (`.deb`)** (#6): app em `/opt/pelicula-converter`, comandos
+  `pelicula-converter` e `pelicula-cli`, atalho no menu (português, inglês e espanhol), tipo de
+  arquivo `application/x-pelicula-project` para os projetos `.plc`, ícones, dependências do
+  sistema pelo `apt` e `ffmpeg` recomendado.
+- Executável de terminal **`pelicula-cli`** junto com o app em todos os pacotes (mesma pasta,
+  sem duplicar bibliotecas) e o comando `pelicula-cli` ao instalar pelo `pip`.
+- `pelicula-install.json` ao lado do executável em cada pacote (`msi`, `zip`, `deb`, `tar` ou
+  `dmg`, com a versão), para o atualizador saber como o app foi instalado.
+- Release com `SHA256SUMS.txt` de todos os arquivos e texto vindo de
+  `pelicula/novidades/release_<tag>.md`.
+- Avisos no Discord (#8): nova versão publicada (com resumo e links dos pacotes) e build quebrado no
+  `main`.
+- Assinatura de código opcional no CI (#7; certificado em segredos do repositório) e o guia
+  [docs/ASSINATURA.md](docs/ASSINATURA.md) com as opções e custos.
+- `build.sh` para gerar o `.tar.gz` e o `.deb` no Linux; o `build.bat` também gera o `.msi`
+  quando o WiX Toolset está instalado.
+- `.dmg` para macOS preparado (o suporte ao macOS continua desativado).
+
+### Mudado
+- CI (#9): pushes em outras branches e pull requests rodam só os testes; os pacotes são gerados no
+  `main`/`master`, em tags `v*` e na execução manual, e o `.msi` e o `.deb` são instalados e
+  removidos de verdade no runner para conferir.
+- Os executáveis do Linux passam a ser gerados no Ubuntu 22.04: o `.deb` e o `.tar.gz` funcionam
+  no Ubuntu 22.04+ e no Debian 12+ (glibc 2.35).
 
 ### Corrigido
 - Preferências do app não são mais gravadas no registro durante testes automatizados:
