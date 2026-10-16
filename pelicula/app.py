@@ -37,6 +37,8 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
     app.setApplicationVersion(__version__)
+    # Liga a janela ao atalho pelicula-converter.desktop (ícone certo no Wayland/GNOME/KDE).
+    app.setDesktopFileName("pelicula-converter")
     app.setStyle("Fusion")
     app.setPalette(theme.palette())
     arrow = os.path.join(tempfile.gettempdir(), "pelicula_seta.png")
