@@ -31,6 +31,7 @@
   - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
   - [Dependências e por que cada uma existe](#dependências-e-por-que-cada-uma-existe)
 - [Guia de uso](#guia-de-uso)
+- [Modo terminal (pelicula-cli)](#modo-terminal-pelicula-cli)
 - [Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)](#arquivos-raw-n-raw-r3d-braw-prores-raw)
 - [Bitolas e formatos de película](#bitolas-e-formatos-de-película)
 - [Perguntas frequentes](#perguntas-frequentes)
@@ -407,7 +408,7 @@ usar depois"*.
 
 No painel **Ajustes**:
 
-- **Salvar** (ícone de disquete, `Ctrl+S`) → *Salvar como novo preset*. O preset entra no grupo
+- **Salvar** (ícone de disquete, `Ctrl+Alt+S`) → *Salvar como novo preset*. O preset entra no grupo
   **Meus presets**, com miniatura.
 - **⋯ (Mais opções de preset)**:
   - *Atualizar este preset com os ajustes atuais* (só presets do usuário);
@@ -421,7 +422,7 @@ Os presets ficam em arquivos `.json` legíveis:
 | Sistema | Pasta |
 |---|---|
 | Windows | `%APPDATA%\PeliculaConverter\presets` |
-| Linux | `~/PeliculaConverter/presets` (o app usa `$APPDATA` quando existe e, sem ele, a pasta pessoal) |
+| Linux | `~/.config/PeliculaConverter/presets` (ou `$XDG_CONFIG_HOME`) |
 
 **Configurações → Abrir pasta dos meus presets** abre a pasta. Formato do arquivo:
 
@@ -443,12 +444,13 @@ presets antigos continuam abrindo.
 A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
 
 - **De onde vêm os LUTs da lista**: os que já estão instalados no computador pelo **Adobe
-  Premiere Pro** (`Lumetri/LUTs/Creative` e `Resources/LUTs/FilmEmulation`) e pelo **DaVinci
-  Resolve** (`Film Looks`), além de **Meus LUTs**. O app só **lê** esses arquivos onde eles já
+  Premiere Pro** (`Lumetri/LUTs/Creative` e `Resources/LUTs/FilmEmulation`), pelo **After
+  Effects** (`Support Files/Lumetri/LUTs/Creative`) e pelo **DaVinci Resolve** (`Film Looks`),
+  além de **Meus LUTs**. O app só **lê** esses arquivos onde eles já
   estão; nenhum LUT de terceiros acompanha o PeliculaConverter.
 - **Instalar LUTs…** copia arquivos `.cube` (depois de conferir que são válidos) para a pasta
-  **Meus LUTs** (`%APPDATA%\PeliculaConverter\luts` no Windows; `~/PeliculaConverter/luts` no
-  Linux). Eles passam a aparecer sempre na lista. O botão **Pasta** abre essa pasta.
+  **Meus LUTs** (`%APPDATA%\PeliculaConverter\luts` no Windows; `~/.config/PeliculaConverter/luts`
+  no Linux). Eles passam a aparecer sempre na lista. O botão **Pasta** abre essa pasta.
 - *Procurar arquivo .cube…* usa um arquivo de qualquer lugar sem copiar.
 - **O LUT espera**: o espaço de cor de entrada do LUT. LUTs de cópia do Resolve (Kodak 2383 etc.)
   esperam **Cineon**; LUTs criativos do Premiere esperam **Rec.709**. O app adivinha pelo nome e
@@ -478,7 +480,10 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
   `Home`/`End` vão para a entrada/saída (ou começo/fim).
 - **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `L` liga/desliga a repetição. O trecho
   marcado pode ser exportado sozinho.
-- **Salvar quadro** (`Ctrl+Shift+S`): renderiza o quadro atual na resolução original em 16 bits e
+- **Som**: a reprodução toca o áudio do vídeo, sincronizado com o quadro mostrado (o som se corrige
+  sozinho se escorregar mais de 0,15 s, inclusive na repetição e ao buscar). O botão de alto-falante
+  (ou a tecla `M`) deixa mudo e o controle ao lado ajusta o volume; as duas escolhas ficam salvas.
+- **Salvar quadro** (`Ctrl+Shift+F`): renderiza o quadro atual na resolução original em 16 bits e
   salva em PNG 16 bits, TIFF 16 bits ou JPEG.
 
 ### 7. Exportar
@@ -568,14 +573,110 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | Botão direito (segurar) no vídeo | Ver o original |
 | Duplo clique no slider | Voltar ao padrão |
 | `Shift` + arrastar slider | Ajuste fino |
-| `Ctrl+O` | Abrir |
+| `M` | Som da prévia: mudo / com som |
+| `Ctrl+N` | Novo projeto |
+| `Ctrl+Shift+O` | Abrir projeto (.plc) |
+| `Ctrl+S` / `Ctrl+Shift+S` | Salvar projeto / salvar projeto como |
+| `Ctrl+O` | Abrir vídeo ou imagem |
 | `Ctrl+E` | Exportar |
-| `Ctrl+S` | Salvar preset |
-| `Ctrl+Shift+S` | Salvar quadro |
+| `Ctrl+Alt+S` | Salvar preset |
+| `Ctrl+Shift+F` | Salvar quadro |
 | `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
 | `F11` | Tela cheia |
 
 A lista também está em **Configurações → Atalhos do teclado**.
+
+### 9. Projetos (.plc): continuar de onde parou
+
+Um **projeto** guarda a edição inteira num arquivo `.plc`: o vídeo de origem, o look escolhido,
+todos os ajustes, a entrada/saída marcadas, o quadro em que você estava, o modo de comparação, a
+qualidade da prévia e uma miniatura.
+
+- Menu **Projeto** (no topo): *Novo projeto* (`Ctrl+N`), *Abrir projeto…* (`Ctrl+Shift+O`),
+  *Projetos recentes*, *Salvar projeto* (`Ctrl+S`), *Salvar projeto como…* (`Ctrl+Shift+S`).
+- O título da janela mostra o nome do projeto e um **•** quando há mudanças não salvas. Ao fechar
+  o app, abrir outro vídeo ou outro projeto com mudanças pendentes, ele pergunta se você quer salvar.
+- Se o vídeo mudou de pasta junto com o projeto, o app o encontra pelo caminho relativo; se não
+  encontrar, pede para você localizá-lo.
+- Também abre com dois cliques no `.plc` (quando instalado pelo `.msi`/`.deb`), arrastando o arquivo
+  para a janela ou pela linha de comando (`PeliculaConverter projeto.plc`).
+- O `.plc` é JSON legível (UTF-8). Valores desconhecidos ou fora da faixa são corrigidos ao abrir.
+
+### 10. Idiomas, boas-vindas e novidades
+
+- **Idiomas**: português do Brasil, inglês e espanhol. No primeiro acesso o app pergunta, já com o
+  idioma do sistema selecionado (ou inglês, se o do sistema não for um dos três). Para trocar:
+  **Configurações → Idioma…** (o app reabre no idioma novo). Números seguem o idioma (1,5 / 1.5).
+- **Tela de boas-vindas**: mostra a versão e a data, os **projetos recentes** com miniatura (clique
+  abre; botão direito remove da lista) e atalhos para abrir um vídeo, um projeto ou a cena de teste.
+  Dá para desligar em *Mostrar esta tela ao abrir o app* e reabrir em **Configurações → Tela de
+  boas-vindas**.
+- **Novidades**: um resumo em linguagem simples do que mudou em cada versão, no idioma escolhido.
+  Abre sozinho uma vez depois de cada atualização e fica em **Configurações → Novidades desta versão**.
+
+### 11. Atualizações automáticas
+
+O app verifica uma vez por dia (em segundo plano) se há versão nova em
+[github.com/edvitor13/pelicula-converter/releases](https://github.com/edvitor13/pelicula-converter/releases).
+Quando há, aparece **Atualizar para X.Y.Z** na barra de status e na tela de boas-vindas.
+
+- **Atualizar agora** baixa o pacote do mesmo tipo da sua instalação (`.msi`, `.zip`, `.deb` ou
+  `.tar.gz`), **confere o SHA-256** com o `SHA256SUMS.txt` publicado na release, fecha o app,
+  instala e abre de novo sozinho. Se o arquivo não conferir, nada é instalado.
+- Também dá para *Pular esta versão*, *Agora não* ou *Abrir página da versão*.
+- **Configurações → Verificar atualizações…** verifica na hora.
+- Rodando pelo código-fonte, o app só avisa (atualize com `git pull`).
+- O repositório precisa ser **público** para a verificação funcionar sem login. Para testar com o
+  repositório privado, defina `PELICULA_GITHUB_TOKEN` com um token de leitura.
+
+## Modo terminal (pelicula-cli)
+
+Tudo o que a janela faz com os looks também dá para fazer no terminal, sem abrir a interface —
+útil para processar muitos arquivos, automatizar ou rodar num servidor com GPU. Use o executável
+`pelicula-cli` (instalado junto) ou `python -m pelicula <comando>` pelo código-fonte. Cada comando
+tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável `PELICULA_LANG`).
+
+| Comando (apelido) | O que faz |
+|---|---|
+| `exportar` (`export`, `render`) | Exporta um vídeo, imagem ou projeto `.plc` com o look, mostrando uma barra de progresso |
+| `projeto` (`project`) | Cria ou edita um projeto `.plc` (preset, ajustes, entrada/saída) |
+| `quadro` (`frame`, `still`) | Salva um quadro com o look em PNG/TIFF 16 bits ou JPEG |
+| `lut` | Grava a cor de um preset ou projeto num LUT `.cube` (17, 33 ou 65 pontos) |
+| `presets` (`list-presets`) | Lista os presets prontos e os seus |
+| `parametros` (`params`) | Lista todos os parâmetros: chave, nome, faixa e padrão |
+| `qualidades` (`qualities`) | Lista as qualidades de exportação (para um arquivo, se informado) |
+| `info` | Mostra resolução, fps, codec e áudio de um arquivo |
+| `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
+| `versao` (`version`) | Mostra a versão |
+
+Exemplos:
+
+```bash
+# aplicar um preset, ajustar dois parâmetros e exportar em MP4
+pelicula-cli exportar video.mp4 --preset vision3_500t --set grao_forca=1.5 --set hal_forca=0.9
+
+# criar um projeto, marcar um trecho e exportar só o trecho em ProRes
+pelicula-cli projeto meu.plc --criar video.mp4 --preset super8_kodachrome --set scan_on=true --inicio 00:00:05 --fim 00:00:12
+pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --trecho
+
+# um quadro em 16 bits e o LUT do look
+pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
+pelicula-cli lut --preset vision3_250d -o vision3_250d.cube
+
+# ver o que existe
+pelicula-cli presets
+pelicula-cli parametros --secao grao
+pelicula-cli qualidades video.mp4
+```
+
+Opções de `exportar`: `-o/--saida`, `--preset`, `--set CHAVE=VALOR` (repetível; cores em `#RRGGBB`,
+porcentagens como `45%`, booleanos `true/false`), `--qualidade` (chaves de `qualidades`), `--codec`,
+`--recipiente`, `--pix`, `--crf`, `--taxa` (Mb/s), `--velocidade`, `--perfil`, `--resolucao`,
+`--fps`, `--audio`, `--inicio`/`--fim` (segundos, `00:01:02.5` ou `#quadro`), `--trecho` (usa a
+entrada/saída do projeto), `--threads`, `--prioridade`, `--hwaccel`, `--buffer`, `-y` (substituir),
+`--json` (progresso em JSON, uma linha por segundo) e `-q` (sem barra de progresso). `Ctrl+C`
+cancela e apaga o arquivo parcial. Códigos de saída: 0 sucesso, 1 erro, 2 uso incorreto,
+130 cancelado.
 
 ## Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)
 

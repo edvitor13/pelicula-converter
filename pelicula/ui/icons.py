@@ -241,6 +241,25 @@ def draw(name: str, p: QPainter, c: QColor) -> None:
         _pen(p, c, 2.0)
         p.drawLine(QPointF(12, 5), QPointF(12, 19))
         p.drawLine(QPointF(5, 12), QPointF(19, 12))
+    elif name in ("volume", "mute"):
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        path = QPainterPath()
+        path.moveTo(4, 9.5)
+        path.lineTo(7.5, 9.5)
+        path.lineTo(12, 5.5)
+        path.lineTo(12, 18.5)
+        path.lineTo(7.5, 14.5)
+        path.lineTo(4, 14.5)
+        path.closeSubpath()
+        p.drawPath(path)
+        _pen(p, c)
+        if name == "volume":
+            p.drawArc(QRectF(10, 8, 8, 8), -50 * 16, 100 * 16)
+            p.drawArc(QRectF(9, 4.5, 13, 15), -50 * 16, 100 * 16)
+        else:
+            p.drawLine(QPointF(15, 9), QPointF(20.5, 15))
+            p.drawLine(QPointF(20.5, 9), QPointF(15, 15))
     elif name == "fit":
         _pen(p, c)
         for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):

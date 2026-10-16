@@ -14,6 +14,7 @@ from typing import Any
 
 from . import look, media
 from .engine import Engine, lut_info
+from .i18n import _
 
 X26_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
 NV_PRESETS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
@@ -60,6 +61,8 @@ CODECS: dict[str, dict[str, Any]] = {
     "webp": dict(label="Imagem WebP", enc="libwebp", exts=["webp"], pix=["yuv420p"], rc="webpq", qrange=(0, 100), image=True),
 }
 
+# Os rótulos destas tabelas ficam em português e são traduzidos com _() onde aparecem
+# (ui/export_dialog.py); tools/i18n_extract.py lê as tabelas para montar os catálogos.
 AUDIO = [("copy", "Copiar original (sem recodificar)"), ("aac320", "AAC 320 kb/s"), ("aac192", "AAC 192 kb/s"),
          ("mp3", "MP3 320 kb/s"), ("opus", "Opus 192 kb/s"), ("pcm24", "PCM 24 bits (sem perdas)"),
          ("none", "Sem áudio")]
@@ -159,45 +162,45 @@ def _original(info: media.MediaInfo) -> ExportSettings:
 def quality_presets(info: media.MediaInfo | None) -> list[tuple[str, str, ExportSettings]]:
     if info is not None and info.is_image:
         out = [
-            ("img_png", "PNG 16 bits (sem perdas)", _S("png", "png", "rgb48be", audio="none", dither=False)),
-            ("img_tiff", "TIFF 16 bits (sem perdas)", _S("tiff", "tif", "rgb48le", audio="none", dither=False)),
-            ("img_jpg", "JPEG alta qualidade", _S("jpg", "jpg", "yuvj444p", 2, audio="none")),
+            ("img_png", _("PNG 16 bits (sem perdas)"), _S("png", "png", "rgb48be", audio="none", dither=False)),
+            ("img_tiff", _("TIFF 16 bits (sem perdas)"), _S("tiff", "tif", "rgb48le", audio="none", dither=False)),
+            ("img_jpg", _("JPEG alta qualidade"), _S("jpg", "jpg", "yuvj444p", 2, audio="none")),
         ]
         if available("webp"):
-            out.append(("img_webp", "WebP (para sites)", _S("webp", "webp", "yuv420p", 90, audio="none")))
+            out.append(("img_webp", _("WebP (para sites)"), _S("webp", "webp", "yuv420p", 90, audio="none")))
         return out
     out = []
     if info is not None:
-        out.append(("original", "Original — mesmo formato, sem perda visível", _original(info)))
+        out.append(("original", _("Original — mesmo formato, sem perda visível"), _original(info)))
     out += [
-        ("mp4", "MP4 H.264 — o formato mais comum, abre em tudo", _S("x264", "mp4", "yuv420p", 18, "medium", audio="aac320", tune_grain=True)),
-        ("mov", "MOV H.264 — Apple, Final Cut, iPhone", _S("x264", "mov", "yuv420p", 17, "slow", audio="aac320", tune_grain=True)),
-        ("mkv", "MKV H.265 — arquivo menor com boa qualidade", _S("x265", "mkv", "yuv420p10le", 20, "medium", audio="aac192", tune_grain=True)),
-        ("yt4k_hevc", "YouTube 4K — H.265 10 bits", _S("x265", "mp4", "yuv420p10le", 16, "slow", resolution="2160", audio="aac320", tune_grain=True)),
-        ("yt4k_h264", "YouTube 4K — H.264", _S("x264", "mp4", "yuv420p", 15, "slow", resolution="2160", audio="aac320", tune_grain=True)),
-        ("fhd", "Full HD 1080p — H.264 alta qualidade", _S("x264", "mp4", "yuv420p", 17, "slow", resolution="1080", audio="aac320", tune_grain=True)),
-        ("social", "Redes sociais 1080p — Instagram, TikTok, WhatsApp", _S("x264", "mp4", "yuv420p", 20, "medium", resolution="1080", audio="aac192", tune_grain=True)),
-        ("leve", "Leve 720p — H.264", _S("x264", "mp4", "yuv420p", 23, "medium", resolution="720", audio="aac192")),
+        ("mp4", _("MP4 H.264 — o formato mais comum, abre em tudo"), _S("x264", "mp4", "yuv420p", 18, "medium", audio="aac320", tune_grain=True)),
+        ("mov", _("MOV H.264 — Apple, Final Cut, iPhone"), _S("x264", "mov", "yuv420p", 17, "slow", audio="aac320", tune_grain=True)),
+        ("mkv", _("MKV H.265 — arquivo menor com boa qualidade"), _S("x265", "mkv", "yuv420p10le", 20, "medium", audio="aac192", tune_grain=True)),
+        ("yt4k_hevc", _("YouTube 4K — H.265 10 bits"), _S("x265", "mp4", "yuv420p10le", 16, "slow", resolution="2160", audio="aac320", tune_grain=True)),
+        ("yt4k_h264", _("YouTube 4K — H.264"), _S("x264", "mp4", "yuv420p", 15, "slow", resolution="2160", audio="aac320", tune_grain=True)),
+        ("fhd", _("Full HD 1080p — H.264 alta qualidade"), _S("x264", "mp4", "yuv420p", 17, "slow", resolution="1080", audio="aac320", tune_grain=True)),
+        ("social", _("Redes sociais 1080p — Instagram, TikTok, WhatsApp"), _S("x264", "mp4", "yuv420p", 20, "medium", resolution="1080", audio="aac192", tune_grain=True)),
+        ("leve", _("Leve 720p — H.264"), _S("x264", "mp4", "yuv420p", 23, "medium", resolution="720", audio="aac192")),
     ]
     if available("vp9"):
-        out.append(("webm", "WebM VP9 — para sites e navegadores", _S("vp9", "webm", "yuv420p", 30, "2", audio="opus")))
+        out.append(("webm", _("WebM VP9 — para sites e navegadores"), _S("vp9", "webm", "yuv420p", 30, "2", audio="opus")))
     if available("xvid"):
-        out.append(("avi", "AVI Xvid — aparelhos e players antigos", _S("xvid", "avi", "yuv420p", 3, audio="mp3")))
+        out.append(("avi", _("AVI Xvid — aparelhos e players antigos"), _S("xvid", "avi", "yuv420p", 3, audio="mp3")))
     if available("gif"):
-        out.append(("gif", "GIF animado (480p, 15 quadros/s)", _S("gif", "gif", "pal8", resolution="480", fps="15", audio="none", dither=False)))
+        out.append(("gif", _("GIF animado (480p, 15 quadros/s)"), _S("gif", "gif", "pal8", resolution="480", fps="15", audio="none", dither=False)))
     out += [
-        ("prores_hq", "Master — ProRes 422 HQ (10 bits)", _S("prores", "mov", "yuv422p10le", profile="3", audio="pcm24")),
-        ("prores_xq", "Master máximo — ProRes 4444 XQ", _S("prores", "mov", "yuv444p10le", profile="5", audio="pcm24")),
-        ("dnxhr_hqx", "Master — DNxHR HQX (10 bits)", _S("dnxhr", "mov", "yuv422p10le", profile="dnxhr_hqx", audio="pcm24")),
-        ("ffv1", "Sem perdas — FFV1 16 bits RGB (.mkv)", _S("ffv1", "mkv", "rgb48le", audio="pcm24", dither=False)),
+        ("prores_hq", _("Master — ProRes 422 HQ (10 bits)"), _S("prores", "mov", "yuv422p10le", profile="3", audio="pcm24")),
+        ("prores_xq", _("Master máximo — ProRes 4444 XQ"), _S("prores", "mov", "yuv444p10le", profile="5", audio="pcm24")),
+        ("dnxhr_hqx", _("Master — DNxHR HQX (10 bits)"), _S("dnxhr", "mov", "yuv422p10le", profile="dnxhr_hqx", audio="pcm24")),
+        ("ffv1", _("Sem perdas — FFV1 16 bits RGB (.mkv)"), _S("ffv1", "mkv", "rgb48le", audio="pcm24", dither=False)),
     ]
     if available("hevc_nvenc"):
-        out.append(("gpu", "Rápido na GPU NVIDIA — H.265 10 bits", _S("hevc_nvenc", "mp4", "p010le", 17, "p6", audio="aac320")))
+        out.append(("gpu", _("Rápido na GPU NVIDIA — H.265 10 bits"), _S("hevc_nvenc", "mp4", "p010le", 17, "p6", audio="aac320")))
     if available("hevc_qsv"):
-        out.append(("gpu_intel", "Rápido na GPU Intel — H.265", _S("hevc_qsv", "mp4", "p010le", 20, "medium", audio="aac320")))
+        out.append(("gpu_intel", _("Rápido na GPU Intel — H.265"), _S("hevc_qsv", "mp4", "p010le", 20, "medium", audio="aac320")))
     if available("hevc_amf"):
-        out.append(("gpu_amd", "Rápido na GPU AMD — H.265", _S("hevc_amf", "mp4", "yuv420p", 20, "quality", audio="aac320")))
-    out.append(("png_seq", "Sequência PNG 16 bits (para efeitos visuais)", _S("png_seq", "png", "rgb48be", audio="none", dither=False)))
+        out.append(("gpu_amd", _("Rápido na GPU AMD — H.265"), _S("hevc_amf", "mp4", "yuv420p", 20, "quality", audio="aac320")))
+    out.append(("png_seq", _("Sequência PNG 16 bits (para efeitos visuais)"), _S("png_seq", "png", "rgb48be", audio="none", dither=False)))
     return out
 
 
@@ -489,10 +492,10 @@ def run_job(job: ExportJob, engine: Engine) -> None:
 
     def read_loop():
         try:
-            for _ in range(skip):
+            for _n in range(skip):
                 if reader.read() is None:
                     break
-            for _ in range(total):
+            for _n in range(total):
                 if job.cancel.is_set():
                     break
                 img = reader.read()
@@ -575,7 +578,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
         return
     if i == 0:
         job.status = "erro"
-        job.error = reader.error or "Nenhum quadro foi lido do arquivo."
+        job.error = reader.error or _("Nenhum quadro foi lido do arquivo.")
         return
     job.done = job.total = i
     job.status = "concluido"

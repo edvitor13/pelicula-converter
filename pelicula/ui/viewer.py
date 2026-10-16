@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from ..i18n import _
 from . import icons, theme
 
 
@@ -30,7 +31,7 @@ class Viewer(QWidget):
         self._pan = None
         self._peek = False
         self._drop_hover = False
-        self.label_proc = "PELÍCULA"
+        self.label_proc = _("PELÍCULA")
         self._build_empty()
 
     def _build_empty(self) -> None:
@@ -42,22 +43,22 @@ class Viewer(QWidget):
         ic.setPixmap(icons.icon("film", theme.ACCENT, 64).pixmap(64, 64))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(ic)
-        t = QLabel("Arraste um vídeo ou uma imagem para cá")
+        t = QLabel(_("Arraste um vídeo ou uma imagem para cá"))
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 15pt;")
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(t)
-        s = QLabel("MP4, MOV, MKV, ProRes, DNxHR, PNG, TIFF, JPEG… ou arquivos .cube e presets .json")
+        s = QLabel(_("MP4, MOV, MKV, ProRes, DNxHR, PNG, TIFF, JPEG… ou arquivos .cube e presets .json"))
         s.setObjectName("Muted")
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(s)
         row = QHBoxLayout()
         row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        b1 = QPushButton("  Abrir arquivo")
+        b1 = QPushButton("  " + _("Abrir arquivo"))
         b1.setObjectName("Primary")
         b1.setIcon(icons.icon("open", "#1b1205", 18))
         b1.clicked.connect(self.openRequested)
-        b2 = QPushButton("  Usar cena de teste")
+        b2 = QPushButton("  " + _("Usar cena de teste"))
         b2.setIcon(icons.icon("image", theme.TEXT, 18))
         b2.clicked.connect(self.testRequested)
         row.addWidget(b1)
@@ -113,7 +114,7 @@ class Viewer(QWidget):
         p.setFont(f)
         p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0b0a09"))
         if self._drop_hover:
@@ -128,7 +129,7 @@ class Viewer(QWidget):
         proc = self.orig if (self._peek or self.mode == "orig") and self.orig is not None else self.proc
         if self.mode == "side" and self.orig is not None and not self._peek:
             half = (area.width() - 10) / 2
-            for i, (img, lab) in enumerate(((self.orig, "ORIGINAL"), (self.proc, self.label_proc))):
+            for i, (img, lab) in enumerate(((self.orig, _("ORIGINAL")), (self.proc, self.label_proc))):
                 sub = QRectF(area.left() + i * (half + 10), area.top(), half, area.height())
                 s = min(sub.width() / img.width(), sub.height() / img.height())
                 r = QRectF(sub.center().x() - img.width() * s / 2, sub.center().y() - img.height() * s / 2,
@@ -145,7 +146,7 @@ class Viewer(QWidget):
         p.drawImage(r, proc)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._peek or self.mode == "orig":
-            self._pill(p, r.left() + 10, max(r.top(), 0) + 10, "ORIGINAL")
+            self._pill(p, r.left() + 10, max(r.top(), 0) + 10, _("ORIGINAL"))
         elif self.mode == "split" and self.orig is not None:
             xs = r.left() + r.width() * self.split
             clip = QRectF(r.left(), r.top(), xs - r.left(), r.height()).intersected(QRectF(self.rect()))
@@ -170,7 +171,7 @@ class Viewer(QWidget):
                 path.lineTo(xs + sgn * 3, cy + 5)
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawPath(path)
-            self._pill(p, xs - 10, top + 10, "ORIGINAL", right=True)
+            self._pill(p, xs - 10, top + 10, _("ORIGINAL"), right=True)
             self._pill(p, xs + 10, top + 10, self.label_proc)
         else:
             self._pill(p, r.left() + 10, max(r.top(), 0) + 10, self.label_proc)

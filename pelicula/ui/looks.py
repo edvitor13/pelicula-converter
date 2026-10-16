@@ -8,6 +8,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
+from ..i18n import _
 from . import theme
 
 THUMB_W, THUMB_H = 122, 69
@@ -20,9 +21,11 @@ def _norm(s: str) -> str:
 class LookThumb(QWidget):
     clicked = Signal(str)
 
-    def __init__(self, pid: str, name: str, desc: str, parent=None):
+    def __init__(self, pid: str, name: str, desc: str, parent=None, search: str = ""):
         super().__init__(parent)
         self.pid, self.name = pid, name
+        # Texto usado na busca: o nome mostrado e, se for diferente, o nome original em português.
+        self.search_key = _norm(f"{name} {search}" if search and search != name else name)
         self.img: QImage | None = None
         self.selected = False
         self._hover = False
@@ -34,11 +37,11 @@ class LookThumb(QWidget):
         self.img = img
         self.update()
 
-    def enterEvent(self, _):
+    def enterEvent(self, _event):
         self._hover = True
         self.update()
 
-    def leaveEvent(self, _):
+    def leaveEvent(self, _event):
         self._hover = False
         self.update()
 
@@ -46,7 +49,7 @@ class LookThumb(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.pid)
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -88,15 +91,15 @@ class LooksPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 6, 6)
         lay.setSpacing(8)
-        k = QLabel("LOOKS")
+        k = QLabel(_("LOOKS"))
         k.setObjectName("Kicker")
         lay.addWidget(k)
-        t = QLabel("Presets de película")
+        t = QLabel(_("Presets de película"))
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 12.5pt;")
         lay.addWidget(t)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Buscar look…")
+        self.search.setPlaceholderText(_("Buscar look…"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
         lay.addWidget(self.search)
@@ -114,6 +117,9 @@ class LooksPanel(QWidget):
         self.selected: str | None = None
 
     def rebuild(self, items: list[dict]) -> None:
+        """Monta a grade por grupo. Nomes, descrições e grupos vêm em português e são traduzidos aqui
+        (os grupos continuam sendo comparados pelo valor original); presets do usuário mantêm o nome
+        que a pessoa deu."""
         while self.vl.count():
             it = self.vl.takeAt(0)
             if it.widget():
@@ -130,7 +136,7 @@ class LooksPanel(QWidget):
                 order.append(g)
             by_group[g].append(it)
         for g in order:
-            lab = QLabel(g.upper())
+            lab = QLabel(_(g).upper())
             lab.setObjectName("Kicker")
             lab.setStyleSheet(f"color: {theme.MUTED}; margin-top: 10px;")
             self.vl.addWidget(lab)
@@ -141,7 +147,11 @@ class LooksPanel(QWidget):
             grid.setVerticalSpacing(2)
             lst = []
             for i, it in enumerate(by_group[g]):
-                th = LookThumb(it["id"], it["nome"], it.get("desc", ""))
+                user = str(it["id"]).startswith("user:")
+                nome, desc = it["nome"], it.get("desc", "")
+                if not user:
+                    nome, desc = _(nome), _(desc)
+                th = LookThumb(it["id"], nome, desc, search=it["nome"])
                 th.clicked.connect(self.presetChosen)
                 th.set_image(old.get(it["id"]))
                 th.selected = it["id"] == self.selected
@@ -170,7 +180,7 @@ class LooksPanel(QWidget):
         q = _norm(text.strip())
         for lab, box, lst in self.groups:
             grid: QGridLayout = box.layout()
-            vis = [t for t in lst if not q or q in _norm(t.name)]
+            vis = [t for t in lst if not q or q in t.search_key]
             for t in lst:
                 grid.removeWidget(t)
                 t.setVisible(t in vis)

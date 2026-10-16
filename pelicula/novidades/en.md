@@ -1,0 +1,23 @@
+## Version 1.1.0 — October 16, 2026
+
+**The app now speaks your language and remembers what you were doing.**
+
+- 🌎 **Portuguese, English and Spanish.** On first launch you pick the language (your computer's language comes preselected). You can change it later in Settings.
+- 🎬 **Welcome screen.** When the app opens you see the version, your recent projects and shortcuts to get started: open a video, open a project or use the test scene.
+- 💾 **Projects (.plc).** Save your edit and pick up where you left off: the video, the look, every adjustment, the marked range and the frame you were on. Double-click a .plc file to open it straight in the app.
+- 🔄 **Automatic updates.** When a new version comes out, the app lets you know and updates itself with one click, checking that the downloaded file is the original.
+- 📦 **Installers.** Besides the portable version, there is now an installer for Windows (.msi) and for Linux (.deb), with a menu shortcut and .plc file association.
+- ✨ **What's new.** This window! Every time you update, you'll see here what changed, in plain language.
+
+## Version 1.0.0 — October 16, 2026
+
+**The first version of PeliculaConverter.**
+
+- 🎞️ **A movie look for any video.** Negative and theatrical print colors, grain, the reddish glow around lights (halation), bloom and much more — all with an instant preview.
+- 📽️ **33 ready-made looks.** Kodak Vision3, Fujifilm Eterna, Super 8 Kodachrome, 16 mm, 65 mm, IMAX, classic black and white, Portra, Velvia, CineStill and more. Tweak any of them and save it as your own.
+- 📏 **Film gauges from 8 mm to IMAX.** Each one changes grain size, sharpness, gate weave and the picture's aspect ratio.
+- 🎞 **Film scan.** Show the whole film strip, with backlit perforations, edge print and neighboring frames, just like a real scan.
+- 🕸️ **Film defects.** Dust, scratches, a hair in the gate, stains, end-of-reel flashes, reel-change cue marks and more — choose which ones appear.
+- 📤 **Export to everything.** MP4, MOV, MKV, WebM, AVI, GIF, ProRes and DNxHR masters and a lossless format, with a time estimate and an export queue.
+- 🎨 **LUTs.** Use the LUTs you already have and turn any look into a LUT for other programs.
+- ⬇️ **Automatic ffmpeg.** If your computer doesn't have ffmpeg (or has a very old one), the app downloads and installs it for you.

@@ -16,8 +16,15 @@ resultado. Windows e Linux; macOS preparado e desativado. Interface 100% em port
 ```
 PeliculaConverter.pyw        entrada sem console (pythonw); python -m pelicula também funciona
 pelicula/
-  __init__.py                __version__, APP_NAME
-  app.py                     main(): tema, checagem de bibliotecas, MainWindow, PELICULA_SCREENSHOT
+  __init__.py                __version__, __date__, APP_NAME
+  __main__.py                python -m pelicula: sem comando abre a janela; com comando usa o modo terminal
+  app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, MainWindow, boas-vindas
+  cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
+  i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
+  locales/                   catálogos en.json e es.json (texto em português → tradução)
+  novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
+  project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
+  updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
@@ -31,7 +38,8 @@ pelicula/
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   ui/                        main_window, export_dialog, queue_dialog, deps_dialog, viewer, looks,
-                             widgets, store (desfazer/refazer), theme, icons
+                             widgets, store (desfazer/refazer), theme, icons, prefs (QSettings),
+                             welcome (boas-vindas e novidades), language_dialog, update_dialog
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
 docs/                        ARQUITETURA.md, EFEITOS.md, img/ (capturas de tela)
@@ -61,9 +69,13 @@ PeliculaConverter.spec       PyInstaller (onedir, Windows/Linux, BUNDLE para mac
    (Resolve) são **apenas lidos** onde já estão instalados no computador do usuário. Não adicione
    arquivos `.cube` de terceiros ao repositório, ao executável, aos testes ou aos pacotes gerados (o
    `.gitignore` ignora `*.cube`, exceto fixtures próprias em `tests/`).
-7. **Texto do usuário em PT-BR, com acentos corretos.** Rótulos, dicas, mensagens de erro, diálogos,
-   scripts `.bat`/`.sh` e documentação. Chaves de parâmetros e identificadores ficam em português sem
-   acento (`grao_forca`, `scan_on`), seguindo o padrão existente; docstrings e comentários em PT-BR.
+7. **Texto do usuário escrito em PT-BR e sempre traduzível.** Todo texto visível passa por `_()`
+   (`from .i18n import _`) na hora de aparecer, com placeholders nomeados
+   (`_("{n} quadros").format(n=...)`); tabelas montadas na importação usam `N_()` e são traduzidas
+   ao exibir. Ao criar texto novo, rode `tools/i18n_extract.py --update` e preencha `en.json` e
+   `es.json` (o teste `tests/test_i18n.py` falha se faltar tradução). Chaves de parâmetros e
+   identificadores ficam em português sem acento (`grao_forca`, `scan_on`); docstrings e
+   comentários em PT-BR.
 8. **Nomes de filmes são aproximações artísticas.** Presets com nomes de marcas descrevem um estilo;
    não use dados, perfis ou LUTs dos fabricantes e mantenha o aviso legal (README e "Sobre").
 9. **Compatibilidade de presets.** Presets são JSON com chaves de `params.PARAMS` e passam por
@@ -77,10 +89,16 @@ PeliculaConverter.spec       PyInstaller (onedir, Windows/Linux, BUNDLE para mac
     `Perf.popen_kwargs()` para prioridade de processos e `media.NO_WINDOW` só no Windows. Caminhos
     do Windows ficam atrás de `sys.platform == "win32"`. O macOS fica desativado
     (`deps.PLATFORM_ENABLED`, aviso em `app.py`, job do CI com `if: false`) até ser testado.
-12. **Não sujar o ambiente do usuário.** O `QSettings` grava no registro (Windows) / `~/.config`
-    (Linux) e o `closeEvent` da janela grava a sessão. Testes e automações devem isolar `APPDATA`
-    (a `conftest.py` já faz isso) e não fechar a `MainWindow` real com a sessão do usuário (para
-    capturas, use um `QSettings` em `.ini` temporário e encerre com `app.exit()`).
+12. **Não sujar o ambiente do usuário.** Preferências só por `ui/prefs.settings()` (nunca
+    `QSettings(APP_NAME, APP_NAME)` direto, que ignora redirecionamentos). Testes e automações
+    definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
+    LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
+    `MainWindow` (o `closeEvent` grava a sessão).
+13. **Projetos `.plc` são um formato público.** Mantenha `project.FORMAT` e a leitura compatível com
+    arquivos antigos; aumente `FORMAT` só com migração. Valores passam por `params.sanitize()`.
+14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
+    recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
+    com os do CI, e cada pacote leva `pelicula-install.json` com o tipo de instalação.
 
 ## Rodar
 

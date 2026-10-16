@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QColorDialog, QCom
                                QToolButton, QVBoxLayout, QWidget)
 
 from .. import luts, params, system
+from ..i18n import _, decimal_sep, parse_decimal
 from . import icons, theme
 from .store import ParamStore
 
@@ -50,7 +51,7 @@ class ToggleSwitch(QAbstractButton):
         self._anim.setEndValue(1.0 if on else 0.0)
         self._anim.start()
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         if self._anim.state() != QPropertyAnimation.State.Running:
             self._p = 1.0 if self.isChecked() else 0.0
         p = QPainter(self)
@@ -116,7 +117,7 @@ class FilmSlider(QWidget):
             v = round((v - self.lo) / self.step) * self.step + self.lo
         return min(max(v, self.lo), self.hi)
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cy = self.height() / 2
@@ -176,7 +177,7 @@ class FilmSlider(QWidget):
             self.update()
             self.released.emit()
 
-    def leaveEvent(self, _):
+    def leaveEvent(self, _event):
         self._hover = False
         self.update()
 
@@ -209,20 +210,22 @@ def compact(combo: QComboBox, chars: int = 10) -> QComboBox:
 
 
 def fmt_value(p: params.Param, v) -> str:
+    """Valor como aparece na caixa de texto, com o separador decimal do idioma."""
     if p.kind == "int":
         return str(int(v))
     if p.percent:
         return f"{v * 100:.0f}%"
-    txt = f"{v:.{p.decimals}f}".replace(".", ",")
+    txt = f"{v:.{p.decimals}f}".replace(".", decimal_sep())
     return txt + p.unit
 
 
 def parse_value(p: params.Param, txt: str):
-    t = txt.strip().replace("%", "").replace(",", ".")
+    """Lê o valor digitado; aceita vírgula ou ponto decimal em qualquer idioma."""
+    t = txt.strip().replace("%", "")
     for u in (p.unit.strip(), "px", "EV", "°", "×"):
         if u:
             t = t.replace(u, "")
-    v = float(t.strip())
+    v = parse_decimal(t)
     if p.percent:
         v /= 100.0
     return v
@@ -235,7 +238,7 @@ class ParamRow(QWidget):
         self.param = param
         self.store = store
         if param.tip:
-            self.setToolTip(param.tip)
+            self.setToolTip(_(param.tip))
 
     def refresh(self) -> None:
         pass
@@ -254,13 +257,13 @@ class NumberRow(ParamRow):
         lay.setSpacing(0)
         top = QHBoxLayout()
         top.setSpacing(4)
-        top.addWidget(self._label(param.label))
+        top.addWidget(self._label(_(param.label)))
         top.addStretch(1)
         if param.kind == "int":
             dice = QToolButton()
             dice.setObjectName("Flat")
             dice.setIcon(icons.icon("dice", theme.MUTED, 16))
-            dice.setToolTip("Sortear")
+            dice.setToolTip(_("Sortear"))
             dice.clicked.connect(lambda: self.store.set(param.key, random.randint(int(param.min), int(param.max))))
             top.addWidget(dice)
         self.edit = QLineEdit()
@@ -307,7 +310,7 @@ class BoolRow(ParamRow):
         super().__init__(param, store, parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 4, 0, 4)
-        lay.addWidget(self._label(param.label))
+        lay.addWidget(self._label(_(param.label)))
         lay.addStretch(1)
         self.sw = ToggleSwitch()
         self.sw.toggled.connect(lambda on: self.store.set(param.key, bool(on)))
@@ -327,11 +330,11 @@ class ChoiceRow(ParamRow):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 3, 0, 3)
         lay.setSpacing(4)
-        lay.addWidget(self._label(param.label))
+        lay.addWidget(self._label(_(param.label)))
         self.combo = compact(QComboBox())
         for val, lab in param.choices:
-            self.combo.addItem(lab, val)
-        self.combo.currentIndexChanged.connect(lambda _: self.store.set(param.key, self.combo.currentData()))
+            self.combo.addItem(_(lab), val)
+        self.combo.currentIndexChanged.connect(lambda _i: self.store.set(param.key, self.combo.currentData()))
         lay.addWidget(self.combo)
         self.refresh()
 
@@ -349,7 +352,7 @@ class ColorButton(QPushButton):
         self.setFixedSize(92, 26)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor(theme.BORDER), 1))
@@ -370,7 +373,7 @@ class ColorRow(ParamRow):
         super().__init__(param, store, parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 3, 0, 3)
-        lay.addWidget(self._label(param.label))
+        lay.addWidget(self._label(_(param.label)))
         lay.addStretch(1)
         self.btn = ColorButton()
         self.btn.clicked.connect(self._pick)
@@ -380,7 +383,7 @@ class ColorRow(ParamRow):
     def _pick(self) -> None:
         start = self.btn.color
         dlg = QColorDialog(start, self.window())
-        dlg.setWindowTitle(self.param.label)
+        dlg.setWindowTitle(_(self.param.label))
         dlg.currentColorChanged.connect(lambda c: self.store.set(self.param.key, [c.redF(), c.greenF(), c.blueF()], record=False))
         if dlg.exec():
             c = dlg.selectedColor()
@@ -403,7 +406,7 @@ class LutRow(ParamRow):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 3, 0, 3)
         lay.setSpacing(4)
-        lay.addWidget(self._label(param.label))
+        lay.addWidget(self._label(_(param.label)))
         self.combo = compact(QComboBox())
         self.combo.setMaxVisibleItems(18)
         lay.addWidget(self.combo)
@@ -413,13 +416,13 @@ class LutRow(ParamRow):
         lay.addWidget(self.path)
         btns = QHBoxLayout()
         btns.setSpacing(6)
-        inst = QPushButton("Instalar LUTs…")
+        inst = QPushButton(_("Instalar LUTs…"))
         inst.setIcon(icons.icon("plus", theme.TEXT, 14))
-        inst.setToolTip("Copia arquivos .cube para a pasta do app; eles passam a aparecer sempre nesta lista.")
+        inst.setToolTip(_("Copia arquivos .cube para a pasta do app; eles passam a aparecer sempre nesta lista."))
         inst.clicked.connect(self._install)
-        folder = QPushButton("Pasta")
+        folder = QPushButton(_("Pasta"))
         folder.setIcon(icons.icon("folder", theme.TEXT, 14))
-        folder.setToolTip("Abrir a pasta dos LUTs instalados")
+        folder.setToolTip(_("Abrir a pasta dos LUTs instalados"))
         folder.clicked.connect(lambda: system.open_path(luts.user_dir()))
         btns.addWidget(inst, 1)
         btns.addWidget(folder)
@@ -429,7 +432,7 @@ class LutRow(ParamRow):
         self.refresh()
 
     def _install(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self.window(), "Instalar LUTs", "", "LUT 3D (*.cube)")
+        paths, _filter = QFileDialog.getOpenFileNames(self.window(), _("Instalar LUTs"), "", _("LUT 3D (*.cube)"))
         if paths:
             self.install(paths)
 
@@ -439,24 +442,26 @@ class LutRow(ParamRow):
         self._fill()
         if done:
             self.set_path(done[0])
-        msg = f"{len(done)} LUT(s) instalado(s) em Meus LUTs." if done else "Nenhum LUT foi instalado."
+            msg = _("{n} LUT(s) instalado(s) em Meus LUTs.").format(n=len(done))
+        else:
+            msg = _("Nenhum LUT foi instalado.")
         if errors:
-            msg += "\n\nNão foi possível instalar:\n" + "\n".join(errors[:8])
-        QMessageBox.information(self.window(), "Instalar LUTs", msg)
+            msg += "\n\n" + _("Não foi possível instalar:") + "\n" + "\n".join(errors[:8])
+        QMessageBox.information(self.window(), _("Instalar LUTs"), msg)
 
     def _fill(self) -> None:
         self.combo.blockSignals(True)
         self.combo.clear()
-        self.combo.addItem("(nenhum)", "")
+        self.combo.addItem(_("(nenhum)"), "")
         for label, path in luts.find_system_luts():
             self.combo.addItem(label, path)
-        self.combo.addItem("Procurar arquivo .cube…", "__browse__")
+        self.combo.addItem(_("Procurar arquivo .cube…"), "__browse__")
         self.combo.blockSignals(False)
 
     def _chosen(self, _i: int) -> None:
         data = self.combo.currentData()
         if data == "__browse__":
-            path, _ = QFileDialog.getOpenFileName(self.window(), "Escolher LUT", "", "LUT 3D (*.cube)")
+            path, _filter = QFileDialog.getOpenFileName(self.window(), _("Escolher LUT"), "", _("LUT 3D (*.cube)"))
             if not path:
                 self.refresh()
                 return
@@ -479,7 +484,7 @@ class LutRow(ParamRow):
             i = self.combo.findData(path)
         self.combo.setCurrentIndex(max(i, 0))
         self.combo.blockSignals(False)
-        self.path.setText(path if path else "Os LUTs do Premiere e do Resolve instalados aparecem na lista.")
+        self.path.setText(path if path else _("Os LUTs do Premiere e do Resolve instalados aparecem na lista."))
 
 
 def make_row(param: params.Param, store: ParamStore) -> ParamRow:
@@ -517,12 +522,12 @@ class SectionCard(QFrame):
         hl.addWidget(self.chev)
         tl = QVBoxLayout()
         tl.setSpacing(0)
-        title = QLabel(section.title)
+        title = QLabel(_(section.title))
         title.setObjectName("PanelTitle")
         title.setMinimumWidth(60)
         tl.addWidget(title)
         if section.subtitle:
-            sub = QLabel(section.subtitle)
+            sub = QLabel(_(section.subtitle))
             sub.setObjectName("Faint")
             sub.setWordWrap(True)
             sub.setMinimumWidth(60)
@@ -531,13 +536,13 @@ class SectionCard(QFrame):
         rst = QToolButton()
         rst.setObjectName("Flat")
         rst.setIcon(icons.icon("reset", theme.FAINT, 16))
-        rst.setToolTip("Restaurar os valores padrão desta seção")
+        rst.setToolTip(_("Restaurar os valores padrão desta seção"))
         rst.clicked.connect(self._reset)
         hl.addWidget(rst)
         self.switch = None
         if section.toggle:
             self.switch = ToggleSwitch()
-            self.switch.setToolTip("Ligar ou desligar esta seção")
+            self.switch.setToolTip(_("Ligar ou desligar esta seção"))
             self.switch.toggled.connect(lambda on: self.store.set(section.toggle, bool(on)))
             hl.addWidget(self.switch)
         head.mousePressEvent = lambda e: self.set_expanded(not self.expanded)
@@ -621,7 +626,7 @@ class Segmented(QFrame):
             self.group.addButton(b)
             lay.addWidget(b)
             self.buttons[key] = b
-            b.clicked.connect(lambda _=False, k=key: self.changed.emit(k))
+            b.clicked.connect(lambda _checked=False, k=key: self.changed.emit(k))
 
     def set_current(self, key: str) -> None:
         if key in self.buttons:
@@ -651,7 +656,7 @@ class Histogram(QWidget):
             self.h = np.clip(hs / m, 0, 1)
         self.update()
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
@@ -720,7 +725,7 @@ class Timeline(QWidget):
     def _f(self, x: float) -> int:
         return int(round(min(max((x - 10) / max(1, self.width() - 20), 0), 1) * (self.total - 1)))
 
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cy = self.height() / 2 + 2
@@ -776,7 +781,7 @@ class Timeline(QWidget):
             self.scrubbing.emit(False)
             self.seek.emit(self._f(e.position().x()))
 
-    def leaveEvent(self, _):
+    def leaveEvent(self, _event):
         self._hover_x = None
         self.update()
 

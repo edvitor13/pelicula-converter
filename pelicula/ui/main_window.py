@@ -12,13 +12,15 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, QSettings, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Qt, QTimer, QSettings, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__, deps, export, look, luts, media, params, presets, system, testimage
+from .. import (APP_NAME, __version__, deps, export, i18n, look, luts, media, params, presets, project, system,
+               testimage, updater)
+from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
 from .export_dialog import ExportDialog
@@ -26,12 +28,19 @@ from .looks import THUMB_H, THUMB_W, LooksPanel
 from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
 from .viewer import Viewer
-from .widgets import Histogram, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
+from .widgets import FilmSlider, Histogram, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
+from . import prefs, welcome
 
-MEDIA_FILTER = ("Vídeos e imagens (*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
-                "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr);;Todos os arquivos (*)")
-PREVIEW_Q = [("540", "Rápida (540p)"), ("720", "Normal (720p)"), ("1080", "Alta (1080p)"),
-             ("full", "Máxima (resolução original)")]
+MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
+                  "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
+# Rótulos traduzidos com _() na hora de mostrar.
+PREVIEW_Q = [("540", N_("Rápida (540p)")), ("720", N_("Normal (720p)")), ("1080", N_("Alta (1080p)")),
+             ("full", N_("Máxima (resolução original)"))]
+
+
+def media_filter() -> str:
+    """Filtro de arquivos dos diálogos de abrir (montado na hora, no idioma ativo)."""
+    return f"{_('Vídeos e imagens')} ({MEDIA_PATTERNS});;{_('Todos os arquivos')} (*)"
 
 
 def qimage_from(arr: np.ndarray) -> QImage:
@@ -136,6 +145,23 @@ class Player:
         self._stop.set()
 
 
+class _UpdateBridge(QObject):
+    found = Signal(object)
+
+
+def restart_app() -> None:
+    """Fecha e abre o app de novo (para trocar o idioma)."""
+    import sys
+    if getattr(sys, "frozen", False):
+        args = [sys.executable] + sys.argv[1:]
+        cwd = os.path.dirname(sys.executable)
+    else:
+        args = [sys.executable, "-m", "pelicula"] + sys.argv[1:]
+        cwd = str(Path(__file__).resolve().parents[2])
+    subprocess.Popen(args, cwd=cwd, close_fds=True)
+    QApplication.instance().exit(0)
+
+
 class _DepsBridge(QObject):
     result = Signal(bool, object, str)
 
@@ -143,7 +169,7 @@ class _DepsBridge(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.settings = QSettings(APP_NAME, APP_NAME)
+        self.settings = prefs.settings()
         media.configure(self.settings.value("ffmpeg_dir", "") or None)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(icons.app_icon())
@@ -168,6 +194,13 @@ class MainWindow(QMainWindow):
         self.frame_idx = 0
         self.cur: np.ndarray | None = None
         self.cur_q: QImage | None = None
+        self.project_path: str | None = None
+        self._saved_state: dict = {}
+        self._media_label = ""
+        self.audio = None
+        self.audio_out = None
+        self._audio_ok = False
+        self._audio_sync_t = 0.0
         self._uploaded = None
         self.inp: int | None = None
         self.outp: int | None = None
@@ -178,7 +211,8 @@ class MainWindow(QMainWindow):
         self._base_cache: tuple[str, dict] | None = None
         self.loader = FrameLoader()
         self.loader.loaded.connect(self._frame_loaded)
-        self.loader.failed.connect(lambda m: self.statusBar().showMessage(f"Erro ao ler o quadro: {m}", 8000))
+        self.loader.failed.connect(
+            lambda m: self.statusBar().showMessage(_("Erro ao ler o quadro: {erro}").format(erro=m), 8000))
         self.player = Player()
 
         self._build_ui()
@@ -203,6 +237,20 @@ class MainWindow(QMainWindow):
         self._deps_bridge = _DepsBridge()
         self._deps_bridge.result.connect(self._deps_result)
         QTimer.singleShot(1200, self._check_deps)
+        self._saved_state = self._state()
+        self._update_bridge = _UpdateBridge()
+        self._update_bridge.found.connect(self._update_found)
+        self.btn_update = QPushButton()
+        self.btn_update.setObjectName("Primary")
+        self.btn_update.setVisible(False)
+        self.btn_update.clicked.connect(lambda: self.show_update(self._release))
+        self.statusBar().addPermanentWidget(self.btn_update)
+        self._release = None
+        QTimer.singleShot(4000, self._auto_check_update)
+        muted = str(self.settings.value("audio_muted", "false")) == "true"
+        self.btn_mute.setChecked(muted)
+        self._set_muted(muted)
+        self.vol.setValue(float(self.settings.value("audio_volume", 0.8) or 0.8))
 
         self._refresh_presets()
         self._update_modified()
@@ -238,7 +286,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.split, 1)
         self.setCentralWidget(central)
         sb = self.statusBar()
-        self.st_file = QLabel("Nenhum arquivo aberto")
+        self.st_file = QLabel(_("Nenhum arquivo aberto"))
         self.st_prev = QLabel("")
         self.st_render = QLabel("")
         self.st_gpu = QLabel(f"GPU: {self.engine.renderer.split('/')[0]}")
@@ -280,31 +328,43 @@ class MainWindow(QMainWindow):
         self.file_label = QLabel("")
         self.file_label.setObjectName("Muted")
         hl.addWidget(self.file_label, 1)
-        self.btn_open = self._flat("open", "Abrir vídeo ou imagem (Ctrl+O)", "Abrir")
+        self.btn_project = self._flat("save", _("Projeto: salvar e abrir a edição"), _("Projeto"))
+        self.project_menu = QMenu(self)
+        self.project_menu.aboutToShow.connect(self._fill_project_menu)
+        self.btn_project.setMenu(self.project_menu)
+        self.btn_project.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        hl.addWidget(self.btn_project)
+        self.btn_open = self._flat("open", _("Abrir vídeo ou imagem (Ctrl+O)"), _("Abrir"))
         self.btn_open.clicked.connect(self.open_dialog)
         hl.addWidget(self.btn_open)
-        self.btn_frame = self._flat("camera", "Salvar o quadro atual em alta qualidade (Ctrl+Shift+S)", "Salvar quadro")
+        self.btn_frame = self._flat("camera", _("Salvar o quadro atual em alta qualidade (Ctrl+Shift+F)"),
+                                    _("Salvar quadro"))
         self.btn_frame.clicked.connect(self.save_frame)
         hl.addWidget(self.btn_frame)
-        self.btn_queue = self._flat("queue", "Fila de exportação", "Fila")
+        self.btn_queue = self._flat("queue", _("Fila de exportação"), _("Fila"))
         self.btn_queue.clicked.connect(self.show_queue)
         hl.addWidget(self.btn_queue)
-        self.btn_export = QPushButton("  Exportar")
+        self.btn_export = QPushButton("  " + _("Exportar"))
         self.btn_export.setObjectName("Primary")
         self.btn_export.setIcon(icons.icon("export", "#1b1205", 16))
-        self.btn_export.setToolTip("Exportar com o look atual (Ctrl+E)")
+        self.btn_export.setToolTip(_("Exportar com o look atual (Ctrl+E)"))
         self.btn_export.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_export.clicked.connect(self.export_dialog)
         hl.addWidget(self.btn_export)
-        self.btn_settings = self._flat("settings", "Configurações")
+        self.btn_settings = self._flat("settings", _("Configurações"))
         menu = QMenu(self)
-        menu.addAction("Dependências e atualizações…", self.show_deps)
-        menu.addAction("Pasta do ffmpeg…", self.choose_ffmpeg)
-        menu.addAction("Abrir pasta dos meus presets", lambda: system.open_path(presets.user_dir()))
-        menu.addAction("Abrir pasta dos meus LUTs", self.open_lut_dir)
+        menu.addAction(_("Idioma…"), self.choose_language)
+        menu.addAction(_("Verificar atualizações…"), lambda: self.check_updates(manual=True))
+        menu.addAction(_("Novidades desta versão"), lambda: welcome.WhatsNewDialog(self).exec())
+        menu.addAction(_("Tela de boas-vindas"), self.show_welcome)
         menu.addSeparator()
-        menu.addAction("Atalhos do teclado", self.show_shortcuts)
-        menu.addAction(f"Sobre o {APP_NAME}", self.about)
+        menu.addAction(_("Dependências e atualizações…"), self.show_deps)
+        menu.addAction(_("Pasta do ffmpeg…"), self.choose_ffmpeg)
+        menu.addAction(_("Abrir pasta dos meus presets"), lambda: system.open_path(presets.user_dir()))
+        menu.addAction(_("Abrir pasta dos meus LUTs"), self.open_lut_dir)
+        menu.addSeparator()
+        menu.addAction(_("Atalhos do teclado"), self.show_shortcuts)
+        menu.addAction(_("Sobre o {app}").format(app=APP_NAME), self.about)
         self.btn_settings.setMenu(menu)
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
@@ -321,40 +381,41 @@ class MainWindow(QMainWindow):
         hl.setContentsMargins(12, 8, 12, 8)
         hl.setSpacing(8)
         self.compare = Segmented([
-            ("proc", "Película", "Só o resultado"),
-            ("split", "Dividido", "Arraste a linha para comparar. Segure o botão direito para ver o original."),
-            ("side", "Lado a lado", "Original e resultado lado a lado"),
-            ("orig", "Original", "Só o vídeo original"),
+            ("proc", _("Película"), _("Só o resultado")),
+            ("split", _("Dividido"), _("Arraste a linha para comparar. Segure o botão direito para ver o original.")),
+            ("side", _("Lado a lado"), _("Original e resultado lado a lado")),
+            ("orig", _("Original"), _("Só o vídeo original")),
         ])
         mode = str(self.settings.value("compare", "split"))
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
         hl.addSpacing(10)
-        self.btn_fit = self._flat("fit", "Ajustar à janela (F)", "Ajustar")
+        self.btn_fit = self._flat("fit", _("Ajustar à janela (F)"), _("Ajustar"))
         self.btn_fit.clicked.connect(lambda: self.viewer.set_zoom(None))
         hl.addWidget(self.btn_fit)
         for z in (1.0, 2.0):
             b = QToolButton()
             b.setObjectName("Flat")
             b.setText(f"{int(z * 100)}%")
-            b.setToolTip(f"Zoom {int(z * 100)}% ({int(z)}). Roda do mouse também dá zoom; arraste para mover.")
+            b.setToolTip(_("Zoom {pct}% ({tecla}). Roda do mouse também dá zoom; arraste para mover.").format(
+                pct=int(z * 100), tecla=int(z)))
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.clicked.connect(lambda _=False, zz=z: self.viewer.set_zoom(zz))
+            b.clicked.connect(lambda _checked=False, zz=z: self.viewer.set_zoom(zz))
             hl.addWidget(b)
         self.zoom_label = QLabel("")
         self.zoom_label.setObjectName("Faint")
         hl.addWidget(self.zoom_label)
         hl.addStretch(1)
-        lab = QLabel("Prévia")
+        lab = QLabel(_("Prévia"))
         lab.setObjectName("Muted")
         hl.addWidget(lab)
         self.prev_combo = compact(QComboBox(), 12)
         for key, text in PREVIEW_Q:
-            self.prev_combo.addItem(text, key)
+            self.prev_combo.addItem(_(text), key)
         self.prev_combo.setCurrentIndex(max(0, self.prev_combo.findData(self.preview_q)))
-        self.prev_combo.setToolTip("Resolução da prévia. O grão só aparece fiel na resolução máxima com zoom 100%.")
+        self.prev_combo.setToolTip(_("Resolução da prévia. O grão só aparece fiel na resolução máxima com zoom 100%."))
         self.prev_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
@@ -371,12 +432,12 @@ class MainWindow(QMainWindow):
         th = QHBoxLayout(tr)
         th.setContentsMargins(10, 6, 12, 10)
         th.setSpacing(4)
-        self.btn_back = self._flat("step_back", "Quadro anterior (←)")
+        self.btn_back = self._flat("step_back", _("Quadro anterior (←)"))
         self.btn_back.clicked.connect(lambda: self.step(-1))
-        self.btn_play = self._flat("play", "Reproduzir / pausar (Espaço)")
+        self.btn_play = self._flat("play", _("Reproduzir / pausar (Espaço)"))
         self.btn_play.setIconSize(QSize(22, 22))
         self.btn_play.clicked.connect(self.toggle_play)
-        self.btn_fwd = self._flat("step_fwd", "Próximo quadro (→)")
+        self.btn_fwd = self._flat("step_fwd", _("Próximo quadro (→)"))
         self.btn_fwd.clicked.connect(lambda: self.step(1))
         for b in (self.btn_back, self.btn_play, self.btn_fwd):
             th.addWidget(b)
@@ -388,17 +449,26 @@ class MainWindow(QMainWindow):
         self.timeline = Timeline()
         self.timeline.seek.connect(self.seek)
         th.addWidget(self.timeline, 1)
-        self.btn_in = self._flat("mark_in", "Marcar entrada (I)")
+        self.btn_in = self._flat("mark_in", _("Marcar entrada (I)"))
         self.btn_in.clicked.connect(self.mark_in)
-        self.btn_out = self._flat("mark_out", "Marcar saída (O)")
+        self.btn_out = self._flat("mark_out", _("Marcar saída (O)"))
         self.btn_out.clicked.connect(self.mark_out)
-        self.btn_clear = self._flat("clear", "Limpar entrada e saída (X)")
+        self.btn_clear = self._flat("clear", _("Limpar entrada e saída (X)"))
         self.btn_clear.clicked.connect(self.clear_marks)
-        self.btn_loop = self._flat("loop", "Repetir (L)", checkable=True)
+        self.btn_loop = self._flat("loop", _("Repetir (L)"), checkable=True)
         self.btn_loop.setChecked(True)
         self.btn_loop.toggled.connect(lambda on: setattr(self, "loop", on))
         for b in (self.btn_in, self.btn_out, self.btn_clear, self.btn_loop):
             th.addWidget(b)
+        th.addSpacing(6)
+        self.btn_mute = self._flat("volume", _("Som da prévia (M liga/desliga)"), checkable=True)
+        self.btn_mute.toggled.connect(self._set_muted)
+        th.addWidget(self.btn_mute)
+        self.vol = FilmSlider(0.0, 1.0, 0.01, 0.8)
+        self.vol.setFixedWidth(80)
+        self.vol.setToolTip(_("Volume da prévia"))
+        self.vol.valueChanged.connect(self._set_volume)
+        th.addWidget(self.vol)
         vl.addWidget(tr)
         return w
 
@@ -409,7 +479,7 @@ class MainWindow(QMainWindow):
         vl = QVBoxLayout(w)
         vl.setContentsMargins(12, 12, 6, 8)
         vl.setSpacing(8)
-        k = QLabel("AJUSTES")
+        k = QLabel(_("AJUSTES"))
         k.setObjectName("Kicker")
         vl.addWidget(k)
         row = QHBoxLayout()
@@ -419,33 +489,34 @@ class MainWindow(QMainWindow):
         self.preset_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.preset_combo.activated.connect(self._combo_chosen)
         row.addWidget(self.preset_combo, 1)
-        self.btn_save = self._flat("save", "Salvar como novo preset (Ctrl+S)")
+        self.btn_save = self._flat("save", _("Salvar como novo preset (Ctrl+Alt+S)"))
         self.btn_save.clicked.connect(self.save_preset_as)
         row.addWidget(self.btn_save)
-        self.btn_more = self._flat("more", "Mais opções de preset")
+        self.btn_more = self._flat("more", _("Mais opções de preset"))
         self.more_menu = QMenu(self)
-        self.act_update = self.more_menu.addAction("Atualizar este preset com os ajustes atuais", self.update_user_preset)
-        self.act_delete = self.more_menu.addAction("Excluir este preset", self.delete_preset)
-        self.more_menu.addAction("Desfazer mudanças (voltar ao preset)", self.revert_preset)
+        self.act_update = self.more_menu.addAction(_("Atualizar este preset com os ajustes atuais"),
+                                                   self.update_user_preset)
+        self.act_delete = self.more_menu.addAction(_("Excluir este preset"), self.delete_preset)
+        self.more_menu.addAction(_("Desfazer mudanças (voltar ao preset)"), self.revert_preset)
         self.more_menu.addSeparator()
-        self.more_menu.addAction("Importar preset (.json)…", self.import_preset)
-        self.more_menu.addAction("Exportar preset (.json)…", self.export_preset)
+        self.more_menu.addAction(_("Importar preset (.json)…"), self.import_preset)
+        self.more_menu.addAction(_("Exportar preset (.json)…"), self.export_preset)
         self.more_menu.addSeparator()
-        self.more_menu.addAction("Exportar a cor como LUT .cube (33 pontos)…", lambda: self.export_lut(33))
-        self.more_menu.addAction("Exportar a cor como LUT .cube (65 pontos)…", lambda: self.export_lut(65))
-        self.more_menu.addAction("Exportar todos os presets como LUTs (pacote)…", self.export_all_luts)
+        self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=33), lambda: self.export_lut(33))
+        self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=65), lambda: self.export_lut(65))
+        self.more_menu.addAction(_("Exportar todos os presets como LUTs (pacote)…"), self.export_all_luts)
         self.more_menu.aboutToShow.connect(self._menu_state)
         self.btn_more.setMenu(self.more_menu)
         self.btn_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         row.addWidget(self.btn_more)
         vl.addLayout(row)
-        self.mod_label = QLabel("Modificado — salve como novo preset para usar depois")
+        self.mod_label = QLabel(_("Modificado — salve como novo preset para usar depois"))
         self.mod_label.setStyleSheet(f"color: {theme.ACCENT}; font-size: 8.5pt;")
         vl.addWidget(self.mod_label)
         self.hist = Histogram()
         vl.addWidget(self.hist)
         row2 = QHBoxLayout()
-        lab = QLabel("Ajustes avançados")
+        lab = QLabel(_("Ajustes avançados"))
         lab.setObjectName("Muted")
         row2.addWidget(lab)
         self.adv = ToggleSwitch()
@@ -453,9 +524,9 @@ class MainWindow(QMainWindow):
         self.adv.toggled.connect(self._set_advanced)
         row2.addWidget(self.adv)
         row2.addStretch(1)
-        self.btn_undo = self._flat("undo", "Desfazer (Ctrl+Z)")
+        self.btn_undo = self._flat("undo", _("Desfazer (Ctrl+Z)"))
         self.btn_undo.clicked.connect(self.store.undo)
-        self.btn_redo = self._flat("redo", "Refazer (Ctrl+Y)")
+        self.btn_redo = self._flat("redo", _("Refazer (Ctrl+Y)"))
         self.btn_redo.clicked.connect(self.store.redo)
         row2.addWidget(self.btn_undo)
         row2.addWidget(self.btn_redo)
@@ -485,8 +556,12 @@ class MainWindow(QMainWindow):
             s.activated.connect(fn)
         sc("Ctrl+O", self.open_dialog)
         sc("Ctrl+E", self.export_dialog)
-        sc("Ctrl+S", self.save_preset_as)
-        sc("Ctrl+Shift+S", self.save_frame)
+        sc("Ctrl+S", self.save_project)
+        sc("Ctrl+Shift+S", self.save_project_as)
+        sc("Ctrl+Shift+O", self.open_project_dialog)
+        sc("Ctrl+N", self.new_project)
+        sc("Ctrl+Alt+S", self.save_preset_as)
+        sc("Ctrl+Shift+F", self.save_frame)
         sc("Ctrl+Z", self.store.undo)
         sc("Ctrl+Y", self.store.redo)
         sc("Ctrl+Shift+Z", self.store.redo)
@@ -495,7 +570,7 @@ class MainWindow(QMainWindow):
     # ================================================================ arquivos
     def open_dialog(self) -> None:
         d = str(self.settings.value("last_dir", str(Path.home())))
-        path, _ = QFileDialog.getOpenFileName(self, "Abrir vídeo ou imagem", d, MEDIA_FILTER)
+        path, _f = QFileDialog.getOpenFileName(self, _("Abrir vídeo ou imagem"), d, media_filter())
         if path:
             self.handle_files([path])
 
@@ -505,10 +580,17 @@ class MainWindow(QMainWindow):
             self.install_luts(cubes)
         for p in paths:
             ext = Path(p).suffix.lower()
+            if ext == project.EXT:
+                self.open_project(p)
+                break
             if ext == ".json":
                 self.import_preset(p)
             elif ext != ".cube":
-                self.load_media(p)
+                if self.confirm_discard():
+                    self.load_media(p)
+                    self.project_path = None
+                    self._saved_state = self._state()
+                    self._update_title()
                 break
 
     def install_luts(self, paths: list[str]) -> None:
@@ -521,7 +603,7 @@ class MainWindow(QMainWindow):
                 r._fill()
                 r.refresh()
         else:
-            done, _ = luts.install(paths)
+            done, _errors = luts.install(paths)
             if done:
                 self.cards_lut_set(done[0])
 
@@ -530,19 +612,19 @@ class MainWindow(QMainWindow):
         self.store.set("lut_entrada", luts.guess_input(path), record=False)
         self.store.set("lut_on", True, record=False)
         self.store.commit()
-        self.statusBar().showMessage(f"LUT carregado: {Path(path).name}", 5000)
+        self.statusBar().showMessage(_("LUT carregado: {nome}").format(nome=Path(path).name), 5000)
 
     def open_test_scene(self) -> None:
         img = testimage.make(1920, 1080)
         path = os.path.join(tempfile.gettempdir(), "pelicula_cena_de_teste.png")
         qimage_from(img).save(path)
-        self.load_media(path, label="Cena de teste")
+        self.load_media(path, label=_("Cena de teste"))
 
     def load_media(self, path: str, label: str | None = None) -> None:
         try:
             info = media.probe(path)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, APP_NAME, f"Não foi possível abrir o arquivo.\n\n{exc}")
+            QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
         self.info = info
@@ -551,11 +633,13 @@ class MainWindow(QMainWindow):
         self.cur = None
         self.timeline.set_media(info.frames, info.fps)
         self.file_label.setText(label or Path(path).name)
-        self.setWindowTitle(f"{label or Path(path).name} — {APP_NAME}")
+        self._media_label = label or Path(path).name
         self.st_file.setText(info.summary())
         self._set_media_enabled(True)
         self.settings.setValue("last_dir", str(Path(path).parent))
+        self._load_audio(path if info.has_audio and not info.is_image else "")
         self.request_frame(0)
+        self._update_title()
 
     def _set_media_enabled(self, on: bool) -> None:
         video = on and self.info is not None and not self.info.is_image
@@ -630,15 +714,15 @@ class MainWindow(QMainWindow):
             plan = look.build_plan(v, w, h, self.frame_idx, self.info.fps if self.info else 24.0, info)
             out = self.engine.render(plan, 8)
         except Exception as exc:  # noqa: BLE001
-            self.statusBar().showMessage(f"Erro na renderização: {exc}", 8000)
+            self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
             return
         ms = (time.perf_counter() - t0) * 1000
         self.viewer.set_images(qimage_from(out), self.cur_q)
         self.hist.set_image(out)
         self.st_render.setText(f"{ms:.0f} ms")
-        self.st_prev.setText(f"Prévia {w}×{h}")
+        self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
         if v["lut_on"] and v["lut_arquivo"] and info is None:
-            self.statusBar().showMessage("O LUT escolhido não pôde ser lido.", 5000)
+            self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
     def _render_thumbs(self) -> None:
         tw, th = THUMB_W * 2, THUMB_H * 2
@@ -668,6 +752,7 @@ class MainWindow(QMainWindow):
                 c.refresh(key)
         self.schedule_render()
         self._update_modified()
+        self._update_title()
 
     # ================================================================ reprodução
     def toggle_play(self) -> None:
@@ -675,6 +760,58 @@ class MainWindow(QMainWindow):
             self.stop_play()
         else:
             self.start_play()
+
+    # ================================================================ som da prévia
+    def _ensure_audio(self) -> bool:
+        if self.audio is not None:
+            return True
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except ImportError:
+            return False
+        self.audio_out = QAudioOutput(self)
+        self.audio = QMediaPlayer(self)
+        self.audio.setAudioOutput(self.audio_out)
+        self.audio_out.setMuted(self.btn_mute.isChecked())
+        self.audio_out.setVolume(self.vol.value())
+        return True
+
+    def _load_audio(self, path: str) -> None:
+        from PySide6.QtCore import QUrl
+        self._audio_ok = bool(path) and self._ensure_audio()
+        if self.audio is not None:
+            self.audio.stop()
+            self.audio.setSource(QUrl.fromLocalFile(path) if self._audio_ok else QUrl())
+        self.btn_mute.setEnabled(self._audio_ok)
+        self.vol.setEnabled(self._audio_ok)
+        self.btn_mute.setToolTip(_("Som da prévia (M liga/desliga)") if self._audio_ok else _("Este arquivo não tem som"))
+
+    def _set_muted(self, on: bool) -> None:
+        self.btn_mute.setIcon(icons.icon("mute" if on else "volume", theme.TEXT, 18))
+        if self.audio_out is not None:
+            self.audio_out.setMuted(on)
+        self.settings.setValue("audio_muted", "true" if on else "false")
+
+    def _set_volume(self, v: float) -> None:
+        if self.audio_out is not None:
+            self.audio_out.setVolume(v)
+        self.settings.setValue("audio_volume", v)
+
+    def _audio_seek(self, frame: int) -> None:
+        if self._audio_ok and self.audio is not None and self.info is not None:
+            self.audio.setPosition(int(frame / self.info.fps * 1000))
+            self._audio_sync_t = time.perf_counter()
+
+    def _audio_follow(self, frame: int) -> None:
+        """Mantém o som junto do quadro mostrado (corrige se escorregar mais de 0,15 s)."""
+        if not self._audio_ok or self.audio is None or not self.playing:
+            return
+        now = time.perf_counter()
+        if now - self._audio_sync_t < 1.0:
+            return
+        expected = frame / self.info.fps * 1000
+        if abs(self.audio.position() - expected) > 150:
+            self._audio_seek(frame)
 
     def start_play(self, start: int | None = None) -> None:
         if self.info is None or self.info.is_image:
@@ -691,6 +828,9 @@ class MainWindow(QMainWindow):
         self._play_last = f
         self._play_pending = None
         self.playing = True
+        if self._audio_ok and self.audio is not None:
+            self._audio_seek(f)
+            self.audio.play()
         self.btn_play.setIcon(icons.icon("pause", theme.TEXT, 18))
         self.play_timer.start(max(5, int(500 / self.info.fps)))
 
@@ -700,6 +840,8 @@ class MainWindow(QMainWindow):
         self.player.stop()
         self.play_timer.stop()
         self.playing = False
+        if self.audio is not None:
+            self.audio.pause()
         self.btn_play.setIcon(icons.icon("play", theme.TEXT, 18))
         self.thumb_timer.start()
 
@@ -720,6 +862,8 @@ class MainWindow(QMainWindow):
                 self.stop_play()
                 return
             if self._play_t0 is None or f < self._play_last:
+                if self._play_t0 is not None:
+                    self._audio_seek(f)
                 self._play_t0, self._play_f0 = now, f
             target = self._play_f0 + int((now - self._play_t0) * self.info.fps)
             if f > target:
@@ -734,6 +878,7 @@ class MainWindow(QMainWindow):
             break
         self._play_last = f
         self._set_frame(f, item[1])
+        self._audio_follow(f)
 
     def seek(self, f: int) -> None:
         if self.info is None:
@@ -755,6 +900,7 @@ class MainWindow(QMainWindow):
         if self.outp is not None and self.outp <= self.inp:
             self.outp = None
         self.timeline.set_inout(self.inp, self.outp)
+        self._update_title()
 
     def mark_out(self) -> None:
         if self.info is None or self.info.is_image:
@@ -763,10 +909,12 @@ class MainWindow(QMainWindow):
         if self.inp is not None and self.inp >= self.outp:
             self.inp = None
         self.timeline.set_inout(self.inp, self.outp)
+        self._update_title()
 
     def clear_marks(self) -> None:
         self.inp = self.outp = None
         self.timeline.set_inout(None, None)
+        self._update_title()
 
     def _set_compare(self, mode: str) -> None:
         self.viewer.set_mode(mode)
@@ -799,11 +947,16 @@ class MainWindow(QMainWindow):
             self._base_cache = (pid, vals)
         return vals
 
+    @staticmethod
+    def _display_name(it: dict) -> str:
+        """Nome mostrado: presets prontos são traduzidos; os do usuário ficam com o nome que ele deu."""
+        return it["nome"] if str(it["id"]).startswith("user:") else _(it["nome"])
+
     def preset_name(self, pid: str) -> str:
         for it in self._all_presets():
             if it["id"] == pid:
-                return it["nome"]
-        return "Personalizado"
+                return self._display_name(it)
+        return _("Personalizado")
 
     def _refresh_presets(self) -> None:
         self._base_cache = None
@@ -816,13 +969,13 @@ class MainWindow(QMainWindow):
         for it in items:
             if it["grupo"] != group:
                 group = it["grupo"]
-                combo.addItem(group.upper())
+                combo.addItem(_(group).upper())
                 item = model.item(combo.count() - 1)
                 item.setEnabled(False)
                 f = theme.font(7.8, theme.QFont.Weight.DemiBold, title=True)
                 item.setFont(f)
                 item.setForeground(QBrush(QColor(theme.ACCENT)))
-            combo.addItem("   " + it["nome"], it["id"])
+            combo.addItem("   " + self._display_name(it), it["id"])
         i = combo.findData(self.preset_id)
         combo.setCurrentIndex(i if i >= 0 else combo.findData(presets.DEFAULT_ID))
         combo.blockSignals(False)
@@ -863,21 +1016,22 @@ class MainWindow(QMainWindow):
     def save_preset_as(self) -> None:
         self.store.commit()
         base = self.preset_name(self.preset_id)
-        suggestion = base if self.preset_id.startswith("user:") else f"Meu {base}"
-        name, ok = QInputDialog.getText(self, "Salvar preset", "Nome do novo preset:", text=suggestion)
+        suggestion = base if self.preset_id.startswith("user:") else _("Meu {nome}").format(nome=base)
+        name, ok = QInputDialog.getText(self, _("Salvar preset"), _("Nome do novo preset:"), text=suggestion)
         name = name.strip()
         if not ok or not name:
             return
         if presets.user_exists(name):
-            r = QMessageBox.question(self, "Salvar preset", f"Já existe um preset chamado \"{name}\". Substituir?")
+            r = QMessageBox.question(self, _("Salvar preset"),
+                                     _("Já existe um preset chamado \"{nome}\". Substituir?").format(nome=name))
             if r != QMessageBox.StandardButton.Yes:
                 return
-        pid = presets.save_user(name, self.store.snapshot(), f"Criado a partir de {base}")
+        pid = presets.save_user(name, self.store.snapshot(), _("Criado a partir de {nome}").format(nome=base))
         self.preset_id = pid
         self._refresh_presets()
         self._update_modified()
         self.thumb_timer.start()
-        self.statusBar().showMessage(f"Preset \"{name}\" salvo em Meus presets.", 5000)
+        self.statusBar().showMessage(_("Preset \"{nome}\" salvo em Meus presets.").format(nome=name), 5000)
 
     def update_user_preset(self) -> None:
         if not self.preset_id.startswith("user:"):
@@ -888,13 +1042,13 @@ class MainWindow(QMainWindow):
         self._refresh_presets()
         self._update_modified()
         self.thumb_timer.start()
-        self.statusBar().showMessage(f"Preset \"{name}\" atualizado.", 5000)
+        self.statusBar().showMessage(_("Preset \"{nome}\" atualizado.").format(nome=name), 5000)
 
     def delete_preset(self) -> None:
         if not self.preset_id.startswith("user:"):
             return
         name = self.preset_name(self.preset_id)
-        r = QMessageBox.question(self, "Excluir preset", f"Excluir o preset \"{name}\"?")
+        r = QMessageBox.question(self, _("Excluir preset"), _("Excluir o preset \"{nome}\"?").format(nome=name))
         if r != QMessageBox.StandardButton.Yes:
             return
         presets.delete_user(self.preset_id)
@@ -907,13 +1061,13 @@ class MainWindow(QMainWindow):
 
     def import_preset(self, path: str | None = None) -> None:
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "Importar preset", "", "Preset (*.json)")
+            path, _f = QFileDialog.getOpenFileName(self, _("Importar preset"), "", _("Preset (*.json)"))
             if not path:
                 return
         try:
             pid = presets.import_file(path)
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, APP_NAME, f"Preset inválido.\n\n{exc}")
+            QMessageBox.warning(self, APP_NAME, _("Preset inválido.\n\n{erro}").format(erro=exc))
             return
         self.preset_id = pid
         self._refresh_presets()
@@ -922,28 +1076,29 @@ class MainWindow(QMainWindow):
 
     def export_preset(self) -> None:
         name = self.preset_name(self.preset_id)
-        path, _ = QFileDialog.getSaveFileName(self, "Exportar preset", f"{name}.json", "Preset (*.json)")
+        path, _f = QFileDialog.getSaveFileName(self, _("Exportar preset"), f"{name}.json", _("Preset (*.json)"))
         if path:
             presets.export_file(path, name, self.store.snapshot())
-            self.statusBar().showMessage(f"Preset exportado: {path}", 5000)
+            self.statusBar().showMessage(_("Preset exportado: {caminho}").format(caminho=path), 5000)
 
     def export_lut(self, size: int) -> None:
         name = self.preset_name(self.preset_id)
-        path, _ = QFileDialog.getSaveFileName(self, "Exportar LUT", f"{name}.cube", "LUT 3D (*.cube)")
+        path, _f = QFileDialog.getSaveFileName(self, _("Exportar LUT"), f"{name}.cube", _("LUT 3D (*.cube)"))
         if not path:
             return
         data = self.engine.bake_lut(self.store.values, size)
         luts.save_cube(path, data, size, name)
         self._uploaded = None
         self.render_now()
+        profile = dict(params.PARAMS["entrada"].choices).get(self.store.get("entrada"), "")
         QMessageBox.information(
-            self, "LUT exportado",
-            f"LUT salvo em:\n{path}\n\nEle guarda só a cor (curva, cópia, tons e saturação). Grão, halação, "
-            f"bloom e os outros efeitos de textura não cabem num LUT.\n\nEntrada do LUT: o mesmo perfil escolhido "
-            f"em \"Perfil do vídeo\" ({params.PARAMS['entrada'].choices[[c[0] for c in params.PARAMS['entrada'].choices].index(self.store.get('entrada'))][1]}).")
+            self, _("LUT exportado"),
+            _("LUT salvo em:\n{caminho}\n\nEle guarda só a cor (curva, cópia, tons e saturação). Grão, halação, "
+              "bloom e os outros efeitos de textura não cabem num LUT.\n\nEntrada do LUT: o mesmo perfil escolhido "
+              "em \"Perfil do vídeo\" ({perfil}).").format(caminho=path, perfil=_(profile)))
 
     def export_all_luts(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Pasta onde salvar os LUTs dos presets",
+        d = QFileDialog.getExistingDirectory(self, _("Pasta onde salvar os LUTs dos presets"),
                                              str(self.settings.value("export_dir", str(Path.home()))))
         if not d:
             return
@@ -953,18 +1108,19 @@ class MainWindow(QMainWindow):
             for it in self._all_presets():
                 if it["id"] == "original":
                     continue
-                safe = "".join(ch for ch in it["nome"].replace("•", "-") if ch not in '<>:"/\\|?*').strip()
+                nome = self._display_name(it)
+                safe = "".join(ch for ch in nome.replace("•", "-") if ch not in '<>:"/\\|?*').strip()
                 data = self.engine.bake_lut(it["valores"], 33)
-                luts.save_cube(os.path.join(d, f"{safe}.cube"), data, 33, it["nome"])
+                luts.save_cube(os.path.join(d, f"{safe}.cube"), data, 33, nome)
                 n += 1
         finally:
             QApplication.restoreOverrideCursor()
         self._uploaded = None
         self.render_now()
-        QMessageBox.information(self, "LUTs exportados",
-                                f"{n} LUTs salvos em:\n{d}\n\nEntrada: vídeo Rec.709 comum. Funcionam no Premiere, "
-                                "Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite .cube. "
-                                "Eles guardam só a cor; grão e halação ficam no PeliculaConverter.")
+        QMessageBox.information(self, _("LUTs exportados"),
+                                _("{n} LUTs salvos em:\n{pasta}\n\nEntrada: vídeo Rec.709 comum. Funcionam no "
+                                  "Premiere, Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite .cube. "
+                                  "Eles guardam só a cor; grão e halação ficam no PeliculaConverter.").format(n=n, pasta=d))
 
     # ================================================================ exportação
     def export_dialog(self) -> None:
@@ -1002,18 +1158,18 @@ class MainWindow(QMainWindow):
         active = [j for j in self.queue.jobs if j.status in ("aguardando", "exportando")]
         running = next((j for j in self.queue.jobs if j.status == "exportando"), None)
         if running:
-            self.btn_queue.setText(f"Fila • {running.progress * 100:.0f}%")
+            self.btn_queue.setText(_("Fila • {pct}%").format(pct=f"{running.progress * 100:.0f}"))
         elif active:
-            self.btn_queue.setText(f"Fila ({len(active)})")
+            self.btn_queue.setText(_("Fila ({n})").format(n=len(active)))
         else:
-            self.btn_queue.setText("Fila")
+            self.btn_queue.setText(_("Fila"))
         for j in self.queue.jobs:
             if j.status in ("concluido", "erro") and j.id not in self._seen_done:
                 self._seen_done.add(j.id)
                 if j.status == "concluido":
-                    self.statusBar().showMessage(f"Exportação concluída: {j.out_path}", 10000)
+                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=j.out_path), 10000)
                 else:
-                    self.statusBar().showMessage("Uma exportação falhou. Veja os detalhes na fila.", 10000)
+                    self.statusBar().showMessage(_("Uma exportação falhou. Veja os detalhes na fila."), 10000)
                     self.show_queue()
                 QApplication.alert(self)
 
@@ -1023,8 +1179,8 @@ class MainWindow(QMainWindow):
         stem = Path(self.info.path).stem
         tc = timecode(self.frame_idx, self.info.fps).replace(":", "-")
         d = str(self.settings.value("export_dir", str(Path(self.info.path).parent)))
-        path, flt = QFileDialog.getSaveFileName(self, "Salvar quadro", str(Path(d) / f"{stem}_{tc}.png"),
-                                                "PNG 16 bits (*.png);;TIFF 16 bits (*.tif);;JPEG (*.jpg)")
+        path, flt = QFileDialog.getSaveFileName(self, _("Salvar quadro"), str(Path(d) / f"{stem}_{tc}.png"),
+                                                _("PNG 16 bits (*.png);;TIFF 16 bits (*.tif);;JPEG (*.jpg)"))
         if not path:
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1046,11 +1202,274 @@ class MainWindow(QMainWindow):
                 raise RuntimeError(res.stderr.decode("utf-8", "replace"))
         except Exception as exc:  # noqa: BLE001
             QApplication.restoreOverrideCursor()
-            QMessageBox.warning(self, APP_NAME, f"Não foi possível salvar o quadro.\n\n{exc}")
+            QMessageBox.warning(self, APP_NAME, _("Não foi possível salvar o quadro.\n\n{erro}").format(erro=exc))
             return
         QApplication.restoreOverrideCursor()
         self.render_now()
-        self.statusBar().showMessage(f"Quadro salvo: {path}", 8000)
+        self.statusBar().showMessage(_("Quadro salvo: {caminho}").format(caminho=path), 8000)
+
+    # ================================================================ projetos (.plc)
+    def _state(self) -> dict:
+        return {"media": self.info.path if self.info else "", "values": dict(self.store.values),
+                "preset": self.preset_id, "in": self.inp, "out": self.outp}
+
+    def is_dirty(self) -> bool:
+        if self.info is None:
+            return False
+        return self._state() != self._saved_state
+
+    def _update_title(self) -> None:
+        if self.project_path:
+            name = Path(self.project_path).stem
+        elif self.info is not None:
+            name = getattr(self, "_media_label", Path(self.info.path).name)
+        else:
+            self.setWindowTitle(APP_NAME)
+            return
+        dot = " •" if self.is_dirty() else ""
+        self.setWindowTitle(f"{name}{dot} — {APP_NAME}")
+        if self.project_path:
+            self.file_label.setText(_("Projeto: {nome}").format(nome=name) + dot)
+
+    def confirm_discard(self) -> bool:
+        """Pergunta se salva as mudanças antes de trocar de projeto ou fechar. False = cancelar."""
+        if not self.is_dirty():
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle(_("Salvar projeto"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(_("Salvar as mudanças da edição atual num projeto (.plc) para continuar depois?"))
+        save = box.addButton(_("Salvar"), QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton(_("Não salvar"), QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(_("Cancelar"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is save:
+            return self.save_project()
+        return box.clickedButton() is discard
+
+    def _thumbnail(self) -> bytes:
+        img = self.viewer.proc
+        if img is None:
+            return b""
+        small = img.scaled(320, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        small.save(buf, "JPG", 82)
+        buf.close()
+        return bytes(ba)
+
+    def _make_project(self) -> project.Project:
+        self.store.commit()
+        return project.Project(
+            media_path=self.info.path if self.info else "", values=self.store.snapshot(), preset_id=self.preset_id,
+            frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
+            preview=self.preview_q, export_quality=str(self.settings.value("export_quality", "")),
+            name=Path(self.project_path).stem if self.project_path else "", thumbnail_jpeg=self._thumbnail())
+
+    def save_project(self) -> bool:
+        if self.info is None:
+            QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
+            return False
+        if not self.project_path:
+            return self.save_project_as()
+        return self._write_project(self.project_path)
+
+    def save_project_as(self) -> bool:
+        if self.info is None:
+            QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
+            return False
+        start = self.project_path or str(Path(self.info.path).with_suffix(project.EXT))
+        path, _f = QFileDialog.getSaveFileName(self, _("Salvar projeto"), start,
+                                               _("Projeto do PeliculaConverter (*.plc)"))
+        if not path:
+            return False
+        return self._write_project(path)
+
+    def _write_project(self, path: str) -> bool:
+        p = self._make_project()
+        try:
+            project.save(p, path)
+        except OSError as exc:
+            QMessageBox.warning(self, _("Salvar projeto"), _("Não foi possível salvar o projeto.\n\n{erro}").format(erro=exc))
+            return False
+        self.project_path = p.path
+        self._saved_state = self._state()
+        welcome.add_recent(self.settings, p.path)
+        self._update_title()
+        self.statusBar().showMessage(_("Projeto salvo: {caminho}").format(caminho=p.path), 6000)
+        return True
+
+    def new_project(self) -> None:
+        if not self.confirm_discard():
+            return
+        self.stop_play()
+        self.project_path = None
+        self.info = None
+        self.cur = None
+        self.cur_q = None
+        self.inp = self.outp = None
+        self.timeline.set_media(1, 24.0)
+        self.viewer.set_images(None, None)
+        self.hist.set_image(None)
+        self.file_label.setText("")
+        self.st_file.setText(_("Nenhum arquivo aberto"))
+        self._set_media_enabled(False)
+        self.apply_preset(presets.DEFAULT_ID)
+        self._saved_state = self._state()
+        self._update_title()
+
+    def open_project_dialog(self) -> None:
+        d = str(self.settings.value("last_project_dir", self.settings.value("last_dir", str(Path.home()))))
+        path, _f = QFileDialog.getOpenFileName(self, _("Abrir projeto"), d, _("Projeto do PeliculaConverter (*.plc)"))
+        if path:
+            self.open_project(path)
+
+    def open_project(self, path: str) -> None:
+        if not self.confirm_discard():
+            return
+        try:
+            p = project.load(path)
+        except project.ProjectError as exc:
+            QMessageBox.warning(self, _("Abrir projeto"), _("Este arquivo não é um projeto válido.\n\n{erro}").format(erro=exc))
+            return
+        self.settings.setValue("last_project_dir", str(Path(path).parent))
+        mediapath = p.media_path
+        if mediapath and not os.path.exists(mediapath):
+            r = QMessageBox.question(self, _("Abrir projeto"),
+                                     _("O vídeo deste projeto não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
+                                     .format(caminho=mediapath))
+            if r == QMessageBox.StandardButton.Yes:
+                new, _f = QFileDialog.getOpenFileName(self, _("Localizar o vídeo"), str(Path(path).parent),
+                                                      media_filter())
+                mediapath = new or ""
+            else:
+                mediapath = ""
+        if mediapath:
+            self.load_media(mediapath)
+        if p.preset_id and self.preset_values(p.preset_id) is not None:
+            self.preset_id = p.preset_id
+        self.store.set_all(p.values)
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
+        self.preset_combo.blockSignals(False)
+        self.looks.set_selected(self.preset_id)
+        self._update_modified()
+        if self.info is not None:
+            self.inp, self.outp = p.in_point, p.out_point
+            self.timeline.set_inout(self.inp, self.outp)
+            if p.preview in [k for k, _l in PREVIEW_Q]:
+                self.prev_combo.setCurrentIndex(self.prev_combo.findData(p.preview))
+            self.request_frame(min(p.frame, self.info.frames - 1))
+        if p.compare in ("proc", "split", "side", "orig"):
+            self.compare.set_current(p.compare)
+            self._set_compare(p.compare)
+        self.project_path = p.path
+        self._saved_state = self._state() if mediapath == p.media_path else {}
+        welcome.add_recent(self.settings, p.path)
+        self._update_title()
+
+    def _fill_project_menu(self) -> None:
+        m = self.project_menu
+        m.clear()
+        m.addAction(_("Novo projeto"), self.new_project).setShortcut(QKeySequence("Ctrl+N"))
+        m.addAction(_("Abrir projeto…"), self.open_project_dialog).setShortcut(QKeySequence("Ctrl+Shift+O"))
+        recent = m.addMenu(_("Projetos recentes"))
+        items = [p for p in welcome.recent_projects(self.settings) if os.path.isfile(p)]
+        for path in items:
+            recent.addAction(Path(path).stem, lambda p=path: self.open_project(p)).setToolTip(path)
+        if items:
+            recent.addSeparator()
+            recent.addAction(_("Limpar lista"), lambda: self.settings.setValue("recent_projects", []))
+        else:
+            recent.setEnabled(False)
+        m.addSeparator()
+        m.addAction(_("Salvar projeto"), self.save_project).setShortcut(QKeySequence("Ctrl+S"))
+        m.addAction(_("Salvar projeto como…"), self.save_project_as).setShortcut(QKeySequence("Ctrl+Shift+S"))
+        m.addSeparator()
+        m.addAction(_("Tela de boas-vindas"), self.show_welcome)
+
+    # ================================================================ boas-vindas, idioma e atualizações
+    def show_welcome(self) -> None:
+        dlg = welcome.WelcomeDialog(self, self.settings)
+        dlg.exec()
+        act = dlg.action
+        if not act:
+            return
+        kind, arg = act
+        if kind == "project" and arg:
+            self.open_project(arg)
+        elif kind == "open_project":
+            self.open_project_dialog()
+        elif kind == "open_media":
+            if self.confirm_discard():
+                self.open_dialog()
+        elif kind == "test":
+            if self.confirm_discard():
+                self.open_test_scene()
+                self.project_path = None
+                self._saved_state = self._state()
+                self._update_title()
+        elif kind == "update" and arg is not None:
+            self.show_update(arg)
+
+    def choose_language(self) -> None:
+        from .language_dialog import LanguageDialog
+        dlg = LanguageDialog(self, i18n.language())
+        if not dlg.exec() or dlg.selected == i18n.language():
+            return
+        self.settings.setValue("language", dlg.selected)
+        r = QMessageBox.question(self, APP_NAME, _("O idioma muda ao abrir o app de novo. Reabrir agora?"))
+        if r == QMessageBox.StandardButton.Yes:
+            if self.confirm_discard():
+                self._saved_state = self._state()
+                restart_app()
+
+    def _auto_check_update(self) -> None:
+        if str(self.settings.value("auto_update", "true")) == "false":
+            return
+        last = float(self.settings.value("update_last_check", 0) or 0)
+        if time.time() - last < 20 * 3600:
+            return
+        self.check_updates(manual=False)
+
+    def check_updates(self, manual: bool = False) -> None:
+        def run():
+            try:
+                rel = updater.check()
+                err = ""
+            except updater.UpdateError as exc:
+                rel, err = None, str(exc)
+            self._update_bridge.found.emit((rel, err, manual))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_found(self, payload) -> None:
+        rel, err, manual = payload
+        self.settings.setValue("update_last_check", time.time())
+        if rel is None:
+            if manual:
+                from .update_dialog import error_text
+                QMessageBox.information(self, _("Atualizações"), error_text(err))
+            return
+        if not updater.is_newer(rel):
+            if manual:
+                QMessageBox.information(self, _("Atualizações"),
+                                        _("Você já está na versão mais recente ({versao}).").format(versao=__version__))
+            return
+        self._release = rel
+        self.btn_update.setText("  " + _("Atualizar para {versao}").format(versao=rel.tag.lstrip("v")))
+        self.btn_update.setIcon(icons.icon("export", "#1b1205", 14))
+        self.btn_update.setVisible(True)
+        if manual or str(self.settings.value("update_skip", "")) != rel.tag:
+            if manual:
+                self.show_update(rel)
+
+    def show_update(self, rel) -> None:
+        if rel is None:
+            return
+        from .update_dialog import UpdateDialog
+        UpdateDialog(self, rel, self.settings).exec()
 
     # ================================================================ dependências
     def _check_deps(self) -> None:
@@ -1066,8 +1485,8 @@ class MainWindow(QMainWindow):
 
     def _deps_result(self, ok: bool, info, latest: str) -> None:
         if not ok:
-            self.show_deps("O ffmpeg não foi encontrado neste computador. Ele é necessário para abrir e exportar "
-                           "vídeos. Clique em \"Baixar ffmpeg\": o download é feito da fonte oficial e conferido.")
+            self.show_deps(_("O ffmpeg não foi encontrado neste computador. Ele é necessário para abrir e exportar "
+                             "vídeos. Clique em \"Baixar ffmpeg\": o download é feito da fonte oficial e conferido."))
             return
         newer = deps.parse_version(latest)
         has_update = bool(info and info.version and newer and info.version[:2] < newer[:2])
@@ -1076,13 +1495,18 @@ class MainWindow(QMainWindow):
         if str(self.settings.value("ffmpeg_skip", "")) == latest:
             return
         box = QMessageBox(self)
-        box.setWindowTitle("Atualizar o ffmpeg")
-        box.setText(f"O ffmpeg deste computador ({info.label}) está {'desatualizado' if info.outdated else 'numa versão antiga'}."
-                    + (f"\n\nA versão {latest} está disponível." if latest else "")
-                    + "\n\nVersões novas são mais rápidas e leem mais formatos (o 8.0+ lê ProRes RAW). Atualizar agora?")
-        upd = box.addButton("Atualizar", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Agora não", QMessageBox.ButtonRole.RejectRole)
-        never = box.addButton("Não perguntar de novo", QMessageBox.ButtonRole.DestructiveRole)
+        box.setWindowTitle(_("Atualizar o ffmpeg"))
+        if info.outdated:
+            text = _("O ffmpeg deste computador ({versao}) está desatualizado.").format(versao=info.label)
+        else:
+            text = _("O ffmpeg deste computador ({versao}) está numa versão antiga.").format(versao=info.label)
+        if latest:
+            text += "\n\n" + _("A versão {versao} está disponível.").format(versao=latest)
+        text += "\n\n" + _("Versões novas são mais rápidas e leem mais formatos (o 8.0+ lê ProRes RAW). Atualizar agora?")
+        box.setText(text)
+        upd = box.addButton(_("Atualizar"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Agora não"), QMessageBox.ButtonRole.RejectRole)
+        never = box.addButton(_("Não perguntar de novo"), QMessageBox.ButtonRole.DestructiveRole)
         box.exec()
         if box.clickedButton() is upd:
             self.show_deps(auto_download=True)
@@ -1101,38 +1525,41 @@ class MainWindow(QMainWindow):
 
     # ================================================================ configurações
     def choose_ffmpeg(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Pasta que contém ffmpeg.exe e ffprobe.exe", media.tool_dir())
+        d = QFileDialog.getExistingDirectory(self, _("Pasta que contém ffmpeg.exe e ffprobe.exe"), media.tool_dir())
         if not d:
             return
         if media.configure(d):
             self.settings.setValue("ffmpeg_dir", d)
-            QMessageBox.information(self, APP_NAME, f"ffmpeg configurado:\n{media.ffmpeg()}")
+            QMessageBox.information(self, APP_NAME, _("ffmpeg configurado:\n{caminho}").format(caminho=media.ffmpeg()))
         else:
-            QMessageBox.warning(self, APP_NAME, "Não encontrei ffmpeg.exe e ffprobe.exe nessa pasta.")
+            QMessageBox.warning(self, APP_NAME, _("Não encontrei ffmpeg.exe e ffprobe.exe nessa pasta."))
 
     def open_lut_dir(self) -> None:
         system.open_path(luts.user_dir())
 
     def show_shortcuts(self) -> None:
-        QMessageBox.information(self, "Atalhos do teclado", (
+        QMessageBox.information(self, _("Atalhos do teclado"), _(
             "Espaço — reproduzir / pausar\n← / → — quadro anterior / próximo\nShift + ← / → — 1 segundo\n"
             "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\nL — repetir\n"
             "C — trocar o modo de comparação\nF — ajustar à janela\n1 / 2 — zoom 100% / 200%\n"
             "Botão direito no vídeo (segurar) — ver o original\nDuplo clique no slider — volta ao padrão\n"
-            "Shift + arrastar slider — ajuste fino\n\nCtrl+O abrir • Ctrl+E exportar • Ctrl+S salvar preset\n"
-            "Ctrl+Shift+S salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer • F11 tela cheia"))
+            "Shift + arrastar slider — ajuste fino\n\nCtrl+N novo projeto • Ctrl+Shift+O abrir projeto\n"
+            "Ctrl+S salvar projeto • Ctrl+Shift+S salvar projeto como\n"
+            "Ctrl+O abrir vídeo • Ctrl+E exportar • Ctrl+Alt+S salvar preset\n"
+            "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer • F11 tela cheia"))
 
     def about(self) -> None:
         try:
             ff = media.ffmpeg()
         except RuntimeError:
-            ff = "não encontrado"
-        QMessageBox.about(self, f"Sobre o {APP_NAME}", (
+            ff = _("não encontrado")
+        QMessageBox.about(self, _("Sobre o {app}").format(app=APP_NAME), (
             f"<h3>{APP_NAME} {__version__}</h3>"
-            "<p>Simula película cinematográfica em vídeos digitais: cor de negativos e cópias, grão, halação, "
-            "bloom, bitolas de 8 mm a IMAX, tremor de projetor, desgaste e moldura.</p>"
+            "<p>" + _("Simula película cinematográfica em vídeos digitais: cor de negativos e cópias, grão, halação, "
+                      "bloom, bitolas de 8 mm a IMAX, tremor de projetor, desgaste e moldura.") + "</p>"
             f"<p>GPU: {self.engine.renderer}<br>ffmpeg: {ff}</p>"
-            "<p>Os presets com nomes de filmes são aproximações artísticas, sem relação com os fabricantes.</p>"))
+            "<p>" + _("Os presets com nomes de filmes são aproximações artísticas, sem relação com os fabricantes.")
+            + "</p>"))
 
     # ================================================================ teclado e janela
     def keyPressEvent(self, e):
@@ -1160,6 +1587,9 @@ class MainWindow(QMainWindow):
             self.clear_marks()
         elif k == Qt.Key.Key_L:
             self.btn_loop.toggle()
+        elif k == Qt.Key.Key_M:
+            if self.btn_mute.isEnabled():
+                self.btn_mute.toggle()
         elif k == Qt.Key.Key_C:
             order = ["proc", "split", "side", "orig"]
             nxt = order[(order.index(self.viewer.mode) + 1) % len(order)]
@@ -1184,8 +1614,11 @@ class MainWindow(QMainWindow):
             self.handle_files(paths)
 
     def closeEvent(self, e):
+        if not self.confirm_discard():
+            e.ignore()
+            return
         if self.queue.busy:
-            r = QMessageBox.question(self, APP_NAME, "Há exportações em andamento. Fechar e cancelar todas?")
+            r = QMessageBox.question(self, APP_NAME, _("Há exportações em andamento. Fechar e cancelar todas?"))
             if r != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
