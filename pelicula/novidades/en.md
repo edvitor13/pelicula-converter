@@ -1,3 +1,10 @@
+## Version 1.2.2 — October 16, 2026
+
+**Handier full screen and control over the film gauge blur.**
+
+- 🖥️ **Full screen with the player.** In the full-screen preview, the playback controls and the preview bar stay on screen. The resolution you picked is kept, and you can change it right there.
+- 🎞️ **Gauge blur.** The slight softness of Super 8 and 8 mm now has its own switch in Film → Gauge blur: turn it off to keep the video sharp, or adjust its strength.
+
 ## Version 1.2.1 — October 16, 2026
 
 **Automatic updates work again on Windows.**

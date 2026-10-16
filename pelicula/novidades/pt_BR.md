@@ -1,3 +1,10 @@
+## Versão 1.2.2 — 16 de outubro de 2026
+
+**Tela cheia mais prática e controle do desfoque das bitolas.**
+
+- 🖥️ **Tela cheia com o player.** Na tela cheia da prévia, os controles de reprodução e a barra da prévia continuam na tela. A resolução que você escolheu é mantida, e dá para trocá-la ali mesmo.
+- 🎞️ **Desfoque da bitola.** O leve embaçado do Super 8 e do 8 mm agora tem chave própria em Película → Desfoque da bitola: desligue para manter a nitidez do vídeo ou ajuste a intensidade.
+
 ## Versão 1.2.1 — 16 de outubro de 2026
 
 **A atualização automática no Windows voltou a funcionar.**
