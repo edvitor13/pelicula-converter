@@ -1,3 +1,11 @@
+## Versão 1.2.0 — 16 de outubro de 2026
+
+**Veja cada detalhe da película.**
+
+- 🖥️ **Prévia em tela cheia.** Um clique no botão de tela cheia (ou F11) e só o vídeo ocupa a tela, na resolução original, para conferir grão, halação e nitidez de pertinho. Esc sai.
+- 🔍 **Zoom livre.** Use as lupas − e +, as teclas + e − ou a roda do mouse para aproximar ou afastar à vontade, de 10% a 1600%.
+- 📂 **Abrir projetos pelo botão Abrir.** Os arquivos .plc agora aparecem junto com os vídeos e imagens.
+
 ## Versão 1.1.0 — 16 de outubro de 2026
 
 **O app agora fala a sua língua e lembra do que você estava fazendo.**

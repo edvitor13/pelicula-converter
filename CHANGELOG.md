@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.2.0] - 2026-10-16
+
 ### Adicionado
 - **Prévia em tela cheia** (botão na barra da prévia ou `F11`): só o vídeo ocupa a tela, na
   resolução original, para ver detalhes. Barrinha flutuante com zoom e *Sair*, que some com o mouse
@@ -21,10 +27,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - O selo de versão do README e a versão do pacote no `pyproject.toml` tinham ficado em 1.0.0. O selo
   agora mostra a última release do GitHub, e o `pyproject.toml` lê a versão de
   `pelicula.__version__`, que passa a ser o único lugar onde ela é escrita. Um teste garante isso.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.1.0] - 2026-10-16
 
