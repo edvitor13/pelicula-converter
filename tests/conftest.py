@@ -20,6 +20,11 @@ from pathlib import Path
 # Não grava .pyc dentro de pelicula/ (o código do app está sendo editado por outra pessoa).
 sys.dont_write_bytecode = True
 
+# Preferências do app (QSettings) nunca vão para o registro/config real durante os testes.
+if not os.environ.get("PELICULA_SETTINGS_DIR"):
+    import tempfile
+    os.environ["PELICULA_SETTINGS_DIR"] = tempfile.mkdtemp(prefix="pelicula_test_settings_")
+
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
