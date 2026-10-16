@@ -25,7 +25,7 @@
 - [Recursos](#recursos)
 - [Como funciona](#como-funciona)
 - [Instalação](#instalação)
-  - [Jeito fácil: executável pronto](#jeito-fácil-executável-pronto)
+  - [Jeito fácil: instalador ou versão portátil](#jeito-fácil-instalador-ou-versão-portátil)
   - [Pelo código-fonte](#pelo-código-fonte)
   - [Requisitos](#requisitos)
   - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
@@ -220,38 +220,85 @@ explicado em [docs/EFEITOS.md](docs/EFEITOS.md).
 
 ## Instalação
 
-### Jeito fácil: executável pronto
+### Jeito fácil: instalador ou versão portátil
 
-O executável já traz o Python e todas as bibliotecas (PySide6, moderngl, numpy). Só o **ffmpeg**
-fica de fora — e o próprio app oferece baixá-lo.
+Os pacotes já trazem o Python e todas as bibliotecas (PySide6, moderngl, numpy). Só o **ffmpeg**
+fica de fora — e o próprio app oferece baixá-lo. Todos ficam na página de
+[*Releases*](https://github.com/edvitor13/pelicula-converter/releases):
 
-**Windows 10/11**
+| Arquivo | Sistema | O que é |
+|---|---|---|
+| `PeliculaConverter-<versão>-windows-x64.msi` | Windows 10/11 | **Instalador** (recomendado): atalhos, associação dos projetos `.plc`, atualização no lugar |
+| `PeliculaConverter-<versão>-windows-x64.zip` | Windows 10/11 | Versão **portátil**: é só extrair e abrir |
+| `PeliculaConverter-<versão>-linux-x64.deb` | Debian, Ubuntu e derivados | **Pacote** do sistema: menu de aplicativos, associação `.plc`, dependências pelo `apt` |
+| `PeliculaConverter-<versão>-linux-x64.tar.gz` | Linux x64 | Versão **portátil** |
+| `SHA256SUMS.txt` | — | Somas SHA-256 de todos os arquivos, para conferir o download |
 
-1. Baixe `PeliculaConverter-<versão>-windows-x64.zip` na página de *Releases* do repositório.
-2. Extraia o `.zip` numa pasta qualquer (por exemplo `C:\Programas\PeliculaConverter`).
-3. Abra `PeliculaConverter.exe`. Na primeira vez o Windows SmartScreen pode avisar que o app não é
-   assinado: clique em **Mais informações → Executar assim mesmo**.
-4. Se o ffmpeg não for encontrado, a janela **Dependências e atualizações** abre sozinha: clique em
-   **Baixar ffmpeg** e pronto.
+Os dois executáveis vão em todos os pacotes: `PeliculaConverter` (a janela) e **`pelicula-cli`**
+(modo de terminal, para usar em scripts).
 
-**Linux (x64)**
+**Windows — instalador `.msi`**
 
-1. Baixe `PeliculaConverter-<versão>-linux-x64.tar.gz`.
-2. Extraia e rode:
+1. Baixe o `.msi` e abra. A instalação é **só para o seu usuário** e **não pede administrador**:
+   o app vai para `%LOCALAPPDATA%\Programs\PeliculaConverter`.
+2. Na tela *Instalação personalizada* dá para trocar a pasta e escolher os extras (todos vêm
+   marcados): **atalho na Área de Trabalho**, **abrir projetos `.plc` com o PeliculaConverter**
+   (dois cliques num projeto abrem o app) e **usar o `pelicula-cli` no terminal** (a pasta do app
+   entra no `PATH` do usuário; vale para terminais abertos depois da instalação). O atalho no
+   Menu Iniciar sempre é criado.
+3. Uma versão nova instalada por cima **substitui a antiga no mesmo lugar**, mantendo a pasta e
+   as escolhas. Para remover: *Configurações → Aplicativos → PeliculaConverter → Desinstalar*.
+4. Sem assinatura digital (ainda), o Windows SmartScreen pode avisar na primeira vez: clique em
+   **Mais informações → Executar assim mesmo**. O porquê e os planos estão em
+   [docs/ASSINATURA.md](docs/ASSINATURA.md).
+
+Instalação silenciosa, para administradores e scripts:
+`msiexec /i PeliculaConverter-<versão>-windows-x64.msi /passive` (acrescente
+`ABRIR_APOS_INSTALAR=1` para abrir o app no fim).
+
+**Windows — versão portátil `.zip`**
+
+1. Extraia o `.zip` numa pasta qualquer (por exemplo `C:\Programas\PeliculaConverter`).
+2. Abra `PeliculaConverter.exe` (o mesmo aviso do SmartScreen pode aparecer).
+
+Nos dois casos, se o ffmpeg não for encontrado, a janela **Dependências e atualizações** abre
+sozinha: clique em **Baixar ffmpeg** e pronto.
+
+**Linux — pacote `.deb` (Debian/Ubuntu)**
+
+```bash
+sudo apt install ./PeliculaConverter-*-linux-x64.deb
+```
+
+O `apt` instala junto as bibliotecas que o Qt e o OpenGL usam e, se possível, o `ffmpeg`
+(recomendado pelo pacote). O app fica em `/opt/pelicula-converter`, aparece no menu de
+aplicativos, os comandos `pelicula-converter` e `pelicula-cli` passam a funcionar no terminal e
+os arquivos `.plc` (tipo `application/x-pelicula-project`) abrem no PeliculaConverter. Para
+remover: `sudo apt remove pelicula-converter`. O pacote é gerado no Ubuntu mais recente do CI e
+pede uma glibc daquela versão ou mais nova; em distribuições mais antigas use a versão portátil
+ou rode pelo código-fonte.
+
+**Linux — versão portátil `.tar.gz`**
+
+1. Extraia e rode:
 
    ```bash
    tar -xzf PeliculaConverter-*-linux-x64.tar.gz
    ./PeliculaConverter/PeliculaConverter
    ```
 
-3. Se a janela não abrir, instale as bibliotecas que o Qt usa (Debian/Ubuntu):
+2. Se a janela não abrir, instale as bibliotecas que o Qt usa (Debian/Ubuntu):
 
    ```bash
    sudo apt install libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3
    ```
 
-4. Sem ffmpeg no sistema, o app oferece baixar um build estático (ou instale com
+3. Sem ffmpeg no sistema, o app oferece baixar um build estático (ou instale com
    `sudo apt install ffmpeg`).
+
+**Conferir o download** (opcional): baixe também o `SHA256SUMS.txt` e, na mesma pasta, rode
+`sha256sum -c SHA256SUMS.txt --ignore-missing` (Linux) ou compare com
+`Get-FileHash <arquivo> -Algorithm SHA256` (PowerShell).
 
 ### Pelo código-fonte
 
@@ -347,6 +394,7 @@ sudo apt install ffmpeg         # Debian/Ubuntu
 | **ffmpeg / ffprobe** (programa externo) | Ler qualquer formato, converter matriz de cor e escala, codificar o vídeo final e copiar/converter o áudio. |
 | pytest (desenvolvimento) | Testes automatizados. |
 | PyInstaller (desenvolvimento) | Gerar o executável de pasta única. |
+| WiX Toolset 5 e `dpkg-deb` (desenvolvimento) | Montar o instalador `.msi` (Windows) e o pacote `.deb` (Linux). |
 
 Não há outras dependências: nada de Pillow, OpenCV ou SciPy. Biblioteca padrão do Python para o
 resto (downloads com `urllib`, SHA-256 com `hashlib`, pipes nomeados com `_winapi`).
@@ -692,13 +740,18 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Faixas (*banding*) em degradês | Mantenha o *Pontilhado (dither)* ligado em 8 bits ou exporte em 10 bits (MKV H.265, YouTube 4K H.265). |
 | O LUT não muda nada ou fica estranho | Confira *O LUT espera* (Cineon × Rec.709 × log da câmera) e se a seção *LUT externo* está ligada. LUTs 1D não são suportados. |
 | Linux: `qt.qpa.plugin: Could not load the Qt platform plugin "xcb"` | Instale `libxcb-cursor0 libxkbcommon-x11-0` (e as outras bibliotecas listadas na instalação). |
-| Windows: o SmartScreen bloqueia o `.exe` | O executável não é assinado. *Mais informações → Executar assim mesmo*, ou rode pelo código-fonte. |
+| Windows: o SmartScreen bloqueia o `.exe` ou o `.msi` | Os pacotes ainda não são assinados. *Mais informações → Executar assim mesmo*, ou rode pelo código-fonte. Detalhes em [docs/ASSINATURA.md](docs/ASSINATURA.md). |
+| Windows: `pelicula-cli` não é reconhecido no terminal | Abra um terminal **novo** depois de instalar (o `PATH` só vale para terminais abertos depois) e confira se o recurso *Usar o pelicula-cli no terminal* estava marcado. |
+| Linux: o `.deb` não instala por causa da `libc6` | O pacote pede a glibc da versão do Ubuntu em que foi gerado. Use o `.tar.gz` portátil ou rode pelo código-fonte. |
 
 ## Gerar o executável (build)
 
-O projeto usa o **PyInstaller** em modo pasta única (*onedir*), sem console. A receita é
-[`PeliculaConverter.spec`](PeliculaConverter.spec) e funciona no Windows e no Linux (o ícone `.ico`
-é usado só no Windows; o macOS tem um `BUNDLE` preparado).
+O projeto usa o **PyInstaller** em modo pasta única (*onedir*). A receita é
+[`PeliculaConverter.spec`](PeliculaConverter.spec) e gera, na mesma pasta e dividindo as mesmas
+bibliotecas, dois executáveis: `PeliculaConverter` (janela, sem console) e `pelicula-cli` (modo de
+terminal). Funciona no Windows e no Linux (o ícone `.ico` é usado só no Windows; o macOS tem um
+`BUNDLE` preparado). Os instaladores são montados a partir dessa pasta com as receitas de
+[`packaging/`](packaging).
 
 **Windows**:
 
@@ -706,28 +759,46 @@ O projeto usa o **PyInstaller** em modo pasta única (*onedir*), sem console. A 
 build.bat
 ```
 
-Instala o PyInstaller no `.venv`, gera `dist\PeliculaConverter\PeliculaConverter.exe` e o pacote
-`dist\PeliculaConverter-<versão>-windows-x64.zip`.
+Instala o PyInstaller no `.venv` e gera `dist\PeliculaConverter\` (com `PeliculaConverter.exe` e
+`pelicula-cli.exe`), o `.zip` portátil `dist\PeliculaConverter-<versão>-windows-x64.zip` e, se o
+[WiX Toolset](https://wixtoolset.org/) estiver instalado, o instalador
+`dist\PeliculaConverter-<versão>-windows-x64.msi`. Para ter o WiX (precisa do .NET SDK):
 
-**Linux** (ou manualmente em qualquer sistema):
-
-```bash
-.venv/bin/python -m pip install "pyinstaller>=6.10"
-.venv/bin/python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
-tar -czf PeliculaConverter-linux-x64.tar.gz -C dist PeliculaConverter
+```bat
+dotnet tool install --global wix --version 5.0.2
 ```
 
-O ffmpeg **não** vai dentro do pacote: quem usar instala pelo próprio app (download conferido)
-ou pelo sistema.
+**Linux**:
+
+```bash
+bash build.sh
+```
+
+Gera `dist/PeliculaConverter/`, o `.tar.gz` portátil e, no Debian/Ubuntu (com `dpkg-deb`), o
+pacote `dist/PeliculaConverter-<versão>-linux-x64.deb`. No macOS (desativado) o mesmo script
+gera um `.dmg`.
+
+Cada pacote leva, ao lado do executável, um `pelicula-install.json` com o tipo de instalação
+(`msi`, `zip`, `deb`, `tar` ou `dmg`) e a versão, que o atualizador do app usa para escolher o
+pacote certo. O ffmpeg **não** vai dentro dos pacotes: quem usar instala pelo próprio app
+(download conferido) ou pelo sistema.
 
 **CI (GitHub Actions)** — [`.github/workflows/build.yml`](.github/workflows/build.yml):
 
-- roda em `windows-latest` e `ubuntu-latest` com Python 3.15, instala o ffmpeg (Chocolatey no
-  Windows, `apt` no Linux, junto com as bibliotecas que o Qt precisa), executa o `pytest`
-  (com `QT_QPA_PLATFORM=offscreen`; os testes de GPU se pulam sozinhos sem OpenGL 3.3), gera o
-  executável e envia o `.zip` (Windows) e o `.tar.gz` (Linux) como artefatos;
-- em tags `v*` (por exemplo `v1.0.0`), cria a **Release** no GitHub com os dois pacotes;
-- existe um job de **macOS** pronto, mas desativado (`if: false`) por enquanto.
+- todo push e pull request roda só os **testes** (`windows-latest` e `ubuntu-latest`, Python
+  3.15, ffmpeg instalado, `QT_QPA_PLATFORM=offscreen`; os testes de GPU se pulam sozinhos sem
+  OpenGL 3.3);
+- push no `main`/`master`, tags `v*` e execução manual (*Run workflow*) também geram os
+  executáveis e os pacotes (`.msi` e `.zip` no Windows, `.deb` e `.tar.gz` no Linux). O `.msi` e
+  o `.deb` são **instalados, atualizados e removidos de verdade** no runner para conferir pasta,
+  atalhos, associação `.plc`, `PATH` e marcador;
+- em tags `v*` (por exemplo `v1.1.0`, que precisa bater com a versão do app), cria a **Release**
+  com os pacotes e o `SHA256SUMS.txt`, usando `pelicula/novidades/release_<tag>.md` como texto
+  (ou as notas geradas pelo GitHub, se o arquivo não existir), e avisa no Discord;
+- se um push no `main`/`master` falhar, avisa no Discord;
+- assinatura digital opcional (só com os segredos do certificado): veja
+  [docs/ASSINATURA.md](docs/ASSINATURA.md);
+- existe um job de **macOS** pronto (com `.dmg`), mas desativado (`if: false`) por enquanto.
 
 ## Desenvolvimento
 
@@ -741,6 +812,8 @@ ou pelo sistema.
   (como adicionar um parâmetro, um preset ou um codec). Também serve para agentes de IA.
 - [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — pipeline de GPU, threads, pipes e exportação em detalhe.
 - [docs/EFEITOS.md](docs/EFEITOS.md) — todos os parâmetros, seção por seção.
+- [docs/ASSINATURA.md](docs/ASSINATURA.md) — assinatura de código: SmartScreen, opções, custos e
+  como ligar no CI.
 - [CHANGELOG.md](CHANGELOG.md) — histórico de versões.
 
 Estrutura:
@@ -761,9 +834,11 @@ pelicula-converter/
 ├── tests/                     # pytest
 ├── assets/                    # logo, ícone e banner
 ├── docs/                      # documentação e capturas de tela
+├── packaging/                 # instaladores: windows/ (.msi, WiX), linux/ (.deb), macos/ (.dmg),
+│                              # marcador pelicula-install.json, avisos no Discord, pelicula-cli
 ├── instalar.bat / executar.bat / build.bat
-├── instalar.sh / executar.sh
-├── PeliculaConverter.spec     # PyInstaller
+├── instalar.sh / executar.sh / build.sh
+├── PeliculaConverter.spec     # PyInstaller (PeliculaConverter + pelicula-cli)
 └── pyproject.toml / requirements.txt
 ```
 

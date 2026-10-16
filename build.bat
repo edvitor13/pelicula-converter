@@ -1,8 +1,8 @@
 @echo off
 rem Gera o PeliculaConverter com o PyInstaller (pasta dist\PeliculaConverter, com
 rem PeliculaConverter.exe e pelicula-cli.exe), o .zip portátil e, se o WiX Toolset estiver
-rem instalado, o instalador .msi. Com WINDOWS_CERT_PFX_BASE64 e WINDOWS_CERT_PASSWORD definidas,
-rem também assina os executáveis e o .msi (veja docs\ASSINATURA.md).
+rem instalado, o instalador .msi. Com WINDOWS_CERT_PFX_BASE64 + WINDOWS_CERT_PASSWORD ou
+rem WINDOWS_CERT_SHA1 definidas, também assina os executáveis e o .msi (veja docs\ASSINATURA.md).
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
@@ -29,8 +29,11 @@ for /f "delims=" %%v in ('.venv\Scripts\python.exe packaging\install_marker.py -
 set "BASE=dist\PeliculaConverter-%VER%-windows-x64"
 set "PS=powershell -NoProfile -ExecutionPolicy Bypass -File"
 set "MSI="
+set "ASSINAR="
+if defined WINDOWS_CERT_PFX_BASE64 set "ASSINAR=1"
+if defined WINDOWS_CERT_SHA1 set "ASSINAR=1"
 
-if defined WINDOWS_CERT_PFX_BASE64 (
+if defined ASSINAR (
     echo.
     echo  Assinando os executáveis...
     %PS% packaging\windows\assinar.ps1 dist\PeliculaConverter\PeliculaConverter.exe dist\PeliculaConverter\pelicula-cli.exe
@@ -48,7 +51,7 @@ echo.
 echo  Gerando o instalador .msi...
 %PS% packaging\windows\build_msi.ps1 -SourceDir dist\PeliculaConverter -Output "%BASE%.msi" -Version %VER% -Python ".venv\Scripts\python.exe"
 if errorlevel 1 goto fail
-if defined WINDOWS_CERT_PFX_BASE64 (
+if defined ASSINAR (
     %PS% packaging\windows\assinar.ps1 "%BASE%.msi"
     if errorlevel 1 goto fail
 )

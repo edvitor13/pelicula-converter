@@ -27,5 +27,6 @@ usuário em [docs/EFEITOS.md](docs/EFEITOS.md).
 ```bash
 .venv\Scripts\python -m pytest -q          # testes (Windows); Linux: .venv/bin/python -m pytest -q
 .venv\Scripts\pythonw PeliculaConverter.pyw # abrir o app (ou executar.bat / ./executar.sh)
-build.bat                                   # executável com PyInstaller (Windows)
+build.bat                                   # executáveis + .zip e .msi (Windows; .msi se houver WiX)
+bash build.sh                               # executáveis + .tar.gz e .deb (Linux; .deb se houver dpkg-deb)
 ```

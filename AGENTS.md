@@ -34,9 +34,18 @@ pelicula/
                              widgets, store (desfazer/refazer), theme, icons
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
-docs/                        ARQUITETURA.md, EFEITOS.md, img/ (capturas de tela)
-PeliculaConverter.spec       PyInstaller (onedir, Windows/Linux, BUNDLE para macOS)
-.github/workflows/build.yml  CI: testes + build Windows/Linux, release em tags v*, macOS com if: false
+docs/                        ARQUITETURA.md, EFEITOS.md, ASSINATURA.md, img/ (capturas de tela)
+PeliculaConverter.spec       PyInstaller (onedir com PeliculaConverter + pelicula-cli, BUNDLE para macOS)
+packaging/
+  install_marker.py          grava pelicula-install.json {"kind", "version"} ao lado do executável
+  pelicula_cli.py            entrada do executável de terminal pelicula-cli (chama pelicula.cli.main)
+  discord_notify.py          avisos do CI no Discord (release, falha, teste); só biblioteca padrão
+  windows/                   PeliculaConverter.wxs (WiX v5), build_msi.ps1, license_rtf.py,
+                             assinar.ps1 (signtool opcional), verificar_msi.ps1 (teste no CI)
+  linux/                     build_deb.sh, verificar_deb.sh, .desktop, tipo MIME (*.plc), debian/postinst|postrm
+  macos/                     build_dmg.sh (macOS desativado)
+.github/workflows/build.yml  CI: testes sempre; pacotes no main/master, tags v* e manual; release em tags
+build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou .tar.gz/.deb (Linux)
 ```
 
 ## Regras que não podem ser quebradas
@@ -197,14 +206,66 @@ e `luts.guess_input()`. Documente em `docs/EFEITOS.md` e no README.
 - Download: `deps.SOURCES` (URL do pacote + URL do hash). Toda fonte nova precisa de hash publicado e
   conferido antes de instalar; nada de executar instaladores, nada de pedir administrador.
 
-## Versão e release
+## Empacotamento e release
+
+### Pacotes
+
+A pasta do PyInstaller (`dist/PeliculaConverter/`, com `PeliculaConverter[.exe]` e
+`pelicula-cli[.exe]` dividindo `_internal/`) é a base de todos os pacotes:
+
+| Pacote | Como é montado | Onde instala | `kind` |
+|---|---|---|---|
+| `PeliculaConverter-{tag}-windows-x64.msi` | `packaging/windows/build_msi.ps1` (WiX 5) | `%LOCALAPPDATA%\Programs\PeliculaConverter` (por usuário, sem administrador) | `msi` |
+| `PeliculaConverter-{tag}-windows-x64.zip` | `Compress-Archive` | onde o usuário extrair | `zip` |
+| `PeliculaConverter-{tag}-linux-x64.deb` | `packaging/linux/build_deb.sh` (`dpkg-deb`) | `/opt/pelicula-converter` + links em `/usr/bin` | `deb` |
+| `PeliculaConverter-{tag}-linux-x64.tar.gz` | `tar` | onde o usuário extrair | `tar` |
+| `PeliculaConverter-{tag}-macos.dmg` (desativado) | `packaging/macos/build_dmg.sh` (`hdiutil`) | `/Applications` | `dmg` |
+
+- **Marcador de instalação**: cada pacote leva `pelicula-install.json` ao lado do executável
+  (no macOS, em `PeliculaConverter.app/Contents/MacOS`), com `{"kind": ..., "version": "x.y.z"}`,
+  gravado por `packaging/install_marker.py` na hora de montar **cada** pacote (o `.msi` e o `.zip`
+  saem da mesma pasta: o marcador é regravado entre um e outro). O atualizador do app lê esse
+  arquivo para escolher o pacote da release; os **nomes dos arquivos da release não podem mudar**.
+- **`.msi`**: o `UpgradeCode` (`35055C18-5F06-43BC-85C7-C95E9E42F81B`) **nunca muda** — é ele que
+  faz um `.msi` novo substituir o antigo no mesmo lugar (`MajorUpgrade`, inclusive na mesma
+  versão). A pasta escolhida fica em `HKCU\Software\PeliculaConverter\InstallDir` e é reaproveitada
+  nas atualizações. Recursos opcionais: `AtalhoDesktop`, `AssociacaoPlc` (ProgId
+  `PeliculaConverter.Projeto`, `.plc` → `PeliculaConverter.exe "%1"`) e `PastaNoPath` (PATH do
+  usuário). `ABRIR_APOS_INSTALAR=1` abre o app no fim de uma instalação silenciosa
+  (`msiexec /i arquivo.msi /passive ABRIR_APOS_INSTALAR=1`). Versão do MSI: só `x.y.z`.
+- **`.deb`**: `Depends` com as bibliotecas do Qt (xcb) e do OpenGL e `libc6 (>= …)` calculada a
+  partir dos binários; `Recommends: ffmpeg`; `.desktop` com `MimeType=application/x-pelicula-project`
+  e o tipo MIME em `/usr/share/mime/packages/pelicula-converter.xml`. Builds fora de tag usam a
+  versão Debian `x.y.z~git<sha>`.
+- **Testes de verdade no CI**: `verificar_msi.ps1` instala, confere, atualiza para uma versão maior
+  (e numa pasta escolhida) e desinstala; `verificar_deb.sh` instala com o `apt`, confere e remove.
+  Não rode esses dois no seu computador.
+- **Assinatura**: opcional, só com os segredos `WINDOWS_CERT_PFX_BASE64` e `WINDOWS_CERT_PASSWORD`
+  (ou `WINDOWS_CERT_SHA1` no build local); opções e custos em [docs/ASSINATURA.md](docs/ASSINATURA.md).
+- **Build local**: `build.bat` (Windows; o `.msi` só se o WiX estiver instalado:
+  `dotnet tool install --global wix --version 5.0.2`) ou `bash build.sh` (Linux; o `.deb` só com
+  `dpkg-deb`).
+
+### CI e Discord
+
+- Todo push e PR: só o job `testes` (Windows e Linux).
+- Push no `main`/`master`, tags `v*` e `workflow_dispatch`: o job `build` também gera, testa e
+  envia os pacotes como artefatos. Para validar uma branch:
+  `gh workflow run build.yml --ref <branch>`.
+- Tags `v*`: release com os pacotes e o `SHA256SUMS.txt`. O texto da release vem de
+  `pelicula/novidades/release_{tag}.md` (as primeiras linhas, até uma linha `---`, viram o resumo
+  do aviso no Discord); sem o arquivo, o GitHub gera as notas. A tag precisa bater com
+  `pelicula.__version__` (o build falha se não bater).
+- Discord: segredo `DISCORD_WEBHOOK` (nunca imprima nem grave em arquivo). Aviso âmbar na release,
+  vermelho quando um push no `main`/`master` falha;
+  `gh workflow run build.yml -f testar_discord=true` manda só uma mensagem de teste.
+
+### Versão e release
 
 1. Atualize `pelicula/__init__.py` (`__version__`), `pyproject.toml` (`version`),
-   `PeliculaConverter.spec` (`CFBundleShortVersionString`) e o `CHANGELOG.md`.
-2. Crie a tag `vX.Y.Z` e envie. O workflow gera os pacotes Windows (`.zip`) e Linux (`.tar.gz`) e
-   publica a Release.
-3. Build local: `build.bat` (Windows) ou
-   `python -m PyInstaller --noconfirm --clean PeliculaConverter.spec` (Linux).
+   `PeliculaConverter.spec` (`CFBundleShortVersionString`), o `CHANGELOG.md` e escreva
+   `pelicula/novidades/release_vX.Y.Z.md`.
+2. Crie a tag `vX.Y.Z` e envie. O workflow gera os pacotes, publica a Release e avisa no Discord.
 
 ## Estilo
 
