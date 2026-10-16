@@ -74,3 +74,6 @@ try {
 } finally {
     if ($pfx) { Remove-Item -Force -ErrorAction SilentlyContinue $pfx }
 }
+# Tudo assinado: não deixa o código do último "signtool verify" (que falha com certificado de
+# teste) vazar como $LASTEXITCODE para quem chamou (o GitHub Actions encerra o passo com ele).
+exit 0
