@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ..i18n import _
 from . import icons, theme
@@ -13,7 +13,6 @@ MIN_ZOOM = 0.1  # 10%
 MAX_ZOOM = 16.0  # 1600%
 ZOOM_STEP = 1.25  # cada clique na lupa, tecla + / − ou passo da roda
 MARGIN = 14  # borda em volta da imagem (0 na tela cheia)
-IDLE_MS = 2500  # na tela cheia, some o cursor e a barra depois disso parado
 HINT_MS = 4500
 
 
@@ -22,7 +21,6 @@ class Viewer(QWidget):
     testRequested = Signal()
     filesDropped = Signal(list)
     zoomChanged = Signal(str)
-    fullscreenExitRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,15 +39,9 @@ class Viewer(QWidget):
         self._pan = None
         self._peek = False
         self._drop_hover = False
-        self._idle = False
         self._hint = False
         self.label_proc = _("PELÍCULA")
         self._build_empty()
-        self._build_hud()
-        self.idle_timer = QTimer(self)
-        self.idle_timer.setSingleShot(True)
-        self.idle_timer.setInterval(IDLE_MS)
-        self.idle_timer.timeout.connect(self._go_idle)
         self.hint_timer = QTimer(self)
         self.hint_timer.setSingleShot(True)
         self.hint_timer.setInterval(HINT_MS)
@@ -86,57 +78,11 @@ class Viewer(QWidget):
         row.addWidget(b2)
         lay.addLayout(row)
 
-    def _build_hud(self) -> None:
-        """Barra flutuante da tela cheia: zoom e sair. Some com o mouse parado."""
-        self.hud = QWidget(self)
-        self.hud.setObjectName("ViewerHud")
-        self.hud.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.hud.setStyleSheet(
-            "#ViewerHud { background: rgba(14, 13, 12, 215); border: 1px solid rgba(255, 255, 255, 38);"
-            " border-radius: 12px; }"
-            "#ViewerHud QToolButton { background: transparent; border: none; border-radius: 8px; padding: 5px 7px;"
-            f" color: {theme.TEXT}; }}"
-            "#ViewerHud QToolButton:hover { background: rgba(255, 255, 255, 30); }"
-            f"#ViewerHud QLabel {{ color: {theme.TEXT}; padding: 0 2px; }}")
-        hl = QHBoxLayout(self.hud)
-        hl.setContentsMargins(6, 4, 6, 4)
-        hl.setSpacing(2)
-
-        def button(icon: str, tip: str, fn, text: str = "") -> QToolButton:
-            b = QToolButton(self.hud)
-            b.setIcon(icons.icon(icon, theme.TEXT, 18))
-            b.setIconSize(QSize(18, 18))
-            b.setToolTip(tip)
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            if text:
-                b.setText(text)
-                b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            b.clicked.connect(fn)
-            hl.addWidget(b)
-            return b
-
-        self.hud_out = button("zoom_out", _("Menos zoom (−)"), lambda: self.zoom_step(-1))
-        self.hud_pct = QLabel("")
-        self.hud_pct.setMinimumWidth(52)
-        self.hud_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hl.addWidget(self.hud_pct)
-        self.hud_in = button("zoom_in", _("Mais zoom (+)"), lambda: self.zoom_step(1))
-        self.hud_fit = button("fit", _("Ajustar à tela (F)"), lambda: self.set_zoom(None))
-        self.hud_exit = button("fullscreen_exit", _("Sair da tela cheia (Esc ou F11)"),
-                               self.fullscreenExitRequested.emit, _("Sair"))
-        self.hud.hide()
-
     def resizeEvent(self, e):
         self.empty.setGeometry(self.rect())
-        self._place_hud()
         super().resizeEvent(e)
         if self.zoom is None:
             self._emit_zoom()
-
-    def _place_hud(self) -> None:
-        self.hud.adjustSize()
-        self.hud.move(self.width() - self.hud.width() - 16, 16)
 
     # ------------------------------------------------------------ estado
     def set_images(self, proc: QImage | None, orig: QImage | None) -> None:
@@ -159,50 +105,20 @@ class Viewer(QWidget):
         self.update()
 
     def _emit_zoom(self) -> None:
-        s = self.scale()
-        self.hud_pct.setText("" if s is None else f"{s * 100:.0f}%")
         self.zoomChanged.emit("fit" if self.zoom is None else f"{self.zoom:g}")
 
     def set_fullscreen(self, on: bool) -> None:
-        """Modo de tela cheia da prévia: sem borda, fundo preto, barra flutuante e dica de teclas."""
+        """Modo de tela cheia da prévia: sem borda, fundo preto e dica das teclas por alguns segundos."""
         self.fullscreen = on
         self.margin = 0 if on else MARGIN
-        self._idle = False
-        self.idle_timer.stop()
-        self.unsetCursor()
+        self._hint = on
         if on:
-            self._hint = True
             self.hint_timer.start()
-            self.hud.show()
-            self.hud.raise_()
-            self._place_hud()
-            self.idle_timer.start()
         else:
-            self._hint = False
             self.hint_timer.stop()
-            self.hud.hide()
         if self.zoom is None:
             self._emit_zoom()
         self.update()
-
-    def _go_idle(self) -> None:
-        if not self.fullscreen or self._pan is not None or self._drag_split or self.hud.underMouse():
-            if self.fullscreen:
-                self.idle_timer.start()
-            return
-        self._idle = True
-        self.hud.hide()
-        self.setCursor(Qt.CursorShape.BlankCursor)
-
-    def _wake(self) -> None:
-        if not self.fullscreen:
-            return
-        if self._idle:
-            self._idle = False
-            self.unsetCursor()
-            self.hud.show()
-            self.hud.raise_()
-        self.idle_timer.start()
 
     def _hide_hint(self) -> None:
         self._hint = False
@@ -375,7 +291,6 @@ class Viewer(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mousePressEvent(self, e):
-        self._wake()
         if self.proc is None:
             return
         if e.button() == Qt.MouseButton.RightButton:
@@ -398,7 +313,6 @@ class Viewer(QWidget):
         self.update()
 
     def mouseMoveEvent(self, e):
-        self._wake()
         if self._drag_split:
             self._move_split(e.position().x())
         elif self._pan is not None and self.proc is not None:
@@ -427,7 +341,6 @@ class Viewer(QWidget):
             self.set_zoom(None)
 
     def wheelEvent(self, e):
-        self._wake()
         if self.proc is None or e.angleDelta().y() == 0:
             return
         self.zoom_step(1 if e.angleDelta().y() > 0 else -1, e.position())

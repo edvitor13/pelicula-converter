@@ -230,7 +230,15 @@ def install(package: str, kind: str | None = None) -> None:
         head = (f"Start-Transcript -Path {_ps(work / 'atualizar.log')} -Append | Out-Null\n"
                 f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue\n"
                 f"Start-Sleep -Milliseconds 500\n")
-        tail = f"Start-Process -FilePath {_ps(exe)}\nStop-Transcript | Out-Null\n"
+        # Reabre o app direto (CreateProcess), sem passar pelo shell do Windows: com Start-Process
+        # (ShellExecute), a primeira abertura do executável recém-instalado levava ~25 s e criava uma
+        # segunda instância passageira do app.
+        tail = ("$psi = New-Object System.Diagnostics.ProcessStartInfo\n"
+                f"$psi.FileName = {_ps(exe)}\n"
+                f"$psi.WorkingDirectory = {_ps(Path(exe).parent)}\n"
+                "$psi.UseShellExecute = $false\n"
+                "[void][System.Diagnostics.Process]::Start($psi)\n"
+                "Stop-Transcript | Out-Null\n")
         if kind == "msi":
             msi_args = ", ".join(_ps(a) for a in ("/i", f'"{package}"', "/passive", "/norestart", "/l*v",
                                                   f'"{work / "instalar.log"}"'))

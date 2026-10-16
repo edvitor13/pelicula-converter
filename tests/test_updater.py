@@ -176,7 +176,8 @@ def test_install_msi_writes_logged_script(tmp_path, monkeypatch):
     body = spawned[0].read_text(encoding="utf-8-sig")
     assert body.startswith("Start-Transcript -Path '") and "d''Ana" in body
     assert "msiexec.exe" in body and "'/passive'" in body and "'/l*v'" in body and "instalar.log" in body
-    assert body.index("msiexec.exe") < body.index("Start-Process -FilePath '") < body.index("Stop-Transcript")
+    assert body.index("msiexec.exe") < body.index("Process]::Start(") < body.index("Stop-Transcript")
+    assert "$psi.UseShellExecute = $false" in body  # reabre direto, sem o shell do Windows
     assert "App d''Ana" in body
     # Conferência de sintaxe pelo próprio PowerShell (sem executar).
     check = ("$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("
