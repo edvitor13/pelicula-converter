@@ -231,6 +231,31 @@ jobs:
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: ./packaging/windows/assinar.ps1 dist/PeliculaConverter/PeliculaConverter.exe dist/PeliculaConverter/pelicula-cli.exe
 
+      # Na execução manual, confere o assinar.ps1 com um certificado autoassinado criado na hora
+      # (só numa cópia do pelicula-cli.exe; os pacotes não são tocados), nos dois modos: .pfx e SHA-1.
+      - name: Testar o script de assinatura (certificado de teste)
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=PeliculaConverter (teste do CI)" `
+                 -CertStoreLocation Cert:\CurrentUser\My
+          $senha = [guid]::NewGuid().ToString()
+          $pfx = Join-Path $env:RUNNER_TEMP "teste.pfx"
+          Export-PfxCertificate -Cert $c -FilePath $pfx -Password (ConvertTo-SecureString $senha -AsPlainText -Force) | Out-Null
+          foreach ($modo in "pfx", "sha1") {
+            $env:WINDOWS_CERT_PFX_BASE64 = if ($modo -eq "pfx") { [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfx)) } else { "" }
+            $env:WINDOWS_CERT_PASSWORD = if ($modo -eq "pfx") { $senha } else { "" }
+            $env:WINDOWS_CERT_SHA1 = if ($modo -eq "sha1") { $c.Thumbprint } else { "" }
+            $alvo = Join-Path $env:RUNNER_TEMP "assinatura-$modo.exe"
+            Copy-Item dist/PeliculaConverter/pelicula-cli.exe $alvo
+            ./packaging/windows/assinar.ps1 $alvo
+            $s = Get-AuthenticodeSignature $alvo
+            Write-Host "[$modo] assinante: $($s.SignerCertificate.Subject) | carimbo: $($s.TimeStamperCertificate.Subject) | status: $($s.Status)"
+            if (-not $s.SignerCertificate -or $s.SignerCertificate.Thumbprint -ne $c.Thumbprint) { throw "[$modo] o arquivo não foi assinado com o certificado de teste." }
+            if (-not $s.TimeStamperCertificate) { throw "[$modo] a assinatura ficou sem carimbo de tempo." }
+          }
+          Remove-Item $pfx, "Cert:\CurrentUser\My\$($c.Thumbprint)"
+
       # Alternativas prontas (desligadas). Para usar uma, descomente o bloco e cadastre os
       # segredos/variáveis indicados; os passos só rodam se o segredo existir. Veja docs/ASSINATURA.md.
       #

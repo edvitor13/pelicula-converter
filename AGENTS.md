@@ -236,7 +236,10 @@ A pasta do PyInstaller (`dist/PeliculaConverter/`, com `PeliculaConverter[.exe]`
 - **`.deb`**: `Depends` com as bibliotecas do Qt (xcb) e do OpenGL e `libc6 (>= …)` calculada a
   partir dos binários; `Recommends: ffmpeg`; `.desktop` com `MimeType=application/x-pelicula-project`
   e o tipo MIME em `/usr/share/mime/packages/pelicula-converter.xml`. Builds fora de tag usam a
-  versão Debian `x.y.z~git<sha>`.
+  versão Debian `x.y.z~git<sha>`. Os pacotes do Linux são gerados no **`ubuntu-22.04`** de
+  propósito (glibc 2.35; o PySide6 pede 2.34): assim o `.deb` e o `.tar.gz` servem ao Ubuntu
+  22.04+ e ao Debian 12+ (o CI confere em contêineres). Gerado num Ubuntu mais novo, o mínimo sobe.
+  O `.desktop` fica na especificação 1.4 (o `desktop-file-validate` do 22.04 não conhece a 1.5).
 - **Testes de verdade no CI**: `verificar_msi.ps1` instala, confere, atualiza para uma versão maior
   (e numa pasta escolhida) e desinstala; `verificar_deb.sh` instala com o `apt`, confere e remove.
   Não rode esses dois no seu computador.

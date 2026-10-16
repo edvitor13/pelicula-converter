@@ -274,9 +274,9 @@ O `apt` instala junto as bibliotecas que o Qt e o OpenGL usam e, se possível, o
 (recomendado pelo pacote). O app fica em `/opt/pelicula-converter`, aparece no menu de
 aplicativos, os comandos `pelicula-converter` e `pelicula-cli` passam a funcionar no terminal e
 os arquivos `.plc` (tipo `application/x-pelicula-project`) abrem no PeliculaConverter. Para
-remover: `sudo apt remove pelicula-converter`. O pacote é gerado no Ubuntu mais recente do CI e
-pede uma glibc daquela versão ou mais nova; em distribuições mais antigas use a versão portátil
-ou rode pelo código-fonte.
+remover: `sudo apt remove pelicula-converter`. Funciona no **Ubuntu 22.04 ou mais novo**, no
+**Debian 12 ou mais novo** e nos derivados (Linux Mint, Pop!_OS, elementary OS…); em sistemas mais
+antigos, rode pelo código-fonte.
 
 **Linux — versão portátil `.tar.gz`**
 
@@ -339,7 +339,7 @@ instalar com o `pip`.
 
 | Item | Mínimo | Observação |
 |---|---|---|
-| Sistema | Windows 10/11 64 bits ou Linux x64 | macOS: preparado, mas desativado nesta versão |
+| Sistema | Windows 10/11 64 bits ou Linux x64 | Executáveis prontos no Linux: glibc 2.35+ (Ubuntu 22.04+, Debian 12+). macOS: preparado, mas desativado nesta versão |
 | Placa de vídeo | **OpenGL 3.3** | Qualquer GPU dedicada ou integrada dos últimos ~12 anos com driver atualizado |
 | ffmpeg + ffprobe | 7.0 ou mais novo (recomendado) | O app baixa sozinho se não encontrar; **FFmpeg 8+** também decodifica **ProRes RAW** |
 | Python (só pelo código-fonte) | 3.12 | Recomendado **3.15**; o executável já traz o Python |
@@ -742,7 +742,7 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Linux: `qt.qpa.plugin: Could not load the Qt platform plugin "xcb"` | Instale `libxcb-cursor0 libxkbcommon-x11-0` (e as outras bibliotecas listadas na instalação). |
 | Windows: o SmartScreen bloqueia o `.exe` ou o `.msi` | Os pacotes ainda não são assinados. *Mais informações → Executar assim mesmo*, ou rode pelo código-fonte. Detalhes em [docs/ASSINATURA.md](docs/ASSINATURA.md). |
 | Windows: `pelicula-cli` não é reconhecido no terminal | Abra um terminal **novo** depois de instalar (o `PATH` só vale para terminais abertos depois) e confira se o recurso *Usar o pelicula-cli no terminal* estava marcado. |
-| Linux: o `.deb` não instala por causa da `libc6` | O pacote pede a glibc da versão do Ubuntu em que foi gerado. Use o `.tar.gz` portátil ou rode pelo código-fonte. |
+| Linux: o `.deb` não instala por causa da `libc6` | Os executáveis prontos pedem a glibc 2.35 ou mais nova (Ubuntu 22.04+, Debian 12+). Em sistemas mais antigos, rode pelo código-fonte. |
 
 ## Gerar o executável (build)
 
