@@ -406,6 +406,7 @@ def add(t):
     if t:
         texts.append(t)
 for root in roots:
+    add(root.windowTitle())
     for w in [root] + root.findChildren(QWidget):
         add(w.toolTip())
         if isinstance(w, (QLabel, QAbstractButton)):
