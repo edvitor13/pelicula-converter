@@ -42,17 +42,34 @@ function Msiexec([string]$argumentos, [string]$nome) {
     $log = Join-Path $Tmp ("{0:D2}-{1}.log" -f $script:n, $nome)
     Write-Host ""
     Write-Host "msiexec $argumentos"
-    $p = Start-Process -FilePath msiexec.exe -ArgumentList "$argumentos /qn /norestart /l*v `"$log`"" -Wait -PassThru
+    # Sem -Wait (que espera também os processos filhos) e com limite de tempo: uma linha de comando
+    # errada faz o msiexec abrir uma janela de ajuda que nunca fecha sozinha.
+    $p = Start-Process -FilePath msiexec.exe -ArgumentList "$argumentos /qn /norestart /l*v `"$log`"" -PassThru
+    $null = $p.Handle
+    if (-not $p.WaitForExit(15 * 60 * 1000)) {
+        $p.Kill()
+        throw "msiexec ($nome) não terminou em 15 minutos."
+    }
     if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
         Get-Content $log -Tail 80 -ErrorAction SilentlyContinue
         throw "msiexec ($nome) saiu com o código $($p.ExitCode). Log: $log"
     }
 }
 
-function Entradas-Arp {
-    @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
-        ForEach-Object { Get-ItemProperty $_.PSPath } |
-        Where-Object { $_.DisplayName -eq "PeliculaConverter" })
+# Produtos instalados com o UpgradeCode do PeliculaConverter (API do Windows Installer: é o que
+# "Adicionar ou remover programas" e o MajorUpgrade enxergam).
+$UpgradeCode = "{" + ([regex]::Match((Get-Content (Join-Path $PSScriptRoot "PeliculaConverter.wxs") -Raw),
+    'UpgradeCode="([0-9A-Fa-f-]{36})"').Groups[1].Value) + "}"
+$Installer = New-Object -ComObject WindowsInstaller.Installer
+
+function Produtos-Instalados {
+    # O PowerShell desenrola a coleção COM; @() garante uma lista (vazia ou não).
+    $lista = @($Installer.RelatedProducts($UpgradeCode) | Where-Object { $_ })
+    , $lista
+}
+
+function Info-Produto([string]$codigo, [string]$prop) {
+    try { [string]$Installer.ProductInfo($codigo, $prop) } catch { "" }
 }
 
 function Valor-Padrao([string]$chave) {
@@ -74,7 +91,7 @@ function Pare-App {
 
 function Confere-Removido([string]$pasta) {
     Confere (-not (Test-Path $pasta)) "pasta removida ($pasta)"
-    Confere ((Entradas-Arp).Count -eq 0) "nenhuma entrada em Adicionar ou remover programas"
+    Confere ((Produtos-Instalados).Count -eq 0) "nenhum PeliculaConverter instalado (Windows Installer)"
     Confere (-not (Test-Path "HKCU:\Software\Classes\.plc")) "associação .plc removida"
     Confere (-not (Test-Path "HKCU:\Software\Classes\PeliculaConverter.Projeto")) "ProgId removido"
     Confere (-not (Test-Path $AtalhoMenu)) "atalho do Menu Iniciar removido"
@@ -89,7 +106,7 @@ function Msi-Minimo([string]$versao) {
     New-Item -ItemType Directory -Force -Path $pasta | Out-Null
     Copy-Item $script:exeCopia $pasta
     $saida = Join-Path $Tmp "PeliculaConverter-$versao-mini.msi"
-    & (Join-Path $PSScriptRoot "build_msi.ps1") -SourceDir $pasta -Output $saida -Version $versao -Python $Python
+    & (Join-Path $PSScriptRoot "build_msi.ps1") -SourceDir $pasta -Output $saida -Version $versao -Python $Python | Out-Host
     $saida
 }
 
@@ -124,22 +141,30 @@ Confere ($cmd -like "*PeliculaConverter.exe*" -and $cmd -like '*"%1"*') "comando
 $icone = Valor-Padrao "HKCU:\Software\Classes\PeliculaConverter.Projeto\DefaultIcon"
 Confere ($icone -like "*pelicula-projeto.ico*") "ícone do tipo .plc ($icone)"
 Confere ((Path-Do-Usuario) -like "*$Padrao*") "pasta do app no PATH do usuário"
-$arp = Entradas-Arp
-Confere ($arp.Count -eq 1) "uma entrada em Adicionar ou remover programas"
-if ($arp.Count -ge 1) {
-    Confere ($arp[0].DisplayVersion -eq $Version) "versão no Adicionar ou remover programas = $Version"
-    Confere ($arp[0].URLInfoAbout -like "https://github.com/edvitor13/pelicula-converter*") "link do repositório"
-    Confere ([bool]$arp[0].DisplayIcon) "ícone no Adicionar ou remover programas"
+$prods = Produtos-Instalados
+Confere ($prods.Count -eq 1) "um PeliculaConverter instalado (Windows Installer, UpgradeCode $UpgradeCode)"
+if ($prods.Count -ge 1) {
+    $pc = $prods[0]
+    Write-Host "        produto: $pc  $(Info-Produto $pc 'ProductName') $(Info-Produto $pc 'VersionString')"
+    Confere ((Info-Produto $pc "VersionString") -eq $Version) "versão registrada = $Version"
+    Confere ((Info-Produto $pc "URLInfoAbout") -like "https://github.com/edvitor13/pelicula-converter*") "link do repositório em Adicionar ou remover programas"
+    Confere ([bool](Info-Produto $pc "ProductIcon")) "ícone em Adicionar ou remover programas"
+    Confere ((Info-Produto $pc "AssignmentType") -eq "0") "instalação por usuário (AssignmentType 0)"
 }
 
 # pelicula-cli: o pelicula/cli.py chega em outro trabalho; até lá só conferimos que o executável sobe.
 $cli = Join-Path $Padrao "pelicula-cli.exe"
-$saidaCli = (cmd /c "`"$cli`" --help 2>&1" | Out-String)
+$eap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$saidaCli = (& $cli --help 2>&1 | Out-String)
 $codigoCli = $LASTEXITCODE
+$ErrorActionPreference = $eap
+Write-Host (($saidaCli -split "`n" | Select-Object -First 12) -join "`n")
 if (Test-Path (Join-Path $Repo "pelicula\cli.py")) {
     Confere ($codigoCli -eq 0) "pelicula-cli --help (código $codigoCli)"
 } else {
-    Confere ($saidaCli -match "pelicula\.cli") "pelicula-cli sobe (pelicula/cli.py ainda não existe neste commit)"
+    # Sem o pelicula/cli.py, o Python do pacote sobe e só falha ao importar o módulo.
+    Confere ($saidaCli -match "No module named 'pelicula") "pelicula-cli sobe (pelicula/cli.py ainda não existe neste commit)"
 }
 
 # ---------------------------------------------------------------------------- 2. atualização
@@ -147,9 +172,9 @@ Write-Host ""
 Write-Host "== 2. Atualização para uma versão maior"
 $mini1 = Msi-Minimo "99.0.0"
 Msiexec "/i `"$mini1`"" "atualizar"
-$arp = Entradas-Arp
-Confere ($arp.Count -eq 1) "continua uma entrada só (a versão antiga foi removida)"
-if ($arp.Count -ge 1) { Confere ($arp[0].DisplayVersion -eq "99.0.0") "versão nova registrada (99.0.0)" }
+$prods = Produtos-Instalados
+Confere ($prods.Count -eq 1) "continua um produto só (a versão antiga foi removida)"
+if ($prods.Count -ge 1) { Confere ((Info-Produto $prods[0] "VersionString") -eq "99.0.0") "versão nova registrada (99.0.0)" }
 Confere (-not (Test-Path (Join-Path $Padrao "_internal"))) "arquivos da versão antiga removidos"
 $m = Marcador $Padrao
 Confere ($m -and $m.version -eq "99.0.0") "marcador atualizado para 99.0.0"

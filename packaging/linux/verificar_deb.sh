@@ -54,8 +54,9 @@ echo "$saida" | head -n 15
 if [ -f "$REPO/pelicula/cli.py" ]; then
     confere "pelicula-cli --help pelo link (código $codigo)" test "$codigo" -eq 0
 else
+    # Sem o pelicula/cli.py, o Python do pacote sobe e só falha ao importar o módulo.
     confere "pelicula-cli sobe pelo link (pelicula/cli.py ainda não existe neste commit)" \
-        grep -q "pelicula\.cli" <<<"$saida"
+        grep -q "No module named 'pelicula" <<<"$saida"
 fi
 
 echo

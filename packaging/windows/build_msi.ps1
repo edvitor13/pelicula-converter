@@ -44,7 +44,7 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
 $cache = (& wix extension list -g | Out-String)
 foreach ($ext in @("WixToolset.UI.wixext", "WixToolset.Util.wixext")) {
     if ($cache -notmatch [regex]::Escape("$ext $WixVersion")) {
-        & wix extension add -g "$ext/$WixVersion"
+        & wix extension add -g "$ext/$WixVersion" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar a extensão $ext/$WixVersion do WiX." }
     }
 }
@@ -52,9 +52,10 @@ foreach ($ext in @("WixToolset.UI.wixext", "WixToolset.Util.wixext")) {
 $Work = Join-Path $Repo "build\msi"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $Rtf = Join-Path $Work "License.rtf"
-& $Python (Join-Path $Repo "packaging\windows\license_rtf.py") (Join-Path $Repo "LICENSE") $Rtf
+# As saídas vão para a tela (Out-Host), não para o pipeline: quem chama este script não recebe lixo.
+& $Python (Join-Path $Repo "packaging\windows\license_rtf.py") (Join-Path $Repo "LICENSE") $Rtf | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar a licença em RTF." }
-& $Python (Join-Path $Repo "packaging\install_marker.py") $Src msi --version $Version
+& $Python (Join-Path $Repo "packaging\install_marker.py") $Src msi --version $Version | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "Falha ao gravar o pelicula-install.json." }
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Output) | Out-Null
@@ -63,7 +64,7 @@ Write-Host "Montando $Output (versão $Version)..."
     -arch x64 -culture pt-BR `
     -ext "WixToolset.UI.wixext/$WixVersion" -ext "WixToolset.Util.wixext/$WixVersion" `
     -d "Version=$Version" -d "SourceDir=$Src" -d "RepoDir=$Repo" -d "LicenseRtf=$Rtf" `
-    -pdbtype none -o $Output
+    -pdbtype none -o $Output | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "O wix build falhou (código $LASTEXITCODE)." }
 
 $size = [math]::Round((Get-Item $Output).Length / 1MB, 1)

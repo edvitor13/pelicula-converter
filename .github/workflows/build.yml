@@ -310,6 +310,7 @@ jobs:
 
       - name: Testar o .msi (instalar, atualizar e desinstalar)
         if: runner.os == 'Windows'
+        timeout-minutes: 25
         shell: pwsh
         env:
           BASE: ${{ steps.meta.outputs.base }}
