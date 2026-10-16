@@ -15,6 +15,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Zoom livre de 10% a 1600%**: lupas − e + na barra da prévia, teclas `+`/`−` e roda do mouse,
   em passos de 25%. O zoom pode ficar menor que o tamanho que cabe na janela, com a imagem
   centralizada. O zoom atual aparece sempre na barra.
+- O botão **Abrir** (`Ctrl+O`) também mostra os projetos `.plc`, que abrem como em *Abrir projeto*.
 
 ### Corrigido
 - O selo de versão do README e a versão do pacote no `pyproject.toml` tinham ficado em 1.0.0. O selo

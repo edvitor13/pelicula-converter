@@ -43,6 +43,14 @@ def media_filter() -> str:
     return f"{_('Vídeos e imagens')} ({MEDIA_PATTERNS});;{_('Todos os arquivos')} (*)"
 
 
+def open_filter() -> str:
+    """Filtro do botão Abrir: o primeiro (padrão) mostra vídeos, imagens e projetos .plc juntos."""
+    return (f"{_('Vídeos, imagens e projetos')} ({MEDIA_PATTERNS} *{project.EXT});;"
+            f"{_('Vídeos e imagens')} ({MEDIA_PATTERNS});;"
+            f"{_('Projeto do PeliculaConverter (*.plc)')};;"
+            f"{_('Todos os arquivos')} (*)")
+
+
 def qimage_from(arr: np.ndarray) -> QImage:
     h, w = arr.shape[:2]
     if arr.dtype != np.uint8:
@@ -338,7 +346,7 @@ class MainWindow(QMainWindow):
         self.btn_project.setMenu(self.project_menu)
         self.btn_project.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_project)
-        self.btn_open = self._flat("open", _("Abrir vídeo ou imagem (Ctrl+O)"), _("Abrir"))
+        self.btn_open = self._flat("open", _("Abrir vídeo, imagem ou projeto .plc (Ctrl+O)"), _("Abrir"))
         self.btn_open.clicked.connect(self.open_dialog)
         hl.addWidget(self.btn_open)
         self.btn_frame = self._flat("camera", _("Salvar o quadro atual em alta qualidade (Ctrl+Shift+F)"),
@@ -644,7 +652,7 @@ class MainWindow(QMainWindow):
     # ================================================================ arquivos
     def open_dialog(self) -> None:
         d = str(self.settings.value("last_dir", str(Path.home())))
-        path, _f = QFileDialog.getOpenFileName(self, _("Abrir vídeo ou imagem"), d, media_filter())
+        path, _f = QFileDialog.getOpenFileName(self, _("Abrir vídeo, imagem ou projeto"), d, open_filter())
         if path:
             self.handle_files([path])
 

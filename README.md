@@ -416,6 +416,8 @@ resto (downloads com `urllib`, SHA-256 com `hashlib`, pipes nomeados com `_winap
   TS, ProRes, DNxHR, H.264/H.265 8/10 bits — e imagens PNG, JPEG, TIFF, BMP, WebP, DPX e EXR.
 - Sem vídeo à mão? **Usar cena de teste** gera uma cartela de cores com rampa de cinza e luzes
   fortes, ótima para ver halação e bloom.
+- O **Abrir** também lista os projetos **`.plc`**: escolher um deles abre o projeto, como em
+  *Projeto → Abrir projeto*.
 - Arrastar um **`.cube`** carrega o LUT; arrastar um **`.json`** importa um preset.
 
 A barra de status mostra resolução, fps, codec, formato de pixel, profundidade de cor e taxa de
@@ -640,7 +642,7 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+N` | Novo projeto |
 | `Ctrl+Shift+O` | Abrir projeto (.plc) |
 | `Ctrl+S` / `Ctrl+Shift+S` | Salvar projeto / salvar projeto como |
-| `Ctrl+O` | Abrir vídeo ou imagem |
+| `Ctrl+O` | Abrir vídeo, imagem ou projeto (.plc) |
 | `Ctrl+E` | Exportar |
 | `Ctrl+Alt+S` | Salvar preset |
 | `Ctrl+Shift+F` | Salvar quadro |
