@@ -14,6 +14,12 @@ dist/
 *.spec
 !PeliculaConverter.spec
 *.zip
+*.tar.gz
+*.msi
+*.wixpdb
+*.deb
+*.dmg
+pelicula-install.json
 
 # ---------------------------------------------------------------- testes e ferramentas
 .pytest_cache/

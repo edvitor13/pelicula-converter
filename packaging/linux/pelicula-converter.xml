@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Tipo de arquivo dos projetos do PeliculaConverter (*.plc). Instalado em /usr/share/mime/packages/. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-pelicula-project">
+    <comment>PeliculaConverter project</comment>
+    <comment xml:lang="pt_BR">Projeto do PeliculaConverter</comment>
+    <comment xml:lang="pt">Projeto do PeliculaConverter</comment>
+    <comment xml:lang="es">Proyecto de PeliculaConverter</comment>
+    <icon name="application-x-pelicula-project"/>
+    <glob pattern="*.plc"/>
+  </mime-type>
+</mime-info>

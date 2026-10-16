@@ -45,6 +45,9 @@ dev = [
 [project.gui-scripts]
 pelicula-converter = "pelicula.app:main"
 
+[project.scripts]
+pelicula-cli = "pelicula.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["pelicula", "pelicula.*"]
 

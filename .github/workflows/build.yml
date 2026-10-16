@@ -1,38 +1,51 @@
 name: Build
 
+# - Todo push e PR: só os testes (job "testes", Windows e Linux), rápido.
+# - Push no main/master, tags v* e execução manual (workflow_dispatch): testes + executáveis
+#   (PyInstaller) + pacotes. Windows: instalador .msi (WiX) e .zip portátil; Linux: pacote .deb e
+#   .tar.gz portátil. Os instaladores são instalados e removidos de verdade no runner para conferir.
+# - Tags v* (por exemplo v1.1.0): publica a Release com os pacotes e o SHA256SUMS.txt e avisa no Discord.
+# - Push no main/master que falhar: avisa no Discord.
+# Detalhes em AGENTS.md (Empacotamento e release).
+
 on:
   push:
-    branches: [main, master]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      testar_discord:
+        description: "Só enviar uma mensagem de teste ao Discord (não roda testes nem gera pacotes)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
   PYTHON_VERSION: "3.15"
+  WIX_VERSION: "5.0.2"
 
 jobs:
-  # ------------------------------------------------------------------ Windows e Linux
-  build:
-    name: ${{ matrix.label }}
+  # ------------------------------------------------------------------ testes (sempre)
+  testes:
+    name: Testes (${{ matrix.label }})
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.testar_discord) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             label: Windows x64
-            target: windows-x64
           - os: ubuntu-latest
             label: Linux x64
-            target: linux-x64
 
     env:
       # Os testes não abrem janelas; os que precisam de GPU (OpenGL 3.3) se pulam sozinhos.
@@ -77,7 +90,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install "pytest>=8" "pyinstaller>=6.10"
+          python -m pip install "pytest>=8"
           python --version
 
       - name: Testes
@@ -87,46 +100,346 @@ jobs:
           python -m pytest -q
           code=$?
           if [ "$code" -eq 5 ]; then
-            echo "Nenhum teste encontrado (código 5 do pytest); seguindo com o build."
+            echo "Nenhum teste encontrado (código 5 do pytest)."
             exit 0
           fi
           exit $code
 
-      - name: Gerar o executável (PyInstaller)
-        shell: bash
-        run: python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
+  # ------------------------------------------------------------------ pacotes Windows e Linux
+  build:
+    name: Pacotes (${{ matrix.label }})
+    needs: testes
+    # Só no main/master, em tags v* e na execução manual (que serve para validar outras branches).
+    if: >-
+      ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && !inputs.testar_discord) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows x64
+            target: windows-x64
+          # Ubuntu 22.04 de propósito: os executáveis pedem a glibc do sistema em que foram gerados
+          # (22.04 = glibc 2.35, e o PySide6 pede 2.34), então o .deb e o .tar.gz funcionam no
+          # Ubuntu 22.04+ e no Debian 12+. Com o ubuntu-latest (24.04) só funcionariam no 24.04+.
+          # Troque pelo próximo LTS quando o GitHub aposentar esta imagem.
+          - os: ubuntu-22.04
+            label: Linux x64
+            target: linux-x64
 
-      - name: Compactar
-        id: pack
+    env:
+      # O pelicula-cli é executado nas conferências dos pacotes, sem tela.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          allow-prereleases: true
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
+
+      - name: Instalar bibliotecas do sistema (Linux)
+        if: runner.os == 'Linux'
+        # As mesmas do Qt que os testes usam: o PyInstaller precisa delas para analisar os plugins.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libopengl0 libglx-mesa0 libgl1-mesa-dri \
+            libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libxcb-xfixes0 libfontconfig1 libdbus-1-3
+
+      - name: Instalar dependências Python
         shell: bash
         run: |
-          ver=$(python -c "import pelicula; print(pelicula.__version__)")
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then label="$GITHUB_REF_NAME"; else label="$ver-${GITHUB_SHA::7}"; fi
-          base="PeliculaConverter-$label-${{ matrix.target }}"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            file="$base.zip"
-            pwsh -NoProfile -Command "Compress-Archive -Path dist/PeliculaConverter -DestinationPath '$file'"
-          else
-            file="$base.tar.gz"
-            tar -czf "$file" -C dist PeliculaConverter
-          fi
-          ls -l "$file"
-          echo "file=$file" >> "$GITHUB_OUTPUT"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install "pyinstaller>=6.10"
+          python --version
 
-      - name: Enviar artefato
+      - name: Versão e nomes dos pacotes
+        id: meta
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          ver=$(python packaging/install_marker.py --print-version)
+          if ! grep -q "^version = \"$ver\"" pyproject.toml; then
+            echo "::warning::pyproject.toml não está na versão $ver (pelicula/__init__.py)."
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # A tag precisa bater com a versão do app: o atualizador compara a versão do marcador
+            # pelicula-install.json com a da última release.
+            case "$GITHUB_REF_NAME" in
+              "v$ver" | "v$ver"-*) ;;
+              *) echo "::error::A tag $GITHUB_REF_NAME não bate com a versão do app ($ver, em pelicula/__init__.py)."
+                 exit 1 ;;
+            esac
+            label="$GITHUB_REF_NAME"
+            debver="$ver"
+          else
+            label="$ver-${GITHUB_SHA::7}"
+            debver="$ver~git${GITHUB_SHA::7}"
+          fi
+          {
+            echo "ver=$ver"
+            echo "debver=$debver"
+            echo "base=PeliculaConverter-$label-$TARGET"
+          } >> "$GITHUB_OUTPUT"
+          echo "Versão $ver; pacotes PeliculaConverter-$label-$TARGET.*"
+
+      - name: Gerar os executáveis (PyInstaller)
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
+          ls -la dist/PeliculaConverter
+
+      # ------------------------------------------------------------ Windows: assinatura opcional
+      # Só assina se os segredos WINDOWS_CERT_PFX_BASE64 e WINDOWS_CERT_PASSWORD existirem.
+      # Sem eles, os passos de assinatura são pulados e os pacotes saem sem assinatura.
+      - name: Conferir se há certificado de assinatura
+        id: cert
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          SENHA: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if [ -n "$PFX" ] && [ -n "$SENHA" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "Certificado encontrado: os executáveis e o .msi serão assinados."
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "Sem certificado: pacotes sem assinatura digital (veja docs/ASSINATURA.md)."
+          fi
+
+      - name: Assinar os executáveis
+        if: runner.os == 'Windows' && steps.cert.outputs.ok == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: ./packaging/windows/assinar.ps1 dist/PeliculaConverter/PeliculaConverter.exe dist/PeliculaConverter/pelicula-cli.exe
+
+      # Na execução manual, confere o assinar.ps1 com um certificado autoassinado criado na hora
+      # (só numa cópia do pelicula-cli.exe; os pacotes não são tocados), nos dois modos: .pfx e SHA-1.
+      - name: Testar o script de assinatura (certificado de teste)
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=PeliculaConverter (teste do CI)" `
+                 -CertStoreLocation Cert:\CurrentUser\My
+          $senha = [guid]::NewGuid().ToString()
+          $pfx = Join-Path $env:RUNNER_TEMP "teste.pfx"
+          Export-PfxCertificate -Cert $c -FilePath $pfx -Password (ConvertTo-SecureString $senha -AsPlainText -Force) | Out-Null
+          foreach ($modo in "pfx", "sha1") {
+            $env:WINDOWS_CERT_PFX_BASE64 = if ($modo -eq "pfx") { [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfx)) } else { "" }
+            $env:WINDOWS_CERT_PASSWORD = if ($modo -eq "pfx") { $senha } else { "" }
+            $env:WINDOWS_CERT_SHA1 = if ($modo -eq "sha1") { $c.Thumbprint } else { "" }
+            $alvo = Join-Path $env:RUNNER_TEMP "assinatura-$modo.exe"
+            Copy-Item dist/PeliculaConverter/pelicula-cli.exe $alvo
+            ./packaging/windows/assinar.ps1 $alvo
+            $s = Get-AuthenticodeSignature $alvo
+            Write-Host "[$modo] assinante: $($s.SignerCertificate.Subject) | carimbo: $($s.TimeStamperCertificate.Subject) | status: $($s.Status)"
+            if (-not $s.SignerCertificate -or $s.SignerCertificate.Thumbprint -ne $c.Thumbprint) { throw "[$modo] o arquivo não foi assinado com o certificado de teste." }
+            if (-not $s.TimeStamperCertificate) { throw "[$modo] a assinatura ficou sem carimbo de tempo." }
+          }
+          Remove-Item $pfx, "Cert:\CurrentUser\My\$($c.Thumbprint)"
+
+      # Alternativas prontas (desligadas). Para usar uma, descomente o bloco e cadastre os
+      # segredos/variáveis indicados; os passos só rodam se o segredo existir. Veja docs/ASSINATURA.md.
+      #
+      # --- SignPath (grátis para projetos de código aberto pela SignPath Foundation;
+      #     exige repositório público e aprovação). Segredo: SIGNPATH_API_TOKEN. Variáveis:
+      #     SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_POLICY_SLUG.
+      #
+      # - name: Conferir o SignPath
+      #   id: signpath
+      #   if: runner.os == 'Windows'
+      #   shell: bash
+      #   env:
+      #     TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #   run: if [ -n "$TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      # - name: Enviar os executáveis ao SignPath
+      #   id: signpath-envio
+      #   if: steps.signpath.outputs.ok == 'true'
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: nao-assinado-${{ matrix.target }}
+      #     path: |
+      #       dist/PeliculaConverter/PeliculaConverter.exe
+      #       dist/PeliculaConverter/pelicula-cli.exe
+      # - name: Assinar com o SignPath
+      #   if: steps.signpath.outputs.ok == 'true'
+      #   uses: signpath/github-action-submit-signing-request@v2
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      #     signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+      #     github-artifact-id: ${{ steps.signpath-envio.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: dist/PeliculaConverter
+      #   (repita o envio + assinatura para o .msi depois do passo "Montar o instalador .msi")
+      #
+      # --- Azure Artifact Signing (antigo Trusted Signing; assinatura mensal, com limites de
+      #     país/organização). Segredos: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET.
+      #     Variáveis: AZURE_SIGNING_ENDPOINT (ex.: https://eus.codesigning.azure.net/),
+      #     AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE.
+      #
+      # - name: Conferir o Azure Artifact Signing
+      #   id: azure
+      #   if: runner.os == 'Windows'
+      #   shell: bash
+      #   env:
+      #     SEGREDO: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #   run: if [ -n "$SEGREDO" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      # - name: Assinar com o Azure Artifact Signing
+      #   if: steps.azure.outputs.ok == 'true'
+      #   uses: azure/artifact-signing-action@v2
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      #     signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      #     certificate-profile-name: ${{ vars.AZURE_CERT_PROFILE }}
+      #     files-folder: ${{ github.workspace }}\dist\PeliculaConverter
+      #     files-folder-filter: exe
+      #     file-digest: SHA256
+      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
+      #     timestamp-digest: SHA256
+      #   (repita com files-folder: ${{ github.workspace }} e files-folder-filter: msi para o .msi)
+
+      # ------------------------------------------------------------ Windows: .msi e .zip
+      - name: Instalar o WiX Toolset ${{ env.WIX_VERSION }}
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          $tools = Join-Path $env:USERPROFILE ".dotnet\tools"
+          Add-Content -Path $env:GITHUB_PATH -Value $tools
+          & (Join-Path $tools "wix.exe") --version
+
+      - name: Montar o instalador .msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VER: ${{ steps.meta.outputs.ver }}
+        run: ./packaging/windows/build_msi.ps1 -SourceDir dist/PeliculaConverter -Output "$env:BASE.msi" -Version $env:VER -WixVersion $env:WIX_VERSION
+
+      - name: Assinar o .msi
+        if: runner.os == 'Windows' && steps.cert.outputs.ok == 'true'
+        shell: pwsh
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: ./packaging/windows/assinar.ps1 "$env:BASE.msi"
+
+      - name: Testar o .msi (instalar, atualizar e desinstalar)
+        if: runner.os == 'Windows'
+        timeout-minutes: 25
+        shell: pwsh
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VER: ${{ steps.meta.outputs.ver }}
+        run: ./packaging/windows/verificar_msi.ps1 -Msi "$env:BASE.msi" -Version $env:VER
+
+      - name: Montar o .zip portátil
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VER: ${{ steps.meta.outputs.ver }}
+        run: |
+          python packaging/install_marker.py dist/PeliculaConverter zip --version $env:VER
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Compress-Archive -Path dist/PeliculaConverter -DestinationPath "$env:BASE.zip"
+          Get-Item "$env:BASE.msi", "$env:BASE.zip" | Format-Table Name, Length
+
+      # ------------------------------------------------------------ Linux: .tar.gz e .deb
+      - name: Montar o .tar.gz portátil
+        if: runner.os == 'Linux'
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VER: ${{ steps.meta.outputs.ver }}
+        run: |
+          python packaging/install_marker.py dist/PeliculaConverter tar --version "$VER"
+          tar -czf "$BASE.tar.gz" -C dist PeliculaConverter
+          ls -l "$BASE.tar.gz"
+
+      - name: Montar o pacote .deb
+        if: runner.os == 'Linux'
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          DEBVER: ${{ steps.meta.outputs.debver }}
+        run: bash packaging/linux/build_deb.sh dist/PeliculaConverter "$BASE.deb" "$DEBVER"
+
+      - name: Testar o .deb (instalar e remover)
+        if: runner.os == 'Linux'
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VER: ${{ steps.meta.outputs.ver }}
+        run: bash packaging/linux/verificar_deb.sh "$BASE.deb" "$VER"
+
+      - name: Instalar o .deb em outras distribuições (informativo)
+        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
+        continue-on-error: true
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+        run: |
+          for img in debian:12 debian:13 ubuntu:22.04 ubuntu:24.04; do
+            echo "::group::$img"
+            if docker run --rm -e DEBIAN_FRONTEND=noninteractive -v "$PWD/$BASE.deb:/tmp/p.deb:ro" "$img" \
+                 bash -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends /tmp/p.deb >/dev/null && /usr/bin/pelicula-cli --help >/dev/null 2>&1; test -x /opt/pelicula-converter/PeliculaConverter'; then
+              echo "$img: instala"
+              echo "- $img: instala" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$img: NÃO instala"
+              echo "- $img: **não instala**" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Conferir a mensagem do Discord (sem enviar)
+        if: runner.os == 'Linux'
+        env:
+          VER: ${{ steps.meta.outputs.ver }}
+        run: |
+          notas="pelicula/novidades/release_v$VER.md"
+          args=(--dry-run release --tag "v$VER" --assets-dir .)
+          if [ -f "$notas" ]; then args+=(--notes "$notas"); fi
+          python packaging/discord_notify.py "${args[@]}"
+          python packaging/discord_notify.py --dry-run falha > /dev/null
+
+      - name: Enviar artefatos
         uses: actions/upload-artifact@v4
         with:
           name: PeliculaConverter-${{ matrix.target }}
-          path: ${{ steps.pack.outputs.file }}
+          path: ${{ steps.meta.outputs.base }}.*
           if-no-files-found: error
+          compression-level: 0
 
   # ------------------------------------------------------------------ macOS
   macos:
     name: macOS (desativado)
-    # O suporte a macOS está preparado (spec com BUNDLE, deps.py), mas DESATIVADO por enquanto:
-    # o app ainda não foi testado no macOS (contexto OpenGL 3.3 Core via CGL, assinatura e
-    # notarização do .app, download automático do ffmpeg). Para ativar, apague a linha `if: false`
-    # e acrescente `macos` na lista `needs` do job `release`.
+    # O suporte a macOS está preparado (spec com BUNDLE, deps.py, packaging/macos/build_dmg.sh),
+    # mas DESATIVADO por enquanto: o app ainda não foi testado no macOS (contexto OpenGL 3.3 Core
+    # via CGL, assinatura e notarização do .app, download automático do ffmpeg). Para ativar,
+    # troque `false` abaixo pela mesma condição do job `build` (e acrescente `needs: testes`);
+    # o job `release` já espera por este job.
     if: false
     runs-on: macos-latest
     timeout-minutes: 45
@@ -154,26 +467,36 @@ jobs:
           exit $code
       - name: Gerar o .app (PyInstaller)
         run: python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
-      - name: Compactar
+      - name: Montar o .dmg
         id: pack
         run: |
-          ver=$(python -c "import pelicula; print(pelicula.__version__)")
+          ver=$(python packaging/install_marker.py --print-version)
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then label="$GITHUB_REF_NAME"; else label="$ver-${GITHUB_SHA::7}"; fi
-          file="PeliculaConverter-$label-macos.tar.gz"
-          tar -czf "$file" -C dist PeliculaConverter.app
+          file="PeliculaConverter-$label-macos.dmg"
+          PYTHON=python bash packaging/macos/build_dmg.sh dist/PeliculaConverter.app "$file"
           echo "file=$file" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: PeliculaConverter-macos
           path: ${{ steps.pack.outputs.file }}
+          if-no-files-found: error
+          compression-level: 0
 
-  # ------------------------------------------------------------------ release (tags v*)
+  # ------------------------------------------------------------------ release (só em tags v*)
   release:
     name: Publicar release
-    needs: [build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, macos]
+    # O macOS desativado fica "skipped" e não impede a release.
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success'
+      && (needs.macos.result == 'success' || needs.macos.result == 'skipped') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Baixar o código (notas da versão e scripts)
+        uses: actions/checkout@v4
+
       - name: Baixar os pacotes gerados
         uses: actions/download-artifact@v4
         with:
@@ -181,14 +504,68 @@ jobs:
           path: pacotes
           merge-multiple: true
 
-      - name: Listar os pacotes
-        run: ls -l pacotes
+      - name: Gerar o SHA256SUMS.txt
+        working-directory: pacotes
+        run: |
+          sha256sum PeliculaConverter-* > SHA256SUMS.txt
+          ls -l
+          cat SHA256SUMS.txt
 
-      - name: Criar a release com o .zip (Windows) e o .tar.gz (Linux)
+      - name: Escolher as notas da versão
+        id: notas
+        run: |
+          f="pelicula/novidades/release_${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then
+            echo "Notas da versão: $f"
+            { echo "arquivo=$f"; echo "gerar=false"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::$f não existe; usando as notas geradas pelo GitHub."
+            { echo "arquivo="; echo "gerar=true"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Criar a release com os instaladores e os pacotes portáteis
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            pacotes/*.zip
-            pacotes/*.tar.gz
-          generate_release_notes: true
+          files: pacotes/*
+          body_path: ${{ steps.notas.outputs.arquivo }}
+          generate_release_notes: ${{ steps.notas.outputs.gerar == 'true' }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
+
+      - name: Avisar no Discord
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          NOTAS: ${{ steps.notas.outputs.arquivo }}
+        run: |
+          args=(release --tag "$GITHUB_REF_NAME" --assets-dir pacotes)
+          if [ -n "$NOTAS" ]; then args+=(--notes "$NOTAS"); fi
+          python3 packaging/discord_notify.py "${args[@]}"
+
+  # ------------------------------------------------------------------ avisos no Discord
+  avisar-falha:
+    name: Avisar falha no Discord
+    needs: [testes, build, macos]
+    if: ${{ failure() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+      - name: Enviar o aviso
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python3 packaging/discord_notify.py falha
+
+  discord-teste:
+    name: Testar o aviso no Discord
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.testar_discord }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+      - name: Enviar a mensagem de teste
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python3 packaging/discord_notify.py teste

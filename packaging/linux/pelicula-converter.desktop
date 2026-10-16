@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Version=1.4
+Name=PeliculaConverter
+Name[en]=PeliculaConverter
+Name[es]=PeliculaConverter
+GenericName=Simulador de película cinematográfica
+GenericName[en]=Motion picture film emulator
+GenericName[es]=Simulador de película cinematográfica
+Comment=Transforme vídeo digital em película de cinema: cor, grão, halação e bitolas
+Comment[en]=Turn digital video into motion picture film: color, grain, halation and gauges
+Comment[es]=Convierte video digital en película de cine: color, grano, halación y formatos
+Exec=pelicula-converter %F
+TryExec=pelicula-converter
+Icon=pelicula-converter
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;
+MimeType=application/x-pelicula-project;
+Keywords=película;filme;grão;halação;LUT;vídeo;cinema;ffmpeg;
+Keywords[en]=film;grain;halation;LUT;video;cinema;ffmpeg;emulation;
+Keywords[es]=película;grano;halación;LUT;video;cine;ffmpeg;
+StartupNotify=true
+StartupWMClass=PeliculaConverter
