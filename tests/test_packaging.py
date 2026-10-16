@@ -142,6 +142,8 @@ def test_desktop_entry_and_mime_type_agree():
     entry = cp["Desktop Entry"]
     for key in ("Name", "Name[en]", "Name[es]", "Comment", "Exec", "Icon", "MimeType", "Categories"):
         assert entry.get(key), key
+    # O desktop-file-validate do Ubuntu 22.04 / Debian 12 (0.26) ainda não conhece a versão 1.5.
+    assert entry["Version"] in {"1.0", "1.1", "1.2", "1.3", "1.4"}
     assert entry["Exec"].startswith("pelicula-converter ")
     assert entry["Icon"] == "pelicula-converter"
     mime = ET.parse(PKG / "linux" / "pelicula-converter.xml").getroot()

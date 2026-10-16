@@ -37,7 +37,9 @@ confere "pelicula-install.json = {kind: deb, version: $VER}" python3 -c '
 import json, sys
 d = json.load(open("/opt/pelicula-converter/pelicula-install.json", encoding="utf-8"))
 sys.exit(0 if d == {"kind": "deb", "version": sys.argv[1]} else 1)' "$VER"
-confere "atalho .desktop válido" desktop-file-validate /usr/share/applications/pelicula-converter.desktop
+dfv_saida="$(desktop-file-validate /usr/share/applications/pelicula-converter.desktop 2>&1)" && dfv=0 || dfv=$?
+if [ -n "$dfv_saida" ]; then echo "$dfv_saida"; fi
+confere "atalho .desktop válido (desktop-file-validate)" test "$dfv" -eq 0
 confere "tipo application/x-pelicula-project registrado para *.plc" \
     grep -q '^[0-9]*:application/x-pelicula-project:\*\.plc' /usr/share/mime/globs2
 confere "*.plc associado ao pelicula-converter.desktop" \
