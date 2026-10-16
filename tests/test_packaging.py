@@ -158,3 +158,12 @@ def test_spec_builds_gui_and_cli_in_one_folder():
     assert re.search(r'CLI_NAME\s*=\s*"pelicula-cli"', spec)
     assert re.search(r"COLLECT\(\s*#[^\n]*\n\s*exe,\s*\n\s*exe_cli,", spec)
     assert (PKG / "pelicula_cli.py").is_file()
+
+
+def test_spec_sets_windows_version_info():
+    """A SignPath exige nome e versão do produto em todos os executáveis assinados."""
+    spec = (ROOT / "PeliculaConverter.spec").read_text(encoding="utf-8")
+    assert spec.count("version=version_info(") == 2
+    for field in ("ProductName", "ProductVersion", "FileVersion", "FileDescription", "OriginalFilename"):
+        assert f'StringStruct("{field}"' in spec
+    assert '"CFBundleShortVersionString": VERSION' in spec

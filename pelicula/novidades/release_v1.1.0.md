@@ -13,3 +13,7 @@ Portugués, inglés y español • pantalla de bienvenida con proyectos reciente
 - Windows: `…-windows-x64.msi` (instalador / installer / instalador) ou `…-windows-x64.zip` (portátil / portable)
 - Linux: `…-linux-x64.deb` (Debian/Ubuntu) ou `…-linux-x64.tar.gz` (portátil / portable)
 - `SHA256SUMS.txt`: conferência dos arquivos / checksums / sumas de verificación
+
+**Code signing:** Windows files will be signed through the free SignPath Foundation program for open source (*free code signing provided by SignPath.io, certificate by SignPath Foundation*); the application is under review, so this release is still unsigned. / Os arquivos do Windows serão assinados pelo programa gratuito da SignPath Foundation; a inscrição está em análise, então esta versão ainda sai sem assinatura.
+
+[Code signing policy / Política de assinatura de código](https://github.com/edvitor13/pelicula-converter#política-de-assinatura-de-código-code-signing-policy) • [Privacy policy / Privacidade](https://github.com/edvitor13/pelicula-converter#privacidade-privacy-policy)

@@ -15,11 +15,16 @@
 # Os instaladores (.msi, .deb, .dmg) são montados a partir desta pasta: veja packaging/.
 
 import os
+import re
 import sys
 
 ROOT = SPECPATH  # noqa: F821  (variável injetada pelo PyInstaller)
 NAME = "PeliculaConverter"
 CLI_NAME = "pelicula-cli"
+
+# Versão lida do código (sem importar o pacote), usada nos metadados dos executáveis.
+with open(os.path.join(ROOT, "pelicula", "__init__.py"), encoding="utf-8") as _f:
+    VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', _f.read()).group(1)
 
 # O moderngl carrega o backend do contexto OpenGL dinamicamente; cada sistema usa um.
 if sys.platform == "win32":
@@ -31,6 +36,36 @@ else:
 
 # Ícone só no Windows (.ico). No Linux o ícone vem do tema / arquivo .desktop.
 ICON = os.path.join(ROOT, "assets", "logo.ico") if sys.platform == "win32" else None
+
+
+
+def version_info(description, filename):
+    """Metadados do .exe (Propriedades > Detalhes). A SignPath exige nome e versão do produto iguais
+    em todos os arquivos assinados de uma mesma build."""
+    if sys.platform != "win32":
+        return None
+    from PyInstaller.utils.win32.versioninfo import (FixedFileInfo, StringFileInfo, StringStruct, StringTable,
+                                                     VarFileInfo, VarStruct, VSVersionInfo)
+    nums = tuple(int(n) for n in re.findall(r"\d+", VERSION)[:3])
+    nums = nums + (0,) * (4 - len(nums))
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=nums, prodvers=nums, mask=0x3F, flags=0x0, OS=0x40004, fileType=0x1,
+                          subtype=0x0, date=(0, 0)),
+        kids=[
+            StringFileInfo([StringTable("041604B0", [  # pt-BR, Unicode
+                StringStruct("CompanyName", "Vitor Gabriel"),
+                StringStruct("FileDescription", description),
+                StringStruct("FileVersion", VERSION),
+                StringStruct("InternalName", filename.rsplit(".", 1)[0]),
+                StringStruct("LegalCopyright", "© 2026 Vitor Gabriel. Licença MIT."),
+                StringStruct("OriginalFilename", filename),
+                StringStruct("ProductName", NAME),
+                StringStruct("ProductVersion", VERSION),
+            ])]),
+            VarFileInfo([VarStruct("Translation", [0x0416, 1200])]),
+        ],
+    )
+
 
 # Dados lidos em tempo de execução. As pastas de traduções e de novidades são lidas pelo app
 # com Path(__file__).parent / "locales" (ou "novidades"); entram só se existirem.
@@ -69,6 +104,7 @@ exe = EXE(  # noqa: F821
     console=False,
     disable_windowed_traceback=False,
     icon=ICON,
+    version=version_info("PeliculaConverter", f"{NAME}.exe"),
 )
 
 # ------------------------------------------------------------------ modo de terminal (console)
@@ -86,6 +122,7 @@ exe_cli = EXE(  # noqa: F821
     upx=False,
     console=True,
     icon=ICON,
+    version=version_info("PeliculaConverter (modo terminal)", f"{CLI_NAME}.exe"),
 )
 
 # Uma pasta só para os dois executáveis: o PyInstaller junta as listas e remove os repetidos.
@@ -109,5 +146,5 @@ if sys.platform == "darwin":
         name=f"{NAME}.app",
         icon=None,
         bundle_identifier="com.peliculaconverter.app",
-        info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.0.0"},
+        info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": VERSION},
     )
