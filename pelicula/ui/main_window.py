@@ -207,6 +207,8 @@ class MainWindow(QMainWindow):
         self.loop = True
         self.playing = False
         self.preview_q = str(self.settings.value("preview_quality", "720"))
+        self.preview_fullscreen = False
+        self._state_before_full = Qt.WindowState.WindowNoState
         self._seen_done: set[str] = set()
         self._base_cache: tuple[str, dict] | None = None
         self.loader = FrameLoader()
@@ -271,14 +273,16 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._top_bar())
+        self.top_bar = self._top_bar()
+        root.addWidget(self.top_bar)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
         self.looks.presetChosen.connect(self.apply_preset)
         self.split.addWidget(self.looks)
         self.split.addWidget(self._center())
-        self.split.addWidget(self._right_panel())
+        self.right_panel = self._right_panel()
+        self.split.addWidget(self.right_panel)
         self.split.setStretchFactor(0, 0)
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 0)
@@ -397,6 +401,12 @@ class MainWindow(QMainWindow):
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
         hl.addSpacing(10)
+        self.btn_zoom_out = self._flat("zoom_out", _("Menos zoom (−). A roda do mouse também dá zoom."))
+        self.btn_zoom_out.clicked.connect(lambda: self.viewer.zoom_step(-1))
+        hl.addWidget(self.btn_zoom_out)
+        self.btn_zoom_in = self._flat("zoom_in", _("Mais zoom (+). A roda do mouse também dá zoom."))
+        self.btn_zoom_in.clicked.connect(lambda: self.viewer.zoom_step(1))
+        hl.addWidget(self.btn_zoom_in)
         self.btn_fit = self._flat("fit", _("Ajustar à janela (F)"), _("Ajustar"))
         self.btn_fit.clicked.connect(lambda: self.viewer.set_zoom(None))
         hl.addWidget(self.btn_fit)
@@ -412,6 +422,8 @@ class MainWindow(QMainWindow):
             hl.addWidget(b)
         self.zoom_label = QLabel("")
         self.zoom_label.setObjectName("Faint")
+        self.zoom_label.setMinimumWidth(44)
+        self.zoom_label.setToolTip(_("Zoom atual (100% = um pixel da prévia por pixel da tela)"))
         hl.addWidget(self.zoom_label)
         hl.addStretch(1)
         lab = QLabel(_("Prévia"))
@@ -425,13 +437,20 @@ class MainWindow(QMainWindow):
         self.prev_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
+        hl.addSpacing(4)
+        self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia para ver os detalhes, na resolução original "
+                                                   "(F11). Esc sai."))
+        self.btn_full.clicked.connect(self.toggle_preview_fullscreen)
+        hl.addWidget(self.btn_full)
         vl.addWidget(bar)
+        self.viewer_bar = bar
         self.viewer = Viewer()
         self.viewer.set_mode(mode)
         self.viewer.openRequested.connect(self.open_dialog)
         self.viewer.testRequested.connect(self.open_test_scene)
         self.viewer.filesDropped.connect(self.handle_files)
-        self.viewer.zoomChanged.connect(lambda z: self.zoom_label.setText("" if z == "fit" else f"{float(z) * 100:.0f}%"))
+        self.viewer.zoomChanged.connect(self._zoom_changed)
+        self.viewer.fullscreenExitRequested.connect(self.toggle_preview_fullscreen)
         vl.addWidget(self.viewer, 1)
         tr = QWidget()
         tr.setObjectName("Transport")
@@ -476,6 +495,7 @@ class MainWindow(QMainWindow):
         self.vol.valueChanged.connect(self._set_volume)
         th.addWidget(self.vol)
         vl.addWidget(tr)
+        self.transport = tr
         return w
 
     def _right_panel(self) -> QWidget:
@@ -571,7 +591,55 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Z", self.store.undo)
         sc("Ctrl+Y", self.store.redo)
         sc("Ctrl+Shift+Z", self.store.redo)
-        sc("F11", lambda: self.showNormal() if self.isFullScreen() else self.showFullScreen())
+        sc("F11", self.toggle_preview_fullscreen)
+        sc("Shift+F11", self.toggle_window_fullscreen)
+
+    # ================================================================ zoom e tela cheia
+    def _zoom_changed(self, _z: str) -> None:
+        s = self.viewer.scale()
+        self.zoom_label.setText("" if s is None else f"{s * 100:.0f}%")
+
+    def toggle_window_fullscreen(self) -> None:
+        """Janela inteira (com os painéis) em tela cheia."""
+        if self.preview_fullscreen:
+            self.toggle_preview_fullscreen()
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def toggle_preview_fullscreen(self) -> None:
+        """Só a prévia do vídeo ocupa a tela; os painéis somem. A prévia passa para a resolução original."""
+        entering = not self.preview_fullscreen
+        if entering and self.info is None:
+            return
+        if entering:
+            self._state_before_full = self.windowState()
+        self.preview_fullscreen = entering
+        for wdg in (self.top_bar, self.looks, self.right_panel, self.viewer_bar, self.transport, self.statusBar()):
+            wdg.setVisible(not entering)
+        self.viewer.set_fullscreen(entering)
+        if entering:
+            self.showFullScreen()
+            self.viewer.setFocus()
+        else:
+            prev = self._state_before_full
+            if prev & Qt.WindowState.WindowFullScreen:
+                self.showFullScreen()
+            elif prev & Qt.WindowState.WindowMaximized:
+                self.showMaximized()
+            else:
+                self.showNormal()
+        if self.info is not None and self.preview_q != "full":
+            self._reload_preview()
+
+    def _reload_preview(self) -> None:
+        """Pede o quadro atual de novo no tamanho de prévia vigente (e reinicia a reprodução, se houver)."""
+        if self.playing:
+            self.stop_play()
+            self.start_play()
+        else:
+            self.request_frame(self.frame_idx)
 
     # ================================================================ arquivos
     def open_dialog(self) -> None:
@@ -654,10 +722,13 @@ class MainWindow(QMainWindow):
         self.timeline.setEnabled(video)
         self.btn_export.setEnabled(on)
         self.btn_frame.setEnabled(on)
+        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full):
+            b.setEnabled(on)
 
     def preview_size(self) -> tuple[int, int]:
         info = self.info
-        if self.preview_q == "full":
+        # Na tela cheia da prévia o objetivo é ver detalhe: usa a resolução original.
+        if self.preview_q == "full" or self.preview_fullscreen:
             h = info.height
         else:
             h = min(int(self.preview_q), info.height)
@@ -1552,12 +1623,13 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, _("Atalhos do teclado"), _(
             "Espaço — reproduzir / pausar\n← / → — quadro anterior / próximo\nShift + ← / → — 1 segundo\n"
             "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\nL — repetir\n"
-            "C — trocar o modo de comparação\nF — ajustar à janela\n1 / 2 — zoom 100% / 200%\n"
+            "C — trocar o modo de comparação\nF — ajustar à janela\n+ / − — mais / menos zoom (de 10% a 1600%)\n"
+            "1 / 2 — zoom 100% / 200%\nF11 — prévia em tela cheia (Esc sai) • Shift+F11 — janela em tela cheia\n"
             "Botão direito no vídeo (segurar) — ver o original\nDuplo clique no slider — volta ao padrão\n"
             "Shift + arrastar slider — ajuste fino\n\nCtrl+N novo projeto • Ctrl+Shift+O abrir projeto\n"
             "Ctrl+S salvar projeto • Ctrl+Shift+S salvar projeto como\n"
             "Ctrl+O abrir vídeo • Ctrl+E exportar • Ctrl+Alt+S salvar preset\n"
-            "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer • F11 tela cheia"))
+            "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer"))
 
     def about(self) -> None:
         try:
@@ -1612,6 +1684,12 @@ class MainWindow(QMainWindow):
             self.viewer.set_zoom(1.0)
         elif k == Qt.Key.Key_2:
             self.viewer.set_zoom(2.0)
+        elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self.viewer.zoom_step(1)
+        elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
+            self.viewer.zoom_step(-1)
+        elif k == Qt.Key.Key_Escape and self.preview_fullscreen:
+            self.toggle_preview_fullscreen()
         else:
             super().keyPressEvent(e)
 
@@ -1640,6 +1718,8 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()
                 time.sleep(0.05)
         self.stop_play()
+        if self.preview_fullscreen:
+            self.toggle_preview_fullscreen()  # salva a geometria e os painéis da janela normal
         self.store.commit()
         self.settings.setValue("session_values", json.dumps(self.store.values))
         self.settings.setValue("session_preset", self.preset_id)

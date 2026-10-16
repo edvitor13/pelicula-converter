@@ -265,6 +265,25 @@ def draw(name: str, p: QPainter, c: QColor) -> None:
         for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
             cx, cy = 12 + sx * 7, 12 + sy * 6
             p.drawPolyline([QPointF(cx, cy - sy * 3.5), QPointF(cx, cy), QPointF(cx - sx * 3.5, cy)])
+    elif name in ("zoom_in", "zoom_out"):
+        _pen(p, c, 2.0)
+        p.drawEllipse(QPointF(10.5, 10.5), 6.5, 6.5)
+        p.drawLine(QPointF(15.3, 15.3), QPointF(20.5, 20.5))
+        _pen(p, c, 1.8)
+        p.drawLine(QPointF(7.5, 10.5), QPointF(13.5, 10.5))
+        if name == "zoom_in":
+            p.drawLine(QPointF(10.5, 7.5), QPointF(10.5, 13.5))
+    elif name in ("fullscreen", "fullscreen_exit"):
+        # Setas diagonais: para fora (entrar) ou para dentro (sair).
+        _pen(p, c, 1.9)
+        for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            outer = QPointF(12 + sx * 8, 12 + sy * 8)
+            inner = QPointF(12 + sx * 2.5, 12 + sy * 2.5)
+            p.drawLine(inner, outer)
+            tip = outer if name == "fullscreen" else inner
+            back = -1 if name == "fullscreen" else 1
+            p.drawPolyline([QPointF(tip.x() + back * sx * 4.5, tip.y()), tip,
+                            QPointF(tip.x(), tip.y() + back * sy * 4.5)])
 
 
 @lru_cache(maxsize=256)

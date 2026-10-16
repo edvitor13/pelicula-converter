@@ -524,8 +524,17 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 
 - **Película / Dividido / Lado a lado / Original** (tecla `C` alterna). No modo *Dividido*, arraste
   a linha; segure o **botão direito** sobre o vídeo para ver o original em qualquer modo.
-- **Ajustar** (`F`), **100%** (`1`), **200%** (`2`), **roda do mouse** (até 1600%), **duplo
-  clique** alterna entre ajustar e 100%, **arrastar** move a imagem com zoom.
+- **Zoom livre, de 10% a 1600%**: lupas **−** e **+** na barra da prévia, teclas `−` e `+` ou a
+  **roda do mouse** (aproxima no ponto do cursor). Ao passar pelo tamanho que cabe na janela, o zoom
+  para nele uma vez. Atalhos diretos: **Ajustar** (`F`), **100%** (`1`) e **200%** (`2`). O **duplo
+  clique** alterna entre ajustar e 100%, e **arrastar** move a imagem quando ela é maior que a tela.
+  O zoom atual aparece ao lado dos botões.
+- **Tela cheia da prévia** (botão no fim da barra da prévia ou `F11`): só o vídeo ocupa a tela, sem
+  os painéis, e a prévia passa para a **resolução original** para mostrar os detalhes (grão,
+  halação, nitidez). Uma barrinha no canto traz as lupas, o *ajustar* e *Sair*; ela e o cursor somem
+  com o mouse parado. Comparação, zoom, reprodução e os atalhos continuam funcionando. `Esc` ou
+  `F11` saem e a prévia volta à qualidade escolhida. `Shift+F11` põe a janela inteira em tela
+  cheia, com os painéis.
 - **Prévia**: *Rápida (540p)*, *Normal (720p)*, *Alta (1080p)* ou *Máxima (resolução original)*.
   O grão só aparece fiel na resolução máxima com zoom 100%.
 - **Linha do tempo**: clique ou arraste; `Espaço` reproduz/pausa (a reprodução pula quadros se a
@@ -622,6 +631,7 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `L` | Repetir (liga/desliga) |
 | `C` | Trocar o modo de comparação |
 | `F` | Ajustar à janela |
+| `+` / `−` | Mais / menos zoom (de 10% a 1600%) |
 | `1` / `2` | Zoom 100% / 200% |
 | Botão direito (segurar) no vídeo | Ver o original |
 | Duplo clique no slider | Voltar ao padrão |
@@ -635,7 +645,8 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+Alt+S` | Salvar preset |
 | `Ctrl+Shift+F` | Salvar quadro |
 | `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
-| `F11` | Tela cheia |
+| `F11` | Prévia em tela cheia, na resolução original (`Esc` sai) |
+| `Shift+F11` | Janela inteira em tela cheia, com os painéis |
 
 A lista também está em **Configurações → Atalhos do teclado**.
 

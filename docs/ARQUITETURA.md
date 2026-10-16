@@ -97,7 +97,7 @@ Três ideias guiam o projeto:
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
 | `pelicula/ui/store.py` | `ParamStore`: valores atuais, sinal `changed`, desfazer/refazer (agrupado por 400 ms, até 300 passos). |
 | `pelicula/ui/widgets.py` | `FilmSlider`, `ToggleSwitch`, linhas de parâmetro, `LutRow`, `SectionCard`, `Segmented`, `Histogram`, `Timeline`, `timecode()`. |
-| `pelicula/ui/viewer.py` | Visualizador: modos de comparação, zoom/pan, espiar o original, arrastar e soltar. |
+| `pelicula/ui/viewer.py` | Visualizador: modos de comparação, zoom livre (10%–1600%) e pan, espiar o original, modo de tela cheia (barra flutuante que some com o mouse parado), arrastar e soltar. |
 | `pelicula/ui/looks.py` | Painel de miniaturas dos presets com busca. |
 | `pelicula/ui/export_dialog.py` | Janela de exportação, desempenho e estimativa. |
 | `pelicula/ui/queue_dialog.py` | Janela da fila. |
