@@ -1,3 +1,11 @@
+## Version 1.2.0 — October 16, 2026
+
+**See every detail of the film look.**
+
+- 🖥️ **Full-screen preview.** One click on the full-screen button (or F11) and only the video fills the screen, at the original resolution, so you can check grain, halation and sharpness up close. Esc exits.
+- 🔍 **Free zoom.** Use the − and + magnifiers, the + and − keys or the mouse wheel to zoom in or out as much as you like, from 10% to 1600%.
+- 📂 **Open projects with the Open button.** .plc files now show up together with videos and images.
+
 ## Version 1.1.0 — October 16, 2026
 
 **The app now speaks your language and remembers what you were doing.**

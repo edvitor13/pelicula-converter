@@ -1,3 +1,11 @@
+## Versión 1.2.0 — 16 de octubre de 2026
+
+**Mira cada detalle de la película.**
+
+- 🖥️ **Vista previa en pantalla completa.** Un clic en el botón de pantalla completa (o F11) y solo el video ocupa la pantalla, en la resolución original, para revisar el grano, el halo y la nitidez de cerca. Esc sale.
+- 🔍 **Zoom libre.** Usa las lupas − y +, las teclas + y − o la rueda del ratón para acercar o alejar cuanto quieras, de 10% a 1600%.
+- 📂 **Abrir proyectos con el botón Abrir.** Los archivos .plc ahora aparecen junto con los videos y las imágenes.
+
 ## Versión 1.1.0 — 16 de octubre de 2026
 
 **La aplicación ahora habla tu idioma y recuerda lo que estabas haciendo.**
