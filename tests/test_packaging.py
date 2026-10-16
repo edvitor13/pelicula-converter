@@ -160,6 +160,17 @@ def test_spec_builds_gui_and_cli_in_one_folder():
     assert (PKG / "pelicula_cli.py").is_file()
 
 
+def test_version_has_single_source():
+    """A versão só é escrita em pelicula/__init__.py; README e pyproject não podem ficar para trás."""
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r'^dynamic\s*=\s*\[\s*"version"\s*\]', pyproject, re.M)
+    assert not re.search(r'^version\s*=\s*"', pyproject, re.M)
+    assert 'version = { attr = "pelicula.__version__" }' in pyproject
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "img.shields.io/github/v/release/edvitor13/pelicula-converter" in readme
+    assert not re.search(r"badge/vers%C3%A3o-\d", readme)
+
+
 def test_spec_sets_windows_version_info():
     """A SignPath exige nome e versão do produto em todos os executáveis assinados."""
     spec = (ROOT / "PeliculaConverter.spec").read_text(encoding="utf-8")

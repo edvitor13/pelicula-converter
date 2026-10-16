@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pelicula-converter"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Simula película cinematográfica em vídeos digitais: cor de negativos e cópias, grão, halação, bitolas de 8 mm a IMAX, defeitos e scan da película, tudo processado na GPU."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -47,6 +47,9 @@ pelicula-converter = "pelicula.app:main"
 
 [project.scripts]
 pelicula-cli = "pelicula.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "pelicula.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["pelicula", "pelicula.*"]

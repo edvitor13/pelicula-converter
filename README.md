@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Versão 1.0.0" src="https://img.shields.io/badge/vers%C3%A3o-1.0.0-f0a63a">
+  <a href="https://github.com/edvitor13/pelicula-converter/releases/latest"><img alt="Última versão" src="https://img.shields.io/github/v/release/edvitor13/pelicula-converter?label=vers%C3%A3o&color=f0a63a"></a>
   <img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-f0a63a">
   <img alt="Python 3.15" src="https://img.shields.io/badge/Python-3.15%20(3.12%2B)-3776ab">
   <img alt="Windows e Linux" src="https://img.shields.io/badge/sistemas-Windows%20%7C%20Linux-25211d">
