@@ -7,6 +7,22 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Desfoque da bitola** (Película): chave para ligar e desligar a maciez natural da bitola (o que
+  deixa o Super 8 e o 8 mm mais "embaçados"), com a dica mostrando quanto cada bitola desfoca. O
+  controle de força virou *Intensidade do desfoque* (antes *Perda de nitidez da bitola*; a chave
+  `bitola_resolucao` não muda). Projetos e presets antigos continuam iguais, com o desfoque ligado.
+
+### Mudado
+- **Tela cheia da prévia**: a resolução escolhida continua (antes passava sozinha para a original) e
+  pode ser trocada na própria tela cheia; a barra da prévia (comparação, zoom, resolução) e o
+  player (reproduzir, linha do tempo, entrada/saída, volume) continuam visíveis. Somem só a barra
+  superior, os painéis de looks e de ajustes e a barra de status. A barrinha flutuante saiu, e o
+  botão de tela cheia vira *Sair da tela cheia*.
+- Atualização no Windows: o app reabre direto (sem passar pelo shell do Windows) depois de instalar.
+  Com o shell, a primeira abertura do executável novo demorava ~25 s e criava uma segunda instância
+  passageira.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

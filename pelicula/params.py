@@ -127,8 +127,12 @@ SECTIONS: list[Section] = [
         C("copia", "Cópia (print)", "nenhuma", COPIAS,
           "Filme usado para copiar o negativo para a projeção. Define o contraste e a cor final."),
         F("copia_forca", "Força da cópia", 1.0, 0, 1, percent=True),
-        F("bitola_resolucao", "Perda de nitidez da bitola", 1.0, 0, 1, percent=True,
-          tip="Quanto da maciez natural da bitola é aplicada."),
+        B("bitola_desfoque_on", "Desfoque da bitola", True,
+          "Maciez natural de cada bitola (desfoque gaussiano). Em 1080p: 8 mm 2,4 px • Super 8 1,9 px • "
+          "16 mm 1,1 px • Super 16 0,9 px • 35 mm 0,35 px • 65 mm e IMAX nenhum. Desligue para manter a nitidez "
+          "do vídeo. Para devolver ainda mais detalhe, use Lente e nitidez → Recuperar detalhe."),
+        F("bitola_resolucao", "Intensidade do desfoque", 1.0, 0, 1, percent=True,
+          tip="100% = a maciez natural da bitola; 0% = sem desfoque."),
         F("bitola_vinheta", "Vinheta da bitola", 1.0, 0, 1, percent=True,
           tip="Escurecimento natural das bordas em bitolas pequenas."),
         F("mix_geral", "Força geral do efeito", 1.0, 0, 1, percent=True,

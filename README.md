@@ -531,12 +531,12 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
   para nele uma vez. Atalhos diretos: **Ajustar** (`F`), **100%** (`1`) e **200%** (`2`). O **duplo
   clique** alterna entre ajustar e 100%, e **arrastar** move a imagem quando ela é maior que a tela.
   O zoom atual aparece ao lado dos botões.
-- **Tela cheia da prévia** (botão no fim da barra da prévia ou `F11`): só o vídeo ocupa a tela, sem
-  os painéis, e a prévia passa para a **resolução original** para mostrar os detalhes (grão,
-  halação, nitidez). Uma barrinha no canto traz as lupas, o *ajustar* e *Sair*; ela e o cursor somem
-  com o mouse parado. Comparação, zoom, reprodução e os atalhos continuam funcionando. `Esc` ou
-  `F11` saem e a prévia volta à qualidade escolhida. `Shift+F11` põe a janela inteira em tela
-  cheia, com os painéis.
+- **Tela cheia da prévia** (botão no fim da barra da prévia ou `F11`): a prévia ocupa a tela e somem
+  a barra superior, os painéis de looks e de ajustes e a barra de status. A **barra da prévia**
+  (comparação, lupas, resolução da prévia, *Sair da tela cheia*) e o **player** (reproduzir, linha do
+  tempo, entrada/saída, repetir, volume) continuam. A resolução escolhida não muda; para ver o
+  máximo de detalhe, escolha *Máxima (resolução original)* ali mesmo. `Esc` ou `F11` saem.
+  `Shift+F11` põe a janela inteira em tela cheia, com os painéis.
 - **Prévia**: *Rápida (540p)*, *Normal (720p)*, *Alta (1080p)* ou *Máxima (resolução original)*.
   O grão só aparece fiel na resolução máxima com zoom 100%.
 - **Linha do tempo**: clique ou arraste; `Espaço` reproduz/pausa (a reprodução pula quadros se a
@@ -647,7 +647,7 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+Alt+S` | Salvar preset |
 | `Ctrl+Shift+F` | Salvar quadro |
 | `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
-| `F11` | Prévia em tela cheia, na resolução original (`Esc` sai) |
+| `F11` | Prévia em tela cheia, com a barra da prévia e o player (`Esc` sai) |
 | `Shift+F11` | Janela inteira em tela cheia, com os painéis |
 
 A lista também está em **Configurações → Atalhos do teclado**.

@@ -42,7 +42,8 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 | **Sensibilidade** | ISO 50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200 | ISO 250 | Filmes mais sensíveis têm grão maior e mais visível: tamanho × (ISO/250)^0,18 e força × (ISO/250)^0,35. Também escolhe o código do texto de borda automático no scan. |
 | **Cópia (print)** | Nenhuma (sem cópia), Kodak 2383 (cópia de cinema clássica), Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra) | Nenhuma | Filme usado para copiar o negativo para a projeção. Aplica uma segunda curva de contraste, saturação e cor por canal por cima do negativo. |
 | **Força da cópia** | 0–100% | 100% | Mistura entre o negativo e o resultado com a cópia. |
-| **Perda de nitidez da bitola** | 0–100% | 100% | Quanto da maciez natural da bitola é aplicada (desfoque gaussiano). |
+| **Desfoque da bitola** | liga/desliga | ligado | Maciez natural de cada bitola (desfoque gaussiano). Em 1080p: 8 mm 2,4 px, Super 8 1,9 px, 16 mm 1,1 px, Super 16 0,9 px, 35 mm 0,35 px, 65 mm e IMAX nenhum (em 4K, o dobro). Desligado, o vídeo mantém a nitidez original; *Lente e nitidez → Recuperar detalhe* devolve ainda mais detalhe. |
+| **Intensidade do desfoque** | 0–100% | 100% | Quanto desse desfoque é aplicado (100% = o natural da bitola; 0% = nenhum). Chave `bitola_resolucao`. |
 | **Vinheta da bitola** | 0–100% | 100% | Escurecimento natural das bordas em bitolas pequenas. Vale mesmo com a seção *Lente* desligada. |
 | **Força geral do efeito** | 0–100% | 100% | Mistura o resultado com o vídeo original (antes da moldura). |
 

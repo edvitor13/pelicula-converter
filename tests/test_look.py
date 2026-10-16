@@ -549,3 +549,27 @@ def test_plan_edge_text_only_when_scanning():
     assert "500T" in plan(v).edge_text
     v["pb"] = True
     assert "DOUBLE-X" in plan(v).edge_text
+
+
+# ------------------------------------------------------------------ desfoque da bitola
+def test_gauge_blur_can_be_turned_off_and_scaled():
+    v = presets.builtin_values("super8_kodachrome")
+    assert v["bitola_desfoque_on"] is True and v["lente_on"] and v["maciez"] == 0 and v["nitidez"] == 0
+    blur = look.GAUGES["super8"]["blur"]
+    on = look.build_plan(v, 1920, 1080, 0, 24.0, None)
+    assert on.soft_sigma == pytest.approx(blur)
+    assert look.build_plan(v, 3840, 2160, 0, 24.0, None).soft_sigma == pytest.approx(blur * 2)  # px@1080
+    half = look.build_plan({**v, "bitola_resolucao": 0.5}, 1920, 1080, 0, 24.0, None)
+    assert half.soft_sigma == pytest.approx(blur / 2)
+    off = look.build_plan({**v, "bitola_desfoque_on": False}, 1920, 1080, 0, 24.0, None)
+    assert off.soft_sigma == 0.0 and off.uniforms.get("u_soft_on", 0) == 0
+
+
+def test_gauge_blur_tip_matches_the_gauges():
+    """A dica do "Desfoque da bitola" cita o desfoque de cada bitola; os números têm de bater com GAUGES."""
+    tip = params.PARAMS["bitola_desfoque_on"].tip
+    for key, label in (("8mm", "8 mm"), ("super8", "Super 8"), ("16mm", "16 mm"), ("super16", "Super 16"),
+                       ("35mm", "35 mm")):
+        value = f"{look.GAUGES[key]['blur']:g}".replace(".", ",")
+        assert f"{label} {value} px" in tip, (label, value)
+    assert look.GAUGES["65mm"]["blur"] == 0 and look.GAUGES["imax"]["blur"] == 0 and "IMAX nenhum" in tip

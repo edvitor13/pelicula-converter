@@ -446,8 +446,7 @@ class MainWindow(QMainWindow):
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
         hl.addSpacing(4)
-        self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia para ver os detalhes, na resolução original "
-                                                   "(F11). Esc sai."))
+        self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia (F11). Esc sai."))
         self.btn_full.clicked.connect(self.toggle_preview_fullscreen)
         hl.addWidget(self.btn_full)
         vl.addWidget(bar)
@@ -458,7 +457,6 @@ class MainWindow(QMainWindow):
         self.viewer.testRequested.connect(self.open_test_scene)
         self.viewer.filesDropped.connect(self.handle_files)
         self.viewer.zoomChanged.connect(self._zoom_changed)
-        self.viewer.fullscreenExitRequested.connect(self.toggle_preview_fullscreen)
         vl.addWidget(self.viewer, 1)
         tr = QWidget()
         tr.setObjectName("Transport")
@@ -617,16 +615,23 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     def toggle_preview_fullscreen(self) -> None:
-        """Só a prévia do vídeo ocupa a tela; os painéis somem. A prévia passa para a resolução original."""
+        """A prévia ocupa a tela: somem a barra superior, os painéis e a barra de status. A barra da prévia
+        (comparação, zoom, resolução) e o player continuam, e a resolução escolhida não muda."""
         entering = not self.preview_fullscreen
         if entering and self.info is None:
             return
         if entering:
             self._state_before_full = self.windowState()
         self.preview_fullscreen = entering
-        for wdg in (self.top_bar, self.looks, self.right_panel, self.viewer_bar, self.transport, self.statusBar()):
+        for wdg in (self.top_bar, self.looks, self.right_panel, self.statusBar()):
             wdg.setVisible(not entering)
         self.viewer.set_fullscreen(entering)
+        self.btn_full.setIcon(icons.icon("fullscreen_exit" if entering else "fullscreen", theme.TEXT, 18))
+        self.btn_full.setText(_("Sair da tela cheia") if entering else "")
+        self.btn_full.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if entering
+                                         else Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.btn_full.setToolTip(_("Sair da tela cheia (Esc ou F11)") if entering
+                                 else _("Prévia em tela cheia (F11). Esc sai."))
         if entering:
             self.showFullScreen()
             self.viewer.setFocus()
@@ -638,16 +643,6 @@ class MainWindow(QMainWindow):
                 self.showMaximized()
             else:
                 self.showNormal()
-        if self.info is not None and self.preview_q != "full":
-            self._reload_preview()
-
-    def _reload_preview(self) -> None:
-        """Pede o quadro atual de novo no tamanho de prévia vigente (e reinicia a reprodução, se houver)."""
-        if self.playing:
-            self.stop_play()
-            self.start_play()
-        else:
-            self.request_frame(self.frame_idx)
 
     # ================================================================ arquivos
     def open_dialog(self) -> None:
@@ -735,8 +730,7 @@ class MainWindow(QMainWindow):
 
     def preview_size(self) -> tuple[int, int]:
         info = self.info
-        # Na tela cheia da prévia o objetivo é ver detalhe: usa a resolução original.
-        if self.preview_q == "full" or self.preview_fullscreen:
+        if self.preview_q == "full":
             h = info.height
         else:
             h = min(int(self.preview_q), info.height)

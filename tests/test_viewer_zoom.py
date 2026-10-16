@@ -55,22 +55,11 @@ out["signals"] = len(seen)
 
 v.set_fullscreen(True)
 out["fs_margin"] = v.margin
-out["fs_hud"] = not v.hud.isHidden()
 out["fs_hint"] = v._hint
 out["fs_fit"] = v.fit_scale()
-exits = []
-v.fullscreenExitRequested.connect(lambda: exits.append(1))
-v.hud_exit.click()
-out["exit_clicks"] = len(exits)
-v.hud_in.click()
-out["hud_zoom"] = v.zoom
-v._go_idle()
-out["idle_hides_hud"] = v.hud.isHidden()
-v._wake()
-out["wake_shows_hud"] = not v.hud.isHidden()
 v.set_fullscreen(False)
 out["normal_margin"] = v.margin
-out["normal_hud_hidden"] = v.hud.isHidden()
+out["normal_hint"] = v._hint
 out["limits"] = [MIN_ZOOM, MAX_ZOOM, ZOOM_STEP]
 print(json.dumps(out))
 app.exit(0)
@@ -126,10 +115,13 @@ out["normal_rendered"] = wait_width(960)
 win.toggle_preview_fullscreen()
 out["fs"] = win.preview_fullscreen
 out["fs_size"] = list(win.preview_size())
-out["fs_rendered"] = wait_width(1920)
-out["hidden"] = [w.isHidden() for w in (win.top_bar, win.looks, win.right_panel, win.viewer_bar, win.transport,
-                                        win.statusBar())]
+out["fs_rendered"] = wait_width(960)
+out["hidden"] = [w.isHidden() for w in (win.top_bar, win.looks, win.right_panel, win.statusBar())]
+out["kept"] = [w.isHidden() for w in (win.viewer_bar, win.transport, win.prev_combo, win.btn_play, win.timeline)]
+out["btn_text"] = win.btn_full.text()
 out["viewer_fs"] = win.viewer.fullscreen
+win.prev_combo.setCurrentIndex(win.prev_combo.findData("full"))
+out["fs_full_rendered"] = wait_width(1920)
 win.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Plus, Qt.KeyboardModifier.NoModifier, "+"))
 out["plus_zoom"] = win.viewer.zoom
 win.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Minus, Qt.KeyboardModifier.NoModifier, "-"))
@@ -138,8 +130,8 @@ win.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.Keyboard
 out["after_esc"] = win.preview_fullscreen
 out["shown_again"] = [w.isHidden() for w in (win.top_bar, win.looks, win.right_panel, win.viewer_bar, win.transport,
                                              win.statusBar())]
+out["btn_text_after"] = win.btn_full.text()
 out["size_after"] = list(win.preview_size())
-out["rendered_after"] = wait_width(960)
 out["calls"] = calls
 out["quality_kept"] = win.preview_q
 print(json.dumps(out))
@@ -158,7 +150,7 @@ def _run(tmp_path, script: str) -> dict:
     return json.loads(lines[-1])
 
 
-def test_free_zoom_steps_limits_and_fullscreen_hud(tmp_path):
+def test_free_zoom_steps_limits_and_fullscreen(tmp_path):
     d = _run(tmp_path, _VIEWER_SCRIPT)
     lo, hi, step = d["limits"]
     fit = d["fit"]
@@ -170,12 +162,9 @@ def test_free_zoom_steps_limits_and_fullscreen_hud(tmp_path):
     assert (x, y) == (ax, ay) and d["pannable_small"] is False
     assert d["min"] == lo and d["max"] == hi and d["pannable_big"] is True
     assert d["signals"] >= 4
-    assert d["fs_margin"] == 0 and d["fs_hud"] and d["fs_hint"]
+    assert d["fs_margin"] == 0 and d["fs_hint"]
     assert d["fs_fit"] > fit  # sem borda, a imagem fica maior
-    assert d["exit_clicks"] == 1
-    assert d["hud_zoom"] is not None
-    assert d["idle_hides_hud"] and d["wake_shows_hud"]
-    assert d["normal_margin"] == 14 and d["normal_hud_hidden"]
+    assert d["normal_margin"] == 14 and d["normal_hint"] is False
 
 
 def test_main_window_preview_fullscreen(tmp_path):
@@ -186,9 +175,11 @@ def test_main_window_preview_fullscreen(tmp_path):
     assert d["no_media_blocked"] is False
     assert d["normal_size"] == [960, 540] and d["normal_rendered"] == 960
     assert d["fs"] is True and d["viewer_fs"] is True
-    assert d["fs_size"] == [1920, 1080] and d["fs_rendered"] == 1920  # resolução original na tela cheia
-    assert all(d["hidden"])
+    assert d["fs_size"] == [960, 540] and d["fs_rendered"] == 960  # a resolução escolhida continua
+    assert all(d["hidden"]) and not any(d["kept"])  # barra da prévia e player continuam na tela cheia
+    assert d["btn_text"] == "Sair da tela cheia" and d["btn_text_after"] == ""
+    assert d["fs_full_rendered"] == 1920  # dá para escolher a máxima na própria tela cheia
     assert d["plus_zoom"] is not None and d["minus_back_to_fit"] is None
     assert d["after_esc"] is False and not any(d["shown_again"])
-    assert d["size_after"] == [960, 540] and d["rendered_after"] == 960 and d["quality_kept"] == "540"
+    assert d["size_after"] == [1920, 1080] and d["quality_kept"] == "full"  # vale a escolha feita
     assert d["calls"] == ["full", "normal"]

@@ -286,7 +286,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     plan = Plan(U)
 
     # ---- Maciez / nitidez
-    sig_g = gauge["blur"] * v["bitola_resolucao"]
+    sig_g = gauge["blur"] * v["bitola_resolucao"] if v["bitola_desfoque_on"] else 0.0
     sig_u = (v["raio_maciez"] * v["maciez"] * 2.0) if lente else 0.0
     soft = math.sqrt(sig_g ** 2 + sig_u ** 2) * scale
     sharp = v["nitidez"] if lente else 0.0
