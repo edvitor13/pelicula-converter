@@ -11,6 +11,36 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).
 
+## [1.1.0] - 2026-10-16
+
+### Adicionado
+- Interface em **português do Brasil, inglês e espanhol** (#1): escolha do idioma no primeiro
+  acesso (com o idioma do sistema selecionado, ou inglês), troca em Configurações > Idioma,
+  catálogos em `pelicula/locales/`, separador decimal por idioma, ferramenta
+  `tools/i18n_extract.py` e teste que exige tradução para todo texto visível.
+- **Tela de boas-vindas** (#2) com banner, versão e data por extenso, projetos recentes com
+  miniatura, atalhos (abrir vídeo, abrir projeto, cena de teste, novidades) e aviso de atualização.
+- **Projetos `.plc`** (#3): salvam vídeo (caminho absoluto e relativo), look, todos os ajustes,
+  entrada/saída, quadro atual, comparação, prévia e miniatura. Menu Projeto (novo, abrir,
+  recentes, salvar, salvar como), "•" no título com mudanças pendentes, pergunta ao fechar,
+  localizar o vídeo se ele sumir, abertura por arrastar ou pela linha de comando.
+- **Novidades em linguagem simples** (#4) em `pelicula/novidades/` nos três idiomas, mostradas
+  depois de cada atualização; `release_vX.Y.Z.md` vira o texto da release.
+- **Atualização automática** pelo GitHub Releases (#5): verificação diária em segundo plano,
+  download do pacote do mesmo tipo da instalação, conferência do SHA-256 com `SHA256SUMS.txt` e
+  instalação depois que o app fecha, reabrindo sozinho.
+- **Modo terminal `pelicula-cli`** (#10): `exportar`, `projeto`, `quadro`, `lut`, `presets`,
+  `parametros`, `qualidades`, `info`, `ffmpeg`, `versao` (com apelidos em inglês), barra de
+  progresso ou JSON, cancelamento com Ctrl+C.
+- **Som na prévia** (#11), sincronizado com o quadro mostrado, com botão de mudo (tecla M) e volume.
+- Atalhos novos: `Ctrl+N`, `Ctrl+Shift+O`, `Ctrl+S`/`Ctrl+Shift+S` para projetos; salvar preset
+  passou para `Ctrl+Alt+S` e salvar quadro para `Ctrl+Shift+F`.
+
+### Corrigido
+- Preferências do app não são mais gravadas no registro durante testes automatizados:
+  `PELICULA_SETTINGS_DIR` leva tudo para um `.ini` (também serve para modo portátil) (#12).
+- Modo terminal: o motor de GPU agora é criado na mesma thread que o usa.
+
 ## [1.0.0] - 2026-10-16
 
 Primeira versão pública.
