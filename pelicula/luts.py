@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .i18n import _
+
 
 @dataclass
 class Lut3D:
@@ -37,7 +39,7 @@ def load_cube(path: str) -> Lut3D:
             elif up.startswith("LUT_3D_SIZE"):
                 size = int(line.split()[1])
             elif up.startswith("LUT_1D_SIZE"):
-                raise ValueError("LUT 1D não é suportado; use um LUT 3D.")
+                raise ValueError(_("LUT 1D não é suportado; use um LUT 3D."))
             elif up.startswith("DOMAIN_MIN"):
                 dmin = [float(x) for x in line.split()[1:4]]
             elif up.startswith("DOMAIN_MAX"):
@@ -50,9 +52,9 @@ def load_cube(path: str) -> Lut3D:
                 if len(parts) >= 3:
                     values.append([float(parts[0]), float(parts[1]), float(parts[2])])
     if size < 2:
-        raise ValueError("Arquivo .cube sem LUT_3D_SIZE.")
+        raise ValueError(_("Arquivo .cube sem LUT_3D_SIZE."))
     if len(values) < size ** 3:
-        raise ValueError(f"LUT incompleto: {len(values)} de {size ** 3} valores.")
+        raise ValueError(_("LUT incompleto: {lidos} de {total} valores.").format(lidos=len(values), total=size ** 3))
     data = np.asarray(values[: size ** 3], dtype=np.float32)
     return Lut3D(path, size, data, tuple(dmin), tuple(dmax), title)
 
@@ -126,7 +128,8 @@ def find_system_luts() -> list[tuple[str, str]]:
     if adobe.is_dir():
         for app in sorted(adobe.glob("Adobe Premiere Pro*"), reverse=True):
             roots.append((app / "Lumetri" / "LUTs" / "Creative", f"{app.name.replace('Adobe ', '')}"))
-            roots.append((app / "Resources" / "LUTs" / "FilmEmulation", f"{app.name.replace('Adobe ', '')} (emulação)"))
+            roots.append((app / "Resources" / "LUTs" / "FilmEmulation",
+                          _("{programa} (emulação)").format(programa=app.name.replace("Adobe ", ""))))
             break
         for app in sorted(adobe.glob("Adobe After Effects*"), reverse=True):
             roots.append((app / "Support Files" / "Lumetri" / "LUTs" / "Creative", f"{app.name.replace('Adobe ', '')}"))
@@ -134,7 +137,7 @@ def find_system_luts() -> list[tuple[str, str]]:
     roots.append((Path(pd) / "Blackmagic Design" / "DaVinci Resolve" / "Support" / "LUT" / "Film Looks", "DaVinci Resolve"))
     roots.append((Path("/opt/resolve/LUT/Film Looks"), "DaVinci Resolve"))
     roots.append((Path("/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/Film Looks"), "DaVinci Resolve"))
-    roots.insert(0, (user_dir(), "Meus LUTs"))
+    roots.insert(0, (user_dir(), _("Meus LUTs")))
     for folder, label in roots:
         if not folder.is_dir():
             continue

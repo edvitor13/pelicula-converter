@@ -10,6 +10,8 @@ import subprocess
 import sys
 from functools import lru_cache
 
+from .i18n import _, fmt_decimal
+
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -19,7 +21,7 @@ def cpu_name() -> str:
         try:
             import winreg
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
-            name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+            name, _kind = winreg.QueryValueEx(key, "ProcessorNameString")
             return " ".join(str(name).split())
         except OSError:
             pass
@@ -37,7 +39,7 @@ def cpu_name() -> str:
                 return out.stdout.decode().strip()
         except (OSError, subprocess.TimeoutExpired):
             pass
-    return platform.processor() or "Processador"
+    return platform.processor() or _("Processador")
 
 
 def open_path(path) -> None:
@@ -109,4 +111,4 @@ def nvidia_gpus() -> list[tuple[int, str, int]]:
 
 
 def gb(n: int) -> str:
-    return f"{n / (1 << 30):.1f} GB".replace(".", ",")
+    return fmt_decimal(n / (1 << 30), 1) + " GB"

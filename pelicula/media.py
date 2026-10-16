@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .i18n import _
+
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".dpx", ".exr"}
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v", ".mts", ".m2ts", ".wmv", ".mpg", ".mpeg",
@@ -73,7 +75,7 @@ def ffmpeg() -> str:
     if not _tools["ffmpeg"]:
         configure()
     if not _tools["ffmpeg"]:
-        raise RuntimeError("ffmpeg não encontrado. Use Configurações > Dependências e atualizações para baixar.")
+        raise RuntimeError(_("ffmpeg não encontrado. Use Configurações > Dependências e atualizações para baixar."))
     return _tools["ffmpeg"]
 
 
@@ -81,7 +83,7 @@ def ffprobe() -> str:
     if not _tools["ffprobe"]:
         configure()
     if not _tools["ffprobe"]:
-        raise RuntimeError("ffprobe não encontrado.")
+        raise RuntimeError(_("ffprobe não encontrado."))
     return _tools["ffprobe"]
 
 
@@ -118,15 +120,17 @@ class MediaInfo:
 
     def summary(self) -> str:
         if self.is_image:
-            return f"{self.width}×{self.height} • imagem {self.codec.upper()} • {self.bit_depth} bits"
+            return _("{w}×{h} • imagem {codec} • {bits} bits").format(
+                w=self.width, h=self.height, codec=self.codec.upper(), bits=self.bit_depth)
         if self.bitrate >= 1_000_000:
             mb = f" • {self.bitrate / 1e6:.0f} Mb/s"
         elif self.bitrate:
             mb = f" • {self.bitrate / 1e3:.0f} kb/s"
         else:
             mb = ""
-        return (f"{self.width}×{self.height} • {self.fps:.3f} fps • {self.codec.upper()} {self.pix_fmt} "
-                f"• {self.bit_depth} bits{mb}")
+        return _("{w}×{h} • {fps} fps • {codec} {pix} • {bits} bits").format(
+            w=self.width, h=self.height, fps=f"{self.fps:.3f}", codec=self.codec.upper(), pix=self.pix_fmt,
+            bits=self.bit_depth) + mb
 
 
 def pix_depth(pix: str) -> int:
@@ -155,13 +159,13 @@ def probe(path: str) -> MediaInfo:
     cmd = [ffprobe(), "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path]
     res = subprocess.run(cmd, capture_output=True, creationflags=NO_WINDOW)
     if res.returncode != 0:
-        raise RuntimeError(res.stderr.decode("utf-8", "replace").strip() or "Não foi possível ler o arquivo.")
+        raise RuntimeError(res.stderr.decode("utf-8", "replace").strip() or _("Não foi possível ler o arquivo."))
     data = json.loads(res.stdout.decode("utf-8", "replace") or "{}")
     streams = data.get("streams", [])
     vs = next((s for s in streams if s.get("codec_type") == "video"
                and not s.get("disposition", {}).get("attached_pic")), None)
     if vs is None:
-        raise RuntimeError("O arquivo não tem imagem de vídeo.")
+        raise RuntimeError(_("O arquivo não tem imagem de vídeo."))
     aus = next((s for s in streams if s.get("codec_type") == "audio"), None)
     fmt = data.get("format", {})
     w, h = int(vs.get("width", 0)), int(vs.get("height", 0))
@@ -286,7 +290,7 @@ class NamedPipe:
                     pass
                 done.wait(2)
                 self.close()
-                raise RuntimeError("O ffmpeg terminou antes de começar a transferir os quadros.")
+                raise RuntimeError(_("O ffmpeg terminou antes de começar a transferir os quadros."))
         if errs:
             self.close()
             raise errs[0]
@@ -418,7 +422,7 @@ def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int 
             r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq)
             img = r.read()
         if img is None:
-            raise RuntimeError(r.error or "Falha ao ler o quadro.")
+            raise RuntimeError(r.error or _("Falha ao ler o quadro."))
         return img.copy()
     finally:
         r.close()

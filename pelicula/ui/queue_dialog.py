@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QProgressBa
                                QVBoxLayout, QWidget)
 
 from ..export import ExportJob, ExportQueue
+from ..i18n import N_, _
 from . import icons, theme
 
-STATUS = {"aguardando": "Na fila", "exportando": "Exportando", "concluido": "Concluído", "erro": "Erro",
-          "cancelado": "Cancelado"}
+# Traduzidos com _() na hora de mostrar.
+STATUS = {"aguardando": N_("Na fila"), "exportando": N_("Exportando"), "concluido": N_("Concluído"),
+          "erro": N_("Erro"), "cancelado": N_("Cancelado")}
 
 
 def _dur(s: float) -> str:
@@ -55,11 +57,11 @@ class JobRow(QFrame):
         self.info.setObjectName("Muted")
         self.info.setWordWrap(True)
         bottom.addWidget(self.info, 1)
-        self.cancel = QPushButton("Cancelar")
+        self.cancel = QPushButton(_("Cancelar"))
         self.cancel.setObjectName("Danger")
         self.cancel.clicked.connect(job.cancel.set)
         bottom.addWidget(self.cancel)
-        self.open = QPushButton("Abrir pasta")
+        self.open = QPushButton(_("Abrir pasta"))
         self.open.setIcon(icons.icon("folder", theme.TEXT, 16))
         self.open.clicked.connect(lambda: open_folder(job.out_path))
         bottom.addWidget(self.open)
@@ -69,37 +71,38 @@ class JobRow(QFrame):
     def refresh(self) -> None:
         j = self.job
         color = {"concluido": theme.OK, "erro": theme.DANGER, "exportando": theme.ACCENT_HI}.get(j.status, theme.MUTED)
-        self.state.setText(STATUS.get(j.status, j.status))
+        self.state.setText(_(STATUS.get(j.status, j.status)))
         self.state.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.bar.setValue(int(j.progress * 1000))
         active = j.status in ("aguardando", "exportando")
         self.cancel.setVisible(active)
         self.open.setVisible(j.status == "concluido")
         if j.status == "exportando":
-            self.info.setText(f"{j.done} de {j.total} quadros • {j.progress * 100:.1f}% • {j.fps_rate:.1f} quadros/s"
-                              f" • faltam {_dur(j.eta)}")
+            self.info.setText(_("{feitos} de {total} quadros • {pct}% • {fps} quadros/s • faltam {tempo}").format(
+                feitos=j.done, total=j.total, pct=f"{j.progress * 100:.1f}", fps=f"{j.fps_rate:.1f}",
+                tempo=_dur(j.eta)))
         elif j.status == "concluido":
-            self.info.setText(f"{j.total} quadros em {_dur(j.finished - j.started)}")
+            self.info.setText(_("{total} quadros em {tempo}").format(total=j.total, tempo=_dur(j.finished - j.started)))
         elif j.status == "erro":
             self.info.setText(j.error[-600:])
         elif j.status == "cancelado":
-            self.info.setText("Exportação cancelada.")
+            self.info.setText(_("Exportação cancelada."))
         else:
-            self.info.setText("Aguardando a exportação anterior terminar.")
+            self.info.setText(_("Aguardando a exportação anterior terminar."))
 
 
 class QueueDialog(QDialog):
     def __init__(self, parent, queue: ExportQueue):
         super().__init__(parent)
         self.queue = queue
-        self.setWindowTitle("Fila de exportação")
+        self.setWindowTitle(_("Fila de exportação"))
         self.resize(640, 440)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 16, 18, 14)
-        k = QLabel("FILA")
+        k = QLabel(_("FILA"))
         k.setObjectName("Kicker")
         lay.addWidget(k)
-        t = QLabel("Exportações")
+        t = QLabel(_("Exportações"))
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 14pt;")
         lay.addWidget(t)
@@ -112,16 +115,16 @@ class QueueDialog(QDialog):
         self.vl.addStretch(1)
         self.scroll.setWidget(self.inner)
         lay.addWidget(self.scroll, 1)
-        self.empty = QLabel("Nenhuma exportação ainda. Use o botão Exportar.")
+        self.empty = QLabel(_("Nenhuma exportação ainda. Use o botão Exportar."))
         self.empty.setObjectName("Muted")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.empty)
         row = QHBoxLayout()
-        clear = QPushButton("Limpar concluídos")
+        clear = QPushButton(_("Limpar concluídos"))
         clear.clicked.connect(self._clear)
         row.addWidget(clear)
         row.addStretch(1)
-        close = QPushButton("Fechar")
+        close = QPushButton(_("Fechar"))
         close.clicked.connect(self.close)
         row.addWidget(close)
         lay.addLayout(row)

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QGroupBox, QHBoxLayout, QLa
                                QPushButton, QVBoxLayout)
 
 from .. import deps, media, system
+from ..i18n import _
 from . import icons, theme
 
 
@@ -24,7 +25,7 @@ class DepsDialog(QDialog):
     def __init__(self, parent, gpu_info: str = "", settings=None, reason: str = ""):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("Dependências e atualizações")
+        self.setWindowTitle(_("Dependências e atualizações"))
         self.setMinimumWidth(620)
         self._cancel = threading.Event()
         self._busy = False
@@ -35,10 +36,10 @@ class DepsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(22, 20, 22, 16)
         lay.setSpacing(12)
-        k = QLabel("SISTEMA")
+        k = QLabel(_("SISTEMA"))
         k.setObjectName("Kicker")
         lay.addWidget(k)
-        t = QLabel("Dependências e atualizações")
+        t = QLabel(_("Dependências e atualizações"))
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 14pt;")
         lay.addWidget(t)
@@ -48,7 +49,7 @@ class DepsDialog(QDialog):
             r.setStyleSheet(f"color: {theme.ACCENT_HI};")
             lay.addWidget(r)
 
-        g = QGroupBox("ffmpeg (leitura e gravação de vídeo)")
+        g = QGroupBox(_("ffmpeg (leitura e gravação de vídeo)"))
         v = QVBoxLayout(g)
         self.ff_status = QLabel()
         self.ff_status.setWordWrap(True)
@@ -67,16 +68,16 @@ class DepsDialog(QDialog):
         self.stage.setVisible(False)
         v.addWidget(self.stage)
         row = QHBoxLayout()
-        self.btn_get = QPushButton("  Baixar ffmpeg")
+        self.btn_get = QPushButton("  " + _("Baixar ffmpeg"))
         self.btn_get.setObjectName("Primary")
         self.btn_get.setIcon(icons.icon("export", "#1b1205", 16))
         self.btn_get.clicked.connect(self._download)
         row.addWidget(self.btn_get)
-        self.btn_cancel = QPushButton("Cancelar download")
+        self.btn_cancel = QPushButton(_("Cancelar download"))
         self.btn_cancel.setVisible(False)
         self.btn_cancel.clicked.connect(self._cancel.set)
         row.addWidget(self.btn_cancel)
-        pick = QPushButton("Usar outra pasta…")
+        pick = QPushButton(_("Usar outra pasta…"))
         pick.setIcon(icons.icon("folder", theme.TEXT, 16))
         pick.clicked.connect(self._pick)
         row.addWidget(pick)
@@ -84,32 +85,36 @@ class DepsDialog(QDialog):
         v.addLayout(row)
         lay.addWidget(g)
 
-        g2 = QGroupBox("Placa de vídeo e bibliotecas")
+        g2 = QGroupBox(_("Placa de vídeo e bibliotecas"))
         v2 = QVBoxLayout(g2)
         pk = "  •  ".join(f"{n} {ver}" for n, ver in deps.python_packages())
         total, avail = system.ram()
-        sysinfo = QLabel(
-            f"Sistema: {platform.system()} {platform.release()} • Python {platform.python_version()}"
-            f"{' (executável)' if getattr(sys, 'frozen', False) else ''}<br>"
-            f"Processador: {system.cpu_name()} • {system.cpu_threads()} núcleos • memória {system.gb(total)}<br>"
-            f"Efeitos na GPU: {gpu_info or 'não detectada'}<br>Bibliotecas: {pk}")
+        frozen = " " + _("(executável)") if getattr(sys, "frozen", False) else ""
+        sysinfo = QLabel("<br>".join([
+            _("Sistema: {sistema} • Python {python}").format(
+                sistema=f"{platform.system()} {platform.release()}", python=platform.python_version()) + frozen,
+            _("Processador: {cpu} • {n} núcleos • memória {ram}").format(
+                cpu=system.cpu_name(), n=system.cpu_threads(), ram=system.gb(total)),
+            _("Efeitos na GPU: {placa}").format(placa=gpu_info or _("não detectada")),
+            _("Bibliotecas: {lista}").format(lista=pk),
+        ]))
         sysinfo.setTextFormat(Qt.TextFormat.RichText)
         sysinfo.setWordWrap(True)
         sysinfo.setObjectName("Muted")
         v2.addWidget(sysinfo)
         missing = deps.missing_python_modules()
         if missing and not getattr(sys, "frozen", False):
-            b = QPushButton(f"Instalar bibliotecas que faltam ({', '.join(missing)})")
+            b = QPushButton(_("Instalar bibliotecas que faltam ({lista})").format(lista=", ".join(missing)))
             b.clicked.connect(lambda: self._pip(missing))
             v2.addWidget(b)
-        tip = QLabel("Se os efeitos não aparecerem, atualize o driver da placa de vídeo (NVIDIA, AMD ou Intel). "
-                     "O app precisa de OpenGL 3.3.")
+        tip = QLabel(_("Se os efeitos não aparecerem, atualize o driver da placa de vídeo (NVIDIA, AMD ou Intel). "
+                       "O app precisa de OpenGL 3.3."))
         tip.setObjectName("Faint")
         tip.setWordWrap(True)
         v2.addWidget(tip)
         lay.addWidget(g2)
 
-        close = QPushButton("Fechar")
+        close = QPushButton(_("Fechar"))
         close.clicked.connect(self.close)
         bl = QHBoxLayout()
         bl.addStretch(1)
@@ -130,31 +135,33 @@ class DepsDialog(QDialog):
         except RuntimeError:
             path = ""
         if not path:
-            self.ff_status.setText(f"<span style='color:{theme.DANGER}'><b>Não encontrado.</b></span> "
-                                   "Sem o ffmpeg o app não consegue abrir nem exportar vídeos.")
-            self.btn_get.setText("  Baixar ffmpeg")
+            self.ff_status.setText(f"<span style='color:{theme.DANGER}'><b>{_('Não encontrado.')}</b></span> "
+                                   + _("Sem o ffmpeg o app não consegue abrir nem exportar vídeos."))
+            self.btn_get.setText("  " + _("Baixar ffmpeg"))
         else:
             info = deps.inspect(path)
             ver = info.label if info else "?"
             newer = deps.parse_version(self.latest)
             is_old = bool(info and info.outdated)
             if info and info.version and newer and info.version < newer:
-                note = f" • versão {self.latest} disponível"
+                note = " • " + _("versão {versao} disponível").format(versao=self.latest)
             else:
                 note = ""
             mine = str(deps.ffmpeg_dir()) in path
             color = theme.ACCENT_HI if is_old else theme.OK
-            state = "desatualizado" if is_old else "ok"
-            self.ff_status.setText(f"<span style='color:{color}'><b>{state.capitalize()}</b></span> — {'versão ' if info and info.version else ''}{ver}{note}"
-                                   f"<br><span style='color:{theme.FAINT}'>{path}"
-                                   f"{' (baixado pelo app)' if mine else ''}</span>")
-            self.btn_get.setText("  Atualizar ffmpeg" if (is_old or note) else "  Baixar de novo")
+            state = _("Desatualizado") if is_old else _("Ok")
+            shown = _("versão {versao}").format(versao=ver) if info and info.version else ver
+            by_app = " " + _("(baixado pelo app)") if mine else ""
+            self.ff_status.setText(f"<span style='color:{color}'><b>{state}</b></span> — {shown}{note}"
+                                   f"<br><span style='color:{theme.FAINT}'>{path}{by_app}</span>")
+            self.btn_get.setText("  " + (_("Atualizar ffmpeg") if (is_old or note) else _("Baixar de novo")))
         if auto:
-            self.ff_source.setText(f"Fonte: {src['name']}. O arquivo é conferido com o SHA-256 publicado e instalado "
-                                   f"só para o seu usuário em {deps.ffmpeg_dir()}.")
+            self.ff_source.setText(_("Fonte: {fonte}. O arquivo é conferido com o SHA-256 publicado e instalado "
+                                     "só para o seu usuário em {pasta}.").format(fonte=_(src["name"]),
+                                                                                 pasta=deps.ffmpeg_dir()))
         else:
-            self.ff_source.setText("O download automático ainda não está disponível neste sistema. Instale o ffmpeg "
-                                   "pelo gerenciador de pacotes e use \"Usar outra pasta…\" se precisar.")
+            self.ff_source.setText(_("O download automático ainda não está disponível neste sistema. Instale o ffmpeg "
+                                     "pelo gerenciador de pacotes e use \"Usar outra pasta…\" se precisar."))
         self.btn_get.setEnabled(auto and not self._busy)
 
     def _on_latest(self, ver: str) -> None:
@@ -177,7 +184,7 @@ class DepsDialog(QDialog):
                 deps.download_ffmpeg(lambda s, d, t: self.bridge.progress.emit(s, d, t), self._cancel)
                 self.bridge.finished.emit(True, "")
             except deps.DownloadCancelled:
-                self.bridge.finished.emit(False, "Download cancelado.")
+                self.bridge.finished.emit(False, _("Download cancelado."))
             except Exception as exc:  # noqa: BLE001
                 self.bridge.finished.emit(False, str(exc))
 
@@ -187,7 +194,8 @@ class DepsDialog(QDialog):
         if total > 0:
             self.bar.setRange(0, 1000)
             self.bar.setValue(int(done / total * 1000))
-            mb = f" {done / 1e6:.0f} de {total / 1e6:.0f} MB" if total > 1 else ""
+            mb = " " + _("{feito} de {total} MB").format(feito=f"{done / 1e6:.0f}", total=f"{total / 1e6:.0f}") \
+                if total > 1 else ""
             self.stage.setText(stage + mb)
         else:
             self.bar.setRange(0, 0)
@@ -204,14 +212,15 @@ class DepsDialog(QDialog):
                 self.settings.remove("ffmpeg_dir")
             media.configure()
             self._refresh()
-            QMessageBox.information(self, "ffmpeg", f"ffmpeg instalado e pronto para uso:\n{media.ffmpeg()}")
+            QMessageBox.information(self, "ffmpeg",
+                                    _("ffmpeg instalado e pronto para uso:\n{caminho}").format(caminho=media.ffmpeg()))
         else:
             self._refresh()
             if msg:
                 QMessageBox.warning(self, "ffmpeg", msg)
 
     def _pick(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Pasta que contém o ffmpeg e o ffprobe", media.tool_dir())
+        d = QFileDialog.getExistingDirectory(self, _("Pasta que contém o ffmpeg e o ffprobe"), media.tool_dir())
         if not d:
             return
         if media.configure(d):
@@ -219,16 +228,16 @@ class DepsDialog(QDialog):
                 self.settings.setValue("ffmpeg_dir", d)
             self._refresh()
         else:
-            QMessageBox.warning(self, "ffmpeg", "Não encontrei o ffmpeg e o ffprobe nessa pasta.")
+            QMessageBox.warning(self, "ffmpeg", _("Não encontrei o ffmpeg e o ffprobe nessa pasta."))
 
     def _pip(self, pkgs: list[str]) -> None:
         self.setCursor(Qt.CursorShape.WaitCursor)
         ok, out = deps.pip_install(pkgs)
         self.unsetCursor()
         if ok:
-            QMessageBox.information(self, "Bibliotecas", "Instaladas. Feche e abra o app de novo.")
+            QMessageBox.information(self, _("Bibliotecas"), _("Instaladas. Feche e abra o app de novo."))
         else:
-            QMessageBox.warning(self, "Bibliotecas", f"Não foi possível instalar.\n\n{out[-1500:]}")
+            QMessageBox.warning(self, _("Bibliotecas"), _("Não foi possível instalar.") + "\n\n" + out[-1500:])
 
     def closeEvent(self, e):
         if self._busy:

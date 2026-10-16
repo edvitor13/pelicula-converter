@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import APP_NAME, __version__
+from .i18n import N_, _
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 MIN_VERSION = (7, 0)
@@ -32,14 +33,14 @@ UA = {"User-Agent": f"{APP_NAME}/{__version__}"}
 
 SOURCES = {
     "win32": dict(
-        name="gyan.dev (build oficial para Windows indicado pelo ffmpeg.org)",
+        name=N_("gyan.dev (build oficial para Windows indicado pelo ffmpeg.org)"),
         version_url="https://www.gyan.dev/ffmpeg/builds/release-version",
         url="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
         sha_url="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256",
         kind="zip",
     ),
     "linux": dict(
-        name="BtbN FFmpeg-Builds (GitHub, build estático)",
+        name=N_("BtbN FFmpeg-Builds (GitHub, build estático)"),
         version_url="",
         url="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz",
         sha_url="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/checksums.sha256",
@@ -102,8 +103,8 @@ class FFmpegInfo:
         if self.version:
             return ".".join(str(n) for n in self.version)
         if self.build_date:
-            return f"build de desenvolvimento de {self.build_date.strftime('%d/%m/%Y')}"
-        return self.raw or "desconhecida"
+            return _("build de desenvolvimento de {data}").format(data=self.build_date.strftime("%d/%m/%Y"))
+        return self.raw or _("desconhecida")
 
     @property
     def outdated(self) -> bool:
@@ -158,7 +159,7 @@ def python_packages() -> list[tuple[str, str]]:
             m = __import__(mod)
             out.append((mod, getattr(m, "__version__", "?")))
         except ImportError:
-            out.append((mod, "não instalado"))
+            out.append((mod, _("não instalado")))
     return out
 
 
@@ -171,7 +172,7 @@ def missing_python_modules() -> list[str]:
 def pip_install(packages: list[str]) -> tuple[bool, str]:
     """Instala pacotes no Python que está rodando o app (só quando roda pelo código-fonte)."""
     if getattr(sys, "frozen", False):
-        return False, "O executável já traz as bibliotecas."
+        return False, _("O executável já traz as bibliotecas.")
     res = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", *packages], capture_output=True,
                          creationflags=NO_WINDOW)
     return res.returncode == 0, (res.stdout + res.stderr).decode("utf-8", "replace")[-3000:]
@@ -186,7 +187,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
     """Baixa, confere o SHA-256 e instala o ffmpeg na pasta do app. Devolve a pasta com os executáveis."""
     key = platform_key()
     if not platform_supported() or key not in SOURCES:
-        raise RuntimeError("O download automático do ffmpeg ainda não está disponível neste sistema.")
+        raise RuntimeError(_("O download automático do ffmpeg ainda não está disponível neste sistema."))
     src = SOURCES[key]
     cancel = cancel or threading.Event()
 
@@ -194,7 +195,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
         if progress:
             progress(stage, done, total)
 
-    report("Conferindo a assinatura publicada…")
+    report(_("Conferindo a assinatura publicada…"))
     req = urllib.request.Request(src["sha_url"], headers=UA)
     with urllib.request.urlopen(req, timeout=30) as r:
         sha_txt = r.read().decode("utf-8", "replace")
@@ -209,7 +210,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
         m = re.search(r"[0-9a-fA-F]{64}", sha_txt)
         expected = m.group(0).lower() if m else None
     if not expected:
-        raise RuntimeError("Não foi possível obter o SHA-256 oficial do arquivo.")
+        raise RuntimeError(_("Não foi possível obter o SHA-256 oficial do arquivo."))
 
     tmp = Path(tempfile.mkdtemp(prefix="pelicula_ffmpeg_"))
     try:
@@ -228,17 +229,17 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
                 fh.write(chunk)
                 h.update(chunk)
                 done += len(chunk)
-                report("Baixando o ffmpeg…", done, total)
+                report(_("Baixando o ffmpeg…"), done, total)
         if h.hexdigest().lower() != expected:
-            raise RuntimeError("O arquivo baixado não confere com o SHA-256 oficial. Nada foi instalado.")
-        report("Extraindo…")
+            raise RuntimeError(_("O arquivo baixado não confere com o SHA-256 oficial. Nada foi instalado."))
+        report(_("Extraindo…"))
         out = tmp / "x"
         out.mkdir()
         if src["kind"] == "zip":
             with zipfile.ZipFile(archive) as z:
                 for member in z.namelist():
                     if not _safe_member(member):
-                        raise RuntimeError(f"Caminho suspeito dentro do arquivo: {member}")
+                        raise RuntimeError(_("Caminho suspeito dentro do arquivo: {caminho}").format(caminho=member))
                 z.extractall(out)
         else:
             with tarfile.open(archive, "r:xz") as t:
@@ -248,7 +249,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
         for name in ("ffmpeg", "ffprobe"):
             hits = list(out.rglob(f"bin/{name}{exe}")) or list(out.rglob(f"{name}{exe}"))
             if not hits:
-                raise RuntimeError(f"{name}{exe} não foi encontrado no pacote baixado.")
+                raise RuntimeError(_("{arquivo} não foi encontrado no pacote baixado.").format(arquivo=f"{name}{exe}"))
             found[name] = hits[0]
         dest = ffmpeg_dir()
         staging = dest.parent / "bin.novo"
@@ -265,7 +266,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
         staging.rename(dest)
         (dest.parent / "ORIGEM.txt").write_text(
             f"Baixado de: {src['url']}\nFonte: {src['name']}\nSHA-256: {expected}\n", encoding="utf-8")
-        report("Pronto.", 1, 1)
+        report(_("Pronto."), 1, 1)
         return dest
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
