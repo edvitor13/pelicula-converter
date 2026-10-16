@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pelicula-converter"
+version = "1.0.0"
+description = "Simula película cinematográfica em vídeos digitais: cor de negativos e cópias, grão, halação, bitolas de 8 mm a IMAX, defeitos e scan da película, tudo processado na GPU."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Vitor Gabriel" }]
+keywords = ["película", "film emulation", "grain", "halation", "LUT", "ffmpeg", "OpenGL", "PySide6", "color grading"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Portuguese (Brazilian)",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
+dependencies = [
+    "PySide6>=6.6",
+    "moderngl>=5.10",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyinstaller>=6.10",
+]
+
+[project.gui-scripts]
+pelicula-converter = "pelicula.app:main"
+
+[tool.setuptools.packages.find]
+include = ["pelicula", "pelicula.*"]
+
+# A configuração do pytest fica em pytest.ini.

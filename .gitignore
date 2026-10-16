@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------- ambiente Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------- build (PyInstaller)
+build/
+dist/
+*.spec
+!PeliculaConverter.spec
+*.zip
+
+# ---------------------------------------------------------------- testes e ferramentas
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------- editores e sistema
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------------------------------------------------------------- mídia local
+# Vídeos, áudios e quadros de teste nunca entram no repositório.
+/midia/
+/media/
+/amostras/
+/samples/
+/saida/
+/exportados/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.mxf
+*.webm
+*.m4v
+*.mts
+*.m2ts
+*.wmv
+*.mpg
+*.mpeg
+*.nev
+*.r3d
+*.braw
+*.dng
+*.dpx
+*.exr
+*.wav
+*.mp3
+*.aac
+*.flac
+
+# ---------------------------------------------------------------- LUTs
+# LUTs de terceiros (Adobe, Blackmagic etc.) são proprietários e nunca são
+# redistribuídos. Arquivos .cube de teste próprios podem ficar em tests/.
+*.cube
+!tests/**/*.cube

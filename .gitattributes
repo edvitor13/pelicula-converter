@@ -1,0 +1,13 @@
+# Texto com quebra de linha normalizada no repositório
+* text=auto
+
+# Scripts do Linux precisam de LF; os do Windows, de CRLF
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.pyw  text eol=lf
+*.py   text eol=lf
+
+# Binários
+*.png  binary
+*.ico  binary
+*.jpg  binary
