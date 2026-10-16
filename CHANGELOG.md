@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.2.1] - 2026-10-16
+
 ### Corrigido
 - **Atualização automática no Windows**: o app baixava e conferia a versão nova, fechava, mas a
   instalação nunca começava e o app não reabria. O script de instalação era entregue a um
@@ -15,11 +21,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   invisível (`CREATE_NO_WINDOW`) e continua depois que o app fecha. O script também grava
   `atualizar.log` e o `msiexec` grava `instalar.log` na pasta do download, e caminhos com apóstrofo
   são escapados. Quem está na 1.1.0 ou 1.2.0 precisa instalar a próxima versão manualmente uma
-  vez, porque o atualizador dessas versões é o que tem o defeito.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
+  vez, porque o atualizador dessas versões é o que tem o defeito. (#26)
 
 ## [1.2.0] - 2026-10-16
 

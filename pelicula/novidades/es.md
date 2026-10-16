@@ -1,3 +1,10 @@
+## Versión 1.2.1 — 16 de octubre de 2026
+
+**La actualización automática vuelve a funcionar en Windows.**
+
+- 🔄 **Actualizar con un clic, de verdad.** Antes, la aplicación descargaba la versión nueva y se cerraba, pero no la instalaba. Ahora la instala y se vuelve a abrir sola, ya en la versión nueva.
+- ℹ️ **¿Vienes de la 1.1.0 o la 1.2.0?** Esas versiones tienen el error, así que esta actualización se instala a mano una vez (descarga el instalador en el sitio o en GitHub). Desde entonces, todo ocurre solo.
+
 ## Versión 1.2.0 — 16 de octubre de 2026
 
 **Mira cada detalle de la película.**

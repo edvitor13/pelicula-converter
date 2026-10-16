@@ -1,3 +1,10 @@
+## Version 1.2.1 — October 16, 2026
+
+**Automatic updates work again on Windows.**
+
+- 🔄 **One-click updates, for real.** Before, the app downloaded the new version and closed, but did not install it. Now it installs and reopens by itself, already on the new version.
+- ℹ️ **Coming from 1.1.0 or 1.2.0?** Those versions have the bug, so this update must be installed by hand once (download the installer from the website or GitHub). From then on, everything happens on its own.
+
 ## Version 1.2.0 — October 16, 2026
 
 **See every detail of the film look.**
