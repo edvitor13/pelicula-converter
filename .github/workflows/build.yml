@@ -77,7 +77,30 @@ jobs:
 
       - name: Instalar o ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: |
+          # O feed do Chocolatey às vezes recusa conexões dos runners (erro 499). Tenta 3 vezes e, se não
+          # der, baixa o mesmo build que o app usa (gyan.dev), conferindo o SHA-256 publicado (deps.py).
+          for ($i = 1; $i -le 3; $i++) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Chocolatey falhou (tentativa $i de 3)"
+            Start-Sleep -Seconds (20 * $i)
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "ffmpeg-gyan"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          $zip = Join-Path $dir "ffmpeg.zip"
+          $sha = Join-Path $dir "ffmpeg.zip.sha256"
+          Invoke-WebRequest $url -OutFile $zip
+          Invoke-WebRequest "$url.sha256" -OutFile $sha
+          $esperado = (Get-Content $sha -Raw).Trim().Split()[0].ToLower()
+          $real = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($esperado -ne $real) { throw "SHA-256 do ffmpeg não confere: $real (esperado $esperado)" }
+          Expand-Archive $zip -DestinationPath $dir
+          $bin = (Get-ChildItem $dir -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          Add-Content $env:GITHUB_PATH $bin
+          Write-Host "ffmpeg do gyan.dev (SHA-256 conferido) em $bin"
 
       - name: Conferir o ffmpeg
         shell: bash
