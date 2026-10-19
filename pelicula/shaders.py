@@ -134,6 +134,7 @@ uniform vec3 u_shadow_tint;
 uniform vec3 u_high_tint;
 uniform float u_balance;
 uniform vec3 u_hue;
+uniform vec2 u_skin;  // pele: giro de matiz (rad), luz (-1..1)
 uniform int u_bw;
 uniform vec3 u_bw_w;
 uniform float u_tone_amt;
@@ -167,7 +168,7 @@ float hueWeight(float h, float h0) {
     return smoothstep(0.8, 0.0, d);
 }
 vec3 hueAdjust(vec3 c) {
-    if (u_hue == vec3(0.0)) return c;
+    if (u_hue == vec3(0.0) && u_skin == vec2(0.0)) return c;
     float Y = dot(c, W709);
     vec2 cc = vec2((c.b - Y) / 1.8556, (c.r - Y) / 1.5748);
     if (length(cc) < 1e-5) return c;
@@ -175,10 +176,11 @@ vec3 hueAdjust(vec3 c) {
     float wg = hueWeight(h, hueAng(vec3(0.25, 0.6, 0.2)));
     float wb = hueWeight(h, hueAng(vec3(0.2, 0.35, 0.8)));
     float ws = hueWeight(h, hueAng(vec3(0.8, 0.55, 0.45)));
-    float rot = u_hue.x * wg + u_hue.y * wb;
+    float rot = u_hue.x * wg + u_hue.y * wb + u_skin.x * ws;
     float cs = cos(rot), sn = sin(rot);
     cc = vec2(cs * cc.x - sn * cc.y, sn * cc.x + cs * cc.y);
     cc *= max(0.0, 1.0 + u_hue.z * ws);
+    Y *= 1.0 + 0.25 * u_skin.y * ws;  // luz da pele: até ±25% na luminância dos tons de pele
     float r = Y + 1.5748 * cc.y;
     float b = Y + 1.8556 * cc.x;
     float g = (Y - 0.2126 * r - 0.0722 * b) / 0.7152;
@@ -247,7 +249,84 @@ vec3 sampleLut(vec3 c) {
     return texture(t_lut, x).rgb;
 }
 
+// ---------------------------------------------------------------- laboratório (negativo → cópia)
+// Modelo de densidade (veja look.py): matriz de sensibilidade → curva do negativo → luz da
+// copiadora − densidade → curva da cópia → diafonia dos corantes (+ chave/prata) → 10^(−D/2,6).
+// Caminho A = negativo + cópia escolhidos; caminho B = processo Technicolor (misturado por u_lab_mix).
+uniform int u_lab_on;
+uniform int u_lab_b_on;
+uniform float u_lab_mix;
+uniform mat3 u_la_sens;
+uniform vec3 u_la_ng;
+uniform vec3 u_la_nt;
+uniform vec3 u_la_ns;
+uniform float u_la_nw;
+uniform mat3 u_la_ii;
+uniform vec3 u_la_pg;
+uniform vec3 u_la_pt;
+uniform vec3 u_la_ps;
+uniform float u_la_pw;
+uniform mat3 u_la_dye;
+uniform vec3 u_la_off;
+uniform vec3 u_la_key;
+uniform vec3 u_la_mid;
+uniform int u_la_scan;
+uniform mat3 u_lb_sens;
+uniform vec3 u_lb_ng;
+uniform vec3 u_lb_nt;
+uniform vec3 u_lb_ns;
+uniform float u_lb_nw;
+uniform mat3 u_lb_ii;
+uniform vec3 u_lb_pg;
+uniform vec3 u_lb_pt;
+uniform vec3 u_lb_ps;
+uniform float u_lb_pw;
+uniform mat3 u_lb_dye;
+uniform vec3 u_lb_off;
+uniform vec3 u_lb_key;
+uniform vec3 u_lb_mid;
+uniform int u_lb_scan;
+
+// softplus(z) = ln(1 + e^z), estável para |z| grande.
+float labSoftplus(float z) { return max(z, 0.0) + log(1.0 + exp(-abs(z))); }
+
+// Curva característica: densidade acima da base em função do log10 da exposição.
+// D(x) = gama · w · [softplus((x − pé)/w) − softplus((x − ombro)/w)] (sempre crescente; satura em gama·(ombro − pé)).
+vec3 labCurve(vec3 x, vec3 g, vec3 xt, vec3 xs, float w) {
+    vec3 a = vec3(labSoftplus((x.r - xt.r) / w), labSoftplus((x.g - xt.g) / w), labSoftplus((x.b - xt.b) / w));
+    vec3 b = vec3(labSoftplus((x.r - xs.r) / w), labSoftplus((x.g - xs.g) / w), labSoftplus((x.b - xs.b) / w));
+    return g * w * (a - b);
+}
+
+// Um caminho completo. lin: luz linear Rec.709 (0,18 = cinza médio). Devolve o valor de exibição.
+vec3 labPath(vec3 lin, mat3 sens, vec3 ng, vec3 nt, vec3 ns, float nw, mat3 ii, vec3 pg, vec3 pt, vec3 ps,
+             float pw, mat3 dye, vec3 off, vec3 key, vec3 nmid, int scan) {
+    vec3 e = max(sens * lin, vec3(1e-7));
+    vec3 le = vec3(log10f(e.r / 0.18), log10f(e.g / 0.18), log10f(e.b / 0.18));  // log10 relativo ao cinza
+    vec3 dn = ii * labCurve(le, ng, nt, ns, nw);  // densidade do negativo (com o efeito entre camadas)
+    if (scan == 1) {
+        // Sem cópia: inverte o negativo com o gama nominal (guardado em pg; 0,30103 = log10(2), um stop)
+        // e mostra com a curva neutra.
+        vec3 st = (dn - nmid) / (pg * 0.30103) - off / 0.30103;
+        return stopsToDisp(clamp(st, -12.0, 12.0));
+    }
+    vec3 dl = labCurve(off - dn, pg, pt, ps, pw);  // densidade de cada camada de corante da cópia
+    vec3 d = dye * dl + vec3(dot(key, dl));         // diafonia + chave preta / prata retida
+    return exp2(-d * (3.32192809 / 2.6));           // 10^(−d/2,6): projeção com gama 2,6
+}
+
+vec3 labPipe(vec3 lin) {
+    vec3 a = labPath(lin, u_la_sens, u_la_ng, u_la_nt, u_la_ns, u_la_nw, u_la_ii, u_la_pg, u_la_pt, u_la_ps,
+                     u_la_pw, u_la_dye, u_la_off, u_la_key, u_la_mid, u_la_scan);
+    if (u_lab_b_on == 0) return a;
+    vec3 b = labPath(lin, u_lb_sens, u_lb_ng, u_lb_nt, u_lb_ns, u_lb_nw, u_lb_ii, u_lb_pg, u_lb_pt, u_lb_ps,
+                     u_lb_pw, u_lb_dye, u_lb_off, u_lb_key, u_lb_mid, u_lb_scan);
+    return mix(a, b, u_lab_mix);
+}
+
 vec3 colorPipe(vec3 lin) {
+    // Laboratório primeiro: o resultado volta para luz linear e o resto (look, cópia, LUT) vem por cima.
+    if (u_lab_on == 1) lin = stopsToLin(dispToStops(labPipe(lin)));
     vec3 neutral = stopsToDisp(linToStops(lin));
     vec3 y = neutral;
     if (u_lut_on == 1 && u_lut_pos == 1) {

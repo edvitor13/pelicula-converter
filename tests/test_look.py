@@ -35,7 +35,7 @@ ALWAYS = ["u_res", "u_scale", "u_input", "u_gamut", "u_shift", "u_rot", "u_zoom"
           "u_tone_amt", "u_tone_sh", "u_tone_hi", "u_age", "u_print_on", "u_lut_on", "u_grain_on", "u_dust",
           "u_dust_size", "u_dust_type", "u_scratch", "u_scratch_w", "u_hair", "u_stain", "u_cue", "u_splice",
           "u_dmg_on", "u_frame", "u_seed_d", "u_scan_on", "u_text_aspect", "u_frame_on", "u_aspect_t", "u_corner",
-          "u_edge_soft", "u_edge_rough", "u_bar_color", "u_mix", "u_dither"]
+          "u_edge_soft", "u_edge_rough", "u_bar_color", "u_mix", "u_dither", "u_lab_on", "u_skin"]
 
 
 def plan(v=None, w=1920, h=1080, frame=0, fps=24.0, lut=None, dither=True, **over):
@@ -120,6 +120,9 @@ def test_tables_cover_every_choice():
     assert set(ch["scan_formato"]) - {"bitola"} <= set(look.SCAN_FORMATS)
     assert set(look.GAUGE_SCAN.values()) <= set(look.SCAN_FORMATS)
     assert set(ch["scan_texto"]) - {"auto", "nenhum"} == set(look.EDGE_TEXTS)
+    assert set(ch["lab_negativo"]) == set(look.NEGATIVES)
+    assert set(ch["lab_copia"]) == set(look.LAB_PRINTS)
+    assert set(ch["lab_processo"]) == set(look.LAB_PROCESSES)
     for k in ("bitola", "proporcao"):
         assert ch[k]
     for prop in ch["proporcao"]:

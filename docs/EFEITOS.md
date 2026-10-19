@@ -26,6 +26,7 @@ título restaura a seção inteira e o dado (*Sortear*) troca as sementes aleat�
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
       → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
       → maciez / nitidez → névoa → bloom → halação → vazamento de luz
+      → [laboratório: negativo → copiadora → cópia]
       → cor da película (ou LUT "no lugar do look") → cópia → envelhecimento → LUT "depois"
       → grão → defeitos → força geral do efeito → moldura → pontilhado → saída
 ```
@@ -97,10 +98,72 @@ Perfis disponíveis:
 
 ---
 
+## Laboratório (negativo e cópia)
+
+*Simula a película de verdade: negativo, revelação, luzes da copiadora e cópia.* Chave: liga o
+modelo de densidade. Desligada (o padrão), nada muda.
+
+Enquanto a seção **Cor da película** desenha um look com curvas e tons, o **Laboratório** refaz o
+caminho físico que a imagem percorria num laboratório de cinema, em **densidade** (o quanto cada
+camada de corante escurece o filme):
+
+```
+cena → cada camada do negativo vê uma faixa de cor (sensibilidade)
+     → curva característica do negativo (pé, trecho reto com gama ~0,6 e ombro) → densidade
+     → copiadora: a luz atravessa o negativo; os pontos de vermelho, verde e azul decidem a exposição
+     → curva característica da cópia (gama ~3) → corantes ciano, magenta e amarelo
+     → absorções indesejadas dos corantes (diafonia) → projeção (gama 2,6) → tela
+```
+
+O cinza médio é **calibrado** para sair neutro (0,45) em qualquer combinação, como o "25-25-25"
+de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois.
+Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
+trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
+baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
+comportamento de cada um, sem dados nem curvas dos fabricantes.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
+| **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
+| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
+| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
+| **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
+| **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
+| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (12 pontos = 0,3 log E ≈ 1 stop). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). |
+| **Luz verde da copiadora** | −12 a +12 pt | 0 | Mais verde deixa a cópia mais magenta. |
+| **Luz azul da copiadora** | −12 a +12 pt | 0 | Mais azul deixa a cópia mais amarela (quente). |
+| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
+| Mistura entre camadas (**avançado**) | 0,00–2,00× | 1,00× | Multiplica as absorções indesejadas dos corantes da cópia: acima de 1 a cor fica mais suja e densa; abaixo, mais pura. |
+
+**Processos.**
+
+- **Technicolor 3 tiras** (1932–1955, *O Mágico de Oz*, *E o Vento Levou*): a câmera separava a
+  cena em três negativos preto e branco por filtros estreitos; de cada um saía uma matriz que
+  transferia um corante puro (ciano, magenta, amarelo) para a cópia, por cima de uma imagem preta
+  de baixo contraste (a **chave**). O resultado são cores densas e saturadas, pretos profundos e
+  pouca latitude nas altas luzes. Aqui: registros de pouca latitude, separação estreita (efeito
+  entre camadas forte), corantes puros e chave preta.
+- **Technicolor 2 cores** (anos 1920): só dois registros, vermelho-laranja e verde-azul, impressos
+  em dois corantes. Pele e vermelhos ficam bons; azuis e verdes viram tons de verde-azulado e
+  cinza-ciano. Com duas cores para três canais, o cinza pode guardar um tom muito leve.
+- **Retenção de prata** (*bleach bypass*, *O Resgate do Soldado Ryan*): a prata não é retirada
+  da cópia e soma uma imagem preto e branca aos corantes: menos cor, mais contraste, pretos
+  profundos.
+
+Tudo isso fica dentro da parte de cor do app, então entra nos **LUTs exportados** (menu de
+presets → *Exportar a cor como LUT*) e no plugin do DaVinci Resolve. Para o resultado mais fiel
+use o Laboratório com **Cor da película** desligada e **Cópia (print)** em *Nenhuma* (é assim
+nos presets do grupo *Laboratório*); se ligar a *Cor da película*, ela atua por cima do
+resultado do laboratório.
+
+---
+
 ## Cor da película
 
 *Curva, cor e tons da emulsão.* Chave: liga a emulação de cor. (No esquema começa desligada; quase
-todos os presets a ligam — as exceções são *Só textura* e *Original*.)
+todos os presets a ligam — as exceções são *Só textura*, *Original* e os do grupo *Laboratório*,
+que usam o modelo de densidade no lugar.)
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
@@ -124,6 +187,8 @@ todos os presets a ligam — as exceções são *Só textura* e *Original*.)
 | Matiz dos verdes (**avançado**) | −40° a +40° | 0° | Gira só os verdes (folhagem mais amarela ou mais azulada). |
 | Matiz dos azuis (**avançado**) | −40° a +40° | 0° | Gira só os azuis (céu mais ciano ou mais violeta). |
 | Saturação da pele (**avançado**) | −1,00 a +1,00 | 0,00 | Satura ou dessatura só os tons de pele. |
+| Matiz da pele (**avançado**) | −30° a +30° | 0° | Gira só os tons de pele: negativo puxa para o vermelho, positivo para o amarelo. |
+| Luz da pele (**avançado**) | −1,00 a +1,00 | 0,00 | Muda só a luminância dos tons de pele (até ±25%): negativo deixa a pele mais densa e escura, positivo clareia. |
 | **Preto e branco** | liga/desliga | desligado | Converte para P&B antes da curva, usando o filtro abaixo. |
 | **Filtro do P&B** | Pancromático (neutro), Vermelho (céu escuro), Laranja, Amarelo, Verde, Azul (ortocromático) | Pancromático | Peso de cada cor na conversão, como um filtro na frente da lente. Vermelho escurece céus azuis; verde clareia folhagem; azul imita filmes ortocromáticos antigos. |
 | **Viragem do P&B** | Nenhuma, Sépia, Selênio, Cianótipo, Ouro | Nenhuma | Banho químico que tinge o P&B (só vale com *Preto e branco* ligado). |
@@ -336,6 +401,7 @@ tremor do projetor move a tira inteira.
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
-tonalidade, cor da película, cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
+tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
+cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
 dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura e scan.

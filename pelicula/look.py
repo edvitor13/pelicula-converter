@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -179,6 +180,272 @@ def _hsv_tint(hue_deg: float, amount: float) -> tuple:
 
 def _softness_p(v: float) -> float:
     return 4.0 + (1.15 - 4.0) * float(v)
+
+
+# ================================================================== laboratório (densidade)
+# Modelo de densidade de um laboratório de cinema, com valores aproximados e artísticos (nada de
+# dados ou curvas dos fabricantes):
+#
+#   cena linear ──matriz de sensibilidade──► exposição de cada camada (R, G, B)
+#     log10(exposição / 0,18) ──curva característica do negativo──► densidade do negativo
+#     luz da copiadora − densidade do negativo = log da exposição da cópia
+#     ──curva característica da cópia──► densidade de cada camada de corante (ciano, magenta, amarelo)
+#     matriz de diafonia dos corantes (+ chave/prata) ──► densidade vista em R, G, B
+#     10^(−densidade/2,6) ──► valor de exibição (projeção com gama 2,6; base limpa = 1,0)
+#
+# Curva característica (densidade × log da exposição): duas "softplus" com a mesma largura, que dão
+# pé (toe) e ombro suaves e um trecho reto com inclinação gama entre eles:
+#   D(x) = gama · w · [softplus((x − pé)/w) − softplus((x − ombro)/w)],  softplus(z) = ln(1 + e^z)
+# A densidade é relativa à base (0 = base + véu), nunca diminui e satura em gama·(ombro − pé).
+# Com a mesma largura nas duas pontas a curva é sempre crescente.
+#
+# A luz da copiadora de cada camada é calibrada (em Python, guardada em cache) para que o cinza
+# médio (luz 0,18) saia neutro em 0,45 — o mesmo cinza da curva neutra do app. As luzes que o
+# usuário escolhe são somadas depois: 1 ponto = 0,025 log E = 1/12 de stop.
+
+LAB_VIEW_GAMMA = 2.6          # projeção de cinema (DCI): densidade → exibição
+LAB_MID_CODE = 0.45           # cinza médio na saída (igual a D_MID)
+LAB_TARGET_D = -LAB_VIEW_GAMMA * math.log10(LAB_MID_CODE)  # densidade do cinza médio na cópia (≈ 0,90)
+LAB_POINT = 0.025             # log E por ponto da copiadora
+LOG10_2 = math.log10(2.0)     # 1 stop em log10
+
+# Matrizes de sensibilidade (linhas = camadas R, G, B do filme; colunas = luz Rec.709 linear): a
+# sobreposição das faixas de cor que cada camada enxerga. Só valores positivos e cada linha soma 1,
+# então o cinza continua cinza e luzes estouradas nunca dão exposição negativa.
+_SENS_V3 = ((0.92, 0.07, 0.01), (0.04, 0.92, 0.04), (0.01, 0.07, 0.92))
+_SENS_V3T = ((0.91, 0.08, 0.01), (0.05, 0.91, 0.04), (0.01, 0.08, 0.91))
+_SENS_ETERNA = ((0.88, 0.10, 0.02), (0.05, 0.88, 0.07), (0.02, 0.11, 0.87))
+_SENS_VIVID = ((0.94, 0.05, 0.01), (0.03, 0.94, 0.03), (0.01, 0.05, 0.94))
+_SENS_ECN2 = ((0.84, 0.13, 0.03), (0.07, 0.85, 0.08), (0.03, 0.13, 0.84))
+_SENS_PAN = ((0.25, 0.65, 0.10),) * 3  # P&B pancromático: as três "camadas" veem a mesma coisa
+
+# Negativos: gama, pé e ombro (log10 relativo ao cinza médio; 0,301 = 1 stop), largura das curvas e
+# efeito entre camadas ("interimage", acopladores DIR): na densidade, cada camada se afasta da média
+# das três (dn' = dn + k·(dn − média)), o que satura sem mexer no cinza. Filmes antigos têm pouco.
+NEGATIVES: dict[str, dict[str, Any]] = {
+    "vision3_50d": dict(sens=_SENS_V3, gamma=(0.62, 0.62, 0.63), toe=(-1.50, -1.50, -1.45),
+                        shoulder=(2.05, 2.05, 2.00), width=0.22, interimage=0.42),
+    "vision3_250d": dict(sens=_SENS_V3, gamma=(0.60, 0.60, 0.61), toe=(-1.60, -1.60, -1.55),
+                         shoulder=(2.00, 2.00, 1.95), width=0.24, interimage=0.38),
+    "vision3_200t": dict(sens=_SENS_V3T, gamma=(0.60, 0.61, 0.59), toe=(-1.60, -1.62, -1.58),
+                         shoulder=(2.00, 2.00, 1.95), width=0.24, interimage=0.37),
+    "vision3_500t": dict(sens=_SENS_V3T, gamma=(0.57, 0.58, 0.58), toe=(-1.72, -1.72, -1.66),
+                         shoulder=(1.90, 1.90, 1.85), width=0.28, interimage=0.36),
+    "eterna_250d": dict(sens=_SENS_ETERNA, gamma=(0.55, 0.56, 0.55), toe=(-1.62, -1.65, -1.62),
+                        shoulder=(2.10, 2.10, 2.05), width=0.30, interimage=0.28),
+    "eterna_vivid": dict(sens=_SENS_VIVID, gamma=(0.64, 0.65, 0.64), toe=(-1.50, -1.50, -1.48),
+                         shoulder=(1.90, 1.90, 1.85), width=0.25, interimage=0.56),
+    "exr_5248": dict(sens=_SENS_V3, gamma=(0.64, 0.65, 0.66), toe=(-1.40, -1.42, -1.40),
+                     shoulder=(1.75, 1.75, 1.70), width=0.24, interimage=0.38),
+    "ecn2_5247": dict(sens=_SENS_ECN2, gamma=(0.67, 0.65, 0.62), toe=(-1.30, -1.32, -1.28),
+                      shoulder=(1.60, 1.60, 1.55), width=0.22, interimage=0.25),
+    "double_x": dict(sens=_SENS_PAN, gamma=(0.65, 0.65, 0.65), toe=(-1.40, -1.40, -1.40),
+                     shoulder=(1.80, 1.80, 1.80), width=0.25, interimage=0.0),
+}
+
+# Cópias: gama, densidade máxima (acima da base) e largura (o pé da cópia é a rolagem das altas luzes).
+# A matriz de diafonia tem linhas = densidade vista em R, G, B e colunas = camadas ciano, magenta, amarelo.
+LAB_PRINTS: dict[str, dict[str, Any] | None] = {
+    "2383": dict(gamma=(3.00, 2.95, 2.85), dmax=(4.0, 4.0, 3.95), width=0.22,
+                 dye=((1.00, 0.08, 0.02), (0.06, 1.00, 0.08), (0.02, 0.14, 1.00))),
+    "2393": dict(gamma=(3.20, 3.15, 3.05), dmax=(4.2, 4.2, 4.15), width=0.20,
+                 dye=((1.00, 0.07, 0.02), (0.05, 1.00, 0.07), (0.02, 0.12, 1.00))),
+    "3513": dict(gamma=(2.95, 2.95, 2.92), dmax=(4.0, 4.0, 4.0), width=0.23,
+                 dye=((1.00, 0.07, 0.03), (0.08, 1.00, 0.06), (0.03, 0.12, 1.00))),
+    "2302": dict(gamma=(2.70, 2.70, 2.70), dmax=(3.8, 3.8, 3.8), width=0.22,
+                 dye=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))),
+    "nenhuma": None,
+}
+
+# Processos especiais (caminho B). Os registros da câmera Technicolor são negativos preto e branco
+# de pouca latitude; a matriz de separação (filtros estreitos) satura mais que um filme de três camadas.
+_TECH_RECORD = dict(gamma=(0.68, 0.68, 0.68), toe=(-1.20, -1.20, -1.20), shoulder=(1.45, 1.45, 1.45), width=0.20)
+LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
+    "normal": None,
+    "prata": None,  # caminho A + densidade de prata retida (média das camadas), sem caminho B
+    # Filtros de separação estreitos: pouca sobreposição e "interimage" alto (o efeito de máscara das matrizes).
+    "tech3": dict(sens=((0.97, 0.03, 0.0), (0.02, 0.96, 0.02), (0.0, 0.03, 0.97)), **_TECH_RECORD, interimage=0.65,
+                  print=dict(gamma=(2.40, 2.40, 2.40), dmax=(3.6, 3.6, 3.6), width=0.15,
+                             dye=((1.00, 0.05, 0.01), (0.04, 1.00, 0.05), (0.01, 0.08, 1.00))),
+                  key=(0.0, 1.0, 0.0)),  # a chave preta sai do registro verde (camada magenta)
+    # Duas cores: registro vermelho-laranja → corante verde-azulado (absorve vermelho); registro
+    # verde-azul → corante vermelho-laranja (absorve verde e azul). A terceira camada não existe.
+    "tech2": dict(sens=((0.78, 0.22, 0.0), (0.0, 0.55, 0.45), (0.0, 0.55, 0.45)), **_TECH_RECORD, interimage=0.0,
+                  print=dict(gamma=(2.30, 2.30, 2.30), dmax=(3.4, 3.4, 3.4), width=0.16,
+                             dye=((1.00, 0.10, 0.0), (0.25, 0.85, 0.0), (0.12, 1.00, 0.0))),
+                  key=(0.0, 0.0, 0.0)),
+}
+
+
+def _softplus(z):
+    z = np.asarray(z, dtype=np.float64)
+    return np.maximum(z, 0.0) + np.log1p(np.exp(-np.abs(z)))
+
+
+def lab_curve(x, gamma, toe, shoulder, width):
+    """Curva característica (densidade acima da base) — a mesma `labCurve` do shader."""
+    x = np.asarray(x, dtype=np.float64)
+    return np.asarray(gamma) * width * (_softplus((x - np.asarray(toe)) / width)
+                                        - _softplus((x - np.asarray(shoulder)) / width))
+
+
+def _lab_curve_slope(x, gamma, toe, shoulder, width):
+    x = np.asarray(x, dtype=np.float64)
+    a = 1.0 / (1.0 + np.exp(-(x - np.asarray(toe)) / width))
+    b = 1.0 / (1.0 + np.exp(-(x - np.asarray(shoulder)) / width))
+    return np.asarray(gamma) * (a - b)
+
+
+def _stops_to_disp(t) -> np.ndarray:
+    """Curva neutra de exibição (stopsToDisp do shader) em numpy."""
+    t = np.asarray(t, dtype=np.float64)
+    r = np.where(t >= 0, 1.0 - D_MID, D_MID)
+    u = t * D_SLOPE / r
+    return D_MID + r * u / (1.0 + np.abs(u) ** D_P) ** (1.0 / D_P)
+
+
+def _t3(a) -> tuple:
+    return tuple(float(x) for x in np.asarray(a, dtype=np.float64).reshape(3))
+
+
+def _t3x3(m) -> tuple:
+    return tuple(tuple(float(x) for x in row) for row in np.asarray(m, dtype=np.float64).reshape(3, 3))
+
+
+@dataclass(frozen=True)
+class LabPath:
+    """Um caminho negativo → cópia já calibrado (vira os uniforms `u_la_*` ou `u_lb_*`)."""
+
+    sens: tuple       # 3x3 (linhas = camadas)
+    ng: tuple         # gama do negativo por camada
+    nt: tuple         # pé do negativo (log10 relativo ao cinza)
+    ns: tuple         # ombro do negativo
+    nw: float         # largura das curvas do negativo
+    ii: tuple         # 3x3 efeito entre camadas, aplicado à densidade do negativo (linhas somam 1)
+    pg: tuple         # gama da cópia (sem cópia: gama nominal do negativo, para a inversão)
+    pt: tuple         # pé da cópia (0: a calibração escolhe a posição)
+    ps: tuple         # ombro da cópia (pé + dmax/gama)
+    pw: float         # largura das curvas da cópia
+    dye: tuple        # 3x3 diafonia (linhas = R, G, B; colunas = camadas)
+    key: tuple        # pesos da chave/prata (densidade somada igual nos três canais)
+    mid: tuple        # densidade do negativo no cinza médio (para a inversão do scan)
+    off: tuple        # luz da copiadora calibrada (log E), antes das luzes do usuário
+    scan: bool        # sem cópia: o negativo é invertido digitalmente
+
+    def eval(self, lin, lights=(0.0, 0.0, 0.0)) -> np.ndarray:
+        """Mesmo cálculo do `labPath` do shader, em numpy (lin: (..., 3) luz linear Rec.709)."""
+        lin = np.asarray(lin, dtype=np.float64)
+        e = np.maximum(lin @ np.asarray(self.sens).T, 1e-7)
+        le = np.log10(e / 0.18)
+        dn = lab_curve(le, self.ng, self.nt, self.ns, self.nw) @ np.asarray(self.ii).T
+        off = np.asarray(self.off) + np.asarray(lights)
+        if self.scan:
+            st = (dn - np.asarray(self.mid)) / (np.asarray(self.pg) * LOG10_2) - off / LOG10_2
+            return _stops_to_disp(np.clip(st, -12.0, 12.0))
+        dl = lab_curve(off - dn, self.pg, self.pt, self.ps, self.pw)
+        d = dl @ np.asarray(self.dye).T + (dl @ np.asarray(self.key))[..., None]
+        return 10.0 ** (-d / LAB_VIEW_GAMMA)
+
+
+def _calibrate_print(dn_mid, gamma, shoulder, width, dye: np.ndarray, key: np.ndarray) -> np.ndarray:
+    """Luz da copiadora (log E por camada) que leva o cinza médio a LAB_TARGET_D nos três canais.
+
+    Newton com mínimos quadrados: no Technicolor de duas cores só duas camadas existem, então a
+    solução é a de menor norma e o cinza pode guardar um leve tom (como no processo real).
+    """
+    toe = np.zeros(3)
+    M = dye + np.outer(np.ones(3), key)
+    target = np.full(3, LAB_TARGET_D)
+    off = dn_mid + 0.35  # começa no trecho reto da cópia
+    for _ in range(100):
+        xp = off - dn_mid
+        F = M @ lab_curve(xp, gamma, toe, shoulder, width) - target
+        if np.max(np.abs(F)) < 1e-11:
+            break
+        J = M * _lab_curve_slope(xp, gamma, toe, shoulder, width)[None, :]
+        step = np.linalg.lstsq(J, F, rcond=1e-9)[0]
+        off = off - np.clip(step, -0.5, 0.5)
+    return off
+
+
+def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key) -> LabPath:
+    ng = np.asarray(neg["gamma"], dtype=np.float64) * (1.0 + 0.12 * push)   # forçar = mais contraste
+    nt = np.asarray(neg["toe"], dtype=np.float64) + 0.08 * push            # ... e sombras mais fechadas
+    ns = np.asarray(neg["shoulder"], dtype=np.float64)
+    nw = float(neg["width"])
+    k = float(neg.get("interimage", 0.0))
+    ii = np.eye(3) * (1.0 + k) - k / 3.0  # dn' = dn + k·(dn − média): linhas somam 1
+    dn_mid = ii @ lab_curve(np.zeros(3), ng, nt, ns, nw)
+    sens = _t3x3(neg["sens"])
+    if pr is None:
+        # Sem cópia o campo `pg` guarda o gama nominal (sem forçar) usado na inversão do scan: assim
+        # a revelação forçada aparece como mais contraste, como num scan com inversão fixa.
+        return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(neg["gamma"]), (0.0, 0.0, 0.0),
+                       (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True)
+    pg = np.asarray(pr["gamma"], dtype=np.float64)
+    ps = np.asarray(pr["dmax"], dtype=np.float64) / pg
+    pw = float(pr["width"])
+    eye = np.eye(3)
+    raw = np.asarray(pr["dye"], dtype=np.float64)
+    used = np.abs(raw).sum(axis=0) > 0  # colunas de camadas que existem (Technicolor 2 cores: só duas)
+    dye = (eye + crosstalk * (raw - eye)) * used[None, :]
+    key = np.asarray(key, dtype=np.float64)
+    off = _calibrate_print(dn_mid, pg, ps, pw, dye, key)
+    return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(pg), (0.0, 0.0, 0.0), _t3(ps), pw,
+                   _t3x3(dye), _t3(key), _t3(dn_mid), _t3(off), False)
+
+
+@lru_cache(maxsize=512)
+def lab_paths(negativo: str, copia: str, processo: str, push: float, crosstalk: float, chave: float,
+              forca: float) -> tuple[LabPath, LabPath | None]:
+    """Caminhos A (negativo + cópia escolhidos) e B (processo Technicolor), já calibrados."""
+    neg = NEGATIVES.get(negativo, NEGATIVES["vision3_250d"])
+    pr = LAB_PRINTS.get(copia, LAB_PRINTS["2383"])
+    key = (0.0, 0.0, 0.0)
+    if processo == "prata":
+        # Prata retida: a imagem de prata (média das três camadas) fica na cópia, como no bleach bypass.
+        key = (0.8 * forca / 3.0,) * 3
+        if pr is None:
+            pr = LAB_PRINTS["2383"]  # a prata só existe numa cópia
+    a = _make_path(neg, pr, push, crosstalk, key)
+    proc = LAB_PROCESSES.get(processo)
+    if not proc:
+        return a, None
+    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]))
+    return a, b
+
+
+def lab_lights(v: dict) -> tuple:
+    """Luzes da copiadora escolhidas pelo usuário, em log E por canal (somadas à calibração)."""
+    d = v["lab_densidade"]
+    return tuple(LAB_POINT * (v[k] + d) for k in ("lab_luz_r", "lab_luz_g", "lab_luz_b"))
+
+
+def lab_paths_for(v: dict) -> tuple[LabPath, LabPath | None]:
+    return lab_paths(v["lab_negativo"], v["lab_copia"], v["lab_processo"], float(v["lab_revelacao"]),
+                     float(v["lab_diafonia"]), float(v["lab_chave"]), float(v["lab_processo_forca"]))
+
+
+def lab_eval(v: dict, lin) -> np.ndarray:
+    """Resultado do laboratório (valor de exibição) em numpy, igual ao `labPipe` do shader."""
+    a, b = lab_paths_for(v)
+    lights = lab_lights(v)
+    ya = a.eval(lin, lights)
+    if b is None:
+        return ya
+    return ya + (b.eval(lin, lights) - ya) * v["lab_processo_forca"]
+
+
+def _lab_uniforms(U: dict, prefix: str, p: LabPath, lights: tuple) -> None:
+    U[prefix + "sens"] = mat3_uniform(np.asarray(p.sens))
+    U[prefix + "ng"], U[prefix + "nt"], U[prefix + "ns"], U[prefix + "nw"] = p.ng, p.nt, p.ns, p.nw
+    U[prefix + "ii"] = mat3_uniform(np.asarray(p.ii))
+    U[prefix + "pg"], U[prefix + "pt"], U[prefix + "ps"], U[prefix + "pw"] = p.pg, p.pt, p.ps, p.pw
+    U[prefix + "dye"] = mat3_uniform(np.asarray(p.dye))
+    U[prefix + "off"] = tuple(o + li for o, li in zip(p.off, lights))
+    U[prefix + "key"] = p.key
+    U[prefix + "mid"] = p.mid
+    U[prefix + "scan"] = 1 if p.scan else 0
 
 
 @dataclass
@@ -357,12 +624,24 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_high_tint"] = _hsv_tint(v["luzes_matiz"], v["luzes_forca"])
     U["u_balance"] = v["equilibrio"]
     U["u_hue"] = (math.radians(v["verdes_matiz"]), math.radians(v["azuis_matiz"]), v["pele_sat"])
+    U["u_skin"] = (math.radians(v["pele_matiz"]), v["pele_luz"])
     U["u_bw"] = 1 if v["pb"] else 0
     U["u_bw_w"] = BW_WEIGHTS.get(v["pb_filtro"], BW_WEIGHTS["pan"])
     tone = TONES.get(v["virada"])
     U["u_tone_amt"] = v["virada_forca"] if (tone and v["pb"]) else 0.0
     U["u_tone_sh"], U["u_tone_hi"] = tone if tone else ((1.0, 1.0, 1.0), (1.0, 1.0, 1.0))
     U["u_age"] = v["envelhecimento"] if v["cor_on"] else 0.0
+
+    # ---- Laboratório (negativo → cópia por densidade); fica dentro do colorPipe, então entra nos LUTs.
+    U["u_lab_on"] = 1 if v["lab_on"] else 0
+    if v["lab_on"]:
+        la, lb = lab_paths_for(v)
+        lights = lab_lights(v)
+        _lab_uniforms(U, "u_la_", la, lights)
+        # Sem processo especial o caminho B recebe uma cópia do A (não é usado: u_lab_b_on = 0).
+        _lab_uniforms(U, "u_lb_", lb or la, lights)
+        U["u_lab_b_on"] = 1 if lb is not None else 0
+        U["u_lab_mix"] = float(v["lab_processo_forca"]) if lb is not None else 0.0
 
     pr = PRINTS.get(v["copia"])
     U["u_print_on"] = 1 if pr else 0
@@ -401,7 +680,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_on"] = 1
         # Grão menor que 1 px some na prévia reduzida; compensa um pouco a intensidade.
         comp = min(1.0, size) ** 0.5
-        U["u_grain_amt"] = 0.011 * v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp
+        push = 1.15 ** float(v["lab_revelacao"]) if v["lab_on"] else 1.0  # revelação forçada aumenta o grão
+        U["u_grain_amt"] = 0.011 * v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push
         U["u_grain_rough"] = v["grao_aspereza"]
         U["u_grain_chroma"] = v["grao_cor"]
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])

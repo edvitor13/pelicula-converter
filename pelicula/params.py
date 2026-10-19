@@ -36,6 +36,7 @@ class Section:
     toggle: str | None
     params: list[Param] = field(default_factory=list)
     subtitle: str = ""
+    layout: str = ""  # "" = uma linha por parâmetro; "hsl" = escolha da cor + 3 linhas (modo Edição)
 
 
 BITOLAS = [
@@ -80,6 +81,34 @@ LUT_ENTRADAS = [
     ("log3g10", "RED Log3G10 (RWG)"),
     ("dwg", "DaVinci Intermediate (DWG)"),
     ("linear", "Linear"),
+]
+
+# Laboratório: aproximações artísticas do comportamento de cada filme (sem dados dos fabricantes).
+NEGATIVOS = [
+    ("vision3_50d", "Kodak Vision3 50D"),
+    ("vision3_250d", "Kodak Vision3 250D"),
+    ("vision3_200t", "Kodak Vision3 200T"),
+    ("vision3_500t", "Kodak Vision3 500T"),
+    ("eterna_250d", "Fujifilm Eterna 250D"),
+    ("eterna_vivid", "Fujifilm Eterna Vivid 500"),
+    ("exr_5248", "Eastman EXR 5248 (anos 90)"),
+    ("ecn2_5247", "Eastman 5247 ECN-II (anos 70)"),
+    ("double_x", "Kodak Double-X 5222 (P&B)"),
+]
+
+COPIAS_LAB = [
+    ("2383", "Kodak 2383 (cópia de cinema clássica)"),
+    ("2393", "Kodak 2393 (mais contraste)"),
+    ("3513", "Fuji 3513 (mais fria e neutra)"),
+    ("2302", "Kodak 2302 (cópia preto e branco)"),
+    ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
+]
+
+PROCESSOS = [
+    ("normal", "Normal (negativo + cópia)"),
+    ("tech3", "Technicolor 3 tiras (transferência de corante)"),
+    ("tech2", "Technicolor 2 cores (anos 20)"),
+    ("prata", "Retenção de prata (bleach bypass)"),
 ]
 
 PROPORCOES = [
@@ -147,6 +176,35 @@ SECTIONS: list[Section] = [
         F("tint", "Tonalidade", 0.0, -100, 100, 1, 0, "", "Negativo puxa para verde, positivo para magenta."),
     ], "Perfil de cor e balanço"),
 
+    Section("lab", "Laboratório (negativo e cópia)", "lab_on", [
+        B("lab_on", "Ativo", False),
+        C("lab_negativo", "Negativo", "vision3_250d", NEGATIVOS,
+          "Filme da câmera. Cada um tem latitude, contraste e mistura de camadas próprios (aproximações artísticas)."),
+        F("lab_revelacao", "Revelação (puxar / forçar)", 0.0, -2, 3, 0.5, 1, " stop",
+          "Forçar (+) aumenta o contraste, fecha as sombras e aumenta o grão; puxar (−) suaviza."),
+        C("lab_copia", "Cópia", "2383", COPIAS_LAB,
+          "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
+        C("lab_processo", "Processo", "normal", PROCESSOS,
+          "Technicolor separa a cena em três (ou dois) registros preto e branco e imprime corantes puros."),
+        F("lab_processo_forca", "Força do processo", 1.0, 0, 1, percent=True,
+          tip="Mistura o processo especial com o caminho normal (negativo + cópia)."),
+        F("lab_chave", "Chave preta (Technicolor)", 0.3, 0, 1, percent=True,
+          tip="Imagem preto e branco de baixo contraste somada aos corantes: pretos mais profundos."),
+        F("lab_luz_r", "Luz vermelha da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
+          "Pontos de luz da copiadora (12 pontos = 1 stop). Mais vermelho deixa a cópia mais ciano, como no "
+          "laboratório."),
+        F("lab_luz_g", "Luz verde da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
+          "Mais verde deixa a cópia mais magenta."),
+        F("lab_luz_b", "Luz azul da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
+          "Mais azul deixa a cópia mais amarela (quente)."),
+        F("lab_densidade", "Densidade da cópia", 0.0, -12, 12, 0.5, 1, " pt",
+          "Luz nas três cores juntas: mais pontos = cópia mais escura. Use com a Exposição para "
+          "compensar sub ou superexposição, como um laboratório."),
+        F("lab_diafonia", "Mistura entre camadas", 1.0, 0, 2, 0.01, 2, "×",
+          "Absorções indesejadas dos corantes: acima de 1 a cor fica mais suja e densa; abaixo, mais pura.",
+          advanced=True),
+    ], "Simula a película de verdade: negativo, revelação, luzes da copiadora e cópia"),
+
     Section("cor", "Cor da película", "cor_on", [
         B("cor_on", "Ativo", False),
         F("cor_forca", "Intensidade do look", 1.0, 0, 1, percent=True),
@@ -175,6 +233,10 @@ SECTIONS: list[Section] = [
         F("verdes_matiz", "Matiz dos verdes", 0.0, -40, 40, 1, 0, "°", advanced=True),
         F("azuis_matiz", "Matiz dos azuis", 0.0, -40, 40, 1, 0, "°", advanced=True),
         F("pele_sat", "Saturação da pele", 0.0, -1, 1, 0.01, 2, advanced=True),
+        F("pele_matiz", "Matiz da pele", 0.0, -30, 30, 1, 0, "°", "Negativo puxa a pele para o vermelho; positivo para o "
+          "amarelo.", advanced=True),
+        F("pele_luz", "Luz da pele", 0.0, -1, 1, 0.01, 2, tip="Negativo deixa a pele mais densa e escura; positivo "
+          "clareia.", advanced=True),
         B("pb", "Preto e branco", False),
         C("pb_filtro", "Filtro do P&B", "pan", [
             ("pan", "Pancromático (neutro)"), ("vermelho", "Vermelho (céu escuro)"),
@@ -309,38 +371,83 @@ SECTIONS: list[Section] = [
     ], "Bordas, furos e quadros vizinhos, como num scan real"),
 ]
 
-PARAMS: dict[str, Param] = {p.key: p for s in SECTIONS for p in s.params}
+LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])
+
+
+def _default_of(p: Param) -> Any:
+    return list(p.default) if p.kind in LIST_KINDS else p.default
+
+
+def _clean(p: Param, v: Any) -> Any:
+    """Valor limpo de um parâmetro, ou levanta ValueError/TypeError se for inválido."""
+    if p.kind == "float":
+        f = float(v)
+        if math.isnan(f):
+            raise ValueError(v)
+        return min(max(f, p.min), p.max)
+    if p.kind == "int":
+        return int(min(max(int(v), p.min), p.max))
+    if p.kind == "bool":
+        return bool(v)
+    if p.kind == "choice":
+        if str(v) not in [c[0] for c in p.choices]:
+            raise ValueError(v)
+        return str(v)
+    if p.kind == "color":
+        cols = [float(c) for c in list(v)[:3]]
+        if len(cols) != 3 or not all(math.isfinite(c) for c in cols):
+            raise ValueError(v)
+        return [min(max(c, 0.0), 1.0) for c in cols]
+    if p.kind == "wheel":
+        # Ponto dentro do disco unitário: direção = matiz, distância = força.
+        x, y = (float(c) for c in list(v)[:2])
+        if not (math.isfinite(x) and math.isfinite(y)):
+            raise ValueError(v)
+        r = math.hypot(x, y)
+        return [x / r, y / r] if r > 1.0 else [x, y]
+    if p.kind == "file":
+        return str(v or "")
+    raise ValueError(p.kind)
+
+
+@dataclass
+class Schema:
+    """Um conjunto de seções (a interface é gerada a partir dele) com padrões e limpeza dos valores.
+
+    `FILM` é o esquema do look de película; o modo Edição tem os seus em `editparams`.
+    """
+
+    sections: list[Section]
+    params: dict[str, Param] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.params = {p.key: p for s in self.sections for p in s.params}
+
+    def defaults(self) -> dict[str, Any]:
+        return {k: _default_of(p) for k, p in self.params.items()}
+
+    def sanitize(self, values: dict[str, Any] | None) -> dict[str, Any]:
+        """Completa com os padrões, descarta chaves desconhecidas e limita à faixa."""
+        out = self.defaults()
+        for k, v in (values or {}).items():
+            p = self.params.get(k)
+            if p is None:
+                continue
+            try:
+                out[k] = _clean(p, v)
+            except (TypeError, ValueError):
+                pass
+        return out
+
+
+FILM = Schema(SECTIONS)
+PARAMS: dict[str, Param] = FILM.params
 
 
 def defaults() -> dict[str, Any]:
-    return {k: (list(p.default) if p.kind == "color" else p.default) for k, p in PARAMS.items()}
+    return FILM.defaults()
 
 
 def sanitize(values: dict[str, Any]) -> dict[str, Any]:
     """Completa e limita valores vindos de presets ou arquivos."""
-    out = defaults()
-    for k, v in (values or {}).items():
-        p = PARAMS.get(k)
-        if p is None:
-            continue
-        try:
-            if p.kind == "float":
-                f = float(v)
-                if not math.isnan(f):
-                    out[k] = min(max(f, p.min), p.max)
-            elif p.kind == "int":
-                out[k] = int(min(max(int(v), p.min), p.max))
-            elif p.kind == "bool":
-                out[k] = bool(v)
-            elif p.kind == "choice":
-                if str(v) in [c[0] for c in p.choices]:
-                    out[k] = str(v)
-            elif p.kind == "color":
-                cols = [float(c) for c in list(v)[:3]]
-                if len(cols) == 3 and all(math.isfinite(c) for c in cols):
-                    out[k] = [min(max(c, 0.0), 1.0) for c in cols]
-            elif p.kind == "file":
-                out[k] = str(v or "")
-        except (TypeError, ValueError):
-            pass
-    return out
+    return FILM.sanitize(values)

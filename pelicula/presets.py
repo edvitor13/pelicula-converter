@@ -28,7 +28,7 @@ FILM_BASE: dict[str, Any] = dict(
     vinheta=0.06, maciez=0.0, nitidez=0.0,
 )
 
-GROUPS = ["Cinema 35 mm", "Bitolas e formatos", "Preto e branco", "Fotografia", "Processos e estilos", "Básicos"]
+GROUPS = ["Cinema 35 mm", "Laboratório", "Bitolas e formatos", "Preto e branco", "Fotografia", "Processos e estilos", "Básicos"]
 
 BUILTIN: list[dict[str, Any]] = [
     # ------------------------------------------------------------ cinema 35 mm
@@ -58,6 +58,49 @@ BUILTIN: list[dict[str, Any]] = [
          desc="Sombras ciano e pele alaranjada, o visual dos filmes de ação.",
          valores=dict(contraste=1.02, saturacao=1.05, densidade=0.4, sombras_matiz=190, sombras_forca=0.45,
                       luzes_matiz=30, luzes_forca=0.32, copia="k2393")),
+
+    # ------------------------------------------------------------ laboratório (modelo de densidade)
+    # Negativo, revelação, luzes da copiadora e cópia simulados pela densidade (seção Laboratório).
+    # O look paramétrico ("Cor da película") e a cópia antiga ficam desligados para não somar duas curvas.
+    dict(id="lab_v3_250d_2383", nome="Laboratório • Vision3 250D → 2383", grupo="Laboratório",
+         desc="Negativo diurno copiado em 2383 pelo modelo de densidade, como num laboratório de cinema.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_250d", lab_copia="2383",
+                      iso="250")),
+    dict(id="lab_v3_500t_noite", nome="Laboratório • Vision3 500T → 2383 (noite)", grupo="Laboratório",
+         desc="Negativo de tungstênio com cópia puxada para o frio pelas luzes da copiadora; halação forte.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_500t", lab_copia="2383",
+                      lab_luz_r=1.0, lab_luz_b=-3.0, iso="500", hal_forca=0.95, hal_limiar=2.2, grao_forca=1.1,
+                      bloom_forca=0.25)),
+    dict(id="lab_eterna_3513", nome="Laboratório • Eterna 250D → Fuji 3513", grupo="Laboratório",
+         desc="Cor contida e sombras esverdeadas da Eterna, copiada na Fuji, mais fria e neutra.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="eterna_250d", lab_copia="3513",
+                      iso="250")),
+    dict(id="lab_ecn2_anos70", nome="Laboratório • 5247 ECN-II (anos 70)", grupo="Laboratório",
+         desc="Negativo dos anos 70: camadas misturadas, cópia quente e grão evidente.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="ecn2_5247", lab_copia="2383",
+                      lab_diafonia=1.3, lab_luz_b=2.0, lab_luz_g=0.5, iso="250", grao_forca=1.25,
+                      grao_aspereza=0.35, hal_forca=0.7)),
+    dict(id="lab_technicolor3", nome="Technicolor 3 tiras (laboratório)", grupo="Laboratório",
+         desc="Três registros preto e branco e corantes puros com chave preta: cores densas dos anos 40 e 50.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_processo="tech3", lab_chave=0.35,
+                      iso="100", grao_forca=0.8, hal_forca=0.5)),
+    dict(id="lab_technicolor2", nome="Technicolor 2 cores (anos 20)", grupo="Laboratório",
+         desc="Só vermelho-laranja e verde-azulado: pele rosada, céu ciano e nada de azul puro.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_processo="tech2", iso="100",
+                      grao_forca=1.1, proj_on=True, tremor_x=0.8, tremor_y=0.6, cintilacao=0.04,
+                      desg_on=True, poeira=0.25, riscos=0.08, mold_on=True, proporcao="1.37")),
+    dict(id="lab_prata", nome="Retenção de prata (laboratório)", grupo="Laboratório",
+         desc="Bleach bypass pela densidade: a prata fica na cópia, a cor cai e o preto fica profundo.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_processo="prata", lab_processo_forca=0.85,
+                      lab_copia="2383", iso="250", grao_forca=1.15)),
+    dict(id="lab_double_x_2302", nome="Laboratório • Double-X → 2302 (P&B)", grupo="Laboratório",
+         desc="Negativo preto e branco de cinema copiado em filme P&B, com o pé e o ombro das duas curvas.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="double_x", lab_copia="2302",
+                      iso="250", grao_forca=1.3, grao_cor=0.0, hal_cor=[1.0, 1.0, 1.0], hal_forca=0.4)),
+    dict(id="lab_negativo_scan", nome="Negativo escaneado (sem cópia)", grupo="Laboratório",
+         desc="O negativo invertido digitalmente, como num scan: latitude enorme e contraste baixo.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_250d",
+                      lab_copia="nenhuma", iso="250")),
 
     # ------------------------------------------------------------ bitolas
     dict(id="super8_kodachrome", nome="Super 8 • Kodachrome 40", grupo="Bitolas e formatos",
