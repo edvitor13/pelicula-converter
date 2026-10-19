@@ -69,6 +69,9 @@ ENTRADAS = [
     ("log3g10", "RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE"),
     ("dwg", "DaVinci Intermediate (DaVinci Wide Gamut)"),
     ("cineon", "Cineon / DPX log"),
+    ("bmd_gen5", "Blackmagic Film Gen 5 (Blackmagic Wide Gamut)"),
+    ("logc4", "ARRI LogC4 (ARRI Wide Gamut 4)"),
+    ("applelog", "Apple Log (Rec.2020) — iPhone"),
 ]
 
 LUT_ENTRADAS = [
@@ -80,6 +83,9 @@ LUT_ENTRADAS = [
     ("vlog", "Panasonic V-Log"),
     ("log3g10", "RED Log3G10 (RWG)"),
     ("dwg", "DaVinci Intermediate (DWG)"),
+    ("bmd_gen5", "Blackmagic Film Gen 5"),
+    ("logc4", "ARRI LogC4"),
+    ("applelog", "Apple Log"),
     ("linear", "Linear"),
 ]
 
@@ -93,6 +99,11 @@ NEGATIVOS = [
     ("eterna_vivid", "Fujifilm Eterna Vivid 500"),
     ("exr_5248", "Eastman EXR 5248 (anos 90)"),
     ("ecn2_5247", "Eastman 5247 ECN-II (anos 70)"),
+    ("vision2_5201", "Kodak Vision2 5201 50D"),
+    ("ecn2_5297", "Eastman ECN-II 5297 250D"),
+    ("vision_5246", "Kodak Vision 5246 250D"),
+    ("vision_5263", "Kodak Vision 5263 500T"),
+    ("vision2_5229", "Kodak Vision2 Expression 5229 500T"),
     ("double_x", "Kodak Double-X 5222 (P&B)"),
 ]
 
@@ -100,6 +111,8 @@ COPIAS_LAB = [
     ("2383", "Kodak 2383 (cópia de cinema clássica)"),
     ("2393", "Kodak 2393 (mais contraste)"),
     ("3513", "Fuji 3513 (mais fria e neutra)"),
+    ("e5386", "Eastman EXR Print 5386"),
+    ("e5385", "Eastman Color Print 5385"),
     ("2302", "Kodak 2302 (cópia preto e branco)"),
     ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
 ]
@@ -109,6 +122,16 @@ PROCESSOS = [
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
     ("tech2", "Technicolor 2 cores (anos 20)"),
     ("prata", "Retenção de prata (bleach bypass)"),
+]
+
+# MTF da película: maciez fina que tira a nitidez "digital" (poros, serrilhado) e mantém o detalhe maior.
+MTFS = [
+    ("nenhum", "Desligado"),
+    ("close", "Close (rosto)"),
+    ("medio", "Plano médio"),
+    ("aberto", "Plano aberto"),
+    ("16mm", "Textura 16 mm"),
+    ("super8", "Textura Super 8"),
 ]
 
 PROPORCOES = [
@@ -162,6 +185,11 @@ SECTIONS: list[Section] = [
           "do vídeo. Para devolver ainda mais detalhe, use Lente e nitidez → Recuperar detalhe."),
         F("bitola_resolucao", "Intensidade do desfoque", 1.0, 0, 1, percent=True,
           tip="100% = a maciez natural da bitola; 0% = sem desfoque."),
+        C("mtf", "MTF da película (maciez fina)", "nenhum", MTFS,
+          "Tira a nitidez “digital” demais (poros, serrilhado) e mantém o detalhe maior, como a resposta de "
+          "um filme. Escolha pelo enquadramento: close suaviza mais a pele; plano aberto, menos."),
+        F("mtf_forca", "Quantidade do MTF", 0.5, 0, 1, percent=True,
+          tip="50% = o valor do enquadramento escolhido; 100% = o dobro."),
         F("bitola_vinheta", "Vinheta da bitola", 1.0, 0, 1, percent=True,
           tip="Escurecimento natural das bordas em bitolas pequenas."),
         F("mix_geral", "Força geral do efeito", 1.0, 0, 1, percent=True,
@@ -200,6 +228,39 @@ SECTIONS: list[Section] = [
         F("lab_densidade", "Densidade da cópia", 0.0, -12, 12, 0.5, 1, " pt",
           "Luz nas três cores juntas: mais pontos = cópia mais escura. Use com a Exposição para "
           "compensar sub ou superexposição, como um laboratório."),
+        F("lab_separacao", "Separação de cores (Hue Split)", 0.0, 0, 1, percent=True,
+          tip="Afasta as cores umas das outras em volta de um eixo (laranja ↔ verde-azulado), como a separação "
+              "das câmeras de três tiras: pele mais quente, céu e sombras mais frios. O cinza não muda."),
+        F("lab_separacao_eixo", "Eixo da separação", 35, 0, 360, 1, 0, "°",
+          "Matiz do polo quente do eixo (35° = laranja, o par teal & orange).", advanced=True),
+        F("lab_saturacao_filme", "Saturação do filme", 1.0, 0, 2, 0.01, 2, "×",
+          "Saturação dentro do negativo (na densidade), como a do próprio filme. O cinza não muda."),
+        F("lab_saturacao", "Saturação final", 1.0, 0, 2, 0.01, 2, "×", "Saturação depois da cópia."),
+        F("lab_dens_r", "Densidade dos vermelhos", 1.0, 0, 2, 0.01, 2, "×",
+          "Acima de 1, vermelhos mais escuros e ricos; abaixo, mais claros. Cinzas e as outras cores não mudam."),
+        F("lab_dens_g", "Densidade dos verdes", 1.0, 0, 2, 0.01, 2, "×",
+          "Acima de 1, verdes mais escuros e ricos; abaixo, mais claros."),
+        F("lab_dens_b", "Densidade dos azuis", 1.0, 0, 2, 0.01, 2, "×",
+          "Acima de 1, azuis mais densos e profundos (céu); abaixo, mais claros."),
+        F("lab_pe", "Pé da cópia (preto)", 0.0, -1, 1, 0.01, 2,
+          tip="Positivo lava os pretos (a cópia chega a menos densidade); negativo aprofunda."),
+        F("lab_sombras_rolagem", "Rolagem das sombras", 0.0, 0, 1, percent=True,
+          tip="Entrada mais suave no preto: as sombras ganham detalhe e perdem dureza."),
+        F("lab_luzes_rolagem", "Rolagem das altas luzes", 0.0, 0, 1, percent=True,
+          tip="Chegada mais suave ao branco: as altas luzes estouram menos."),
+        F("lab_pele_matiz", "Matiz da pele", 0.0, -30, 30, 1, 0, "°",
+          "Negativo puxa a pele para o vermelho; positivo para o amarelo."),
+        F("lab_pele_sat", "Saturação da pele", 0.0, -1, 1, 0.01, 2, tip="Mais ou menos cor só nos tons de pele."),
+        F("lab_bypass_negativo", "Bleach bypass no negativo", 0.0, 0, 1, percent=True,
+          tip="A prata fica no negativo: mais contraste e menos cor, principalmente nas altas luzes."),
+        F("lab_bypass_copia", "Bleach bypass na cópia", 0.0, 0, 1, percent=True,
+          tip="A prata fica na cópia: pretos mais profundos e cor mais contida (o processo Retenção de prata em "
+              "quantidade ajustável)."),
+        F("lab_neutro_negativo", "Curva neutra do negativo", 0.0, 0, 1, percent=True,
+          tip="Iguala as curvas das três camadas do negativo: tira a variação de cor entre sombras e luzes do "
+              "filme.", advanced=True),
+        F("lab_neutro_copia", "Curva neutra da cópia", 0.0, 0, 1, percent=True,
+          tip="Iguala as curvas das três camadas da cópia.", advanced=True),
         F("lab_diafonia", "Mistura entre camadas", 1.0, 0, 2, 0.01, 2, "×",
           "Absorções indesejadas dos corantes: acima de 1 a cor fica mais suja e densa; abaixo, mais pura.",
           advanced=True),

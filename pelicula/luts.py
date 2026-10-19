@@ -76,6 +76,13 @@ def guess_input(path: str) -> str:
     if "/film looks/" in p or "cineon" in name:
         return "cineon"
     words = set(re.split(r"[^a-z0-9]+", name))
+    compact = re.sub(r"[^a-z0-9]+", "", name)
+    if "logc4" in compact or "awg4" in compact:
+        return "logc4"
+    if "applelog" in compact or ("apple" in words and "log" in words):
+        return "applelog"
+    if "gen5" in compact or "bmdfilm" in compact or "blackmagicfilm" in compact:
+        return "bmd_gen5"
     if "logc" in name or "arri" in words or "alexa" in words:
         return "logc3"
     if "slog3" in name or "s-log3" in name:

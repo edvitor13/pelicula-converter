@@ -137,8 +137,17 @@ quadros vizinhos:
   **cópia** (2383, 2393, 3513, 2302 P&B ou o negativo escaneado, sem cópia).
 - **Processos**: **Technicolor 3 tiras** (três registros P&B, corantes puros e chave preta),
   **Technicolor 2 cores** (anos 20) e **retenção de prata** (bleach bypass).
+- **Separação de cores (Hue Split)**: afasta as cores em volta de um eixo (laranja ↔ verde-azulado),
+  como as câmeras de três tiras — pele quente, céu e sombras frios —, sem mexer no cinza.
+- **Densidade dos vermelhos, verdes e azuis**, **saturação do filme** (na densidade) e **saturação
+  final**, **pé da cópia** (preto), **rolagem das sombras e das altas luzes**, **pele** (matiz e
+  saturação), **bleach bypass no negativo e na cópia** e **curva neutra** do negativo e da cópia.
+- Negativos Kodak Vision3 50D/250D/200T/500T, Vision2 5201 50D, Vision 5246 250D e 5263 500T,
+  Vision2 Expression 5229 500T, Eastman ECN-II 5297 250D, EXR 5248 e 5247 (anos 70), Eterna e
+  Double-X; cópias 2383, 2393, 3513, Eastman EXR Print 5386, Eastman Color Print 5385 e 2302 P&B.
 - O cinza médio sai neutro em qualquer combinação; exposição + luzes da copiadora funcionam como
-  no laboratório de verdade. Controle de **pele** (matiz, saturação e luz) no look.
+  no laboratório de verdade. Controle de **pele** (matiz, saturação e luz) também no look.
+- **Curva**: um botão no painel *Ajustes* mostra a curva do look em R, G e B (entrada × saída).
 
 ### Edição
 - **Faixas de vídeo e de áudio**, imagem e som ligados, importar vídeos, imagens e músicas.
@@ -157,7 +166,8 @@ quadros vizinhos:
 
 ### Entrada
 - **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
-  ARRI LogC3 (EI 800), Panasonic V-Log, RED Log3G10 (RWG — para R3D e Nikon N-RAW convertidos),
+  ARRI LogC3 (EI 800), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
+  Nikon N-RAW convertidos), Blackmagic Film Gen 5 (Blackmagic Wide Gamut), Apple Log (iPhone),
   DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa.
 - **Exposição** (±3 EV), **temperatura** e **tonalidade** aplicadas em luz linear.
 
@@ -166,6 +176,8 @@ quadros vizinhos:
 - **Bloom** e **névoa** (imitação de filtros difusores tipo Pro-Mist).
 - **Lente**: maciez, recuperação de detalhe (nitidez), aberração cromática, distorção barril ou
   almofada, vinheta com raio, suavidade e redondeza.
+- **MTF da película**: tira a nitidez "digital" demais (poros, serrilhado) mantendo o detalhe maior,
+  com predefinições por enquadramento (close, plano médio, plano aberto, 16 mm, Super 8) e quantidade.
 
 ### Projeção, defeitos e moldura
 - **Projetor**: tremor horizontal, vertical e de rotação; cintilação de brilho.
@@ -180,7 +192,7 @@ quadros vizinhos:
   (furos escuros).
 
 ### Presets e LUTs
-- **42 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
+- **44 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
   branco, Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro
   e busca.
 - **Presets do usuário**: salvar como, atualizar, excluir, voltar ao preset, importar e exportar
@@ -473,7 +485,7 @@ mesmo preset aparece na lista do painel **Ajustes**.
 | Grupo | Presets |
 |---|---|
 | Cinema 35 mm | Kodak Vision3 250D · Kodak Vision3 50D · Kodak Vision3 200T · Kodak Vision3 500T · Fujifilm Eterna 250D · Fujifilm Eterna Vivid 500 · Blockbuster (teal & orange) |
-| Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) |
+| Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) · Technicolor (5297 → 5386, Hue Split) · Teal & orange (5201 → 2393, Hue Split) |
 | Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm |
 | Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo |
 | Fotografia | Kodak Portra 400 · Kodak Ektar 100 · Fujifilm Velvia 50 · Fujifilm Superia 400 · CineStill 800T |
@@ -797,16 +809,20 @@ como no laboratório) e vira a **cópia** projetada. Os processos **Technicolor 
 
 O PeliculaConverter gera um pacote para o Resolve com os mesmos looks do app:
 
-- **PeliculaConverter Cor** (DCTL): perfil de entrada, exposição, Laboratório, cor da película e
-  cópia — a mesma matemática do app (conferida nos testes).
-- **PeliculaConverter Textura** (DCTL): grão animado, halação, bloom e lente.
+- **PeliculaConverter Laboratorio** (DCTL): o nó no estilo dos plugins de emulação — perfil de
+  entrada, exposição, negativo, cópia, luzes da copiadora, Hue Split, densidades, saturação do filme,
+  pele, bleach bypass, curvas neutras e **Mostrar curva** (desenha as curvas R, G e B sobre a imagem).
+- **PeliculaConverter Cor** (DCTL): o mesmo, mais a cor paramétrica da película e a cópia
+  paramétrica — a mesma matemática do app (conferida nos testes).
+- **PeliculaConverter Textura** (DCTL): grão animado, halação, bloom, lente e MTF da película.
 - **PeliculaConverter Projetor** (DCTL): tremor, cintilação, poeira, riscos e moldura.
 - Os DCTLs de cada preset (pasta *Presets*, com os valores do preset já como padrão) e um **LUT
   `.cube` por preset** (pasta *LUTs*), que funciona também no Resolve gratuito, no Premiere e em outros
   programas.
 
 Instale em **Configurações → Plugin para o DaVinci Resolve…** (ou `pelicula-cli resolve --instalar`)
-e reabra o Resolve. Na página **Color**, use três nós em série — *Cor → Textura → Projetor* — com o
+e reabra o Resolve. Na página **Color**, use nós em série — *Laboratorio* (ou *Cor*) → *Textura* →
+*Projetor* — com o
 efeito **OpenFX → ResolveFX Color → DCTL**. O plugin DCTL precisa do **DaVinci Resolve Studio**;
 os LUTs funcionam em qualquer versão. Guia completo: [docs/DAVINCI.md](docs/DAVINCI.md).
 

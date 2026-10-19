@@ -32,6 +32,7 @@ from .store import ParamStore
 from .viewer import Viewer
 from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
 from .flow import AdaptiveBar, ElideLabel, FlowLayout
+from .labcurve import CurveGraph
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .scopes import Scopes
@@ -341,6 +342,12 @@ class MainWindow(QMainWindow):
         self.thumb_timer.setSingleShot(True)
         self.thumb_timer.setInterval(350)
         self.thumb_timer.timeout.connect(self._render_thumbs)
+        self.curve_timer = QTimer(self)
+        self.curve_timer.setSingleShot(True)
+        self.curve_timer.setInterval(80)
+        self.curve_timer.timeout.connect(self._update_curve)
+        if str(self.settings.value("show_curve", "false")) == "true":
+            self.curve_switch.setChecked(True)
         self.play_timer = QTimer(self)
         self.play_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.play_timer.timeout.connect(self._play_tick)
@@ -728,6 +735,10 @@ class MainWindow(QMainWindow):
         self.hist = Scopes()
         self.hist.mode = str(self.settings.value("scopes", self.hist.mode))
         vl.addWidget(self.hist)
+        # "Mostrar curva": a curva de transferência do look (Laboratório + cor + cópia + LUT) em R, G e B.
+        self.curve_graph = CurveGraph()
+        self.curve_graph.setVisible(False)
+        vl.addWidget(self.curve_graph)
         row2 = QHBoxLayout()
         lab = QLabel(_("Ajustes avançados"))
         lab.setObjectName("Muted")
@@ -736,6 +747,15 @@ class MainWindow(QMainWindow):
         self.adv.setChecked(self.settings.value("advanced", "false") == "true")
         self.adv.toggled.connect(self._set_advanced)
         row2.addWidget(self.adv)
+        row2.addSpacing(10)
+        lab_c = QLabel(_("Curva"))
+        lab_c.setObjectName("Muted")
+        lab_c.setToolTip(_("Mostrar a curva do look em R, G e B (como o \"Show Curve\" dos plugins de película)"))
+        row2.addWidget(lab_c)
+        self.curve_switch = ToggleSwitch()
+        self.curve_switch.setToolTip(lab_c.toolTip())
+        self.curve_switch.toggled.connect(self._set_curve_visible)
+        row2.addWidget(self.curve_switch)
         row2.addStretch(1)
         self.btn_undo = self._flat("undo", _("Desfazer (Ctrl+Z)"))
         self.btn_undo.clicked.connect(self.store.undo)
@@ -1454,6 +1474,20 @@ class MainWindow(QMainWindow):
         self.schedule_render()
         self._update_modified()
         self._update_title()
+        if self.curve_graph.isVisible():
+            self.curve_timer.start()
+
+    def _set_curve_visible(self, on: bool) -> None:
+        self.curve_graph.setVisible(bool(on))
+        self.settings.setValue("show_curve", "true" if on else "false")
+        if on:
+            self._update_curve()
+
+    def _update_curve(self) -> None:
+        """Curva do look atual: o eixo dos cinzas de um LUT assado na GPU (mesmo caminho de cor do app)."""
+        if not self.curve_graph.isVisible():
+            return
+        self.curve_graph.update_from(self.engine, self.store.values)
 
     # ================================================================ reprodução
     def toggle_play(self) -> None:

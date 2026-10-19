@@ -3,19 +3,21 @@
 O PeliculaConverter gera um pacote de **DCTLs** (o "plugin" de cor do Resolve) e de **LUTs .cube** com o
 mesmo look do app. A ideia é a mesma dos pacotes de emulação de película vendidos para o Resolve: três
 nós em série, na ordem de um laboratório de cinema — **LOOK → LAB → PRINT** —, aqui chamados de
-**Cor → Textura → Projetor**.
+**Laboratorio (ou Cor) → Textura → Projetor**.
 
 | Nó | O que faz | Igual ao app? |
 |---|---|---|
+| **PeliculaConverter Laboratorio** | Só o **Laboratório**, como um nó de emulação de filme: perfil do vídeo, exposição e balanço, negativo, cópia, revelação, separação de cores (Hue Split) e o eixo, luzes da copiadora, densidade da cópia e por cor, pé da cópia, rolagens, saturação do filme e final, pele, bleach bypass no negativo e na cópia, curvas neutras, processo (Technicolor, retenção de prata), chave, diafonia e força geral. **Mostrar curva** desenha por cima da imagem as curvas R, G e B do ajuste (eixo horizontal de −8 a +8 stops em volta do cinza médio; a linha cinza marca o 0,45). | **Sim.** É o app com *Laboratório* ligado, *Cor da película* desligada e *Cópia (print)* em *Nenhuma* (como nos presets do grupo *Laboratório*). Diferença < 0,000001 nos testes. |
 | **PeliculaConverter Cor** | Perfil do vídeo (Rec.709, log das câmeras), exposição e balanço, **Laboratório** (negativo, revelação, luzes da copiadora, cópia, Technicolor 3 tiras / 2 cores, retenção de prata), look de película (curva, saturação, densidade, tons de sombra/luz, pele, P&B e viragens), cópia 2383/2393/3513, envelhecimento e força geral. | **Sim.** É a mesma conta de `colorPipe()` (diferença < 0,002 nos testes, normalmente 0,000001). |
-| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado), halação, bloom, névoa (filtro difusor), maciez da bitola e da lente, recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
+| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado), halação, bloom, névoa (filtro difusor), maciez da bitola e da lente, **MTF da película** (close, plano médio, plano aberto, 16 mm, Super 8), recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
 | **PeliculaConverter Projetor** | Tremor do quadro, cintilação, clarões de fim de rolo, cor instável, emendas, vazamento de luz, poeira, riscos, fio de cabelo, manchas químicas, marcas de troca de rolo e moldura (proporção, cantos, borda irregular). | **Sim** (< 1/255), quadro a quadro, com as mesmas sementes. |
 
 Além dos três nós "em branco" (que já abrem com o preset inicial do app, Kodak Vision3 250D), o pacote
 traz:
 
-- **Presets/** — para cada preset pronto do app, um nó *Cor* e um *Textura* com os valores do preset (e um
-  *Projetor* quando o preset usa tremor, defeitos ou moldura). Ex.: `Kodak Vision3 500T - Cor.dctl`.
+- **Presets/** — para cada preset pronto do app, um nó *Cor* e um *Textura* com os valores do preset (mais um
+  *Laboratorio* quando o preset usa o laboratório e um *Projetor* quando usa tremor, defeitos ou moldura).
+  Ex.: `Kodak Vision3 500T - Cor.dctl`, `Technicolor (5297 5386 Hue Split) - Laboratorio.dctl`.
 - **LUTs/** — um `.cube` de 33 pontos por preset (só a cor, entrada Rec.709). Funcionam no **Resolve
   gratuito**, no Premiere, no Final Cut, no CapCut, no OBS e em qualquer programa que aceite `.cube`.
 - **LEIA-ME.txt** (português e inglês) e **VERSAO.txt** (versão do app que gerou o pacote).
@@ -52,12 +54,15 @@ atualizar, instale de novo pela versão nova do app: a pasta inteira é trocada.
 
 1. Página **Color**. Crie três nós em série (Alt+S).
 2. Em cada nó, arraste **OpenFX › ResolveFX Color › DCTL** e, na lista *DCTL List*, escolha
-   **PeliculaConverter Cor**, **PeliculaConverter Textura** e **PeliculaConverter Projetor**, nessa ordem
-   (ou os arquivos da pasta *Presets*).
-3. **Gestão de cor.** No nó *Cor*, escolha em **Perfil do video** a curva da câmera (S-Log3, LogC3,
-   V-Log, N-Log, Log3G10, DaVinci Intermediate, Cineon). Se a linha do tempo já está em Rec.709 /
-   Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um *Color Space Transform* antes do nó *Cor*
-   convertendo para Rec.709 / Gamma 2.4. A saída dos três nós é Rec.709 (como no app).
+   **PeliculaConverter Laboratorio** (ou **PeliculaConverter Cor**), **PeliculaConverter Textura** e
+   **PeliculaConverter Projetor**, nessa ordem (ou os arquivos da pasta *Presets*). Use o *Laboratorio*
+   **ou** o *Cor*, não os dois: o *Cor* já contém o laboratório inteiro (com a chave *Laboratorio negativo
+   e copia*) mais o look paramétrico, a cópia 2383/2393/3513 e o envelhecimento.
+3. **Gestão de cor.** No primeiro nó, escolha em **Perfil do video** a curva da câmera (S-Log3, LogC3,
+   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon). Se a
+   linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um *Color Space
+   Transform* antes do primeiro nó convertendo para Rec.709 / Gamma 2.4. A saída dos nós é Rec.709 (como
+   no app).
 4. Na *Textura* e no *Projetor*, escolha a **mesma bitola** (ela muda o tamanho do grão, a maciez, o
    tremor e a vinheta). No *Projetor*, escolha os **quadros por segundo** da linha do tempo: o tremor, a
    cintilação e os defeitos seguem o tempo real.
@@ -66,10 +71,15 @@ atualizar, instale de novo pela versão nova do app: a pasta inteira é trocada.
 
 Dicas:
 
+- **Mostrar curva** (nós *Laboratorio* e *Cor*) é só para ver o ajuste — por exemplo, o efeito do *Pé da
+  copia*, das *Rolagens* ou de um negativo com cruzamento de cores. Desligue antes de renderizar.
+- O fluxo dos plugins de emulação (perfil → negativo → print → Hue Split → saturação do filme → luzes →
+  textura com MTF, grão e halação) está explicado em [EFEITOS.md](EFEITOS.md#laboratório-negativo-e-cópia).
 - Para "ajustar a cor no laboratório", use as **luzes da copiadora** (12 pontos = 1 stop; mais vermelho =
   cópia mais ciano) e a **densidade da cópia**, junto com a *Exposição* — o mesmo fluxo de um
   laboratório de verdade.
-- O nó *Cor* pode ser aplicado também como LUT (botão direito no nó › *DCTL*), com os valores padrão.
+- Os nós *Laboratorio* e *Cor* podem ser aplicados também como LUT (botão direito no nó › *DCTL*), com os
+  valores padrão.
 - A **Qualidade do brilho** (nó *Textura*) troca velocidade por suavidade da halação/bloom/névoa.
 
 ## Resolve Studio × gratuito
@@ -104,10 +114,17 @@ Dicas:
   kernel, em forma fechada: com pé 0 a curva da cópia se inverte exatamente
   (`x = w·ln((q − 1)/(1 − q·e^(−s/w)))`, `q = e^(D/(g·w))`) e as densidades das camadas saem de
   `M·D = alvo` (mínimos quadrados no Technicolor de duas cores). Por isso qualquer revelação, diafonia,
-  chave ou força funciona sem tabelas.
+  chave, força, separação de cores, saturação do filme, bleach bypass, curva neutra ou pé funciona sem
+  tabelas. A matriz do negativo é montada linha a linha: `S·(A·I + B·J)`, com `A`, `B` de
+  `look.ii_coefs` (efeito entre camadas, saturação do filme, prata no negativo) e `S` a matriz da
+  separação (`look.split_matrix`: eixos `u` e `v` a partir do matiz do eixo). O que vem depois da cópia
+  (`look.LabPost`: rolagens, saturação final, densidade por cor, pele) é `pc_lab_post`.
+- **Mostrar curva** roda o mesmo caminho de cor uma segunda vez, para um cinza que vai de −8 a +8 stops
+  ao longo da largura (`p_X`), e desenha as três curvas com `p_Y` (linha 0 = topo).
 - `tests/test_resolve.py` roda o dialeto GLSL na GPU e compara com `Engine.bake_lut` (nó *Cor*: todos os
-  presets, todos os perfis de entrada e todas as combinações de negativo × cópia × processo) e com
-  `Engine.render` (Textura e Projetor). Também confere as regras do DCTL: só ASCII, sufixo `f` nos
+  presets, todos os perfis de entrada e todas as combinações de negativo × cópia × processo; nós *Cor* e
+  *Laboratorio*: cada controle novo do laboratório em seis pares negativo/cópia; nó *Laboratorio*: os
+  presets do grupo *Laboratório*) e com `Engine.render` (Textura, com o MTF, e Projetor). Também confere as regras do DCTL: só ASCII, sufixo `f` nos
   números, sem swizzles nem sobrecarga de funções, assinatura exata do `transform`, até 64 controles por
   tipo e 5 seletores de cor, rótulos seguros e únicos.
 - Mudou `colorPipe` (em `shaders.py`) ou uma tabela de `look.py`? Atualize o kernel em `resolve.py` e rode

@@ -51,7 +51,7 @@ def test_dctl_is_ascii_with_balanced_brackets(kind):
 @pytest.mark.parametrize("kind", resolve.KINDS)
 def test_entry_point_is_exactly_the_documented_signature(kind):
     src = SOURCES[kind]
-    if kind == "cor":
+    if kind in resolve.COLOR_KINDS:
         sig = ("__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, "
                "float p_B)")
     else:
@@ -114,7 +114,8 @@ def test_frame_index_is_version_guarded():
         src = SOURCES[kind]
         assert "TIMELINE_FRAME_INDEX" in src and "__RESOLVE_VER_MAJOR__" in src
         assert "#define PC_FRAME (1)" in src
-    assert "TIMELINE_FRAME_INDEX" not in SOURCES["cor"]
+    for kind in resolve.COLOR_KINDS:
+        assert "TIMELINE_FRAME_INDEX" not in SOURCES[kind]
 
 
 def test_tables_come_from_the_app_tables():
@@ -155,6 +156,28 @@ def test_preset_dctl_defaults_are_the_preset_values(pid):
 def test_preset_files_follow_what_the_preset_uses():
     assert resolve.preset_files(presets.BY_ID["vision3_250d"]) == ["cor", "textura"]
     assert resolve.preset_files(presets.BY_ID["8mm_caseiro"]) == ["cor", "textura", "projetor"]
+    assert resolve.preset_files(presets.BY_ID["lab_v3_250d_2383"]) == ["cor", "laboratorio", "textura"]
+
+
+def test_laboratorio_node_has_the_lab_and_no_parametric_look():
+    names = {c.key for c in resolve.spec("laboratorio").controls if c.key}
+    lab_keys = {k for k in params.PARAMS if k.startswith("lab_") and k != "lab_on"}
+    assert lab_keys <= names, sorted(lab_keys - names)
+    assert {"entrada", "exposicao", "temperatura", "tint", "mix_geral"} <= names
+    assert not names & {"cor_on", "contraste", "copia", "pb", "envelhecimento", "lab_on"}
+    assert "int v_lab_on = 1;" in SOURCES["laboratorio"]
+    for kind in resolve.COLOR_KINDS:
+        assert "DEFINE_UI_PARAMS(ui_mostrar_curva, Mostrar curva, DCTLUI_CHECK_BOX, 0)" in SOURCES[kind]
+
+
+def test_new_inputs_and_mtf_are_in_the_plugin():
+    src = SOURCES["cor"]
+    for fn in ("pc_bmd5_dec", "pc_logc4_dec", "pc_apple_dec"):
+        assert fn in src
+    assert "Blackmagic Film Gen 5" in src and "ARRI LogC4" in src and "Apple Log" in src
+    m = re.search(r"PC_MTF\[(\d+)\] = \{([^}]*)\}", SOURCES["textura"])
+    vals = [float(x.strip().rstrip("f")) for x in m.group(2).split(",")]
+    assert vals == pytest.approx([look.MTF_SIGMA[k] for k, _l in params.MTFS])
 
 
 # ------------------------------------------------------------------ pacote e instalação
@@ -315,6 +338,71 @@ def test_cor_node_matches_the_app_for_every_input_profile(harness, gl_engine, en
     assert _cor_diff(harness, gl_engine, v) < 2e-3
 
 
+def _lab_app_values(values: dict) -> dict:
+    """O que o nó Laboratório faz, nos ajustes do app: só o laboratório (sem look, cópia nem envelhecimento)."""
+    return dict(values, lab_on=True, cor_on=False, copia="nenhuma", envelhecimento=0.0)
+
+
+def _lab_diff(harness, gl_engine, values: dict, n: int = 17) -> float:
+    vals = dict(_lab_app_values(values), proj_on=False, lut_on=False)
+    want = np.clip(gl_engine.bake_lut(vals, n), 0.0, 1.0)
+    got = harness.run("laboratorio", vals, _grid(n)).reshape(-1, 3)
+    return float(np.abs(want - got).max())
+
+
+LAB_PRESET_IDS = [p["id"] for p in presets.BUILTIN if p["grupo"] == "Laboratório"]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("pid", LAB_PRESET_IDS + ["vision3_500t", "original"])
+def test_laboratorio_node_matches_the_app(harness, gl_engine, pid):
+    assert _lab_diff(harness, gl_engine, presets.builtin_values(pid)) < 2e-3
+
+
+NEW_LAB_CASES = [
+    dict(lab_separacao=0.69),
+    dict(lab_separacao=1.0, lab_separacao_eixo=200.0, lab_saturacao_filme=1.6),
+    dict(lab_saturacao_filme=0.3, lab_saturacao=1.7),
+    dict(lab_dens_r=1.8, lab_dens_g=0.4, lab_dens_b=2.0),
+    dict(lab_pe=0.8, lab_luzes_rolagem=0.7, lab_sombras_rolagem=0.4),
+    dict(lab_pe=-1.0, lab_pele_matiz=-20.0, lab_pele_sat=0.8),
+    dict(lab_bypass_negativo=1.0, lab_bypass_copia=0.6),
+    dict(lab_neutro_negativo=1.0, lab_neutro_copia=0.7, lab_revelacao=2.0),
+    dict(lab_separacao=0.5, lab_bypass_copia=0.4, lab_processo="prata", lab_processo_forca=0.6),
+    dict(lab_separacao=0.69, lab_saturacao_filme=1.3, lab_processo="tech3", lab_neutro_copia=0.5, lab_pe=0.3),
+    dict(lab_separacao=0.8, lab_processo="tech2", lab_bypass_negativo=0.5, lab_dens_b=1.5),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", NEW_LAB_CASES, ids=[str(i) for i in range(len(NEW_LAB_CASES))])
+@pytest.mark.parametrize("neg, cop", [("vision3_250d", "2383"), ("ecn2_5297", "e5386"), ("vision2_5201", "2393"),
+                                      ("vision2_5229", "e5385"), ("ecn2_5247", "nenhuma"), ("double_x", "2302")])
+def test_new_lab_controls_match_the_app(harness, gl_engine, neg, cop, over):
+    v = dict(params.defaults(), lab_on=True, lab_negativo=neg, lab_copia=cop, lab_luz_r=3.0, lab_luz_b=-2.0, **over)
+    v = params.sanitize(v)
+    assert _cor_diff(harness, gl_engine, v, n=9) < 2e-3
+    assert _lab_diff(harness, gl_engine, v, n=9) < 2e-3
+
+
+@pytest.mark.gpu
+def test_show_curve_draws_the_transfer_curve_over_the_image(harness):
+    h, w = 108, 192
+    img = np.full((h, w, 3), 0.2, dtype=np.float32)
+    v = presets.builtin_values("lab_v3_250d_2383")
+    plain = harness.run("laboratorio", v, img)
+    curve = harness.run("laboratorio", v, img, ui_mostrar_curva=1)
+    changed = np.abs(curve - plain).max(axis=2) > 0.05
+    assert changed.any() and changed.mean() < 0.2           # só as linhas, a imagem continua lá
+    col = w // 2                                            # meio da largura = 0 stops = cinza médio
+    rows = np.nonzero(changed[:, col])[0]
+    target = (1.0 - 0.45) * h                               # o cinza médio sai em 0,45
+    assert rows.size and np.abs(rows - target).min() < 3
+    left, right = np.nonzero(changed[:, 4])[0], np.nonzero(changed[:, w - 5])[0]
+    assert left.mean() > right.mean()                       # mais luz → curva mais alta (y para baixo)
+    np.testing.assert_array_equal(plain, harness.run("laboratorio", v, img, ui_mostrar_curva=0))
+
+
 @pytest.mark.gpu
 def test_cor_node_matches_the_app_for_every_lab_combination(harness, gl_engine):
     base = params.defaults()
@@ -361,6 +449,8 @@ EXACT = [
     ("grao_s8", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True)),
     ("vinheta", "textura", _neutral(lente_on=True, vinheta=0.6)),
     ("maciez", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0)),
+    ("mtf", "textura", _neutral(mtf="close", mtf_forca=0.8)),
+    ("mtf_bitola", "textura", _neutral(bitola="super16", bitola_vinheta=0.0, mtf="super8", mtf_forca=0.4)),
     ("nitidez", "textura", _neutral(lente_on=True, nitidez=1.0)),
     ("lente", "textura", _neutral(lente_on=True, aberracao=4.0, distorcao=0.1)),
     ("tremor", "projetor", _neutral(proj_on=True, tremor_x=3, tremor_y=2, tremor_rot=0.2, cintilacao=0.1)),

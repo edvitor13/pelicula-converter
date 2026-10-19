@@ -366,3 +366,219 @@ def test_gpu_skin_controls(gl_engine):
     assert (c[:, :16] @ W709).mean() < (a[:, :16] @ W709).mean() - 600  # luz da pele: mais densa
     d = _render(gl_engine, base, img)
     np.testing.assert_array_equal(a, d.astype(np.int64))   # padrão é neutro e determinístico
+
+
+# ------------------------------------------------------------------ controles do fluxo do tutorial (SumerFade)
+NEW_DEFAULTS = {"lab_separacao": 0.0, "lab_separacao_eixo": 35.0, "lab_saturacao_filme": 1.0, "lab_saturacao": 1.0,
+                "lab_dens_r": 1.0, "lab_dens_g": 1.0, "lab_dens_b": 1.0, "lab_pe": 0.0, "lab_sombras_rolagem": 0.0,
+                "lab_luzes_rolagem": 0.0, "lab_pele_matiz": 0.0, "lab_pele_sat": 0.0, "lab_bypass_negativo": 0.0,
+                "lab_bypass_copia": 0.0, "lab_neutro_negativo": 0.0, "lab_neutro_copia": 0.0}
+EXTREMES = [dict(lab_separacao=1.0), dict(lab_separacao=0.7, lab_separacao_eixo=210.0),
+            dict(lab_saturacao_filme=2.0), dict(lab_saturacao_filme=0.0), dict(lab_saturacao=0.0),
+            dict(lab_dens_r=2.0, lab_dens_g=0.0, lab_dens_b=2.0), dict(lab_pe=1.0), dict(lab_pe=-1.0),
+            dict(lab_sombras_rolagem=1.0, lab_luzes_rolagem=1.0), dict(lab_pele_matiz=30.0, lab_pele_sat=1.0),
+            dict(lab_bypass_negativo=1.0), dict(lab_bypass_copia=1.0),
+            dict(lab_neutro_negativo=1.0, lab_neutro_copia=1.0)]
+SKIN = np.array([0.30, 0.17, 0.11])   # pele em luz linear
+SKY = np.array([0.08, 0.16, 0.32])    # céu
+
+
+def test_new_lab_controls_are_neutral_by_default():
+    d = params.defaults()
+    for k, val in NEW_DEFAULTS.items():
+        assert d[k] == val, k
+    assert d["mtf"] == "nenhum" and d["mtf_forca"] == 0.5
+    U = look.build_plan(lab_values(), 320, 180, 0, 24.0).uniforms
+    assert U["u_lab_ops"] == 0
+    for pid in [p["id"] for p in presets.BUILTIN if p["valores"] and p["valores"].get("lab_on")]:
+        if pid in ("lab_technicolor_hue_split", "lab_teal_orange_5201"):
+            continue
+        v = presets.builtin_values(pid)
+        assert look.build_plan(v, 64, 36, 0, 24.0).uniforms["u_lab_ops"] == 0, pid
+
+
+@pytest.mark.parametrize("over", EXTREMES, ids=[",".join(o) for o in EXTREMES])
+@pytest.mark.parametrize("neg, copia, proc", [("vision3_250d", "2383", "normal"), ("ecn2_5297", "e5386", "normal"),
+                                              ("vision2_5229", "nenhuma", "normal"), ("vision3_500t", "2393", "tech3"),
+                                              ("vision2_5201", "e5385", "prata"), ("double_x", "2302", "normal")])
+def test_mid_grey_stays_neutral_with_every_new_control(neg, copia, proc, over):
+    v = lab_values(lab_negativo=neg, lab_copia=copia, lab_processo=proc, **over)
+    np.testing.assert_allclose(look.lab_eval(v, np.full(3, 0.18)), 0.45, atol=1e-6)
+    y = look.lab_eval(v, stops(np.linspace(-12, 12, 241)))
+    assert np.isfinite(y).all() and (y >= 0).all()
+    assert (np.diff(y @ W709) >= -1e-6).all()  # o cinza continua subindo
+
+
+GREEN = np.array([0.08, 0.20, 0.07])
+MAGENTA = np.array([0.25, 0.08, 0.22])
+
+
+def split_coords(y, hue_deg=35.0):
+    """Cor em log, sem o neutro, nos eixos da separação: u (laranja ↔ azul) e v (verde ↔ magenta)."""
+    u, v = look.split_axes(hue_deg)
+    c = np.log(np.maximum(np.asarray(y, dtype=np.float64), 1e-9))
+    c = c - c.mean(axis=-1, keepdims=True)
+    return c @ u, c @ v
+
+
+def test_hue_split_pushes_warm_and_cool_apart_and_squeezes_the_rest():
+    lin = np.stack([SKIN, SKY, GREEN, MAGENTA])
+    u0, v0 = split_coords(look.lab_eval(lab_values(), lin))
+    u1, v1 = split_coords(look.lab_eval(lab_values(lab_separacao=0.69), lin))
+    u2, v2 = split_coords(look.lab_eval(lab_values(lab_separacao=1.0), lin))
+    assert u0[0] > 0 > u0[1]                                 # pele no polo quente, céu no frio
+    assert u0[0] - u0[1] < u1[0] - u1[1] < u2[0] - u2[1]     # e se afastam com a quantidade
+    assert u1[0] - u1[1] > 1.2 * (u0[0] - u0[1])
+    for i in (2, 3):                                         # verde e magenta: comprimidos
+        assert abs(v2[i]) < abs(v1[i]) < abs(v0[i]) * 0.85
+    # mesmo efeito em qualquer exposição (é feito na densidade, em log)
+    for k in (0.25, 4.0):
+        a, _ = split_coords(look.lab_eval(lab_values(), lin[:2] * k))
+        b, _ = split_coords(look.lab_eval(lab_values(lab_separacao=0.69), lin[:2] * k))
+        assert b[0] - b[1] > 1.15 * (a[0] - a[1])
+    # o eixo gira a separação: a 215° o polo "quente" passa a ser o azul
+    ua, _ = split_coords(look.lab_eval(lab_values(lab_separacao=1.0, lab_separacao_eixo=215.0), lin), 215.0)
+    assert ua[1] > 0 > ua[0]
+
+
+def test_hue_split_matrix_keeps_neutral_and_mean():
+    for amount, hue_deg in ((0.69, 35.0), (1.0, 200.0), (0.3, 300.0)):
+        m = look.split_matrix(amount, hue_deg)
+        np.testing.assert_allclose(m @ np.ones(3), np.ones(3), atol=1e-12)
+        np.testing.assert_allclose(np.ones(3) @ m, np.ones(3), atol=1e-12)
+    np.testing.assert_array_equal(look.split_matrix(0.0, 35.0), np.eye(3))
+    u, v = look.split_axes(35.0)
+    assert abs(u @ v) < 1e-12 and abs(u.sum()) < 1e-12 and abs(v.sum()) < 1e-12
+
+
+def test_density_per_color_only_touches_that_color():
+    lin = np.stack([SKY, np.array([0.30, 0.05, 0.04]), np.full(3, 0.18)])
+    base = look.lab_eval(lab_values(), lin)
+    blue = look.lab_eval(lab_values(lab_dens_b=1.8), lin)
+    assert blue[0] @ W709 < base[0] @ W709 - 0.01            # o céu fica mais denso
+    np.testing.assert_allclose(blue[1:], base[1:], atol=1e-9)  # vermelho e cinza iguais
+    light = look.lab_eval(lab_values(lab_dens_r=0.2), lin)
+    assert light[1] @ W709 > base[1] @ W709 + 0.005            # menos densidade clareia
+
+
+def test_black_toe_and_roll_offs():
+    lo, hi = stops(np.array([-6.0])), stops(np.array([5.0]))
+    base_lo = look.lab_eval(lab_values(), lo)[0, 1]
+    assert look.lab_eval(lab_values(lab_pe=0.8), lo)[0, 1] > base_lo + 0.01      # pé positivo lava o preto
+    assert look.lab_eval(lab_values(lab_pe=-0.8), lo)[0, 1] <= base_lo           # negativo aprofunda
+    s0 = look.lab_eval(lab_values(), stops(np.array([-3.0])))[0, 1]
+    s1 = look.lab_eval(lab_values(lab_sombras_rolagem=1.0), stops(np.array([-3.0])))[0, 1]
+    h0 = look.lab_eval(lab_values(), hi)[0, 1]
+    h1 = look.lab_eval(lab_values(lab_luzes_rolagem=1.0), hi)[0, 1]
+    assert s1 > s0 + 0.01 and h1 < h0 - 0.01
+
+
+def test_saturations():
+    neu = look._stops_to_disp(np.log2(PATCHES / 0.18))
+    base = sat(look.lab_eval(lab_values(), PATCHES)) / sat(neu)
+    film = sat(look.lab_eval(lab_values(lab_saturacao_filme=1.6), PATCHES)) / sat(neu)
+    assert film.mean() > base.mean() + 0.1
+    grey = look.lab_eval(lab_values(lab_saturacao=0.0), PATCHES)
+    np.testing.assert_allclose(np.ptp(grey, axis=1), 0.0, atol=1e-9)  # saturação final 0 = preto e branco
+
+
+def test_bleach_bypass_on_negative_and_print():
+    neu = look._stops_to_disp(np.log2(PATCHES / 0.18))
+    base = sat(look.lab_eval(lab_values(), PATCHES)) / sat(neu)
+    for k in ("lab_bypass_negativo", "lab_bypass_copia"):
+        s = sat(look.lab_eval(lab_values(**{k: 1.0}), PATCHES)) / sat(neu)
+        assert s.mean() < base.mean() - 0.05, k
+
+    def spread(**over):
+        y = look.lab_eval(lab_values(**over), stops(np.array([-2.0, 2.0])))
+        return float(y[1, 1] - y[0, 1])
+
+    assert spread(lab_bypass_negativo=1.0) > spread() + 0.01                 # prata no negativo: mais contraste
+    lo = stops(np.array([-4.0]))
+    assert look.lab_eval(lab_values(lab_bypass_copia=1.0), lo)[0, 1] < look.lab_eval(lab_values(), lo)[0, 1]
+
+
+def test_neutral_curves_remove_the_stock_crossover():
+    ramp = stops(np.array([-5.0, -3.0, 3.0, 5.0]))
+    v = dict(lab_negativo="ecn2_5247", lab_copia="e5385")
+    a = np.ptp(look.lab_eval(lab_values(**v), ramp), axis=1).max()
+    b = np.ptp(look.lab_eval(lab_values(lab_neutro_negativo=1.0, lab_neutro_copia=1.0, **v), ramp), axis=1).max()
+    assert b < a * 0.5
+
+
+def test_lab_skin_controls_only_touch_skin():
+    lin = np.stack([SKIN, SKY])
+    a = look.lab_eval(lab_values(), lin)
+    b = look.lab_eval(lab_values(lab_pele_matiz=25.0, lab_pele_sat=0.6), lin)
+    assert np.abs(b[0] - a[0]).max() > 0.01
+    np.testing.assert_allclose(b[1], a[1], atol=1e-3)
+
+
+def test_new_controls_enter_the_cache_key_rounded():
+    look.lab_paths.cache_clear()
+    look.lab_eval(lab_values(lab_separacao=0.5), PATCHES)
+    look.lab_eval(lab_values(lab_separacao=0.50000001), PATCHES)   # arredondado: mesma calibração
+    look.lab_eval(lab_values(lab_separacao=0.5, lab_saturacao=1.4, lab_dens_b=1.3), PATCHES)  # depois da cópia
+    assert look.lab_paths.cache_info().misses == 1
+    look.lab_eval(lab_values(lab_separacao=0.6), PATCHES)
+    assert look.lab_paths.cache_info().misses == 2
+
+
+def test_new_stocks_exist_and_are_calibrated():
+    for k in ("vision2_5201", "ecn2_5297", "vision_5246", "vision_5263", "vision2_5229"):
+        assert k in look.NEGATIVES and k in dict(params.NEGATIVOS)
+    for k in ("e5386", "e5385"):
+        assert k in look.LAB_PRINTS and k in dict(params.COPIAS_LAB)
+
+
+def test_video_presets():
+    v = presets.builtin_values("lab_technicolor_hue_split")
+    assert (v["lab_negativo"], v["lab_copia"]) == ("ecn2_5297", "e5386")
+    assert v["lab_separacao"] == pytest.approx(0.69) and v["lab_saturacao_filme"] == pytest.approx(1.3)
+    assert v["mtf"] == "close"
+    w = presets.builtin_values("lab_teal_orange_5201")
+    assert (w["lab_negativo"], w["lab_copia"]) == ("vision2_5201", "2393") and w["lab_dens_b"] > 1
+
+
+def test_mtf_softens_through_the_soft_blur():
+    v = params.defaults()
+    v["bitola"] = "nenhuma"
+    assert look.build_plan(v, 1920, 1080, 0, 24.0).soft_sigma == 0.0
+    v.update(mtf="close", mtf_forca=0.5)
+    assert look.build_plan(v, 1920, 1080, 0, 24.0).soft_sigma == pytest.approx(look.MTF_SIGMA["close"])
+    assert look.build_plan(v, 3840, 2160, 0, 24.0).soft_sigma == pytest.approx(2 * look.MTF_SIGMA["close"])
+    v["mtf_forca"] = 1.0
+    assert look.build_plan(v, 1920, 1080, 0, 24.0).soft_sigma == pytest.approx(2 * look.MTF_SIGMA["close"])
+    v.update(bitola="16mm")
+    want = math.hypot(look.GAUGES["16mm"]["blur"], 2 * look.MTF_SIGMA["close"])
+    assert look.build_plan(v, 1920, 1080, 0, 24.0).soft_sigma == pytest.approx(want)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", EXTREMES[:6] + [dict(lab_separacao=0.69, lab_saturacao_filme=1.3, lab_pe=0.3,
+                                                      lab_dens_b=1.5, lab_pele_matiz=10.0, lab_luzes_rolagem=0.5)],
+                         ids=[str(i) for i in range(7)])
+def test_gpu_new_controls_match_numpy(gl_engine, over):
+    rng = np.random.default_rng(11)
+    img = rng.integers(0, 65536, size=(32, 48, 3), dtype=np.uint16)
+    v = lab_values(lab_negativo="ecn2_5297", lab_copia="e5386", grao_on=False, hal_on=False, bloom_on=False,
+                   lente_on=False, bitola_vinheta=0.0, **over)
+    out = _render(gl_engine, v, img).astype(np.float64) / 65535.0
+    ref = look.lab_eval(v, display_to_lin(img.astype(np.float64) / 65535.0))
+    ref = look._stops_to_disp(np.clip(np.log2(display_to_lin(ref) / 0.18), -12, 12))  # volta pela curva neutra
+    assert np.abs(out - ref).max() < 0.006
+
+
+@pytest.mark.gpu
+def test_gpu_mtf_removes_fine_detail(gl_engine):
+    rng = np.random.default_rng(3)
+    img = (rng.random((540, 960, 3)) * 65535).astype(np.uint16)  # meia resolução: σ do "close" ≈ 1,6 px
+    v = params.defaults()
+    v.update(bitola="nenhuma")
+    a = _render(gl_engine, v, img).astype(np.float64)
+    b = _render(gl_engine, dict(v, mtf="close", mtf_forca=1.0), img).astype(np.float64)
+
+    def hf(x):
+        return np.abs(np.diff(x, axis=1)).mean()
+
+    assert hf(b) < hf(a) * 0.6

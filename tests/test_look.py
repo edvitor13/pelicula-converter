@@ -123,6 +123,7 @@ def test_tables_cover_every_choice():
     assert set(ch["lab_negativo"]) == set(look.NEGATIVES)
     assert set(ch["lab_copia"]) == set(look.LAB_PRINTS)
     assert set(ch["lab_processo"]) == set(look.LAB_PROCESSES)
+    assert set(ch["mtf"]) == set(look.MTF_SIGMA) and look.MTF_SIGMA["nenhum"] == 0.0
     for k in ("bitola", "proporcao"):
         assert ch[k]
     for prop in ch["proporcao"]:
@@ -130,6 +131,19 @@ def test_tables_cover_every_choice():
             assert float(prop) > 1.0
     assert len(set(look.INPUT_IDS.values())) == len(look.INPUT_IDS)
     assert set(look.INPUT_GAMUT.values()) <= set(look._PRIMARIES)
+
+
+def test_lab_post_uniforms_follow_the_controls():
+    v = params.defaults()
+    v["lab_on"] = True
+    U = look.build_plan(v, 320, 180, 0, 24.0).uniforms
+    assert U["u_lab_ops"] == 0
+    v.update(lab_luzes_rolagem=0.5, lab_saturacao=1.2, lab_dens_b=1.4, lab_pele_sat=0.3)
+    U = look.build_plan(v, 320, 180, 0, 24.0).uniforms
+    assert U["u_lab_ops"] == 2 | 4 | 8 | 16
+    assert U["u_lab_sat"] == pytest.approx(1.2)
+    assert tuple(U["u_lab_dens"]) == pytest.approx((0.0, 0.0, 0.4))
+    assert U["u_lab_skin"][1] == pytest.approx(0.3)
 
 
 @pytest.mark.parametrize("filtro", list(look.BW_WEIGHTS))

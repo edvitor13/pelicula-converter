@@ -101,6 +101,19 @@ BUILTIN: list[dict[str, Any]] = [
          desc="O negativo invertido digitalmente, como num scan: latitude enorme e contraste baixo.",
          valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_250d",
                       lab_copia="nenhuma", iso="250")),
+    # O fluxo do tutorial "Three-Strip Technicolor Look": negativo + cópia Eastman, Hue Split, saturação do
+    # filme e luzes da copiadora; textura com MTF de close, grão e halação de 35 mm.
+    dict(id="lab_technicolor_hue_split", nome="Technicolor (5297 → 5386, Hue Split)", grupo="Laboratório",
+         desc="Negativo Eastman 5297 copiado na 5386 com separação de cores: pele quente, céu e sombras frios e "
+              "cores densas, como o Technicolor de três tiras.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="ecn2_5297", lab_copia="e5386",
+                      exposicao=-0.25, lab_separacao=0.69, lab_saturacao_filme=1.3, lab_luz_r=-1.0, lab_luz_b=1.0,
+                      iso="250", mtf="close", mtf_forca=0.5, hal_forca=0.7)),
+    dict(id="lab_teal_orange_5201", nome="Teal & orange (5201 → 2393, Hue Split)", grupo="Laboratório",
+         desc="Vision2 5201 50D copiado na 2393 com separação de cores e azuis mais densos: o céu se separa da "
+              "pele.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision2_5201", lab_copia="2393",
+                      lab_separacao=0.69, lab_dens_b=1.4, lab_saturacao_filme=1.1, iso="50", mtf="medio")),
 
     # ------------------------------------------------------------ bitolas
     dict(id="super8_kodachrome", nome="Super 8 • Kodachrome 40", grupo="Bitolas e formatos",

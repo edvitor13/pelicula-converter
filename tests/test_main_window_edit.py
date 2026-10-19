@@ -111,6 +111,10 @@ win.redo()
 
 # De volta ao modo Película: a montagem (não trivial) continua sendo a fonte.
 win.set_mode("pelicula")
+win.curve_switch.setChecked(True)
+wait(0.3)
+c = win.curve_graph.curves
+out["curve"] = None if c is None else list(c.shape)
 win.split.setSizes([560, 700, 300])
 wait(0.5)
 group = win.looks.groups[0][2]
@@ -174,6 +178,7 @@ def test_edit_mode_end_to_end(gl_engine, sample_video, tmp_path):
     assert out["after_values"]
     assert out["undo_exposure"] == 0.0
     assert out["film_uses_seq"]
+    assert out["curve"] == [33, 3]
     assert out["export_status"] == "concluido", out["export_error"]
     assert out["export_frames"] == 12
     assert out["project_format"] == 2 and out["project_has_edit"]

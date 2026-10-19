@@ -20,7 +20,8 @@ D_MID = 0.45
 D_P = 4.0
 
 INPUT_IDS = {"rec709": 0, "linear": 1, "nlog": 2, "slog3": 3, "logc3": 4, "vlog": 5, "cineon": 6, "dwg": 7,
-             "log3g10": 8}
+             "log3g10": 8, "bmd_gen5": 9, "logc4": 10,
+             "applelog": 11}
 
 GAUGES: dict[str, dict[str, Any]] = {
     "nenhuma": dict(grain_size=1.00, grain_amt=1.00, blur=0.0, weave=1.0, vignette=0.00, hal=1.00, aspect=None),
@@ -66,6 +67,15 @@ EDGE_TEXTS = {
 _KODAK_35 = {50: "5203", 100: "5203", 125: "5203", 200: "5213", 250: "5207", 400: "5207", 500: "5219",
              800: "5219", 1600: "5219", 3200: "5219"}
 _KODAK_NAME = {"5203": "50D", "5213": "200T", "5207": "250D", "5219": "500T"}
+
+
+# MTF da película (px@1080): sigma da gaussiana fina de cada enquadramento, com "Quantidade" 50%.
+MTF_SIGMA = {"nenhum": 0.0, "close": 1.6, "medio": 1.1, "aberto": 0.7, "16mm": 1.5, "super8": 2.3}
+
+
+def mtf_sigma(v: dict) -> float:
+    """Sigma do MTF em px@1080 (0 = desligado). Quantidade 50% = o valor do enquadramento; 100% = o dobro."""
+    return MTF_SIGMA.get(v.get("mtf", "nenhum"), 0.0) * 2.0 * float(v.get("mtf_forca", 0.5))
 
 
 def edge_text(v: dict) -> str:
@@ -126,10 +136,14 @@ _PRIMARIES = {
     "vgamut": ((0.730, 0.280), (0.165, 0.840), (0.100, -0.030)),
     "dwg": ((0.8000, 0.3130), (0.1682, 0.9877), (0.0790, -0.1155)),
     "rwg": ((0.780308, 0.304253), (0.121595, 1.493994), (0.095612, -0.084589)),
+    # Blackmagic Wide Gamut (Gen 4/5) e ARRI Wide Gamut 4 (valores publicados; branco D65)
+    "bmdwg": ((0.7177215, 0.3171181), (0.2280410, 0.8615690), (0.1005841, -0.0820452)),
+    "awg4": ((0.7347, 0.2653), (0.1424, 0.8576), (0.0991, -0.0308)),
 }
 _D65 = (0.3127, 0.3290)
 INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020",
-               "slog3": "sgamut3cine", "logc3": "awg3", "vlog": "vgamut", "dwg": "dwg", "log3g10": "rwg"}
+               "slog3": "sgamut3cine", "logc3": "awg3", "vlog": "vgamut", "dwg": "dwg", "log3g10": "rwg",
+               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020"}
 
 
 def _npm(prim, white=_D65) -> np.ndarray:
@@ -217,6 +231,8 @@ _SENS_V3T = ((0.91, 0.08, 0.01), (0.05, 0.91, 0.04), (0.01, 0.08, 0.91))
 _SENS_ETERNA = ((0.88, 0.10, 0.02), (0.05, 0.88, 0.07), (0.02, 0.11, 0.87))
 _SENS_VIVID = ((0.94, 0.05, 0.01), (0.03, 0.94, 0.03), (0.01, 0.05, 0.94))
 _SENS_ECN2 = ((0.84, 0.13, 0.03), (0.07, 0.85, 0.08), (0.03, 0.13, 0.84))
+_SENS_V2 = ((0.91, 0.08, 0.01), (0.05, 0.90, 0.05), (0.01, 0.08, 0.91))
+_SENS_EXR = ((0.88, 0.10, 0.02), (0.06, 0.88, 0.06), (0.02, 0.10, 0.88))
 _SENS_PAN = ((0.25, 0.65, 0.10),) * 3  # P&B pancromático: as três "camadas" veem a mesma coisa
 
 # Negativos: gama, pé e ombro (log10 relativo ao cinza médio; 0,301 = 1 stop), largura das curvas e
@@ -239,6 +255,18 @@ NEGATIVES: dict[str, dict[str, Any]] = {
                      shoulder=(1.75, 1.75, 1.70), width=0.24, interimage=0.38),
     "ecn2_5247": dict(sens=_SENS_ECN2, gamma=(0.67, 0.65, 0.62), toe=(-1.30, -1.32, -1.28),
                       shoulder=(1.60, 1.60, 1.55), width=0.22, interimage=0.25),
+    # Negativos de outras épocas (aproximações artísticas): quanto mais antigo, mais mistura entre
+    # camadas, menos latitude e menos efeito entre camadas.
+    "vision2_5201": dict(sens=_SENS_V2, gamma=(0.63, 0.63, 0.64), toe=(-1.45, -1.46, -1.42),
+                         shoulder=(1.88, 1.88, 1.84), width=0.23, interimage=0.44),
+    "ecn2_5297": dict(sens=_SENS_EXR, gamma=(0.64, 0.63, 0.61), toe=(-1.36, -1.38, -1.34),
+                      shoulder=(1.72, 1.72, 1.66), width=0.24, interimage=0.32),
+    "vision_5246": dict(sens=_SENS_EXR, gamma=(0.61, 0.61, 0.61), toe=(-1.48, -1.50, -1.46),
+                        shoulder=(1.85, 1.85, 1.80), width=0.25, interimage=0.36),
+    "vision_5263": dict(sens=_SENS_V3T, gamma=(0.58, 0.59, 0.58), toe=(-1.56, -1.58, -1.52),
+                        shoulder=(1.80, 1.80, 1.75), width=0.27, interimage=0.33),
+    "vision2_5229": dict(sens=_SENS_V3T, gamma=(0.52, 0.53, 0.52), toe=(-1.66, -1.68, -1.62),
+                         shoulder=(1.95, 1.95, 1.90), width=0.32, interimage=0.30),
     "double_x": dict(sens=_SENS_PAN, gamma=(0.65, 0.65, 0.65), toe=(-1.40, -1.40, -1.40),
                      shoulder=(1.80, 1.80, 1.80), width=0.25, interimage=0.0),
 }
@@ -252,6 +280,11 @@ LAB_PRINTS: dict[str, dict[str, Any] | None] = {
                  dye=((1.00, 0.07, 0.02), (0.05, 1.00, 0.07), (0.02, 0.12, 1.00))),
     "3513": dict(gamma=(2.95, 2.95, 2.92), dmax=(4.0, 4.0, 4.0), width=0.23,
                  dye=((1.00, 0.07, 0.03), (0.08, 1.00, 0.06), (0.03, 0.12, 1.00))),
+    # Cópias Eastman mais antigas: gama um pouco menor, menos densidade máxima e corantes menos puros.
+    "e5386": dict(gamma=(2.90, 2.85, 2.74), dmax=(3.85, 3.85, 3.78), width=0.24,
+                  dye=((1.00, 0.10, 0.03), (0.07, 1.00, 0.10), (0.03, 0.16, 1.00))),
+    "e5385": dict(gamma=(2.80, 2.74, 2.62), dmax=(3.65, 3.65, 3.55), width=0.25,
+                  dye=((1.00, 0.12, 0.04), (0.08, 1.00, 0.12), (0.04, 0.18, 1.00))),
     "2302": dict(gamma=(2.70, 2.70, 2.70), dmax=(3.8, 3.8, 3.8), width=0.22,
                  dye=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))),
     "nenhuma": None,
@@ -275,6 +308,144 @@ LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
                              dye=((1.00, 0.10, 0.0), (0.25, 0.85, 0.0), (0.12, 1.00, 0.0))),
                   key=(0.0, 0.0, 0.0)),
 }
+
+
+# Separação de cores (Hue Split), na densidade do negativo: no plano perpendicular ao cinza (as três
+# camadas iguais) estica ao longo de um eixo e encolhe na perpendicular, puxando as cores para os dois
+# polos do eixo (padrão laranja ↔ verde-azulado) e afastando umas das outras. Como é feita em log
+# (densidade), age igual em qualquer exposição; o cinza e a densidade média não mudam. Junta-se à
+# matriz do efeito entre camadas (u_la_ii).
+SPLIT_STRETCH = 0.60   # esticar ao longo do eixo com força 1
+SPLIT_SQUEEZE = 0.45   # encolher na perpendicular com força 1
+_W709 = np.array([0.2126, 0.7152, 0.0722])
+
+
+def _hue_rgb(hue_deg: float) -> np.ndarray:
+    """Cor pura de matiz `hue_deg` (o mesmo setor HSV de _hsv_tint e pc_hsv_tint)."""
+    h = (hue_deg % 360) / 60.0
+    x = 1 - abs(h % 2 - 1)
+    return np.array([(1, x, 0), (x, 1, 0), (0, 1, x), (0, x, 1), (x, 0, 1), (1, 0, x)][int(h) % 6], dtype=np.float64)
+
+
+def split_axes(hue_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    """Eixos u (polo quente) e v (perpendicular) do plano perpendicular a (1, 1, 1), unitários."""
+    c = _hue_rgb(hue_deg)
+    u = c - c.mean()
+    u = u / np.linalg.norm(u)
+    v = np.cross(np.ones(3) / math.sqrt(3.0), u)
+    return u, v / np.linalg.norm(v)
+
+
+def split_matrix(amount: float, hue_deg: float) -> np.ndarray:
+    """Matriz 3×3 da separação na densidade (identidade com força 0; mantém (1, 1, 1) e a média)."""
+    if amount == 0:
+        return np.eye(3)
+    u, v = split_axes(hue_deg)
+    a = SPLIT_STRETCH * amount
+    b = SPLIT_SQUEEZE * amount
+    return np.full((3, 3), 1.0 / 3.0) + (1 + a) * np.outer(u, u) + (1 - b) * np.outer(v, v)
+
+
+# ------------------------------------------------------------------ depois da cópia (no valor de exibição)
+def _curve_np(t, slope, mid, black, white, ps, pt):
+    t = np.asarray(t, dtype=np.float64)
+    rw = max(white - mid, 1e-4)
+    rb = max(mid - black, 1e-4)
+    r = np.where(t >= 0, rw, rb)
+    p = np.where(t >= 0, ps, pt)
+    u = t * slope / r
+    return mid + r * u / (1.0 + np.abs(u) ** p) ** (1.0 / p)
+
+
+def _disp_to_stops(y) -> np.ndarray:
+    y = np.asarray(y, dtype=np.float64)
+    r = np.where(y >= D_MID, 1.0 - D_MID, D_MID)
+    a = np.minimum(np.abs((y - D_MID) / r), 0.99995)
+    u = a / (1 - a ** D_P) ** (1 / D_P)
+    return np.clip(np.sign(y - D_MID) * u * r / D_SLOPE, -12.0, 12.0)
+
+
+def _smoothstep(e0, e1, x):
+    t = np.clip((np.asarray(x, dtype=np.float64) - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
+def _hue_ang(c) -> float:
+    c = np.asarray(c, dtype=np.float64)
+    y = c @ _W709
+    return float(np.arctan2((c[0] - y) / 1.5748, (c[2] - y) / 1.8556))
+
+
+SKIN_HUE = _hue_ang((0.8, 0.55, 0.45))
+
+
+def skin_adjust(y, rot: float, sat: float) -> np.ndarray:
+    """Giro de matiz e saturação só nos tons de pele (labSkin do shader / hueAdjust do look)."""
+    y = np.asarray(y, dtype=np.float64)
+    Y = y @ _W709
+    cx = (y[..., 2] - Y) / 1.8556
+    cy = (y[..., 0] - Y) / 1.5748
+    h = np.arctan2(cy, cx)
+    d = np.abs(np.mod(h - SKIN_HUE + math.pi, 2 * math.pi) - math.pi)
+    ws = _smoothstep(0.8, 0.0, d)
+    a = rot * ws
+    nx = np.cos(a) * cx - np.sin(a) * cy
+    ny = np.sin(a) * cx + np.cos(a) * cy
+    k = np.maximum(0.0, 1.0 + sat * ws)
+    nx, ny = nx * k, ny * k
+    r = Y + 1.5748 * ny
+    b = Y + 1.8556 * nx
+    g = (Y - 0.2126 * r - 0.0722 * b) / 0.7152
+    out = np.stack([r, g, b], axis=-1)
+    tiny = np.hypot(cx, cy) < 1e-5
+    return np.where(tiny[..., None], y, out)
+
+
+LAB_DENS_K = 0.5  # escurecimento por unidade de densidade extra numa cor 100% dominante
+
+
+@dataclass(frozen=True)
+class LabPost:
+    """O que vem depois da cópia, já no valor de exibição (u_lab_ops e companhia)."""
+
+    ops: int          # bits: 2 rolagem, 4 saturação, 8 densidades, 16 pele (1 fica livre)
+    tone: tuple       # expoentes (altas luzes, sombras) da curva de rolagem
+    sat: float
+    dens: tuple       # densidade − 1 por primária (R, G, B)
+    skin: tuple       # giro de matiz da pele (rad), saturação da pele
+
+    def post(self, y) -> np.ndarray:
+        y = np.asarray(y, dtype=np.float64)
+        if self.ops & 2:
+            y = _curve_np(_disp_to_stops(y), D_SLOPE, D_MID, 0.0, 1.0, self.tone[0], self.tone[1])
+        if self.ops & 4:
+            L = (y @ _W709)[..., None]
+            y = L + (y - L) * self.sat
+        if self.ops & 8:
+            w = np.stack([np.maximum(0.0, y[..., 0] - np.maximum(y[..., 1], y[..., 2])),
+                          np.maximum(0.0, y[..., 1] - np.maximum(y[..., 0], y[..., 2])),
+                          np.maximum(0.0, y[..., 2] - np.maximum(y[..., 0], y[..., 1]))], axis=-1)
+            f = np.clip(1.0 - LAB_DENS_K * (w @ np.asarray(self.dens)), 0.2, 2.0)
+            y = y * f[..., None]
+        if self.ops & 16:
+            y = skin_adjust(y, self.skin[0], self.skin[1])
+        return y
+
+
+def lab_post(v: dict) -> LabPost:
+    ops = 0
+    hi, lo = float(v["lab_luzes_rolagem"]), float(v["lab_sombras_rolagem"])
+    if hi > 0 or lo > 0:
+        ops |= 2
+    if float(v["lab_saturacao"]) != 1.0:
+        ops |= 4
+    dens = tuple(float(v[k]) - 1.0 for k in ("lab_dens_r", "lab_dens_g", "lab_dens_b"))
+    if any(d != 0.0 for d in dens):
+        ops |= 8
+    skin = (math.radians(float(v["lab_pele_matiz"])), float(v["lab_pele_sat"]))
+    if skin != (0.0, 0.0):
+        ops |= 16
+    return LabPost(ops, (_softness_p(hi), _softness_p(lo)), float(v["lab_saturacao"]), dens, skin)
 
 
 def _softplus(z):
@@ -368,22 +539,71 @@ def _calibrate_print(dn_mid, gamma, shoulder, width, dye: np.ndarray, key: np.nd
     return off
 
 
-def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key) -> LabPath:
-    ng = np.asarray(neg["gamma"], dtype=np.float64) * (1.0 + 0.12 * push)   # forçar = mais contraste
-    nt = np.asarray(neg["toe"], dtype=np.float64) + 0.08 * push            # ... e sombras mais fechadas
-    ns = np.asarray(neg["shoulder"], dtype=np.float64)
+def _neutral3(a, t: float) -> np.ndarray:
+    """Aproxima os três canais da média deles (t = 0: igual; t = 1: os três iguais)."""
+    a = np.asarray(a, dtype=np.float64)
+    return a + (np.full(3, a.mean()) - a) * t
+
+
+def _aij(a1: float, b1: float, a2: float, b2: float) -> tuple[float, float]:
+    """Produto de matrizes da forma a·I + b·J (J = todos 1): continua nessa forma."""
+    return a1 * a2, a1 * b2 + b1 * a2 + 3.0 * b1 * b2
+
+
+BYPASS_NEG_CONTRAST = 0.5  # bleach bypass no negativo: contraste neutro a mais
+BYPASS_NEG_DYE = 0.3       # e quanto da cor dos corantes a prata esconde
+
+
+def ii_coefs(interimage: float, film_sat: float, bypass_neg: float) -> tuple[float, float]:
+    """Matriz da densidade do negativo: dn' = A·dn + B·(soma de dn).
+
+    Efeito entre camadas (A = 1 + k, B = −k/3), saturação do filme (s·I + (1 − s)/3·J, mantém a
+    média) e prata retida no negativo ((1 − d)·I + (c + d)/3·J: a prata é densidade neutra que soma
+    contraste, c = 0,5 × bleach bypass, e dilui a cor dos corantes, d = 0,3 × bleach bypass).
+    """
+    k = float(interimage)
+    a, b = 1.0 + k, -k / 3.0
+    s = float(film_sat)
+    a, b = _aij(s, (1.0 - s) / 3.0, a, b)
+    c, d = BYPASS_NEG_CONTRAST * float(bypass_neg), BYPASS_NEG_DYE * float(bypass_neg)
+    a, b = _aij(1.0 - d, (c + d) / 3.0, a, b)
+    return a, b
+
+
+@dataclass(frozen=True)
+class LabMods:
+    """Ajustes do usuário que mudam as curvas (entram na calibração e na chave do cache)."""
+
+    film_sat: float = 1.0
+    bypass_neg: float = 0.0
+    neutral_neg: float = 0.0
+    neutral_print: float = 0.0
+    toe: float = 0.0      # pé da cópia: positivo lava os pretos (menos densidade máxima)
+    split: float = 0.0    # separação de cores (Hue Split), na densidade do negativo
+    split_hue: float = 35.0
+
+
+def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
+               mods: LabMods = LabMods()) -> LabPath:
+    gamma = _neutral3(neg["gamma"], mods.neutral_neg)
+    ng = gamma * (1.0 + 0.12 * push)                                       # forçar = mais contraste
+    nt = _neutral3(neg["toe"], mods.neutral_neg) + 0.08 * push             # ... e sombras mais fechadas
+    ns = _neutral3(neg["shoulder"], mods.neutral_neg)
     nw = float(neg["width"])
-    k = float(neg.get("interimage", 0.0))
-    ii = np.eye(3) * (1.0 + k) - k / 3.0  # dn' = dn + k·(dn − média): linhas somam 1
+    a_ii, b_ii = ii_coefs(neg.get("interimage", 0.0), mods.film_sat, mods.bypass_neg)
+    ii = np.eye(3) * a_ii + b_ii  # dn' = A·dn + B·(soma): linhas somam A + 3B
+    if mods.split:
+        ii = split_matrix(mods.split, mods.split_hue) @ ii  # comuta com A·I + B·J
     dn_mid = ii @ lab_curve(np.zeros(3), ng, nt, ns, nw)
     sens = _t3x3(neg["sens"])
     if pr is None:
         # Sem cópia o campo `pg` guarda o gama nominal (sem forçar) usado na inversão do scan: assim
         # a revelação forçada aparece como mais contraste, como num scan com inversão fixa.
-        return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(neg["gamma"]), (0.0, 0.0, 0.0),
+        return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(gamma), (0.0, 0.0, 0.0),
                        (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True)
-    pg = np.asarray(pr["gamma"], dtype=np.float64)
-    ps = np.asarray(pr["dmax"], dtype=np.float64) / pg
+    pg = _neutral3(pr["gamma"], mods.neutral_print)
+    dmax = _neutral3(pr["dmax"], mods.neutral_print) * 2.0 ** (-0.6 * mods.toe)
+    ps = dmax / pg
     pw = float(pr["width"])
     eye = np.eye(3)
     raw = np.asarray(pr["dye"], dtype=np.float64)
@@ -397,7 +617,7 @@ def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key) -
 
 @lru_cache(maxsize=512)
 def lab_paths(negativo: str, copia: str, processo: str, push: float, crosstalk: float, chave: float,
-              forca: float) -> tuple[LabPath, LabPath | None]:
+              forca: float, mods: LabMods = LabMods(), bypass_print: float = 0.0) -> tuple[LabPath, LabPath | None]:
     """Caminhos A (negativo + cópia escolhidos) e B (processo Technicolor), já calibrados."""
     neg = NEGATIVES.get(negativo, NEGATIVES["vision3_250d"])
     pr = LAB_PRINTS.get(copia, LAB_PRINTS["2383"])
@@ -407,11 +627,13 @@ def lab_paths(negativo: str, copia: str, processo: str, push: float, crosstalk: 
         key = (0.8 * forca / 3.0,) * 3
         if pr is None:
             pr = LAB_PRINTS["2383"]  # a prata só existe numa cópia
-    a = _make_path(neg, pr, push, crosstalk, key)
+    if bypass_print > 0 and pr is not None:
+        key = tuple(k + 0.8 * bypass_print / 3.0 for k in key)  # bleach bypass contínuo na cópia
+    a = _make_path(neg, pr, push, crosstalk, key, mods)
     proc = LAB_PROCESSES.get(processo)
     if not proc:
         return a, None
-    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]))
+    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]), mods)
     return a, b
 
 
@@ -421,19 +643,40 @@ def lab_lights(v: dict) -> tuple:
     return tuple(LAB_POINT * (v[k] + d) for k in ("lab_luz_r", "lab_luz_g", "lab_luz_b"))
 
 
+def _r4(x) -> float:
+    return round(float(x), 4)  # chave do cache: valores de slider arredondados
+
+
 def lab_paths_for(v: dict) -> tuple[LabPath, LabPath | None]:
+    mods = LabMods(_r4(v["lab_saturacao_filme"]), _r4(v["lab_bypass_negativo"]), _r4(v["lab_neutro_negativo"]),
+                   _r4(v["lab_neutro_copia"]), _r4(v["lab_pe"]), _r4(v["lab_separacao"]),
+                   _r4(v["lab_separacao_eixo"]))
     return lab_paths(v["lab_negativo"], v["lab_copia"], v["lab_processo"], float(v["lab_revelacao"]),
-                     float(v["lab_diafonia"]), float(v["lab_chave"]), float(v["lab_processo_forca"]))
+                     float(v["lab_diafonia"]), float(v["lab_chave"]), float(v["lab_processo_forca"]), mods,
+                     _r4(v["lab_bypass_copia"]))
 
 
 def lab_eval(v: dict, lin) -> np.ndarray:
-    """Resultado do laboratório (valor de exibição) em numpy, igual ao `labPipe` do shader."""
+    """Resultado do laboratório (valor de exibição) em numpy, igual ao `labPipe` do shader.
+
+    `lin`: (..., 3) luz linear Rec.709 (0,18 = cinza médio). Inclui a separação de cores (na densidade
+    do negativo) e, depois da cópia, rolagens, saturação final, densidades por cor e pele.
+    """
     a, b = lab_paths_for(v)
+    post = lab_post(v)
     lights = lab_lights(v)
-    ya = a.eval(lin, lights)
-    if b is None:
-        return ya
-    return ya + (b.eval(lin, lights) - ya) * v["lab_processo_forca"]
+    y = a.eval(lin, lights)
+    if b is not None:
+        y = y + (b.eval(lin, lights) - y) * v["lab_processo_forca"]
+    return post.post(y)
+
+
+def _lab_post_uniforms(U: dict, post: LabPost) -> None:
+    U["u_lab_ops"] = int(post.ops)
+    U["u_lab_tone"] = tuple(float(x) for x in post.tone)
+    U["u_lab_sat"] = float(post.sat)
+    U["u_lab_dens"] = tuple(float(x) for x in post.dens)
+    U["u_lab_skin"] = tuple(float(x) for x in post.skin)
 
 
 def _lab_uniforms(U: dict, prefix: str, p: LabPath, lights: tuple) -> None:
@@ -555,7 +798,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     # ---- Maciez / nitidez
     sig_g = gauge["blur"] * v["bitola_resolucao"] if v["bitola_desfoque_on"] else 0.0
     sig_u = (v["raio_maciez"] * v["maciez"] * 2.0) if lente else 0.0
-    soft = math.sqrt(sig_g ** 2 + sig_u ** 2) * scale
+    sig_m = mtf_sigma(v)  # MTF da película: gaussiana fina somada em quadratura
+    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2) * scale
     sharp = v["nitidez"] if lente else 0.0
     if soft > 0.05:
         plan.soft_sigma = soft
@@ -642,6 +886,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         _lab_uniforms(U, "u_lb_", lb or la, lights)
         U["u_lab_b_on"] = 1 if lb is not None else 0
         U["u_lab_mix"] = float(v["lab_processo_forca"]) if lb is not None else 0.0
+        _lab_post_uniforms(U, lab_post(v))
 
     pr = PRINTS.get(v["copia"])
     U["u_print_on"] = 1 if pr else 0

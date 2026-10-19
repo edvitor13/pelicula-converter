@@ -33,6 +33,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   **retenção de prata**. O cinza médio sai neutro em qualquer combinação. Novos presets no grupo
   *Laboratório*.
 - **Controle de pele** no look: matiz e luz da pele, além da saturação.
+- Controles no estilo do tutorial de Technicolor da Cinesumer (SumerFade): **separação de cores
+  (Hue Split)** com eixo ajustável, **densidade dos vermelhos/verdes/azuis**, **saturação do filme**
+  e **saturação final**, **pé da cópia**, **rolagem das sombras e das altas luzes**, **pele** no
+  Laboratório, **bleach bypass no negativo e na cópia** e **curva neutra** do negativo e da cópia.
+- Negativos Vision2 5201 50D, Eastman ECN-II 5297 250D, Vision 5246 250D, Vision 5263 500T e
+  Vision2 Expression 5229 500T; cópias Eastman EXR Print 5386 e Eastman Color Print 5385 (todos
+  aproximações artísticas). Presets *Technicolor (5297 → 5386, Hue Split)* e *Teal & orange
+  (5201 → 2393, Hue Split)*.
+- Perfis de entrada **Blackmagic Film Gen 5** (Blackmagic Wide Gamut), **ARRI LogC4** (Wide Gamut 4)
+  e **Apple Log** (iPhone), também para LUTs; o palpite do espaço do LUT reconhece os nomes.
+- **MTF da película** (lente): suaviza a nitidez digital fina por enquadramento, com quantidade.
+- **Curva** no painel *Ajustes*: mostra a curva do look em R, G e B (calculada na GPU com o mesmo
+  caminho de cor da exportação).
+- Plugin do DaVinci: nó **PeliculaConverter Laboratorio** com **Mostrar curva**, todos os controles
+  novos nos nós Cor e Laboratorio e o MTF no nó Textura.
 - **Plugin para o DaVinci Resolve** (*Configurações → Plugin para o DaVinci Resolve…* ou
   `pelicula-cli resolve --instalar`): DCTLs *PeliculaConverter Cor*, *Textura* e *Projetor* (a
   ordem dos nós é como LOOK → LAB → PRINT), um DCTL por preset e LUTs `.cube` de todos os presets

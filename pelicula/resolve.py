@@ -1,10 +1,14 @@
 """Plugin do PeliculaConverter para o DaVinci Resolve: pacote de DCTLs e LUTs.
 
-O pacote tem três nós, na ordem em que entram na árvore do Resolve (como LOOK → LAB → PRINT):
+O pacote tem quatro nós; na árvore do Resolve vão em série, como LOOK → LAB → PRINT:
 
-- **PeliculaConverter Cor** (só cor): perfil de entrada, exposição e balanço, laboratório
-  (negativo → cópia), look de película, cópia (2383/2393/3513) e envelhecimento. É a mesma
-  matemática de `shaders.COMMON` (os testes comparam com `Engine.bake_lut`).
+- **PeliculaConverter Laboratorio** (só cor, o nó "à la SumerFade"): perfil de entrada (espaço de
+  cor + curva), exposição e balanço e o laboratório inteiro — negativo, revelação, separação de cores
+  (Hue Split), luzes da copiadora, densidades por cor, pé e rolagens, saturações, pele, bleach bypass,
+  curvas neutras e cópia —, com "Mostrar curva" para ver as curvas R, G e B por cima da imagem.
+- **PeliculaConverter Cor** (só cor): tudo do Laboratório mais o look paramétrico (curva, tons, P&B),
+  a cópia paramétrica (2383/2393/3513) e o envelhecimento. Use um dos dois (Laboratório OU Cor).
+  É a mesma matemática de `shaders.COMMON` (os testes comparam com `Engine.bake_lut`).
 - **PeliculaConverter Textura**: grão (o mesmo ruído PCG + Box–Muller + B-spline do app),
   halação, bloom e névoa (amostragem esparsa numa passada), maciez/nitidez, aberração,
   distorção e vinheta.
@@ -44,9 +48,11 @@ from .i18n import _
 PACKAGE_NAME = "PeliculaConverter"
 MARKER = "VERSAO.txt"
 DCTL, GLSL = "dctl", "glsl"
-KINDS = ("cor", "textura", "projetor")
-FILE_NAMES = {"cor": "PeliculaConverter Cor.dctl", "textura": "PeliculaConverter Textura.dctl",
-              "projetor": "PeliculaConverter Projetor.dctl"}
+KINDS = ("cor", "laboratorio", "textura", "projetor")
+COLOR_KINDS = ("cor", "laboratorio")  # nós só de cor (entrada por pixel, funcionam como LUT)
+FILE_NAMES = {"cor": "PeliculaConverter Cor.dctl", "laboratorio": "PeliculaConverter Laboratorio.dctl",
+              "textura": "PeliculaConverter Textura.dctl", "projetor": "PeliculaConverter Projetor.dctl"}
+NODE_LABELS = {"cor": "Cor", "laboratorio": "Laboratorio", "textura": "Textura", "projetor": "Projetor"}
 LUT_SIZE = 33
 
 
@@ -218,22 +224,47 @@ def cor_controls() -> list[Ctl]:
         ctl("pb", "Preto e branco"), ctl("pb_filtro", "Filtro do PeB"), ctl("virada", "Viragem do PeB"),
         ctl("virada_forca"), ctl("envelhecimento"),
         ctl("copia", "Copia print"), ctl("copia_forca", "Forca da copia"),
-        ctl("mix_geral", "Forca geral do look"),
+        ctl("mix_geral", "Forca geral do look"), curve_control(),
     ]
     return out
 
 
-def lab_controls() -> list[Ctl]:
+def lab_controls(with_switch: bool = True) -> list[Ctl]:
     """Laboratório (negativo → cópia): os mesmos controles da seção do app."""
-    return [
-        ctl("lab_on", "Laboratorio negativo e copia"), ctl("lab_negativo", "Lab - Negativo"),
-        ctl("lab_revelacao", "Lab - Revelacao stops"), ctl("lab_copia", "Lab - Copia"),
-        ctl("lab_processo", "Lab - Processo"), ctl("lab_processo_forca", "Lab - Forca do processo"),
-        ctl("lab_chave", "Lab - Chave preta Technicolor"),
+    out = [ctl("lab_on", "Laboratorio negativo e copia")] if with_switch else []
+    return out + [
+        ctl("lab_negativo", "Lab - Negativo"), ctl("lab_copia", "Lab - Copia"),
+        ctl("lab_revelacao", "Lab - Revelacao stops"),
+        ctl("lab_separacao", "Lab - Separacao de cores Hue Split"),
+        ctl("lab_separacao_eixo", "Lab - Eixo da separacao graus"),
         ctl("lab_luz_r", "Lab - Luz vermelha pt"), ctl("lab_luz_g", "Lab - Luz verde pt"),
         ctl("lab_luz_b", "Lab - Luz azul pt"), ctl("lab_densidade", "Lab - Densidade da copia pt"),
+        ctl("lab_dens_r", "Lab - Densidade dos vermelhos"), ctl("lab_dens_g", "Lab - Densidade dos verdes"),
+        ctl("lab_dens_b", "Lab - Densidade dos azuis"),
+        ctl("lab_pe", "Lab - Pe da copia preto"), ctl("lab_sombras_rolagem", "Lab - Rolagem das sombras"),
+        ctl("lab_luzes_rolagem", "Lab - Rolagem das altas luzes"),
+        ctl("lab_saturacao_filme", "Lab - Saturacao do filme"), ctl("lab_saturacao", "Lab - Saturacao final"),
+        ctl("lab_pele_matiz", "Lab - Matiz da pele graus"), ctl("lab_pele_sat", "Lab - Saturacao da pele"),
+        ctl("lab_bypass_negativo", "Lab - Bleach bypass no negativo"),
+        ctl("lab_bypass_copia", "Lab - Bleach bypass na copia"),
+        ctl("lab_neutro_negativo", "Lab - Curva neutra do negativo"),
+        ctl("lab_neutro_copia", "Lab - Curva neutra da copia"),
+        ctl("lab_processo", "Lab - Processo"), ctl("lab_processo_forca", "Lab - Forca do processo"),
+        ctl("lab_chave", "Lab - Chave preta Technicolor"),
         ctl("lab_diafonia", "Lab - Mistura entre camadas"),
     ]
+
+
+def curve_control() -> Ctl:
+    return Ctl("ui_mostrar_curva", "Mostrar curva", "check", 0,
+               tip="Desenha as curvas R G B do ajuste atual por cima da imagem - eixo horizontal de -8 a +8 stops. "
+                   "So para ver: desligue antes de renderizar.")
+
+
+def laboratorio_controls() -> list[Ctl]:
+    """Nó Laboratório: entrada, exposição e o laboratório (sempre ligado), como um nó de emulação de filme."""
+    return ([ctl("entrada", "Perfil do video"), ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
+            + lab_controls(with_switch=False) + [ctl("mix_geral", "Forca geral do look"), curve_control()])
 
 
 # ------------------------------------------------------------------ dialetos
@@ -437,6 +468,20 @@ PC_DEVICE float pc_di_dec(float y) {
 PC_DEVICE float pc_l3g10_dec(float y) {
     return (y < 0.0f) ? y / 15.1927f - 0.01f : (_powf(10.0f, y / 0.224282f) - 1.0f) / 155.975327f - 0.01f;
 }
+// Blackmagic Film Gen 5: D*x + E abaixo do corte; A*ln(x + B) + C acima
+PC_DEVICE float pc_bmd5_dec(float y) {
+    return (y < 0.13388378308667f) ? (y - 0.09246575342465753f) / 8.283605932402494f
+                                   : _expf((y - 0.5300133392291939f) / 0.08692876065491224f) - 0.005494072432257808f;
+}
+// ARRI LogC4 (a, b, c, s, t da especificacao)
+PC_DEVICE float pc_logc4_dec(float e) {
+    return (e >= 0.0f) ? (_exp2f(14.0f * (e - PC_C4C) / PC_C4B + 6.0f) - 64.0f) / PC_C4A : e * PC_C4S + PC_C4T;
+}
+// Apple Log
+PC_DEVICE float pc_apple_dec(float p) {
+    if (p >= 0.20855531595464202f) return _exp2f((p - 0.69336945f) / 0.08550479f) - 0.00964052f;
+    return (p >= 0.0f) ? _sqrtf(p / 47.28711236f) - 0.05641088f : -0.05641088f;
+}
 PC_DEVICE float3 pc_to_linear(float3 c, int id) {
     if (id == 0) return pc_code_to_lin(c);
     if (id == 1) return c;
@@ -446,6 +491,9 @@ PC_DEVICE float3 pc_to_linear(float3 c, int id) {
     if (id == 5) return make_float3(pc_vlog_dec(c.x), pc_vlog_dec(c.y), pc_vlog_dec(c.z));
     if (id == 7) return make_float3(pc_di_dec(c.x), pc_di_dec(c.y), pc_di_dec(c.z));
     if (id == 8) return make_float3(pc_l3g10_dec(c.x), pc_l3g10_dec(c.y), pc_l3g10_dec(c.z));
+    if (id == 9) return make_float3(pc_bmd5_dec(c.x), pc_bmd5_dec(c.y), pc_bmd5_dec(c.z));
+    if (id == 10) return make_float3(pc_logc4_dec(c.x), pc_logc4_dec(c.y), pc_logc4_dec(c.z));
+    if (id == 11) return make_float3(pc_apple_dec(c.x), pc_apple_dec(c.y), pc_apple_dec(c.z));
     return make_float3(pc_cineon_dec(c.x), pc_cineon_dec(c.y), pc_cineon_dec(c.z));
 }
 """
@@ -549,16 +597,33 @@ PC_DEVICE float3 pc_aged(float3 y) {
 B_COR = r"""
     float3 code = rgb;
     int ent = v_entrada;
-    float3 lin = pc_to_linear(code, PC_IN_ID[ent]);
-    lin = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
-                  make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
-                  make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin);
+    float3 lin_in = pc_to_linear(code, PC_IN_ID[ent]);
+    lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
+                     make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
+                     make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
+    // "Mostrar curva": uma segunda passada com um cinza de -8 a +8 stops ao longo da largura
+    int npass = (v_mostrar_curva == 1) ? 2 : 1;
+    float curve_t = -8.0f + 16.0f * (PC_F(p_X) + 0.5f) / PC_F(p_Width);
+    float3 res = code;
+    float3 curve_y = pc_s3(0.0f);
+    for (int pass = 0; pass < npass; pass = pass + 1) {
+    float3 lin = lin_in;
+    if (pass == 1) lin = pc_s3(0.18f * _exp2f(curve_t));
     float tmp = v_temperatura / 100.0f;
     float tnt = v_tint / 100.0f;
     lin = make_float3(_fmaxf(lin.x, 0.0f) * _exp2f(v_exposicao + 0.28f * tmp + 0.08f * tnt),
                       _fmaxf(lin.y, 0.0f) * _exp2f(v_exposicao - 0.22f * tnt),
                       _fmaxf(lin.z, 0.0f) * _exp2f(v_exposicao - 0.38f * tmp + 0.08f * tnt));
 /*LAB*/
+/*LOOK*/
+    if (pass == 0) res = pc_clamp3(pc_lerp3(code, y, v_mix_geral), 0.0f, 1.0f);
+    else curve_y = y;
+    }
+    if (npass == 2) res = pc_curve_overlay(res, curve_y, p_Y, p_Height);
+"""
+
+# O look paramétrico, a cópia e o envelhecimento (só no nó Cor).
+B_LOOK = r"""
     float3 neutral = pc_lin_to_code(lin);
     float3 y = neutral;
     if (v_cor_on == 1) {
@@ -587,13 +652,23 @@ B_COR = r"""
     }
     float age = (v_cor_on == 1) ? v_envelhecimento : 0.0f;
     if (age > 0.0f) y = pc_lerp3(y, pc_aged(y), age);
-    float3 res = pc_clamp3(pc_lerp3(code, y, v_mix_geral), 0.0f, 1.0f);
+"""
+
+# No nó Laboratório o resultado é o próprio laboratório (curva neutra de volta para o código).
+B_LAB_ONLY = r"""
+    float3 y = pc_lin_to_code(lin);
 """
 
 
 def _cor_tables(dialect: str) -> str:
     entradas = [c[0] for c in params.PARAMS["entrada"].choices]
     out = _define("PC_CIN_BLACK", 0.010797752)
+    a4 = (2 ** 18 - 16) / 117.45
+    b4 = (1023 - 95) / 1023
+    c4 = 95 / 1023
+    out += _define("PC_C4A", a4) + _define("PC_C4B", b4) + _define("PC_C4C", c4)
+    out += _define("PC_C4S", (7 * math.log(2) * 2 ** (7 - 14 * c4 / b4)) / (a4 * b4))
+    out += _define("PC_C4T", (2 ** (14 * (-c4 / b4) + 6) - 64) / a4)
     out += _define("PC_SKIN_LUM", 0.25)  # luz da pele: até ±25% (hueAdjust do app)
     out += _table(dialect, "PC_IN_ID", [look.INPUT_IDS[e] for e in entradas], "int")
     gam = []
@@ -642,15 +717,17 @@ class Spec:
 
 
 def spec(kind: str, dialect: str = DCTL) -> Spec:
-    if kind == "cor":
-        controls = cor_controls()
-        body = B_COR
-        body = body.replace("/*LAB*/", B_LAB)
-        kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB
-        return Spec("cor", controls, _cor_tables(dialect) + _lab_tables(dialect), kernel, body, False)
+    if kind in COLOR_KINDS:
+        lab_only = kind == "laboratorio"
+        controls = laboratorio_controls() if lab_only else cor_controls()
+        body = B_COR.replace("/*LAB*/", B_LAB).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
+        if lab_only:
+            body = "    int v_lab_on = 1;\n" + body  # o nó Laboratório é o laboratório sempre ligado
+        kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB + K_CURVE
+        return Spec(kind, controls, _cor_tables(dialect) + _lab_tables(dialect), kernel, body, False)
     if kind == "textura":
-        return Spec("textura", textura_controls(), _gauge_tables(dialect), K_COMMON + K_RAND + K_TEXTURA,
-                    _textura_body(), True)
+        return Spec("textura", textura_controls(), _gauge_tables(dialect) + _mtf_table(dialect),
+                    K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
     if kind == "projetor":
         return Spec("projetor", projetor_controls(), _gauge_tables(dialect) + _projetor_tables(dialect),
                     K_COMMON + K_RAND + K_PROJETOR, _projetor_body(), True)
@@ -687,7 +764,9 @@ def _lab_tables(dialect: str) -> str:
     prints = [k for k, _l in params.COPIAS_LAB]
     procs = [k for k, _l in params.PROCESSOS]
     out = _define("PC_LAB_TARGET", look.LAB_TARGET_D) + _define("PC_LAB_POINT", look.LAB_POINT)
-    out += _define("PC_LAB_VIEW", look.LAB_VIEW_GAMMA)
+    out += _define("PC_LAB_VIEW", look.LAB_VIEW_GAMMA) + _define("PC_LAB_DENS_K", look.LAB_DENS_K)
+    out += _define("PC_SPLIT_A", look.SPLIT_STRETCH) + _define("PC_SPLIT_B", look.SPLIT_SQUEEZE)
+    out += _define("PC_BYP_C", look.BYPASS_NEG_CONTRAST) + _define("PC_BYP_D", look.BYPASS_NEG_DYE)
     out += f"#define PC_LAB_2383 {prints.index('2383')}\n"
     out += _table(dialect, "PC_NEG", [x for k in negs for x in _neg_row(look.NEGATIVES[k])])
     out += _table(dialect, "PC_LPR", [x for k in prints for x in _print_row(look.LAB_PRINTS[k])])
@@ -710,10 +789,46 @@ PC_DEVICE float3 pc_lab_curve(float3 x, float3 g, float3 xt, float3 xs, float w)
                        g.y * w * (pc_softplus((x.y - xt.y) / w) - pc_softplus((x.y - xs.y) / w)),
                        g.z * w * (pc_softplus((x.z - xt.z) / w) - pc_softplus((x.z - xs.z) / w)));
 }
-// efeito entre camadas: dn' = dn + k (dn - media)
-PC_DEVICE float3 pc_lab_ii(float3 d, float k) {
-    float m = (d.x + d.y + d.z) * (k / 3.0f);
-    return d * (1.0f + k) - pc_s3(m);
+// os tres canais se aproximam da media deles (curvas neutras)
+PC_DEVICE float3 pc_neutral3(float3 v, float t) {
+    float m = (v.x + v.y + v.z) / 3.0f;
+    return v + (pc_s3(m) - v) * t;
+}
+// produto de matrizes a*I + b*J: devolve o novo b (o novo a e a1*a2)
+PC_DEVICE float pc_aij_b(float a1, float b1, float a2, float b2) { return a1 * b2 + b1 * a2 + 3.0f * b1 * b2; }
+// densidade do negativo: dn' = A*dn + B*(soma). Efeito entre camadas k, saturacao do filme fs e prata
+// retida no negativo bn: mais contraste neutro e menos cor dos corantes (look.ii_coefs)
+PC_DEVICE float2 pc_ii_coefs(float k, float fs, float bn) {
+    float a = 1.0f + k;
+    float b = -k / 3.0f;
+    float nb = pc_aij_b(fs, (1.0f - fs) / 3.0f, a, b);
+    a = fs * a;
+    b = nb;
+    float c = PC_BYP_C * bn;
+    float d = PC_BYP_D * bn;
+    b = pc_aij_b(1.0f - d, (c + d) / 3.0f, a, b);
+    a = (1.0f - d) * a;
+    return make_float2(a, b);
+}
+// cor pura de um matiz (setor HSV, igual a look._hue_rgb)
+PC_DEVICE float3 pc_hue_rgb(float hue_deg) {
+    float h = pc_mod(hue_deg, 360.0f) / 60.0f;
+    float x = 1.0f - _fabs(pc_mod(h, 2.0f) - 1.0f);
+    int sector = pc_clampi(PC_I(_floorf(h)), 0, 5);
+    float3 c = make_float3(1.0f, x, 0.0f);
+    if (sector == 1) c = make_float3(x, 1.0f, 0.0f);
+    if (sector == 2) c = make_float3(0.0f, 1.0f, x);
+    if (sector == 3) c = make_float3(0.0f, x, 1.0f);
+    if (sector == 4) c = make_float3(x, 0.0f, 1.0f);
+    if (sector == 5) c = make_float3(1.0f, 0.0f, x);
+    return c;
+}
+// uma linha da matriz da densidade: separacao de cores (Hue Split) S vezes (A*I + B*J) = A*S_i + B
+PC_DEVICE float3 pc_ii_row(float3 e, float ui, float vi, float3 u, float3 v, float sa, float sb, float ia, float ib,
+                           int on) {
+    float3 s = e;
+    if (on == 1) s = pc_s3(1.0f / 3.0f) + u * ((1.0f + sa) * ui) + v * ((1.0f - sb) * vi);
+    return s * ia + pc_s3(ib);
 }
 // inversa da curva da copia (pe 0): log da exposicao que da a densidade D
 PC_DEVICE float pc_lab_inv(float D, float g, float s, float w) {
@@ -726,14 +841,15 @@ PC_DEVICE float pc_det3(float3 a, float3 b, float3 c) {
     return a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) + a.z * (b.x * c.y - b.y * c.x);
 }
 PC_DEVICE float3 pc_lab_path(float3 lin, float3 s0, float3 s1, float3 s2, float3 ng0, float3 nt0, float3 ns,
-                             float nw, float kii, int has_print, float3 pg, float3 dmax, float pw, float3 d0,
-                             float3 d1, float3 d2, float3 key, float push, float xtalk, float3 lights) {
+                             float nw, float3 i0, float3 i1, float3 i2, int has_print, float3 pg, float3 dmax,
+                             float pw, float3 d0, float3 d1, float3 d2, float3 key, float push, float xtalk,
+                             float3 lights) {
     float3 ng = ng0 * (1.0f + 0.12f * push);
     float3 nt = nt0 + pc_s3(0.08f * push);
-    float3 dmid = pc_lab_ii(pc_lab_curve(pc_s3(0.0f), ng, nt, ns, nw), kii);
+    float3 dmid = pc_mat3(i0, i1, i2, pc_lab_curve(pc_s3(0.0f), ng, nt, ns, nw));
     float3 e = pc_max3(pc_mat3(s0, s1, s2, lin), 1e-7f);
     float3 le = make_float3(pc_log10(e.x / 0.18f), pc_log10(e.y / 0.18f), pc_log10(e.z / 0.18f));
-    float3 dn = pc_lab_ii(pc_lab_curve(le, ng, nt, ns, nw), kii);
+    float3 dn = pc_mat3(i0, i1, i2, pc_lab_curve(le, ng, nt, ns, nw));
     if (has_print == 0) {
         // sem copia: inversao digital com o gama nominal do negativo
         float3 st = make_float3((dn.x - dmid.x) / (ng0.x * 0.30103f) - lights.x / 0.30103f,
@@ -783,6 +899,29 @@ PC_DEVICE float3 pc_lab_path(float3 lin, float3 s0, float3 s1, float3 s2, float3
     float kv = 3.32192809f / PC_LAB_VIEW;
     return make_float3(_exp2f(-d.x * kv), _exp2f(-d.y * kv), _exp2f(-d.z * kv));
 }
+// depois da copia (look.LabPost): rolagens, saturacao final, densidade por cor e pele
+PC_DEVICE float3 pc_lab_post(float3 y, float hi, float lo, float sat, float3 dens, float srot, float ssat) {
+    if (hi > 0.0f || lo > 0.0f) {
+        float3 t = pc_disp_to_stops(y);
+        float ph = pc_soft_p(hi);
+        float pl = pc_soft_p(lo);
+        y = make_float3(pc_curve(t.x, PC_DSLOPE, PC_DMID, 0.0f, 1.0f, ph, pl),
+                        pc_curve(t.y, PC_DSLOPE, PC_DMID, 0.0f, 1.0f, ph, pl),
+                        pc_curve(t.z, PC_DSLOPE, PC_DMID, 0.0f, 1.0f, ph, pl));
+    }
+    if (sat != 1.0f) {
+        float L = pc_luma(y);
+        y = pc_s3(L) + (y - pc_s3(L)) * sat;
+    }
+    if (dens.x != 0.0f || dens.y != 0.0f || dens.z != 0.0f) {
+        float wr = _fmaxf(0.0f, y.x - _fmaxf(y.y, y.z));
+        float wg = _fmaxf(0.0f, y.y - _fmaxf(y.x, y.z));
+        float wb = _fmaxf(0.0f, y.z - _fmaxf(y.x, y.y));
+        y = y * _clampf(1.0f - PC_LAB_DENS_K * (dens.x * wr + dens.y * wg + dens.z * wb), 0.2f, 2.0f);
+    }
+    if (srot != 0.0f || ssat != 0.0f) y = pc_hue_adjust(y, 0.0f, 0.0f, ssat, srot, 0.0f);
+    return y;
+}
 """
 
 # Etapa do laboratório no corpo do nó Cor (antes do look; o resultado volta para luz linear).
@@ -801,33 +940,55 @@ B_LAB = r"""
             key = pc_s3(0.8f * forca / 3.0f);
             if (PC_LPR[lp * 17] == 0.0f) lp = PC_LAB_2383;
         }
+        if (v_lab_bypass_copia > 0.0f && PC_LPR[lp * 17] > 0.5f) key = key + pc_s3(0.8f * v_lab_bypass_copia / 3.0f);
+        // separacao de cores (Hue Split) na densidade: eixos u (polo quente) e v (perpendicular)
+        int split_on = (v_lab_separacao > 0.0f) ? 1 : 0;
+        float3 hu = pc_hue_rgb(v_lab_separacao_eixo);
+        hu = hu - pc_s3((hu.x + hu.y + hu.z) / 3.0f);
+        hu = hu * (1.0f / _sqrtf(pc_dot3(hu, hu)));
+        float3 hv = make_float3(hu.z - hu.y, hu.x - hu.z, hu.y - hu.x) * 0.57735027f;
+        hv = hv * (1.0f / _sqrtf(pc_dot3(hv, hv)));
+        float sa = PC_SPLIT_A * v_lab_separacao;
+        float sb = PC_SPLIT_B * v_lab_separacao;
+        float toe = _exp2f(-0.6f * v_lab_pe);
+        float nn = v_lab_neutro_negativo;
+        float np = v_lab_neutro_copia;
         int lq = lp * 17;
+        float2 ab = pc_ii_coefs(PC_NEG[ni + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
         float3 la = pc_lab_path(lin,
             make_float3(PC_NEG[ni + 0], PC_NEG[ni + 1], PC_NEG[ni + 2]),
             make_float3(PC_NEG[ni + 3], PC_NEG[ni + 4], PC_NEG[ni + 5]),
             make_float3(PC_NEG[ni + 6], PC_NEG[ni + 7], PC_NEG[ni + 8]),
-            make_float3(PC_NEG[ni + 9], PC_NEG[ni + 10], PC_NEG[ni + 11]),
-            make_float3(PC_NEG[ni + 12], PC_NEG[ni + 13], PC_NEG[ni + 14]),
-            make_float3(PC_NEG[ni + 15], PC_NEG[ni + 16], PC_NEG[ni + 17]), PC_NEG[ni + 18], PC_NEG[ni + 19],
+            pc_neutral3(make_float3(PC_NEG[ni + 9], PC_NEG[ni + 10], PC_NEG[ni + 11]), nn),
+            pc_neutral3(make_float3(PC_NEG[ni + 12], PC_NEG[ni + 13], PC_NEG[ni + 14]), nn),
+            pc_neutral3(make_float3(PC_NEG[ni + 15], PC_NEG[ni + 16], PC_NEG[ni + 17]), nn), PC_NEG[ni + 18],
+            pc_ii_row(make_float3(1.0f, 0.0f, 0.0f), hu.x, hv.x, hu, hv, sa, sb, ab.x, ab.y, split_on),
+            pc_ii_row(make_float3(0.0f, 1.0f, 0.0f), hu.y, hv.y, hu, hv, sa, sb, ab.x, ab.y, split_on),
+            pc_ii_row(make_float3(0.0f, 0.0f, 1.0f), hu.z, hv.z, hu, hv, sa, sb, ab.x, ab.y, split_on),
             (PC_LPR[lq] > 0.5f) ? 1 : 0,
-            make_float3(PC_LPR[lq + 1], PC_LPR[lq + 2], PC_LPR[lq + 3]),
-            make_float3(PC_LPR[lq + 4], PC_LPR[lq + 5], PC_LPR[lq + 6]), PC_LPR[lq + 7],
+            pc_neutral3(make_float3(PC_LPR[lq + 1], PC_LPR[lq + 2], PC_LPR[lq + 3]), np),
+            pc_neutral3(make_float3(PC_LPR[lq + 4], PC_LPR[lq + 5], PC_LPR[lq + 6]), np) * toe, PC_LPR[lq + 7],
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
             key, v_lab_revelacao, v_lab_diafonia, lights);
         if (kind == 2.0f) {
             int b = pk + 1;
+            float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
             float3 lb = pc_lab_path(lin,
                 make_float3(PC_PROC[b + 0], PC_PROC[b + 1], PC_PROC[b + 2]),
                 make_float3(PC_PROC[b + 3], PC_PROC[b + 4], PC_PROC[b + 5]),
                 make_float3(PC_PROC[b + 6], PC_PROC[b + 7], PC_PROC[b + 8]),
-                make_float3(PC_PROC[b + 9], PC_PROC[b + 10], PC_PROC[b + 11]),
-                make_float3(PC_PROC[b + 12], PC_PROC[b + 13], PC_PROC[b + 14]),
-                make_float3(PC_PROC[b + 15], PC_PROC[b + 16], PC_PROC[b + 17]), PC_PROC[b + 18], PC_PROC[b + 19],
+                pc_neutral3(make_float3(PC_PROC[b + 9], PC_PROC[b + 10], PC_PROC[b + 11]), nn),
+                pc_neutral3(make_float3(PC_PROC[b + 12], PC_PROC[b + 13], PC_PROC[b + 14]), nn),
+                pc_neutral3(make_float3(PC_PROC[b + 15], PC_PROC[b + 16], PC_PROC[b + 17]), nn), PC_PROC[b + 18],
+                pc_ii_row(make_float3(1.0f, 0.0f, 0.0f), hu.x, hv.x, hu, hv, sa, sb, bb.x, bb.y, split_on),
+                pc_ii_row(make_float3(0.0f, 1.0f, 0.0f), hu.y, hv.y, hu, hv, sa, sb, bb.x, bb.y, split_on),
+                pc_ii_row(make_float3(0.0f, 0.0f, 1.0f), hu.z, hv.z, hu, hv, sa, sb, bb.x, bb.y, split_on),
                 1,
-                make_float3(PC_PROC[b + 20], PC_PROC[b + 21], PC_PROC[b + 22]),
-                make_float3(PC_PROC[b + 23], PC_PROC[b + 24], PC_PROC[b + 25]), PC_PROC[b + 26],
+                pc_neutral3(make_float3(PC_PROC[b + 20], PC_PROC[b + 21], PC_PROC[b + 22]), np),
+                pc_neutral3(make_float3(PC_PROC[b + 23], PC_PROC[b + 24], PC_PROC[b + 25]), np) * toe,
+                PC_PROC[b + 26],
                 make_float3(PC_PROC[b + 27], PC_PROC[b + 28], PC_PROC[b + 29]),
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
@@ -835,8 +996,31 @@ B_LAB = r"""
                 v_lab_revelacao, v_lab_diafonia, lights);
             la = pc_lerp3(la, lb, forca);
         }
+        la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
+                         make_float3(v_lab_dens_r - 1.0f, v_lab_dens_g - 1.0f, v_lab_dens_b - 1.0f),
+                         v_lab_pele_matiz * 0.0174532925f, v_lab_pele_sat);
         lin = pc_code_to_lin(la);
     }
+"""
+
+# Curvas R, G e B do ajuste atual desenhadas por cima da imagem ("Mostrar curva").
+K_CURVE = r"""
+// ---------------------------------------------------------------- curva sobreposta
+PC_DEVICE float3 pc_curve_overlay(float3 img, float3 cy, int py, int ph) {
+    float H = PC_F(ph);
+    float fy = (PC_F(py) + 0.5f) / H;
+    float th = 1.2f * H / 1080.0f + 0.8f;
+    float3 o = img;
+    float dm = _fabs(fy - (1.0f - PC_DMID)) * H;
+    o = pc_lerp3(o, pc_s3(0.5f), 0.35f * _clampf(1.0f - dm, 0.0f, 1.0f));
+    float dr = _fabs(fy - (1.0f - cy.x)) * H;
+    float dg = _fabs(fy - (1.0f - cy.y)) * H;
+    float db = _fabs(fy - (1.0f - cy.z)) * H;
+    o = pc_lerp3(o, make_float3(1.0f, 0.25f, 0.2f), 0.9f * _clampf(th - dr + 1.0f, 0.0f, 1.0f));
+    o = pc_lerp3(o, make_float3(0.3f, 1.0f, 0.35f), 0.9f * _clampf(th - dg + 1.0f, 0.0f, 1.0f));
+    o = pc_lerp3(o, make_float3(0.35f, 0.55f, 1.0f), 0.9f * _clampf(th - db + 1.0f, 0.0f, 1.0f));
+    return o;
+}
 """
 
 
@@ -892,7 +1076,8 @@ def source(kind: str, dialect: str = DCTL, values: dict | None = None, title: st
             first = ("    int p_Width = textureSize(t_img, 0).x;\n    int p_Height = textureSize(t_img, 0).y;\n"
                      "    int p_X = int(gl_FragCoord.x);\n    int p_Y = int(gl_FragCoord.y);\n")
         else:
-            first = ("    int p_Width = 1;\n    int p_Height = 1;\n    int p_X = 0;\n    int p_Y = 0;\n"
+            first = ("    int p_Width = textureSize(t_img, 0).x;\n    int p_Height = textureSize(t_img, 0).y;\n"
+                     "    int p_X = int(gl_FragCoord.x);\n    int p_Y = int(gl_FragCoord.y);\n"
                      "    vec3 rgb = texelFetch(t_img, ivec2(gl_FragCoord.xy), 0).rgb;\n")
         out.append(f"\nvoid main() {{\n{first}{pre}{sp.body}    f_out = vec4(res, 1.0);\n}}\n")
     return ascii_source("".join(out))
@@ -1146,7 +1331,8 @@ def _textura_body() -> str:
     // maciez da bitola e da lente / recuperar detalhe (gaussiana em luz linear)
     float sig_g = (v_bitola_desfoque_on == 1) ? PC_GAUGE[gi * 7 + 2] * v_bitola_resolucao : 0.0f;
     float sig_u = (v_lente_on == 1) ? v_raio_maciez * v_maciez * 2.0f : 0.0f;
-    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u) * scale;
+    float sig_m = PC_MTF[v_mtf] * 2.0f * v_mtf_forca;  // MTF da pelicula (look.mtf_sigma)
+    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m) * scale;
     float sharp = (v_lente_on == 1) ? v_nitidez : 0.0f;
     float sigma = 0.0f;
     float soft_mix = 0.0f;
@@ -1220,6 +1406,7 @@ def textura_controls() -> list[Ctl]:
     return [
         ctl("bitola"), ctl("iso", "Sensibilidade ISO"),
         ctl("bitola_desfoque_on"), ctl("bitola_resolucao"), ctl("bitola_vinheta"),
+        ctl("mtf", "MTF da pelicula"), ctl("mtf_forca", "MTF - Quantidade"),
         ctl("grao_on", "Grao"), ctl("grao_forca", "Grao - Intensidade"), ctl("grao_tamanho", "Grao - Tamanho"),
         ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
         ctl("grao_sombras", "Grao - Nas sombras"), ctl("grao_meios", "Grao - Nos tons medios"),
@@ -1240,6 +1427,10 @@ def textura_controls() -> list[Ctl]:
             choices=[("rapida", "Rapida"), ("normal", "Normal"), ("alta", "Alta")],
             tip="Amostras da halacao do bloom e da nevoa. Alta fica mais suave e mais lenta."),
     ]
+
+
+def _mtf_table(dialect: str) -> str:
+    return _table(dialect, "PC_MTF", [look.MTF_SIGMA[k] for k, _l in params.MTFS])
 
 
 def _gauge_tables(dialect: str) -> str:
@@ -1636,26 +1827,35 @@ README_TEXT = """PeliculaConverter {versao} - plugin para o DaVinci Resolve
 
 PORTUGUES
 ---------
-Este pacote traz o look do PeliculaConverter para o DaVinci Resolve em tres nos,
+Este pacote traz o look do PeliculaConverter para o DaVinci Resolve em nos que vao em serie,
 na mesma ordem de um laboratorio de cinema (como LOOK -> LAB -> PRINT):
 
-  1. PeliculaConverter Cor       - perfil do video, exposicao, laboratorio (negativo e copia),
-                                   look de pelicula, copia (2383/2393/3513) e envelhecimento.
+  1. PeliculaConverter Laboratorio - so o laboratorio, como um no de emulacao de filme: perfil do
+                                   video, exposicao, negativo, copia, separacao de cores (Hue Split),
+                                   luzes da copiadora, densidade por cor, pe e rolagens, saturacoes,
+                                   pele, bleach bypass e curvas neutras. "Mostrar curva" desenha as
+                                   curvas R, G e B por cima da imagem.
+     ou PeliculaConverter Cor    - tudo do Laboratorio mais o look de pelicula, a copia
+                                   (2383/2393/3513) e o envelhecimento. Use UM dos dois.
                                    E a mesma conta do app: o resultado e igual ao do PeliculaConverter.
-  2. PeliculaConverter Textura   - grao, halacao, bloom, nevoa, maciez, aberracao e vinheta.
+  2. PeliculaConverter Textura   - grao, halacao, bloom, nevoa, maciez, MTF da pelicula, aberracao
+                                   e vinheta.
   3. PeliculaConverter Projetor  - tremor, cintilacao, defeitos (poeira, riscos, fio, manchas),
                                    vazamento de luz e moldura.
 
 Como usar (pagina Color):
   - Crie tres nos em serie (Alt+S). Em cada um, arraste OpenFX > ResolveFX Color > DCTL e escolha
-    "PeliculaConverter Cor", "PeliculaConverter Textura" e "PeliculaConverter Projetor".
-  - No no Cor, escolha em "Perfil do video" a curva da camera (S-Log3, LogC3, V-Log, N-Log, DWG...).
-    Se a linha do tempo ja estiver em Rec.709 (Gamma 2.4), deixe Rec.709. Outra opcao e colocar um
-    Color Space Transform antes do no Cor convertendo para Rec.709 / Gamma 2.4.
+    "PeliculaConverter Laboratorio" (ou "PeliculaConverter Cor"), "PeliculaConverter Textura" e
+    "PeliculaConverter Projetor".
+  - No primeiro no, escolha em "Perfil do video" a curva da camera (S-Log3, LogC3, LogC4, V-Log, N-Log,
+    Blackmagic Film Gen 5, Apple Log, DWG...). Se a linha do tempo ja estiver em Rec.709 (Gamma 2.4),
+    deixe Rec.709. Outra opcao e colocar um Color Space Transform antes convertendo para Rec.709 /
+    Gamma 2.4.
+  - "Mostrar curva" e so para ver o ajuste: desligue antes de renderizar.
   - Na Textura e no Projetor, escolha a mesma bitola. No Projetor, escolha os quadros por segundo
     da linha do tempo (o tremor e os defeitos seguem o tempo real).
-  - Na pasta Presets ha um no Cor, um Textura e (quando o preset usa) um Projetor para cada preset do
-    app, ja com os valores do preset.
+  - Na pasta Presets ha um no Cor, um Textura e (quando o preset usa) um Laboratorio e um Projetor
+    para cada preset do app, ja com os valores do preset.
   - Na pasta LUTs ha um .cube por preset (so a cor, entrada Rec.709). Os LUTs funcionam tambem no
     Resolve gratuito, no Premiere, no Final Cut e em qualquer programa que aceite .cube.
 
@@ -1669,15 +1869,18 @@ reabra o programa.
 
 ENGLISH
 -------
-Three DaVinci Resolve nodes with the PeliculaConverter look, in film-lab order (LOOK -> LAB -> PRINT):
-"PeliculaConverter Cor" (color: input profile, exposure, lab negative/print, film look, print stock,
-fading - identical math to the app), "PeliculaConverter Textura" (grain, halation, bloom, mist, softness,
-aberration, vignette) and "PeliculaConverter Projetor" (gate weave, flicker, dust, scratches, hair, stains,
-light leaks, frame mask). Color page: add three serial nodes and drop OpenFX > ResolveFX Color > DCTL on
-each one. Set "Perfil do video" to the camera log (or put a Color Space Transform to Rec.709/Gamma 2.4
-before it). The DCTL effect requires DaVinci Resolve Studio; the free version can use the .cube LUTs in
-the LUTs folder. Grain and damage animate per frame on Resolve 19.1+. Presets/ has one node set per app
-preset. Update from the app (Settings > DaVinci Resolve plugin > Install) and press Refresh in Resolve.
+DaVinci Resolve nodes with the PeliculaConverter look, in film-lab order (LOOK -> LAB -> PRINT):
+"PeliculaConverter Laboratorio" (film emulation only: input profile, exposure, negative, print, hue
+split, printer lights, per-color density, toe and roll-offs, saturation, skin, bleach bypass, neutral
+curves and a "Mostrar curva" R/G/B curve overlay) or "PeliculaConverter Cor" (the same lab plus the
+parametric film look, print stock and fading - identical math to the app), then "PeliculaConverter
+Textura" (grain, halation, bloom, mist, softness, film MTF, aberration, vignette) and "PeliculaConverter
+Projetor" (gate weave, flicker, dust, scratches, hair, stains, light leaks, frame mask). Color page: add
+three serial nodes and drop OpenFX > ResolveFX Color > DCTL on each one. Set "Perfil do video" to the
+camera log (or put a Color Space Transform to Rec.709/Gamma 2.4 before it). The DCTL effect requires
+DaVinci Resolve Studio; the free version can use the .cube LUTs in the LUTs folder. Grain and damage
+animate per frame on Resolve 19.1+. Presets/ has one node set per app preset. Update from the app
+(Settings > DaVinci Resolve plugin > Install) and press Refresh in Resolve.
 
 Os nomes de filmes sao aproximacoes artisticas, sem relacao com os fabricantes.
 Film names are artistic approximations, not affiliated with the manufacturers.
@@ -1689,9 +1892,12 @@ def _preset_items() -> list[dict]:
 
 
 def preset_files(p: dict) -> list[str]:
-    """Nós gerados para um preset: Cor e Textura sempre; Projetor quando o preset usa tremor, defeitos ou moldura."""
+    """Nós gerados para um preset: Cor e Textura sempre; Laboratório quando o preset usa o laboratório;
+    Projetor quando usa tremor, defeitos ou moldura."""
     v = presets.builtin_values(p["id"])
     kinds = ["cor", "textura"]
+    if v.get("lab_on"):
+        kinds.insert(1, "laboratorio")
     if v.get("proj_on") or v.get("desg_on") or v.get("mold_on"):
         kinds.append("projetor")
     return kinds
@@ -1752,7 +1958,7 @@ def build_package(dest_dir: str | Path, presets: bool = True, luts: bool = True,
             vals = _preset_values(p["id"])
             base = safe_file_name(p["nome"])
             for kind in preset_files(p):
-                label = {"cor": "Cor", "textura": "Textura", "projetor": "Projetor"}[kind]
+                label = NODE_LABELS[kind]
                 write(root / "Presets" / f"{base} - {label}.dctl", source(kind, values=vals, title=p["nome"]))
     if luts:
         try:

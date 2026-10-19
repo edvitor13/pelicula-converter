@@ -37,10 +37,11 @@ pelicula/
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
-  look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut)
+  look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
+                             Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
-  presets.py                 FILM_BASE, BUILTIN (42 presets em 7 grupos), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, build_encoder_cmd(), ExportQueue, run_job(), measure_speed()
@@ -252,12 +253,28 @@ corantes; a calibração do cinza é automática), a escolha em `params.py` e, s
 `presets.py`. Rode `tests/test_lab.py` (cinza neutro em toda combinação) e `tests/test_resolve.py`
 (o plugin do DaVinci lê as mesmas tabelas). Nomes de filmes são aproximações artísticas (regra 8).
 
+Como o Laboratório se organiza (`look.py`):
+
+- `lab_paths(negativo, copia, processo, push, diafonia, chave, forca, mods, bypass_print)` (com
+  `lru_cache`) devolve os caminhos A/B já calibrados. `LabMods` reúne o que muda as curvas e por
+  isso entra na calibração (Hue Split, saturação do filme, bypass no negativo, curvas neutras, pé);
+  `LabPost` reúne os passos depois da cópia (rolagens, saturação final, densidade por cor, pele),
+  que por construção **não podem mexer no cinza** — mantenha assim ao acrescentar um passo.
+- No shader, `u_lab_ops` liga só os passos usados (bits: 2 tons, 4 saturação, 8 densidade por cor,
+  16 pele); com tudo no padrão nada extra roda.
+- `ii_coefs` e `split_matrix` (Hue Split na densidade do negativo) são espelhados no kernel do DCTL
+  em `resolve.py`; mudou um, mude o outro e rode `tests/test_resolve.py`.
+- `look.lab_eval(v, lin)` é a referência em numpy (testes de paridade); o gráfico *Curva* da janela
+  usa `Engine.bake_lut` (o eixo dos cinzas), então vale para qualquer ajuste.
+
 ### Atualizar o plugin do DaVinci Resolve
 
 `resolve.py` gera tudo: rode `pelicula-cli resolve --pasta saida/` para ver o pacote. Mudou a cor
 do app? Porte a mudança para o kernel do DCTL e rode `tests/test_resolve.py` (paridade com
 `Engine.bake_lut` na GPU). Textura (grão, halação) e projetor são aproximações de passo único,
-documentadas em `docs/DAVINCI.md`.
+documentadas em `docs/DAVINCI.md`. São quatro tipos de nó (`COLOR_KINDS` e `NODE_LABELS`):
+*Laboratorio* (entrada + laboratório inteiro + "Mostrar curva"), *Cor* (laboratório + cor
+paramétrica + cópia), *Textura* e *Projetor*; cada um tem no máximo 64 controles de cada tipo.
 
 ### Adicionar um preset pronto
 
