@@ -11,15 +11,17 @@ import threading
 import time
 from pathlib import Path
 
+import dataclasses
+
 import numpy as np
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Qt, QTimer, QSettings, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QImage, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QBrush, QColor, QFontMetrics, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, deps, export, i18n, look, luts, media, params, presets, project, system,
-               testimage, updater)
+from .. import (APP_NAME, __version__, audiomix, compositor, deps, editparams, export, i18n, look, luts, media,
+               params, presets, project, sequence, system, testimage, timeline, updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
@@ -28,11 +30,19 @@ from .looks import THUMB_H, THUMB_W, LooksPanel
 from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
 from .viewer import Viewer
-from .widgets import FilmSlider, Histogram, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
+from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
+from .flow import AdaptiveBar, ElideLabel, FlowLayout
+from .labcurve import CurveGraph
+from .edit_model import TimelineModel
+from .edit_panels import ClipInspector, MediaBin
+from .scopes import Scopes
+from .timeline_view import TimelineEditor
 from . import prefs, welcome
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
+AUDIO_PATTERNS = "*.wav *.mp3 *.aac *.m4a *.flac *.ogg *.opus *.aif *.aiff *.wma"
+MODES = ("pelicula", "edicao")
 # Rótulos traduzidos com _() na hora de mostrar.
 PREVIEW_Q = [("540", N_("Rápida (540p)")), ("720", N_("Normal (720p)")), ("1080", N_("Alta (1080p)")),
              ("full", N_("Máxima (resolução original)"))]
@@ -41,6 +51,12 @@ PREVIEW_Q = [("540", N_("Rápida (540p)")), ("720", N_("Normal (720p)")), ("1080
 def media_filter() -> str:
     """Filtro de arquivos dos diálogos de abrir (montado na hora, no idioma ativo)."""
     return f"{_('Vídeos e imagens')} ({MEDIA_PATTERNS});;{_('Todos os arquivos')} (*)"
+
+
+def import_filter() -> str:
+    """Filtro do Importar do modo Edição: vídeos, imagens e músicas."""
+    return (f"{_('Vídeos, imagens e áudio')} ({MEDIA_PATTERNS} {AUDIO_PATTERNS});;"
+            f"{_('Áudio')} ({AUDIO_PATTERNS});;{_('Todos os arquivos')} (*)")
 
 
 def open_filter() -> str:
@@ -67,7 +83,11 @@ def array_from(img: QImage) -> np.ndarray:
 
 
 class FrameLoader(QObject):
-    """Carrega quadros em segundo plano; só o pedido mais recente importa."""
+    """Carrega quadros em segundo plano; só o pedido mais recente importa.
+
+    A origem é um arquivo (`media.MediaInfo`) ou a sequência do modo Edição (`timeline.Sequence`,
+    uma cópia que a interface não altera); no segundo caso chega um `sequence.FrameLayers`.
+    """
 
     loaded = Signal(object, int, object)
     failed = Signal(str)
@@ -78,9 +98,9 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, info, frame, w, h) -> None:
+    def request(self, source, frame, w, h) -> None:
         with self._lock:
-            self._pending = (info, frame, w, h)
+            self._pending = (source, frame, w, h)
             if self._busy:
                 return
             self._busy = True
@@ -94,27 +114,31 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            info, frame, w, h = job
+            source, frame, w, h = job
             try:
-                img = media.grab_frame(info, frame, w, h, 8)
+                if isinstance(source, timeline.Sequence):
+                    img = sequence.grab(source, frame, w, h, 8)
+                else:
+                    img = media.grab_frame(source, frame, w, h, 8)
             except Exception as exc:  # noqa: BLE001
                 self.failed.emit(str(exc))
                 continue
-            self.loaded.emit(info, frame, img)
+            self.loaded.emit(source, frame, img)
 
 
 class Player:
-    """Decodifica em sequência numa thread para a reprodução."""
+    """Decodifica em sequência numa thread para a reprodução (arquivo ou sequência da edição)."""
 
     def __init__(self):
         self.q: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
 
-    def start(self, info, start, end, w, h, loop, loop_start) -> None:
+    def start(self, source, start, end, w, h, loop, loop_start) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
         self._stop, self.q = stop, q
+        is_seq = isinstance(source, timeline.Sequence)
 
         def put(item) -> bool:
             while not stop.is_set():
@@ -125,10 +149,19 @@ class Player:
                     continue
             return False
 
+        def open_reader(f):
+            if is_seq:
+                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1)
+            return media.FrameReader(source, w, h, 8, f)
+
         def run():
             f = start
             while not stop.is_set():
-                reader = media.FrameReader(info, w, h, 8, f)
+                try:
+                    reader = open_reader(f)
+                except Exception:  # noqa: BLE001
+                    put((None, None))
+                    return
                 try:
                     while not stop.is_set() and f <= end:
                         img = reader.read()
@@ -151,6 +184,50 @@ class Player:
 
     def stop(self) -> None:
         self._stop.set()
+
+
+class _TransportBar(AdaptiveBar):
+    """Player: com pouca largura a linha do tempo sobe para uma linha própria, acima dos botões."""
+
+    WRAP = 860  # px abaixo dos quais a linha do tempo não cabe bem ao lado dos botões
+
+    def __init__(self):
+        super().__init__()
+        self.scrub: QWidget | None = None
+        self.top_row: QHBoxLayout | None = None
+        self.row: QHBoxLayout | None = None
+        self.scrub_index = 0
+        self.stacked = False
+
+    def place_scrub(self, width: int) -> None:
+        if self.scrub is None:
+            return
+        stacked = width < self.WRAP
+        if stacked == self.stacked:
+            return
+        self.stacked = stacked
+        (self.row if stacked else self.top_row).removeWidget(self.scrub)
+        if stacked:
+            self.top_row.addWidget(self.scrub, 1)
+            self.row.insertStretch(self.scrub_index, 1)
+        else:
+            stretch = self.row.itemAt(self.scrub_index)
+            if stretch is not None and stretch.spacerItem() is not None:
+                self.row.takeAt(self.scrub_index)
+            self.row.insertWidget(self.scrub_index, self.scrub, 1)
+        self.updateGeometry()
+
+    def resizeEvent(self, e) -> None:
+        self.place_scrub(e.size().width())
+        super().resizeEvent(e)
+
+
+class _MixBridge(QObject):
+    """Som da prévia da sequência renderizado em segundo plano."""
+
+    done = Signal(str, str)  # chave da mixagem, arquivo WAV ("" = sem som)
+    peaks = Signal(str)      # forma de onda de um arquivo ficou pronta
+    thumb = Signal(str, object)  # miniatura de uma mídia importada (caminho, QImage)
 
 
 class _UpdateBridge(QObject):
@@ -199,7 +276,8 @@ class MainWindow(QMainWindow):
         self.queue = export.ExportQueue()
         self.queue_dialog: QueueDialog | None = None
         self.info: media.MediaInfo | None = None
-        self.frame_idx = 0
+        self.frame_idx = 0     # posição do cursor
+        self.cur_frame = 0     # quadro da imagem que está na tela (pode estar chegando atrasado)
         self.cur: np.ndarray | None = None
         self.cur_q: QImage | None = None
         self.project_path: str | None = None
@@ -224,10 +302,37 @@ class MainWindow(QMainWindow):
         self.loader.failed.connect(
             lambda m: self.statusBar().showMessage(_("Erro ao ler o quadro: {erro}").format(erro=m), 8000))
         self.player = Player()
+        # Modo Edição: a montagem (sequência) é a fonte da prévia quando tem mudanças em relação ao arquivo.
+        self.mode = "pelicula"
+        self.model = TimelineModel(timeline.Sequence())
+        self.file_info: media.MediaInfo | None = None  # arquivo aberto no modo Película
+        self.src_seq: timeline.Sequence | None = None   # cópia da sequência que a prévia está mostrando
+        self.cur_layers = None
+        self.cur_neutral_q: QImage | None = None
+        self.edit_film = str(self.settings.value("edit_film", "false")) == "true"
+        self._sources: dict[str, timeline.Source] = {}
+        self._loading = False
+        self._audio_src = ("", "")
+        self._mix_key = ""
+        self._mix_path = ""
+        self._mix_files: list[str] = []
+        self._mix_token = 0
+        self._peaks: dict[str, object] = {}
+        self._peaks_pending: set[str] = set()
+        self._mix_bridge = _MixBridge()
+        self._mix_bridge.done.connect(self._mix_done)
+        self._mix_bridge.peaks.connect(lambda path: self.tl_editor.peaks_ready(path))
+        self._mix_bridge.thumb.connect(lambda path, img: self.bin.set_thumb(path, img))
 
         self._build_ui()
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
+        self.model.changed.connect(self._model_changed)
+        self.model.historyChanged.connect(self._update_history)
+        self.mix_timer = QTimer(self)
+        self.mix_timer.setSingleShot(True)
+        self.mix_timer.setInterval(700)
+        self.mix_timer.timeout.connect(self._start_mix)
 
         self.render_timer = QTimer(self)
         self.render_timer.setSingleShot(True)
@@ -237,6 +342,12 @@ class MainWindow(QMainWindow):
         self.thumb_timer.setSingleShot(True)
         self.thumb_timer.setInterval(350)
         self.thumb_timer.timeout.connect(self._render_thumbs)
+        self.curve_timer = QTimer(self)
+        self.curve_timer.setSingleShot(True)
+        self.curve_timer.setInterval(80)
+        self.curve_timer.timeout.connect(self._update_curve)
+        if str(self.settings.value("show_curve", "false")) == "true":
+            self.curve_switch.setChecked(True)
         self.play_timer = QTimer(self)
         self.play_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.play_timer.timeout.connect(self._play_tick)
@@ -274,6 +385,14 @@ class MainWindow(QMainWindow):
         st = self.settings.value("splitter")
         if st is not None:
             self.split.restoreState(st)
+        # Estados antigos podiam ter um painel recolhido (largura 0): volta ao padrão.
+        self.split.setChildrenCollapsible(False)
+        if min(self.split.sizes()) <= 0:
+            self.split.setSizes([310, 960, 380])
+        st = self.settings.value("splitter_edit")
+        if st is not None:
+            self.center_split.restoreState(st)
+        self.center_split.setChildrenCollapsible(False)
 
     # ================================================================ interface
     def _build_ui(self) -> None:
@@ -287,14 +406,37 @@ class MainWindow(QMainWindow):
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
         self.looks.presetChosen.connect(self.apply_preset)
-        self.split.addWidget(self.looks)
-        self.split.addWidget(self._center())
-        self.right_panel = self._right_panel()
+        self.bin = MediaBin()
+        self.bin.importRequested.connect(self.import_dialog)
+        self.bin.addRequested.connect(self.add_to_timeline)
+        self.bin.removeRequested.connect(self._bin_remove)
+        self.bin.filesDropped.connect(self._bin_files)
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(self.looks)
+        self.left_stack.addWidget(self.bin)
+        self.split.addWidget(self.left_stack)
+        self.center_split = QSplitter(Qt.Orientation.Vertical)
+        self.center_split.setHandleWidth(1)
+        self.center_split.addWidget(self._center())
+        self.tl_editor = TimelineEditor(self.model)
+        self.tl_editor.seekRequested.connect(self.seek)
+        self.tl_editor.filesDropped.connect(self.drop_on_timeline)
+        self.tl_editor.set_peaks_provider(self._peaks_for)
+        self.tl_editor.setVisible(False)
+        self.center_split.addWidget(self.tl_editor)
+        self.center_split.setStretchFactor(0, 3)
+        self.center_split.setStretchFactor(1, 2)
+        self.center_split.setChildrenCollapsible(False)
+        self.split.addWidget(self.center_split)
+        self.right_panel = QStackedWidget()
+        self.right_panel.addWidget(self._right_panel())
+        self.right_panel.addWidget(self._edit_panel())
         self.split.addWidget(self.right_panel)
         self.split.setStretchFactor(0, 0)
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 0)
-        self.split.setSizes([290, 980, 380])
+        self.split.setChildrenCollapsible(False)
+        self.split.setSizes([310, 960, 380])
         root.addWidget(self.split, 1)
         self.setCentralWidget(central)
         sb = self.statusBar()
@@ -324,7 +466,7 @@ class MainWindow(QMainWindow):
         return b
 
     def _top_bar(self) -> QWidget:
-        bar = QWidget()
+        bar = AdaptiveBar()
         bar.setObjectName("TopBar")
         hl = QHBoxLayout(bar)
         hl.setContentsMargins(14, 8, 14, 8)
@@ -337,9 +479,18 @@ class MainWindow(QMainWindow):
                       f"<span style='font-family:\"{t}\"; font-size:14.5pt; font-weight:300; color:{theme.ACCENT}'>Converter</span>")
         hl.addWidget(name)
         hl.addSpacing(18)
-        self.file_label = QLabel("")
+        self.mode_switch = Segmented([
+            ("pelicula", _("Película"), _("Aplicar o look de película no vídeo ou na montagem (Ctrl+1)")),
+            ("edicao", _("Edição"), _("Cortar, juntar clipes e ajustar cor e som antes do look de película (Ctrl+2)")),
+        ])
+        self.mode_switch.set_current("pelicula")
+        self.mode_switch.changed.connect(self.set_mode)
+        hl.addWidget(self.mode_switch)
+        hl.addSpacing(10)
+        self.file_label = ElideLabel("")
         self.file_label.setObjectName("Muted")
         hl.addWidget(self.file_label, 1)
+        self._brand = name
         self.btn_project = self._flat("save", _("Projeto: salvar e abrir a edição"), _("Projeto"))
         self.project_menu = QMenu(self)
         self.project_menu.aboutToShow.connect(self._fill_project_menu)
@@ -381,11 +532,16 @@ class MainWindow(QMainWindow):
         menu.addAction(_("Abrir pasta dos meus presets"), lambda: system.open_path(presets.user_dir()))
         menu.addAction(_("Abrir pasta dos meus LUTs"), self.open_lut_dir)
         menu.addSeparator()
+        menu.addAction(icons.icon("davinci", theme.TEXT, 16), _("Plugin para o DaVinci Resolve…"), self.show_resolve)
+        menu.addSeparator()
         menu.addAction(_("Atalhos do teclado"), self.show_shortcuts)
         menu.addAction(_("Sobre o {app}").format(app=APP_NAME), self.about)
         self.btn_settings.setMenu(menu)
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
+        # Janela estreita: os botões ficam só com o ícone e o nome do app some.
+        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue],
+                         optional=[self._brand])
         return bar
 
     def _center(self) -> QWidget:
@@ -393,11 +549,10 @@ class MainWindow(QMainWindow):
         vl = QVBoxLayout(w)
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
-        bar = QWidget()
+        bar = AdaptiveBar()
         bar.setObjectName("ViewerBar")
-        hl = QHBoxLayout(bar)
+        hl = FlowLayout(bar, 8, 6)
         hl.setContentsMargins(12, 8, 12, 8)
-        hl.setSpacing(8)
         self.compare = Segmented([
             ("proc", _("Película"), _("Só o resultado")),
             ("split", _("Dividido"), _("Arraste a linha para comparar. Segure o botão direito para ver o original.")),
@@ -408,7 +563,7 @@ class MainWindow(QMainWindow):
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
-        hl.addSpacing(10)
+        hl.add_spacing(2)
         self.btn_zoom_out = self._flat("zoom_out", _("Menos zoom (−). A roda do mouse também dá zoom."))
         self.btn_zoom_out.clicked.connect(lambda: self.viewer.zoom_step(-1))
         hl.addWidget(self.btn_zoom_out)
@@ -418,6 +573,7 @@ class MainWindow(QMainWindow):
         self.btn_fit = self._flat("fit", _("Ajustar à janela (F)"), _("Ajustar"))
         self.btn_fit.clicked.connect(lambda: self.viewer.set_zoom(None))
         hl.addWidget(self.btn_fit)
+        zoom_buttons = []
         for z in (1.0, 2.0):
             b = QToolButton()
             b.setObjectName("Flat")
@@ -428,12 +584,32 @@ class MainWindow(QMainWindow):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _checked=False, zz=z: self.viewer.set_zoom(zz))
             hl.addWidget(b)
+            zoom_buttons.append(b)
         self.zoom_label = QLabel("")
         self.zoom_label.setObjectName("Faint")
         self.zoom_label.setMinimumWidth(44)
         self.zoom_label.setToolTip(_("Zoom atual (100% = um pixel da prévia por pixel da tela)"))
         hl.addWidget(self.zoom_label)
-        hl.addStretch(1)
+        self.btn_edit_film = self._flat("film", _("Mostrar a montagem já com o look de película (mais lento). "
+                                                  "O que aparece aqui é o que sai na exportação."),
+                                        _("Com película"), checkable=True)
+        self.btn_edit_film.setChecked(self.edit_film)
+        self.btn_edit_film.toggled.connect(self._set_edit_film)
+        hl.addWidget(self.btn_edit_film)
+        self.btn_seq = self._flat("settings", _("Resolução, quadros por segundo e cor de fundo da sequência"),
+                                  _("Sequência"))
+        self.btn_seq.clicked.connect(self.sequence_settings)
+        hl.addWidget(self.btn_seq)
+        self.btn_edit_undo = self._flat("undo", _("Desfazer na edição (Ctrl+Z)"))
+        self.btn_edit_undo.clicked.connect(self.undo)
+        self.btn_edit_redo = self._flat("redo", _("Refazer na edição (Ctrl+Y)"))
+        self.btn_edit_redo.clicked.connect(self.redo)
+        hl.addWidget(self.btn_edit_undo)
+        hl.addWidget(self.btn_edit_redo)
+        self._edit_only = [self.btn_edit_film, self.btn_seq, self.btn_edit_undo, self.btn_edit_redo]
+        for wdg in self._edit_only:
+            wdg.setVisible(False)
+        hl.add_stretch()
         lab = QLabel(_("Prévia"))
         lab.setObjectName("Muted")
         hl.addWidget(lab)
@@ -445,10 +621,12 @@ class MainWindow(QMainWindow):
         self.prev_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
-        hl.addSpacing(4)
         self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia (F11). Esc sai."))
         self.btn_full.clicked.connect(self.toggle_preview_fullscreen)
         hl.addWidget(self.btn_full)
+        # Prévia estreita: botões só com ícone, somem os extras e, se ainda faltar espaço, quebra a linha.
+        bar.set_adaptive(compact=[self.btn_fit, self.btn_edit_film, self.btn_seq],
+                         optional=zoom_buttons + [self.zoom_label, lab])
         vl.addWidget(bar)
         self.viewer_bar = bar
         self.viewer = Viewer()
@@ -458,11 +636,17 @@ class MainWindow(QMainWindow):
         self.viewer.filesDropped.connect(self.handle_files)
         self.viewer.zoomChanged.connect(self._zoom_changed)
         vl.addWidget(self.viewer, 1)
-        tr = QWidget()
+        tr = _TransportBar()
         tr.setObjectName("Transport")
-        th = QHBoxLayout(tr)
-        th.setContentsMargins(10, 6, 12, 10)
+        tv = QVBoxLayout(tr)
+        tv.setContentsMargins(10, 6, 12, 10)
+        tv.setSpacing(2)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        tv.addLayout(top)
+        th = QHBoxLayout()
         th.setSpacing(4)
+        tv.addLayout(th)
         self.btn_back = self._flat("step_back", _("Quadro anterior (←)"))
         self.btn_back.clicked.connect(lambda: self.step(-1))
         self.btn_play = self._flat("play", _("Reproduzir / pausar (Espaço)"))
@@ -474,11 +658,13 @@ class MainWindow(QMainWindow):
             th.addWidget(b)
         self.time_label = QLabel("00:00:00:00")
         self.time_label.setObjectName("Time")
-        self.time_label.setMinimumWidth(190)
+        # Largura fixa do texto mais longo (fonte monoespaçada): o rótulo não pula nem corta.
+        self.time_label.setMinimumWidth(QFontMetrics(theme.mono_font()).horizontalAdvance("00:00:00:00  /  00:00:00:00") + 8)
         th.addSpacing(6)
         th.addWidget(self.time_label)
         self.timeline = Timeline()
         self.timeline.seek.connect(self.seek)
+        tr.scrub, tr.top_row, tr.row, tr.scrub_index = self.timeline, top, th, th.count()
         th.addWidget(self.timeline, 1)
         self.btn_in = self._flat("mark_in", _("Marcar entrada (I)"))
         self.btn_in.clicked.connect(self.mark_in)
@@ -500,6 +686,7 @@ class MainWindow(QMainWindow):
         self.vol.setToolTip(_("Volume da prévia"))
         self.vol.valueChanged.connect(self._set_volume)
         th.addWidget(self.vol)
+        tr.set_adaptive(optional=[self.vol])
         vl.addWidget(tr)
         self.transport = tr
         return w
@@ -507,7 +694,7 @@ class MainWindow(QMainWindow):
     def _right_panel(self) -> QWidget:
         w = QWidget()
         w.setObjectName("Panel")
-        w.setMinimumWidth(340)
+        w.setMinimumWidth(300)
         vl = QVBoxLayout(w)
         vl.setContentsMargins(12, 12, 6, 8)
         vl.setSpacing(8)
@@ -545,8 +732,13 @@ class MainWindow(QMainWindow):
         self.mod_label = QLabel(_("Modificado — salve como novo preset para usar depois"))
         self.mod_label.setStyleSheet(f"color: {theme.ACCENT}; font-size: 8.5pt;")
         vl.addWidget(self.mod_label)
-        self.hist = Histogram()
+        self.hist = Scopes()
+        self.hist.mode = str(self.settings.value("scopes", self.hist.mode))
         vl.addWidget(self.hist)
+        # "Mostrar curva": a curva de transferência do look (Laboratório + cor + cópia + LUT) em R, G e B.
+        self.curve_graph = CurveGraph()
+        self.curve_graph.setVisible(False)
+        vl.addWidget(self.curve_graph)
         row2 = QHBoxLayout()
         lab = QLabel(_("Ajustes avançados"))
         lab.setObjectName("Muted")
@@ -555,6 +747,15 @@ class MainWindow(QMainWindow):
         self.adv.setChecked(self.settings.value("advanced", "false") == "true")
         self.adv.toggled.connect(self._set_advanced)
         row2.addWidget(self.adv)
+        row2.addSpacing(10)
+        lab_c = QLabel(_("Curva"))
+        lab_c.setObjectName("Muted")
+        lab_c.setToolTip(_("Mostrar a curva do look em R, G e B (como o \"Show Curve\" dos plugins de película)"))
+        row2.addWidget(lab_c)
+        self.curve_switch = ToggleSwitch()
+        self.curve_switch.setToolTip(lab_c.toolTip())
+        self.curve_switch.toggled.connect(self._set_curve_visible)
+        row2.addWidget(self.curve_switch)
         row2.addStretch(1)
         self.btn_undo = self._flat("undo", _("Desfazer (Ctrl+Z)"))
         self.btn_undo.clicked.connect(self.store.undo)
@@ -582,6 +783,22 @@ class MainWindow(QMainWindow):
         vl.addWidget(scroll, 1)
         return w
 
+    def _edit_panel(self) -> QWidget:
+        """Painel da direita no modo Edição: medidores de cor e o inspetor do clipe escolhido."""
+        w = QWidget()
+        w.setObjectName("Panel")
+        w.setMinimumWidth(300)
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(12, 12, 6, 8)
+        vl.setSpacing(8)
+        self.edit_scopes = Scopes()
+        self.edit_scopes.mode = str(self.settings.value("scopes_edit", self.edit_scopes.mode))
+        vl.addWidget(self.edit_scopes)
+        self.inspector = ClipInspector(self.model)
+        self.inspector.autoRequested.connect(self.auto_adjust_clip)
+        vl.addWidget(self.inspector, 1)
+        return w
+
     def _shortcuts(self) -> None:
         def sc(seq, fn):
             s = QShortcut(QKeySequence(seq), self)
@@ -594,9 +811,14 @@ class MainWindow(QMainWindow):
         sc("Ctrl+N", self.new_project)
         sc("Ctrl+Alt+S", self.save_preset_as)
         sc("Ctrl+Shift+F", self.save_frame)
-        sc("Ctrl+Z", self.store.undo)
-        sc("Ctrl+Y", self.store.redo)
-        sc("Ctrl+Shift+Z", self.store.redo)
+        sc("Ctrl+Z", self.undo)
+        sc("Ctrl+Y", self.redo)
+        sc("Ctrl+Shift+Z", self.redo)
+        sc("Ctrl+I", self.import_dialog)
+        sc("Ctrl+1", lambda: self.set_mode("pelicula"))
+        sc("Ctrl+2", lambda: self.set_mode("edicao"))
+        sc("Ctrl+Alt+C", lambda: self.mode == "edicao" and self.inspector.copy_values())
+        sc("Ctrl+Alt+V", lambda: self.mode == "edicao" and self.inspector.paste_values())
         sc("F11", self.toggle_preview_fullscreen)
         sc("Shift+F11", self.toggle_window_fullscreen)
 
@@ -623,8 +845,9 @@ class MainWindow(QMainWindow):
         if entering:
             self._state_before_full = self.windowState()
         self.preview_fullscreen = entering
-        for wdg in (self.top_bar, self.looks, self.right_panel, self.statusBar()):
+        for wdg in (self.top_bar, self.left_stack, self.right_panel, self.statusBar()):
             wdg.setVisible(not entering)
+        self.tl_editor.setVisible(not entering and self.mode == "edicao")
         self.viewer.set_fullscreen(entering)
         self.btn_full.setIcon(icons.icon("fullscreen_exit" if entering else "fullscreen", theme.TEXT, 18))
         self.btn_full.setText(_("Sair da tela cheia") if entering else "")
@@ -646,6 +869,9 @@ class MainWindow(QMainWindow):
 
     # ================================================================ arquivos
     def open_dialog(self) -> None:
+        if self.mode == "edicao":
+            self.import_dialog()
+            return
         d = str(self.settings.value("last_dir", str(Path.home())))
         path, _f = QFileDialog.getOpenFileName(self, _("Abrir vídeo, imagem ou projeto"), d, open_filter())
         if path:
@@ -663,6 +889,9 @@ class MainWindow(QMainWindow):
             if ext == ".json":
                 self.import_preset(p)
             elif ext != ".cube":
+                if self.mode == "edicao":
+                    self.import_paths([q for q in paths if Path(q).suffix.lower() not in (".cube", ".json")])
+                    break
                 if self.confirm_discard():
                     self.load_media(p)
                     self.project_path = None
@@ -698,25 +927,28 @@ class MainWindow(QMainWindow):
         self.load_media(path, label=_("Cena de teste"))
 
     def load_media(self, path: str, label: str | None = None) -> None:
+        """Abre um arquivo no modo Película. A edição recomeça com ele inteiro na linha do tempo."""
         try:
             info = media.probe(path)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
-        self.info = info
-        self.frame_idx = 0
-        self.inp = self.outp = None
+        self.file_info = info
         self.cur = None
-        self.timeline.set_media(info.frames, info.fps)
-        self.file_label.setText(label or Path(path).name)
         self._media_label = label or Path(path).name
-        self.st_file.setText(info.summary())
-        self._set_media_enabled(True)
         self.settings.setValue("last_dir", str(Path(path).parent))
-        self._load_audio(path if info.has_audio and not info.is_image else "")
-        self.request_frame(0)
-        self._update_title()
+        src = timeline.Source.from_info(info)
+        self._sources = {src.path: src}
+        self.bin.clear()
+        self.bin.add_source(src)
+        self._request_thumb(src)
+        self._loading = True
+        try:
+            self.model.set_sequence(timeline.Sequence.for_source(src))
+        finally:
+            self._loading = False
+        self._refresh_source(reset=True)
 
     def _set_media_enabled(self, on: bool) -> None:
         video = on and self.info is not None and not self.info.is_image
@@ -729,6 +961,8 @@ class MainWindow(QMainWindow):
             b.setEnabled(on)
 
     def preview_size(self) -> tuple[int, int]:
+        if self.src_seq is not None:
+            return sequence.canvas_size(self.src_seq, None if self.preview_q == "full" else int(self.preview_q))
         info = self.info
         if self.preview_q == "full":
             h = info.height
@@ -744,24 +978,67 @@ class MainWindow(QMainWindow):
         self.frame_idx = f
         self._update_time()
         w, h = self.preview_size()
-        self.loader.request(self.info, f, w, h)
+        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h)
 
-    def _frame_loaded(self, info, frame: int, img: np.ndarray) -> None:
-        if info is not self.info or self.playing:
+    def _frame_loaded(self, source, frame: int, img) -> None:
+        expected = self.src_seq if self.src_seq is not None else self.info
+        if source is not expected or self.playing:
             return
-        self._set_frame(frame, img)
+        # Arrastando o cursor, quadros de posições anteriores ainda podem chegar: a imagem aparece,
+        # mas o cursor continua onde a pessoa deixou (antes ele voltava para trás por um instante).
+        self._set_frame(frame, img, move_cursor=frame == self.frame_idx)
         self.thumb_timer.start()
 
-    def _set_frame(self, frame: int, img: np.ndarray) -> None:
+    def _set_frame(self, frame: int, img, move_cursor: bool = True) -> None:
+        """Mostra um quadro: imagem do arquivo ou camadas da montagem (compostas aqui, na GPU)."""
+        self.cur_frame = frame
+        if move_cursor:
+            self.frame_idx = frame
+        if isinstance(img, sequence.FrameLayers):
+            self.cur_layers = img
+            if not self._compose_current():
+                return
+        else:
+            self.cur_layers = None
+            self.cur_neutral_q = None
+            self.cur = img
+            self.cur_q = qimage_from(img)
+        if move_cursor:
+            self._update_time()
+        self.render_now()
+
+    def _live_layers(self, fl):
+        """As camadas decodificadas com os ajustes atuais dos clipes (a cópia da thread pode estar velha)."""
+        seq = self.model.seq
+        out = []
+        for li in fl.layers:
+            clip = seq.find(li.layer.clip.id)
+            if clip is not None:
+                out.append(sequence.LayerImage(dataclasses.replace(li.layer, clip=clip), li.image))
+        return sequence.FrameLayers(fl.frame, out)
+
+    def _compose_current(self) -> bool:
+        """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
+        if self.cur_layers is None:
+            return False
+        live = self._live_layers(self.cur_layers)
+        w, h = self.preview_size()
+        try:
+            img = self.engine.compose(live, self.model.seq, w, h, 8)
+            neutral = (self.engine.compose(live, self.model.seq, w, h, 8, neutral=True)
+                       if self.mode == "edicao" else None)
+        except Exception as exc:  # noqa: BLE001
+            self.statusBar().showMessage(_("Erro ao montar o quadro: {erro}").format(erro=exc), 8000)
+            return False
         self.cur = img
         self.cur_q = qimage_from(img)
-        self.frame_idx = frame
-        self._update_time()
-        self.render_now()
+        self.cur_neutral_q = qimage_from(neutral) if neutral is not None else None
+        return True
 
     def _update_time(self) -> None:
         if self.info is None:
             return
+        self.tl_editor.set_playhead(self.frame_idx)
         self.timeline.set_pos(self.frame_idx)
         self.time_label.setText(f"{timecode(self.frame_idx, self.info.fps)}  /  "
                                 f"{timecode(self.info.frames - 1, self.info.fps)}")
@@ -774,6 +1051,361 @@ class MainWindow(QMainWindow):
                 self.stop_play()
             self.request_frame(self.frame_idx)
 
+    # ================================================================ modos Película / Edição
+    def set_mode(self, mode: str) -> None:
+        """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes)."""
+        if mode not in MODES:
+            return
+        self.mode_switch.set_current(mode)
+        if mode == self.mode:
+            return
+        if self.preview_fullscreen:
+            self.toggle_preview_fullscreen()
+        self.stop_play()
+        self.mode = mode
+        edit = mode == "edicao"
+        self.left_stack.setCurrentIndex(1 if edit else 0)
+        self.right_panel.setCurrentIndex(1 if edit else 0)
+        self.tl_editor.setVisible(edit)
+        self.timeline.setVisible(not edit)
+        for wdg in self._edit_only:
+            wdg.setVisible(edit)
+        self.btn_open.setText(_("Importar") if edit else _("Abrir"))
+        self.btn_open.setToolTip(_("Importar vídeos, imagens e músicas para a edição (Ctrl+I)") if edit
+                                 else _("Abrir vídeo, imagem ou projeto .plc (Ctrl+O)"))
+        self._update_label_proc()
+        self._update_history()
+        self._refresh_source()
+        if edit:
+            self.tl_editor.setFocus()
+
+    def _update_label_proc(self) -> None:
+        self.viewer.label_proc = _("EDIÇÃO") if (self.mode == "edicao" and not self.edit_film) else _("PELÍCULA")
+        self.viewer.update()
+
+    def _set_edit_film(self, on: bool) -> None:
+        self.edit_film = bool(on)
+        self.settings.setValue("edit_film", "true" if on else "false")
+        self._update_label_proc()
+        self.render_now()
+
+    def _use_sequence(self) -> bool:
+        """A prévia mostra a montagem? (no modo Película só quando ela difere do arquivo aberto)"""
+        seq = self.model.seq
+        if not seq.clips:
+            return False
+        if self.mode == "edicao" or self.file_info is None:
+            return True
+        return seq.is_trivial() != self.file_info.path
+
+    def _refresh_source(self, reset: bool = False) -> None:
+        """Escolhe a fonte da prévia (arquivo ou montagem) e atualiza linha do tempo, rótulos e som."""
+        was_seq = self.src_seq is not None
+        if self._use_sequence():
+            self.src_seq = self.model.seq.copy()
+            info = sequence.media_info(self.src_seq)
+        else:
+            self.src_seq = None
+            info = self.file_info if self.mode == "pelicula" else None
+        if self.playing:
+            self.stop_play()
+        self.info = info
+        if info is None:
+            self.cur = None
+            self.cur_q = None
+            self.cur_layers = None
+            self.cur_neutral_q = None
+            self.viewer.set_images(None, None)
+            self.hist.set_image(None)
+            self.edit_scopes.set_image(None)
+            self.timeline.set_media(1, 24.0)
+            self.tl_editor.set_playhead(0)
+            self.file_label.setText("")
+            self.st_file.setText(_("Nenhum arquivo aberto") if self.mode == "pelicula"
+                                 else _("Importe vídeos, imagens ou músicas para começar a edição"))
+            self._set_media_enabled(False)
+            self._set_audio("", "")
+            self._update_title()
+            return
+        if reset:
+            self.frame_idx = 0
+            self.inp = self.outp = None
+        last = max(0, info.frames - 1)
+        self.frame_idx = min(self.frame_idx, last)
+        if self.inp is not None and self.inp > last:
+            self.inp = None
+        if self.outp is not None and self.outp > last:
+            self.outp = None
+        self.timeline.set_media(info.frames, info.fps)
+        self.timeline.set_inout(self.inp, self.outp)
+        self.tl_editor.set_inout(self.inp, self.outp)
+        if self.src_seq is not None:
+            seq = self.src_seq
+            n = sum(1 for c in seq.clips if c.kind == timeline.VIDEO)
+            self.st_file.setText(_("Montagem {w}×{h} • {fps} fps • {n} clipes de imagem • {dur}").format(
+                w=seq.width, h=seq.height, fps=i18n.fmt_decimal(seq.fps, 3), n=n,
+                dur=timecode(seq.duration, seq.fps)))
+            self.file_label.setText(_("Montagem da edição"))
+            self._schedule_mix(immediate=not was_seq or reset)
+        else:
+            self.st_file.setText(info.summary())
+            self.file_label.setText(self._media_label)
+            self._set_audio("file", info.path if info.has_audio and not info.is_image else "")
+        self._set_media_enabled(True)
+        self.request_frame(self.frame_idx)
+        self._update_title()
+
+    def _model_changed(self, kind: str) -> None:
+        """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
+        if self._loading:
+            return
+        if kind == "values" and self.src_seq is not None and self._use_sequence():
+            self.src_seq = self.model.seq.copy()
+            if self._compose_current():
+                self.render_now()
+            if not self.playing:
+                self.request_frame(self.frame_idx)
+            self._schedule_mix()
+        else:
+            self._refresh_source()
+        self._update_title()
+        self._update_history()
+
+    # ---------------------------------------------------------------- som da montagem
+    def _set_audio(self, kind: str, path: str) -> None:
+        """Troca o som da prévia (arquivo original ou mixagem da montagem) sem perder a reprodução."""
+        if (kind, path) == self._audio_src:
+            return
+        self._audio_src = (kind, path)
+        self._load_audio(path)
+        if self.playing and self._audio_ok and self.audio is not None:
+            self._audio_seek(self.frame_idx)
+            self.audio.play()
+
+    def _schedule_mix(self, immediate: bool = False) -> None:
+        if self.src_seq is None:
+            return
+        if immediate:
+            self.mix_timer.stop()
+            QTimer.singleShot(0, self._start_mix)
+        else:
+            self.mix_timer.start()
+
+    def _start_mix(self) -> None:
+        """Mixa o som da montagem num WAV temporário (em segundo plano) para tocar na prévia."""
+        if self.src_seq is None:
+            return
+        seq = self.model.seq.copy()
+        key = audiomix.mix_key(seq)
+        if key == self._mix_key:
+            self._set_audio("seq", self._mix_path)
+            return
+        if not seq.has_audio:
+            self._mix_key, self._mix_path = key, ""
+            self._set_audio("seq", "")
+            return
+        self._mix_token += 1
+        path = os.path.join(tempfile.gettempdir(), f"pelicula_previa_{os.getpid()}_{self._mix_token}.wav")
+        self._mix_files.append(path)
+
+        def run():
+            try:
+                ok = audiomix.render_mix(seq, path)
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._mix_bridge.done.emit(key, path if ok else "")
+
+        threading.Thread(target=run, daemon=True, name="mixagem-previa").start()
+
+    def _mix_done(self, key: str, path: str) -> None:
+        if self.src_seq is None or key != audiomix.mix_key(self.model.seq):
+            return  # já existe uma mixagem mais nova a caminho
+        self._mix_key, self._mix_path = key, path
+        self._set_audio("seq", path)
+        self._clean_mixes(keep=path)
+
+    def _clean_mixes(self, keep: str = "") -> None:
+        for f in list(self._mix_files):
+            if f == keep:
+                continue
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+                self._mix_files.remove(f)
+            except OSError:
+                pass  # ainda aberto pelo player; tenta de novo depois
+
+    def audio_stop_and_clean(self) -> None:
+        if self.audio is not None:
+            from PySide6.QtCore import QUrl
+            self.audio.stop()
+            self.audio.setSource(QUrl())
+        self._clean_mixes()
+
+    def _peaks_for(self, path: str):
+        """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
+        if path in self._peaks:
+            return self._peaks[path]
+        if path not in self._peaks_pending:
+            self._peaks_pending.add(path)
+
+            def run():
+                try:
+                    data = audiomix.peaks(path)
+                except Exception:  # noqa: BLE001
+                    data = None
+                self._peaks[path] = data
+                self._mix_bridge.peaks.emit(path)
+
+            threading.Thread(target=run, daemon=True, name="forma-de-onda").start()
+        return None
+
+    # ---------------------------------------------------------------- mídia da edição
+    def import_dialog(self) -> None:
+        d = str(self.settings.value("last_dir", str(Path.home())))
+        paths, _f = QFileDialog.getOpenFileNames(self, _("Importar para a edição"), d, import_filter())
+        if paths:
+            self.import_paths(paths)
+
+    def _probe_source(self, path: str) -> timeline.Source | None:
+        src = self._sources.get(path) or self.model.seq.sources.get(path)
+        if src is None:
+            try:
+                src = media.probe_source(path)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
+                    nome=Path(path).name, erro=exc))
+                return None
+        if path not in self._sources:
+            self._sources[path] = src
+            self.bin.add_source(src)
+            self._request_thumb(src)
+        return src
+
+    def _request_thumb(self, src: timeline.Source) -> None:
+        if not src.has_video:
+            return
+
+        def run():
+            try:
+                tw = 192
+                th = max(2, int(round(tw * src.height / max(1, src.width))))
+                f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
+                img = media.grab_frame(src.to_info(), f, tw, th, 8)
+            except Exception:  # noqa: BLE001
+                return
+            self._mix_bridge.thumb.emit(src.path, qimage_from(img))
+
+        threading.Thread(target=run, daemon=True, name="miniatura-midia").start()
+
+    def _adopt_format(self, src: timeline.Source) -> None:
+        """Primeiro arquivo numa montagem vazia: a sequência fica com a resolução e o fps dele."""
+        if self.model.seq.clips or not src.has_video:
+            return
+        ref = timeline.Sequence.for_source(src, with_media=False)
+        self.model.set_settings(ref.width, ref.height, ref.fps_str)
+
+    def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0):
+        seq = self.model.seq
+        self._adopt_format(src)
+        if not src.has_video:
+            if at is None:
+                # Música: começa no início, na primeira faixa de áudio vazia.
+                tracks = seq.kind_tracks(timeline.AUDIO)
+                track = next((i for i in range(len(tracks)) if not seq.clips_on(timeline.AUDIO, i)), len(tracks))
+                return self.model.insert_media(src, at=0, atrack=track)
+            return self.model.insert_media(src, at=at, atrack=track if kind == timeline.AUDIO else 0)
+        return self.model.insert_media(src, at=at, vtrack=track if kind == timeline.VIDEO else 0,
+                                       atrack=track if kind == timeline.AUDIO else 0)
+
+    def import_paths(self, paths: list[str]) -> None:
+        """Importa arquivos para a edição: entram na Mídia e vão para o fim da linha do tempo."""
+        paths = [p for p in paths if p and os.path.isfile(p)]
+        if not paths:
+            return
+        if self.mode != "edicao":
+            self.set_mode("edicao")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            srcs = [s for s in (self._probe_source(p) for p in paths) if s is not None]
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not srcs:
+            return
+        self.settings.setValue("last_dir", str(Path(paths[0]).parent))
+        for src in srcs:
+            self._insert(src)
+        self.statusBar().showMessage(_("{n} arquivo(s) na linha do tempo.").format(n=len(srcs)), 5000)
+
+    def add_to_timeline(self, path: str) -> None:
+        src = self._probe_source(path)
+        if src is not None:
+            self._insert(src)
+
+    def drop_on_timeline(self, paths: list, frame: int, kind: str, track: int) -> None:
+        """Arquivos (do sistema ou da Mídia) soltos na linha do tempo: entram no ponto e na faixa do mouse."""
+        pos = max(0, int(frame))
+        for path in paths:
+            src = self._probe_source(str(path))
+            if src is None:
+                continue
+            made = self._insert(src, at=pos, kind=kind, track=max(0, int(track)))
+            if made:
+                pos = max(c.end for c in made)
+
+    def _bin_files(self, paths: list) -> None:
+        """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo)."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for p in paths:
+                if os.path.isfile(str(p)):
+                    self._probe_source(str(p))
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _bin_remove(self, path: str) -> None:
+        if any(c.src == path for c in self.model.seq.clips):
+            QMessageBox.information(self, _("Mídia"), _("Este arquivo está na linha do tempo. Apague os clipes dele "
+                                                       "antes de tirá-lo da Mídia."))
+            return
+        self._sources.pop(path, None)
+        thumbs = getattr(self.bin, "_thumbs", None)
+        self.bin.clear()
+        for src in self._sources.values():
+            self.bin.add_source(src, (thumbs or {}).get(src.path))
+
+    def sequence_settings(self) -> None:
+        from .sequence_dialog import SequenceDialog
+        dlg = SequenceDialog(self, self.model.seq)
+        if dlg.exec():
+            w, h, fps, bg = dlg.values()
+            self.model.set_settings(w, h, fps, bg)
+
+    def auto_adjust_clip(self, cid: str) -> None:
+        """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
+        seq = self.model.seq
+        clip = seq.find(cid)
+        if clip is None or clip.kind != timeline.VIDEO:
+            return
+        img = None
+        if self.cur_layers is not None:
+            img = next((li.image for li in self.cur_layers.layers
+                        if li.layer.clip.id == cid and not li.layer.extension), None)
+        if img is None:
+            src = seq.sources[clip.src]
+            t = self.frame_idx if clip.start <= self.frame_idx < clip.end else clip.start
+            try:
+                w = 480
+                img = media.grab_frame(src.to_info(), seq.src_frame(clip, t), w,
+                                       max(2, int(round(w * src.height / max(1, src.width)))), 8)
+            except Exception as exc:  # noqa: BLE001
+                self.statusBar().showMessage(_("Erro ao ler o quadro: {erro}").format(erro=exc), 8000)
+                return
+        vals = dict(clip.values)
+        vals.update(compositor.auto_adjust(img))
+        self.model.set_clip_values(cid, vals)
+        self.statusBar().showMessage(_("Cor automática aplicada em {nome}.").format(nome=clip.name or "-"), 4000)
+
     # ================================================================ renderização
     def schedule_render(self) -> None:
         if not self.playing:
@@ -783,6 +1415,14 @@ class MainWindow(QMainWindow):
         if self.cur is None:
             return
         h, w = self.cur.shape[:2]
+        if self.mode == "edicao" and not self.edit_film:
+            # Só a edição: o quadro montado já é o resultado.
+            self.viewer.set_images(self.cur_q, self.cur_neutral_q or self.cur_q)
+            self.hist.set_image(self.cur)
+            self.edit_scopes.set_image(self.cur)
+            self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
+            self.st_render.setText("")
+            return
         if self._uploaded is not self.cur:
             self.engine.set_input(self.cur)
             self._uploaded = self.cur
@@ -790,14 +1430,16 @@ class MainWindow(QMainWindow):
         info = lut_info(v["lut_arquivo"]) if v["lut_on"] and v["lut_arquivo"] else None
         t0 = time.perf_counter()
         try:
-            plan = look.build_plan(v, w, h, self.frame_idx, self.info.fps if self.info else 24.0, info)
+            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info)
             out = self.engine.render(plan, 8)
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
             return
         ms = (time.perf_counter() - t0) * 1000
-        self.viewer.set_images(qimage_from(out), self.cur_q)
+        orig = self.cur_neutral_q if (self.mode == "edicao" and self.cur_neutral_q is not None) else self.cur_q
+        self.viewer.set_images(qimage_from(out), orig)
         self.hist.set_image(out)
+        self.edit_scopes.set_image(out)
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
         if v["lut_on"] and v["lut_arquivo"] and info is None:
@@ -832,6 +1474,20 @@ class MainWindow(QMainWindow):
         self.schedule_render()
         self._update_modified()
         self._update_title()
+        if self.curve_graph.isVisible():
+            self.curve_timer.start()
+
+    def _set_curve_visible(self, on: bool) -> None:
+        self.curve_graph.setVisible(bool(on))
+        self.settings.setValue("show_curve", "true" if on else "false")
+        if on:
+            self._update_curve()
+
+    def _update_curve(self) -> None:
+        """Curva do look atual: o eixo dos cinzas de um LUT assado na GPU (mesmo caminho de cor do app)."""
+        if not self.curve_graph.isVisible():
+            return
+        self.curve_graph.update_from(self.engine, self.store.values)
 
     # ================================================================ reprodução
     def toggle_play(self) -> None:
@@ -901,7 +1557,8 @@ class MainWindow(QMainWindow):
         if f >= end or f < loop_start and self.inp is not None:
             f = loop_start
         w, h = self.preview_size()
-        self.player.start(self.info, f, end, w, h, self.loop, loop_start)
+        self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
+                          loop_start)
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -979,6 +1636,7 @@ class MainWindow(QMainWindow):
         if self.outp is not None and self.outp <= self.inp:
             self.outp = None
         self.timeline.set_inout(self.inp, self.outp)
+        self.tl_editor.set_inout(self.inp, self.outp)
         self._update_title()
 
     def mark_out(self) -> None:
@@ -988,11 +1646,13 @@ class MainWindow(QMainWindow):
         if self.inp is not None and self.inp >= self.outp:
             self.inp = None
         self.timeline.set_inout(self.inp, self.outp)
+        self.tl_editor.set_inout(self.inp, self.outp)
         self._update_title()
 
     def clear_marks(self) -> None:
         self.inp = self.outp = None
         self.timeline.set_inout(None, None)
+        self.tl_editor.set_inout(None, None)
         self._update_title()
 
     def _set_compare(self, mode: str) -> None:
@@ -1086,6 +1746,21 @@ class MainWindow(QMainWindow):
     def _update_history(self) -> None:
         self.btn_undo.setEnabled(self.store.can_undo())
         self.btn_redo.setEnabled(self.store.can_redo())
+        self.btn_edit_undo.setEnabled(self.model.can_undo())
+        self.btn_edit_redo.setEnabled(self.model.can_redo())
+
+    def undo(self) -> None:
+        """Ctrl+Z: desfaz na linha do tempo (modo Edição) ou nos ajustes do look (modo Película)."""
+        if self.mode == "edicao":
+            self.model.undo()
+        else:
+            self.store.undo()
+
+    def redo(self) -> None:
+        if self.mode == "edicao":
+            self.model.redo()
+        else:
+            self.store.redo()
 
     def _menu_state(self) -> None:
         user = self.preset_id.startswith("user:")
@@ -1214,9 +1889,11 @@ class MainWindow(QMainWindow):
             perf = json.loads(self.settings.value("export_perf", "") or "{}")
         except ValueError:
             perf = {}
-        dlg = ExportDialog(self, self.info, self.store.snapshot(), self.preset_name(self.preset_id), inout,
+        values, look_name = self._export_look()
+        seq = self.src_seq.copy() if self.src_seq is not None else None
+        dlg = ExportDialog(self, self.info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
-                           perf, self.engine.renderer.split("/")[0])
+                           perf, self.engine.renderer.split("/")[0], sequence=seq)
         if not dlg.exec():
             return
         job = dlg.job()
@@ -1225,6 +1902,12 @@ class MainWindow(QMainWindow):
         self.settings.setValue("export_perf", json.dumps(dlg.perf_dict()))
         self.queue.add(job)
         self.show_queue()
+
+    def _export_look(self) -> tuple[dict, str]:
+        """O que sai na exportação é o que a prévia mostra: no modo Edição sem película, só a montagem."""
+        if self.mode == "edicao" and not self.edit_film:
+            return presets.builtin_values("original"), _("Sem película (só a edição)")
+        return self.store.snapshot(), self.preset_name(self.preset_id)
 
     def show_queue(self) -> None:
         if self.queue_dialog is None:
@@ -1255,7 +1938,7 @@ class MainWindow(QMainWindow):
     def save_frame(self) -> None:
         if self.info is None:
             return
-        stem = Path(self.info.path).stem
+        stem = Path(self.info.path).stem or "quadro"
         tc = timecode(self.frame_idx, self.info.fps).replace(":", "-")
         d = str(self.settings.value("export_dir", str(Path(self.info.path).parent)))
         path, flt = QFileDialog.getSaveFileName(self, _("Salvar quadro"), str(Path(d) / f"{stem}_{tc}.png"),
@@ -1265,12 +1948,19 @@ class MainWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             w, h = self.info.width, self.info.height
-            img = media.grab_frame(self.info, self.frame_idx, w, h, 16, hq=True)
-            self.engine.set_input(img)
+            if self.src_seq is not None:
+                fl = sequence.grab(self.src_seq, self.frame_idx, w, h, 16, hq=True)
+                img = self.engine.compose(self._live_layers(fl), self.model.seq, w, h, 16)
+            else:
+                img = media.grab_frame(self.info, self.frame_idx, w, h, 16, hq=True)
             self._uploaded = None
-            v = self.store.values
-            info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
-            out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False), 16)
+            v, _name = self._export_look()
+            if self.mode == "edicao" and not self.edit_film:
+                out = img
+            else:
+                self.engine.set_input(img)
+                info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
+                out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False), 16)
             ext = Path(path).suffix.lower()
             pix = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
                    ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}.get(ext, [])
@@ -1288,9 +1978,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(_("Quadro salvo: {caminho}").format(caminho=path), 8000)
 
     # ================================================================ projetos (.plc)
+    def _seq_json(self) -> dict | None:
+        """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1)."""
+        seq = self.model.seq
+        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path):
+            return None
+        return seq.to_json()
+
     def _state(self) -> dict:
-        return {"media": self.info.path if self.info else "", "values": dict(self.store.values),
-                "preset": self.preset_id, "in": self.inp, "out": self.outp}
+        seq = self._seq_json()
+        return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
+                "preset": self.preset_id, "in": self.inp, "out": self.outp,
+                "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
     def is_dirty(self) -> bool:
         if self.info is None:
@@ -1300,6 +1999,8 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         if self.project_path:
             name = Path(self.project_path).stem
+        elif self.src_seq is not None and (self.file_info is None or self._seq_json() is not None):
+            name = _("Edição sem título")
         elif self.info is not None:
             name = getattr(self, "_media_label", Path(self.info.path).name)
         else:
@@ -1340,11 +2041,14 @@ class MainWindow(QMainWindow):
 
     def _make_project(self) -> project.Project:
         self.store.commit()
+        seq = self._seq_json()
+        media_path = self.file_info.path if self.file_info else next(iter(self.model.seq.sources), "")
         return project.Project(
-            media_path=self.info.path if self.info else "", values=self.store.snapshot(), preset_id=self.preset_id,
+            media_path=media_path, values=self.store.snapshot(), preset_id=self.preset_id,
             frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
             preview=self.preview_q, export_quality=str(self.settings.value("export_quality", "")),
-            name=Path(self.project_path).stem if self.project_path else "", thumbnail_jpeg=self._thumbnail())
+            name=Path(self.project_path).stem if self.project_path else "", thumbnail_jpeg=self._thumbnail(),
+            sequence=seq, mode=self.mode)
 
     def save_project(self) -> bool:
         if self.info is None:
@@ -1384,16 +2088,18 @@ class MainWindow(QMainWindow):
             return
         self.stop_play()
         self.project_path = None
-        self.info = None
+        self.file_info = None
         self.cur = None
         self.cur_q = None
         self.inp = self.outp = None
-        self.timeline.set_media(1, 24.0)
-        self.viewer.set_images(None, None)
-        self.hist.set_image(None)
-        self.file_label.setText("")
-        self.st_file.setText(_("Nenhum arquivo aberto"))
-        self._set_media_enabled(False)
+        self._sources = {}
+        self.bin.clear()
+        self._loading = True
+        try:
+            self.model.set_sequence(timeline.Sequence())
+        finally:
+            self._loading = False
+        self._refresh_source(reset=True)
         self.apply_preset(presets.DEFAULT_ID)
         self._saved_state = self._state()
         self._update_title()
@@ -1413,6 +2119,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, _("Abrir projeto"), _("Este arquivo não é um projeto válido.\n\n{erro}").format(erro=exc))
             return
         self.settings.setValue("last_project_dir", str(Path(path).parent))
+        if p.sequence:
+            self._open_sequence_project(p)
+            return
         mediapath = p.media_path
         if mediapath and not os.path.exists(mediapath):
             r = QMessageBox.question(self, _("Abrir projeto"),
@@ -1445,6 +2154,68 @@ class MainWindow(QMainWindow):
             self._set_compare(p.compare)
         self.project_path = p.path
         self._saved_state = self._state() if mediapath == p.media_path else {}
+        welcome.add_recent(self.settings, p.path)
+        self.set_mode(p.mode if p.mode in MODES else "pelicula")
+        self._update_title()
+
+    def _open_sequence_project(self, p: project.Project) -> None:
+        """Projeto com montagem do modo Edição: relocaliza arquivos que sumiram e abre a sequência."""
+        seq = timeline.Sequence.from_json(p.sequence)
+        changed = False
+        for path in list(seq.sources):
+            if os.path.exists(path):
+                continue
+            r = QMessageBox.question(self, _("Abrir projeto"),
+                                     _("Um arquivo da edição não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
+                                     .format(caminho=path))
+            if r != QMessageBox.StandardButton.Yes:
+                continue
+            new, _f = QFileDialog.getOpenFileName(self, _("Localizar o arquivo"), str(Path(p.path).parent),
+                                                  import_filter())
+            if new:
+                seq.relink(path, new)
+                changed = True
+        self.stop_play()
+        self.file_info = None
+        if p.media_path and os.path.exists(p.media_path):
+            try:
+                self.file_info = media.probe(p.media_path)
+                self._media_label = Path(p.media_path).name
+            except Exception:  # noqa: BLE001
+                self.file_info = None
+        self._sources = dict(seq.sources)
+        self.bin.clear()
+        for src in seq.sources.values():
+            self.bin.add_source(src)
+            self._request_thumb(src)
+        self._loading = True
+        try:
+            self.model.set_sequence(seq)
+        finally:
+            self._loading = False
+        if p.preset_id and self.preset_values(p.preset_id) is not None:
+            self.preset_id = p.preset_id
+        self.store.set_all(p.values)
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
+        self.preset_combo.blockSignals(False)
+        self.looks.set_selected(self.preset_id)
+        self._update_modified()
+        self.mode = "pelicula"
+        self.set_mode(p.mode if p.mode in MODES else "edicao")
+        self._refresh_source(reset=True)
+        if self.info is not None:
+            self.inp, self.outp = p.in_point, p.out_point
+            self.timeline.set_inout(self.inp, self.outp)
+            self.tl_editor.set_inout(self.inp, self.outp)
+            if p.preview in [k for k, _l in PREVIEW_Q]:
+                self.prev_combo.setCurrentIndex(self.prev_combo.findData(p.preview))
+            self.request_frame(min(p.frame, self.info.frames - 1))
+        if p.compare in ("proc", "split", "side", "orig"):
+            self.compare.set_current(p.compare)
+            self._set_compare(p.compare)
+        self.project_path = p.path
+        self._saved_state = {} if changed else self._state()
         welcome.add_recent(self.settings, p.path)
         self._update_title()
 
@@ -1607,6 +2378,13 @@ class MainWindow(QMainWindow):
         if self.info is not None:
             self.request_frame(self.frame_idx)
 
+    def show_resolve(self) -> None:
+        """Plugin para o DaVinci Resolve: DCTLs e LUTs do PeliculaConverter."""
+        from .resolve_dialog import ResolveDialog
+        ResolveDialog(self, engine=self.engine).exec()
+        self._uploaded = None
+        self.render_now()
+
     # ================================================================ configurações
     def choose_ffmpeg(self) -> None:
         d = QFileDialog.getExistingDirectory(self, _("Pasta que contém ffmpeg.exe e ffprobe.exe"), media.tool_dir())
@@ -1631,7 +2409,11 @@ class MainWindow(QMainWindow):
             "Shift + arrastar slider — ajuste fino\n\nCtrl+N novo projeto • Ctrl+Shift+O abrir projeto\n"
             "Ctrl+S salvar projeto • Ctrl+Shift+S salvar projeto como\n"
             "Ctrl+O abrir vídeo • Ctrl+E exportar • Ctrl+Alt+S salvar preset\n"
-            "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer"))
+            "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer\n\n"
+            "Ctrl+1 modo Película • Ctrl+2 modo Edição • Ctrl+I importar para a edição\n"
+            "Edição: S divide no cursor • Delete apaga • Shift+Delete apaga e fecha o espaço\n"
+            "Ctrl+Alt+C / Ctrl+Alt+V copiar / colar os ajustes de cor do clipe\n"
+            "B lâmina • V seleção • N ímã • Ctrl + roda do mouse: zoom da linha do tempo"))
 
     def about(self) -> None:
         try:
@@ -1654,6 +2436,12 @@ class MainWindow(QMainWindow):
         if mod & Qt.KeyboardModifier.ControlModifier:
             return super().keyPressEvent(e)
         fps = int(round(self.info.fps)) if self.info else 24
+        if self.mode == "edicao" and k == Qt.Key.Key_S:
+            self.model.split_at(self.frame_idx)
+            return
+        if self.mode == "edicao" and k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.model.delete_selected(ripple=shift)
+            return
         if k == Qt.Key.Key_Space:
             self.toggle_play()
         elif k == Qt.Key.Key_Left:
@@ -1723,8 +2511,13 @@ class MainWindow(QMainWindow):
         if self.preview_fullscreen:
             self.toggle_preview_fullscreen()  # salva a geometria e os painéis da janela normal
         self.store.commit()
+        self.audio_stop_and_clean()
+        self.settings.setValue("edit_film", "true" if self.edit_film else "false")
+        self.settings.setValue("scopes", self.hist.mode)
+        self.settings.setValue("scopes_edit", self.edit_scopes.mode)
         self.settings.setValue("session_values", json.dumps(self.store.values))
         self.settings.setValue("session_preset", self.preset_id)
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("splitter", self.split.saveState())
+        self.settings.setValue("splitter_edit", self.center_split.saveState())
         super().closeEvent(e)

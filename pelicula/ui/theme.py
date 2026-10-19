@@ -16,6 +16,16 @@ ACCENT_DIM = "#7a5320"
 DANGER = "#e5534b"
 OK = "#5cc48a"
 
+# Linha do tempo do modo Edição
+CLIP_VIDEO = "#a8692a"
+CLIP_VIDEO_HI = "#d18a3f"
+CLIP_IMAGE = "#8c6a3c"
+CLIP_AUDIO = "#2c7a70"
+CLIP_AUDIO_HI = "#3fa597"
+TRACK_BG = "#141210"
+TRACK_BG2 = "#181513"
+PLAYHEAD = "#ffcf7a"
+
 
 def ui_font() -> str:
     fams = set(QFontDatabase.families())
@@ -31,6 +41,15 @@ def title_font() -> str:
         if f in fams:
             return f
     return ui_font()
+
+
+def mono_font(size: float = 9.5) -> QFont:
+    """Fonte do tempo (QLabel#Time na folha de estilo)."""
+    fams = set(QFontDatabase.families())
+    f = QFont(next((n for n in ("Cascadia Mono", "Consolas", "DejaVu Sans Mono") if n in fams), "monospace"))
+    f.setStyleHint(QFont.StyleHint.Monospace)
+    f.setPointSizeF(size)
+    return f
 
 
 def font(size: float = 9.5, weight: QFont.Weight = QFont.Weight.Normal, title: bool = False) -> QFont:

@@ -144,3 +144,144 @@ def test_module_entry_point(ffmpeg_ok, tmp_path):
     r = subprocess.run([__import__("sys").executable, "-m", "pelicula", "versao"], capture_output=True, text=True,
                        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), env=env, timeout=60)
     assert r.returncode == 0 and "PeliculaConverter" in r.stdout
+
+
+# ------------------------------------------------------------------ modo Edição e DaVinci Resolve
+def _edit_project(tmp_path, sample_video):
+    from pelicula import media, timeline
+    src = media.probe_source(sample_video)
+    seq = timeline.Sequence.for_source(src)
+    seq.split(8)
+    v = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: c.start)
+    seq.delete([v[0].id], ripple=True)  # tira os 8 primeiros quadros
+    seq.insert_media(src)
+    p = project.Project(media_path=sample_video, values=params.defaults(), preset_id="", sequence=seq.to_json(),
+                        mode="edicao")
+    path = tmp_path / "edicao.plc"
+    project.save(p, str(path))
+    return path, seq
+
+
+def test_project_sequence_trivial_and_missing(tmp_path):
+    from pelicula import timeline
+    media_path = tmp_path / "v.mp4"
+    media_path.write_bytes(b"x")
+    src = timeline.Source(str(media_path), 320, 180, 24.0, "24/1", 48, 2.0, has_audio=False)
+    p = project.Project(media_path=str(media_path), sequence=timeline.Sequence.for_source(src).to_json())
+    assert cli.project_sequence(p) is None  # só o arquivo inteiro: usa o arquivo direto
+    seq = timeline.Sequence.for_source(src)
+    seq.split(10)
+    p.sequence = seq.to_json()
+    assert cli.project_sequence(p) is not None
+    media_path.unlink()
+    with pytest.raises(cli.CliError):
+        cli.project_sequence(p)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_export_and_frame_of_an_edit_project(gl_session, ffmpeg_ok, sample_video, tmp_path, capsys):
+    plc, seq = _edit_project(tmp_path, sample_video)
+    assert seq.duration == 40
+    out = tmp_path / "montagem.mp4"
+    assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "mp4", "--velocidade", "ultrafast",
+                     "-q"]) == 0
+    from pelicula import media
+    info = media.probe(str(out))
+    assert info.frames == 40 and info.has_audio
+    png = tmp_path / "q.png"
+    assert cli.main(["quadro", str(plc), "-o", str(png), "--tempo", "#30"]) == 0
+    assert png.stat().st_size > 1000
+
+
+class _FakeResolve:
+    def __init__(self, tmp):
+        self.tmp = tmp
+        self.installed = None
+
+    def lut_dirs(self):
+        return [self.tmp / "LUT"]
+
+    def build_package(self, dest):
+        from pathlib import Path
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        f = Path(dest) / "PeliculaConverter.dctl"
+        f.write_text("x")
+        return [f]
+
+    def install(self, target=None):
+        self.installed = target or str(self.tmp / "LUT")
+        return self.tmp / "LUT" / "PeliculaConverter"
+
+
+class _FakeResolveOfx(_FakeResolve):
+    """Com o plugin OpenFX (nada é instalado de verdade: pastas temporárias)."""
+
+    def __init__(self, tmp):
+        super().__init__(tmp)
+        self.ofx_installed = False
+
+    def ofx_bundle_version(self):
+        return "9.8.7"
+
+    def ofx_install_dir(self):
+        return self.tmp / "OFX" / "Plugins"
+
+    def ofx_installed_version(self, folder=None):
+        return "9.8.7" if self.ofx_installed else None
+
+    def ofx_install(self, target_dir=None):
+        self.ofx_installed = True
+        return self.ofx_install_dir() / "PeliculaConverter.ofx.bundle"
+
+    def ofx_save_bundle(self, dest):
+        from pathlib import Path
+        b = Path(dest) / "PeliculaConverter.ofx.bundle"
+        b.mkdir(parents=True)
+        return b
+
+    def ofx_generate(self, dest=None):
+        from pathlib import Path
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        return [Path(dest) / "pc_kernels.h", Path(dest) / "pc_params.h"]
+
+
+def test_resolve_command_ofx(tmp_path, capsys, monkeypatch):
+    import sys
+    fake = _FakeResolveOfx(tmp_path)
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", fake)
+    import pelicula
+    monkeypatch.setattr(pelicula, "resolve", fake, raising=False)
+    assert cli.main(["resolve", "--listar"]) == 0
+    out = capsys.readouterr().out
+    assert "OpenFX" in out and "9.8.7" in out
+    assert cli.main(["resolve", "--ofx-pasta", str(tmp_path / "copia")]) == 0
+    assert (tmp_path / "copia" / "PeliculaConverter.ofx.bundle").is_dir()
+    assert cli.main(["resolve", "--ofx-instalar"]) == 0 and fake.ofx_installed
+    assert fake.installed is None  # só o OpenFX: os DCTLs não foram instalados
+    assert cli.main(["resolve", "--ofx-fonte", str(tmp_path / "fonte")]) == 0
+    assert "2" in capsys.readouterr().out
+
+
+def test_resolve_command(tmp_path, capsys, monkeypatch):
+    import sys
+    fake = _FakeResolve(tmp_path)
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", fake)
+    import pelicula
+    monkeypatch.setattr(pelicula, "resolve", fake, raising=False)
+    assert cli.main(["resolve"]) == 0
+    assert "LUT" in capsys.readouterr().out
+    assert cli.main(["davinci", "--pasta", str(tmp_path / "pacote")]) == 0
+    assert (tmp_path / "pacote" / "PeliculaConverter.dctl").exists()
+    assert cli.main(["resolve", "--instalar", "--destino", str(tmp_path / "X")]) == 0
+    assert fake.installed == str(tmp_path / "X")
+    assert "resolve" in cli.COMMANDS and cli.COMMANDS["davinci"] == "resolve"
+
+
+def test_resolve_command_without_module(capsys, monkeypatch):
+    import sys
+    import pelicula
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", None)
+    monkeypatch.delattr(pelicula, "resolve", raising=False)
+    assert cli.main(["resolve", "--listar"]) == 1
+    assert "DaVinci" in capsys.readouterr().err

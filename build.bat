@@ -21,6 +21,15 @@ echo  Instalando o PyInstaller no ambiente .venv...
 if errorlevel 1 goto fail
 
 echo.
+echo  Compilando o plugin OpenFX do DaVinci Resolve (vai pronto dentro do app)...
+call plugins\ofx\build_windows.bat
+if errorlevel 2 (
+    echo  Sem o compilador C++ ^(Visual Studio Build Tools^): o pacote sai sem o plugin OpenFX.
+) else (
+    if errorlevel 1 goto fail
+)
+
+echo.
 echo  Gerando os executáveis...
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean PeliculaConverter.spec
 if errorlevel 1 goto fail

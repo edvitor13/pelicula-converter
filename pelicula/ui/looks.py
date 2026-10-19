@@ -6,10 +6,11 @@ import unicodedata
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QLineEdit, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ..i18n import _
 from . import theme
+from .flow import FlowLayout
 
 THUMB_W, THUMB_H = 122, 69
 
@@ -87,7 +88,6 @@ class LooksPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("Panel")
-        self.setMinimumWidth(THUMB_W * 2 + 42)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 6, 6)
         lay.setSpacing(8)
@@ -107,6 +107,11 @@ class LooksPanel(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lay.addWidget(self.scroll, 1)
+        # No mínimo duas miniaturas lado a lado (com a barra de rolagem visível); mais largo, as
+        # miniaturas se reorganizam em três ou mais colunas.
+        m = lay.contentsMargins()
+        bar = self.scroll.verticalScrollBar().sizeHint().width()
+        self.setMinimumWidth(2 * (THUMB_W + 6) + 4 + 6 + m.left() + m.right() + bar + 4)
         self.inner = QWidget()
         self.vl = QVBoxLayout(self.inner)
         self.vl.setContentsMargins(0, 0, 6, 0)
@@ -141,10 +146,12 @@ class LooksPanel(QWidget):
             lab.setStyleSheet(f"color: {theme.MUTED}; margin-top: 10px;")
             self.vl.addWidget(lab)
             box = QWidget()
-            grid = QGridLayout(box)
+            grid = FlowLayout(box, 4, 2, center_rows=False)
             grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(4)
-            grid.setVerticalSpacing(2)
+            sp = box.sizePolicy()
+            sp.setHeightForWidth(True)
+            sp.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+            box.setSizePolicy(sp)
             lst = []
             for i, it in enumerate(by_group[g]):
                 user = str(it["id"]).startswith("user:")
@@ -155,7 +162,7 @@ class LooksPanel(QWidget):
                 th.clicked.connect(self.presetChosen)
                 th.set_image(old.get(it["id"]))
                 th.selected = it["id"] == self.selected
-                grid.addWidget(th, i // 2, i % 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+                grid.addWidget(th)
                 self.thumbs[it["id"]] = th
                 lst.append(th)
             self.vl.addWidget(box)
@@ -179,12 +186,9 @@ class LooksPanel(QWidget):
     def _filter(self, text: str) -> None:
         q = _norm(text.strip())
         for lab, box, lst in self.groups:
-            grid: QGridLayout = box.layout()
             vis = [t for t in lst if not q or q in t.search_key]
             for t in lst:
-                grid.removeWidget(t)
                 t.setVisible(t in vis)
-            for i, t in enumerate(vis):
-                grid.addWidget(t, i // 2, i % 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            box.layout().invalidate()
             lab.setVisible(bool(vis))
             box.setVisible(bool(vis))

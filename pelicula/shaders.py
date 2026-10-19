@@ -104,6 +104,32 @@ float diDec(float y) { return (y <= 0.02740668) ? y / 10.44426855 : exp2(y / 0.0
 float diEnc(float x) { return (x <= 0.00262409) ? x * 10.44426855 : (log2(max(x + 0.0075, 1e-10)) + 7.0) * 0.07329248; }
 float l3g10Dec(float y) { return (y < 0.0) ? y / 15.1927 - 0.01 : (pow(10.0, y / 0.224282) - 1.0) / 155.975327 - 0.01; }
 float l3g10Enc(float x) { float v = x + 0.01; return (v < 0.0) ? v * 15.1927 : 0.224282 * log10f(v * 155.975327 + 1.0); }
+// Blackmagic Film Gen 5: y = D·x + E abaixo de 0,005; acima, A·ln(x + B) + C (corte em 0,13388378 no código).
+float bmd5Dec(float y) {
+    return (y < 0.13388378308667) ? (y - 0.09246575342465753) / 8.283605932402494
+                                  : exp((y - 0.5300133392291939) / 0.08692876065491224) - 0.005494072432257808;
+}
+float bmd5Enc(float x) {
+    return (x < 0.005) ? 8.283605932402494 * x + 0.09246575342465753
+                       : 0.08692876065491224 * log(x + 0.005494072432257808) + 0.5300133392291939;
+}
+// ARRI LogC4: a = (2^18 − 16)/117,45, b = 928/1023, c = 95/1023, s e t derivados (especificação da ARRI).
+const float C4A = 2231.8263090676883;
+const float C4B = 0.9071358748778103;
+const float C4C = 0.09286412512218964;
+const float C4S = 0.1135972086105891;
+const float C4T = -0.01805699611991131;
+float logc4Dec(float e) { return (e >= 0.0) ? (exp2(14.0 * (e - C4C) / C4B + 6.0) - 64.0) / C4A : e * C4S + C4T; }
+float logc4Enc(float x) { return (x >= C4T) ? (log2(C4A * x + 64.0) - 6.0) / 14.0 * C4B + C4C : (x - C4T) / C4S; }
+// Apple Log: γ·log2(R + β) + δ acima de Rt = 0,01; σ·(R − R0)² entre R0 e Rt; 0 abaixo de R0.
+float appleDec(float p) {
+    if (p >= 0.20855531595464202) return exp2((p - 0.69336945) / 0.08550479) - 0.00964052;
+    return (p >= 0.0) ? sqrt(p / 47.28711236) - 0.05641088 : -0.05641088;
+}
+float appleEnc(float r) {
+    if (r >= 0.01) return 0.08550479 * log2(r + 0.00964052) + 0.69336945;
+    return (r >= -0.05641088) ? 47.28711236 * (r + 0.05641088) * (r + 0.05641088) : 0.0;
+}
 
 vec3 toLinear(vec3 c, int id) {
     if (id == 0) return stopsToLin(dispToStops(c));
@@ -114,6 +140,9 @@ vec3 toLinear(vec3 c, int id) {
     if (id == 5) return vec3(vlogDec(c.r), vlogDec(c.g), vlogDec(c.b));
     if (id == 7) return vec3(diDec(c.r), diDec(c.g), diDec(c.b));
     if (id == 8) return vec3(l3g10Dec(c.r), l3g10Dec(c.g), l3g10Dec(c.b));
+    if (id == 9) return vec3(bmd5Dec(c.r), bmd5Dec(c.g), bmd5Dec(c.b));
+    if (id == 10) return vec3(logc4Dec(c.r), logc4Dec(c.g), logc4Dec(c.b));
+    if (id == 11) return vec3(appleDec(c.r), appleDec(c.g), appleDec(c.b));
     return vec3(cineonDec(c.r), cineonDec(c.g), cineonDec(c.b));
 }
 
@@ -134,6 +163,7 @@ uniform vec3 u_shadow_tint;
 uniform vec3 u_high_tint;
 uniform float u_balance;
 uniform vec3 u_hue;
+uniform vec2 u_skin;  // pele: giro de matiz (rad), luz (-1..1)
 uniform int u_bw;
 uniform vec3 u_bw_w;
 uniform float u_tone_amt;
@@ -167,7 +197,7 @@ float hueWeight(float h, float h0) {
     return smoothstep(0.8, 0.0, d);
 }
 vec3 hueAdjust(vec3 c) {
-    if (u_hue == vec3(0.0)) return c;
+    if (u_hue == vec3(0.0) && u_skin == vec2(0.0)) return c;
     float Y = dot(c, W709);
     vec2 cc = vec2((c.b - Y) / 1.8556, (c.r - Y) / 1.5748);
     if (length(cc) < 1e-5) return c;
@@ -175,10 +205,11 @@ vec3 hueAdjust(vec3 c) {
     float wg = hueWeight(h, hueAng(vec3(0.25, 0.6, 0.2)));
     float wb = hueWeight(h, hueAng(vec3(0.2, 0.35, 0.8)));
     float ws = hueWeight(h, hueAng(vec3(0.8, 0.55, 0.45)));
-    float rot = u_hue.x * wg + u_hue.y * wb;
+    float rot = u_hue.x * wg + u_hue.y * wb + u_skin.x * ws;
     float cs = cos(rot), sn = sin(rot);
     cc = vec2(cs * cc.x - sn * cc.y, sn * cc.x + cs * cc.y);
     cc *= max(0.0, 1.0 + u_hue.z * ws);
+    Y *= 1.0 + 0.25 * u_skin.y * ws;  // luz da pele: até ±25% na luminância dos tons de pele
     float r = Y + 1.5748 * cc.y;
     float b = Y + 1.8556 * cc.x;
     float g = (Y - 0.2126 * r - 0.0722 * b) / 0.7152;
@@ -239,6 +270,9 @@ vec3 lutEncode(vec3 lin, int id) {
     if (id == 5) return vec3(vlogEnc(n.r), vlogEnc(n.g), vlogEnc(n.b));
     if (id == 7) return vec3(diEnc(n.r), diEnc(n.g), diEnc(n.b));
     if (id == 8) return vec3(l3g10Enc(n.r), l3g10Enc(n.g), l3g10Enc(n.b));
+    if (id == 9) return vec3(bmd5Enc(n.r), bmd5Enc(n.g), bmd5Enc(n.b));
+    if (id == 10) return vec3(logc4Enc(n.r), logc4Enc(n.g), logc4Enc(n.b));
+    if (id == 11) return vec3(appleEnc(n.r), appleEnc(n.g), appleEnc(n.b));
     return vec3(cineonEnc(n.r), cineonEnc(n.g), cineonEnc(n.b));
 }
 vec3 sampleLut(vec3 c) {
@@ -247,7 +281,128 @@ vec3 sampleLut(vec3 c) {
     return texture(t_lut, x).rgb;
 }
 
+// ---------------------------------------------------------------- laboratório (negativo → cópia)
+// Modelo de densidade (veja look.py): matriz de sensibilidade → curva do negativo → luz da
+// copiadora − densidade → curva da cópia → diafonia dos corantes (+ chave/prata) → 10^(−D/2,6).
+// Caminho A = negativo + cópia escolhidos; caminho B = processo Technicolor (misturado por u_lab_mix).
+uniform int u_lab_on;
+uniform int u_lab_b_on;
+uniform float u_lab_mix;
+uniform mat3 u_la_sens;
+uniform vec3 u_la_ng;
+uniform vec3 u_la_nt;
+uniform vec3 u_la_ns;
+uniform float u_la_nw;
+uniform mat3 u_la_ii;
+uniform vec3 u_la_pg;
+uniform vec3 u_la_pt;
+uniform vec3 u_la_ps;
+uniform float u_la_pw;
+uniform mat3 u_la_dye;
+uniform vec3 u_la_off;
+uniform vec3 u_la_key;
+uniform vec3 u_la_mid;
+uniform int u_la_scan;
+uniform mat3 u_lb_sens;
+uniform vec3 u_lb_ng;
+uniform vec3 u_lb_nt;
+uniform vec3 u_lb_ns;
+uniform float u_lb_nw;
+uniform mat3 u_lb_ii;
+uniform vec3 u_lb_pg;
+uniform vec3 u_lb_pt;
+uniform vec3 u_lb_ps;
+uniform float u_lb_pw;
+uniform mat3 u_lb_dye;
+uniform vec3 u_lb_off;
+uniform vec3 u_lb_key;
+uniform vec3 u_lb_mid;
+uniform int u_lb_scan;
+// Depois dos caminhos (look.LabPost). u_lab_ops: 2 rolagem das sombras/altas luzes, 4 saturação
+// final, 8 densidade por cor, 16 pele. A separação de cores (Hue Split) já está em u_la_ii/u_lb_ii.
+uniform int u_lab_ops;
+uniform vec2 u_lab_tone;   // expoentes da curva de rolagem (altas luzes, sombras); 4 = sem mudança
+uniform float u_lab_sat;
+uniform vec3 u_lab_dens;   // densidade − 1 dos vermelhos, verdes e azuis
+uniform vec2 u_lab_skin;   // pele: giro de matiz (rad), saturação (−1..1)
+
+// softplus(z) = ln(1 + e^z), estável para |z| grande.
+float labSoftplus(float z) { return max(z, 0.0) + log(1.0 + exp(-abs(z))); }
+
+// Curva característica: densidade acima da base em função do log10 da exposição.
+// D(x) = gama · w · [softplus((x − pé)/w) − softplus((x − ombro)/w)] (sempre crescente; satura em gama·(ombro − pé)).
+vec3 labCurve(vec3 x, vec3 g, vec3 xt, vec3 xs, float w) {
+    vec3 a = vec3(labSoftplus((x.r - xt.r) / w), labSoftplus((x.g - xt.g) / w), labSoftplus((x.b - xt.b) / w));
+    vec3 b = vec3(labSoftplus((x.r - xs.r) / w), labSoftplus((x.g - xs.g) / w), labSoftplus((x.b - xs.b) / w));
+    return g * w * (a - b);
+}
+
+// Um caminho completo. lin: luz linear Rec.709 (0,18 = cinza médio). Devolve o valor de exibição.
+vec3 labPath(vec3 lin, mat3 sens, vec3 ng, vec3 nt, vec3 ns, float nw, mat3 ii, vec3 pg, vec3 pt, vec3 ps,
+             float pw, mat3 dye, vec3 off, vec3 key, vec3 nmid, int scan) {
+    vec3 e = max(sens * lin, vec3(1e-7));
+    vec3 le = vec3(log10f(e.r / 0.18), log10f(e.g / 0.18), log10f(e.b / 0.18));  // log10 relativo ao cinza
+    vec3 dn = ii * labCurve(le, ng, nt, ns, nw);  // densidade do negativo (com o efeito entre camadas)
+    if (scan == 1) {
+        // Sem cópia: inverte o negativo com o gama nominal (guardado em pg; 0,30103 = log10(2), um stop)
+        // e mostra com a curva neutra.
+        vec3 st = (dn - nmid) / (pg * 0.30103) - off / 0.30103;
+        return stopsToDisp(clamp(st, -12.0, 12.0));
+    }
+    vec3 dl = labCurve(off - dn, pg, pt, ps, pw);  // densidade de cada camada de corante da cópia
+    vec3 d = dye * dl + vec3(dot(key, dl));         // diafonia + chave preta / prata retida
+    return exp2(-d * (3.32192809 / 2.6));           // 10^(−d/2,6): projeção com gama 2,6
+}
+
+// Pele: giro de matiz e saturação só nos tons de pele (mesmos pesos do hueAdjust do look).
+vec3 labSkin(vec3 c, float rot, float sat) {
+    float Y = dot(c, W709);
+    vec2 cc = vec2((c.b - Y) / 1.8556, (c.r - Y) / 1.5748);
+    if (length(cc) < 1e-5) return c;
+    float ws = hueWeight(atan(cc.y, cc.x), hueAng(vec3(0.8, 0.55, 0.45)));
+    float a = rot * ws;
+    float cs = cos(a), sn = sin(a);
+    cc = vec2(cs * cc.x - sn * cc.y, sn * cc.x + cs * cc.y) * max(0.0, 1.0 + sat * ws);
+    float r = Y + 1.5748 * cc.y;
+    float b = Y + 1.8556 * cc.x;
+    float g = (Y - 0.2126 * r - 0.0722 * b) / 0.7152;
+    return vec3(r, g, b);
+}
+
+// Depois da cópia, no valor de exibição: nada disso muda o cinza.
+vec3 labPost(vec3 y) {
+    if ((u_lab_ops & 2) != 0) {
+        // rolagem: a curva neutra com outros expoentes nas pontas (cinza médio fica em 0,45)
+        vec3 t = dispToStops(y);
+        y = vec3(curve(t.r, D_SLOPE, D_MID, 0.0, 1.0, u_lab_tone.x, u_lab_tone.y),
+                 curve(t.g, D_SLOPE, D_MID, 0.0, 1.0, u_lab_tone.x, u_lab_tone.y),
+                 curve(t.b, D_SLOPE, D_MID, 0.0, 1.0, u_lab_tone.x, u_lab_tone.y));
+    }
+    if ((u_lab_ops & 4) != 0) {
+        float L = dot(y, W709);
+        y = vec3(L) + (y - vec3(L)) * u_lab_sat;
+    }
+    if ((u_lab_ops & 8) != 0) {
+        // densidade por cor: quanto mais um canal domina, mais a cor escurece (ou clareia, abaixo de 1)
+        vec3 w = vec3(max(0.0, y.r - max(y.g, y.b)), max(0.0, y.g - max(y.r, y.b)), max(0.0, y.b - max(y.r, y.g)));
+        y *= clamp(1.0 - 0.5 * dot(u_lab_dens, w), 0.2, 2.0);
+    }
+    if ((u_lab_ops & 16) != 0) y = labSkin(y, u_lab_skin.x, u_lab_skin.y);
+    return y;
+}
+
+vec3 labPipe(vec3 lin) {
+    vec3 a = labPath(lin, u_la_sens, u_la_ng, u_la_nt, u_la_ns, u_la_nw, u_la_ii, u_la_pg, u_la_pt, u_la_ps,
+                     u_la_pw, u_la_dye, u_la_off, u_la_key, u_la_mid, u_la_scan);
+    if (u_lab_b_on == 0) return labPost(a);
+    vec3 b = labPath(lin, u_lb_sens, u_lb_ng, u_lb_nt, u_lb_ns, u_lb_nw, u_lb_ii, u_lb_pg, u_lb_pt, u_lb_ps,
+                     u_lb_pw, u_lb_dye, u_lb_off, u_lb_key, u_lb_mid, u_lb_scan);
+    return labPost(mix(a, b, u_lab_mix));
+}
+
 vec3 colorPipe(vec3 lin) {
+    // Laboratório primeiro: o resultado volta para luz linear e o resto (look, cópia, LUT) vem por cima.
+    if (u_lab_on == 1) lin = stopsToLin(dispToStops(labPipe(lin)));
     vec3 neutral = stopsToDisp(linToStops(lin));
     vec3 y = neutral;
     if (u_lut_on == 1 && u_lut_pos == 1) {

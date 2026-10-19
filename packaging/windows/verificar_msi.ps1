@@ -133,6 +133,8 @@ $exe = Join-Path $Padrao "PeliculaConverter.exe"
 Confere (Test-Path $exe) "PeliculaConverter.exe em $Padrao"
 Confere (Test-Path (Join-Path $Padrao "pelicula-cli.exe")) "pelicula-cli.exe instalado"
 Confere (Test-Path (Join-Path $Padrao "_internal")) "pasta _internal instalada"
+$ofx = Join-Path $Padrao "_internal\ofx\PeliculaConverter.ofx.bundle\Contents\Win64\PeliculaConverter.ofx"
+Confere (Test-Path $ofx) "plugin OpenFX do DaVinci Resolve no pacote"
 Confere (Test-Path (Join-Path $Padrao "pelicula-projeto.ico")) "ícone dos projetos .plc"
 $m = Marcador $Padrao
 Confere ($m -and $m.kind -eq "msi" -and $m.version -eq $Version) "pelicula-install.json = {kind: msi, version: $Version}"
@@ -169,6 +171,12 @@ $ErrorActionPreference = $eap
 Write-Host (($saidaCli -split "`n" | Select-Object -First 12) -join "`n")
 if (Test-Path (Join-Path $Repo "pelicula\cli.py")) {
     Confere ($codigoCli -eq 0) "pelicula-cli --help (código $codigoCli)"
+    # o app instalado acha o plugin OpenFX que veio com ele e copia para uma pasta qualquer
+    $ofxCopia = Join-Path $Tmp "ofx-copia"
+    $ErrorActionPreference = "Continue"
+    & $cli resolve --ofx-pasta $ofxCopia 2>&1 | Out-Host
+    $ErrorActionPreference = $eap
+    Confere (Test-Path (Join-Path $ofxCopia "PeliculaConverter.ofx.bundle\Contents\Win64\PeliculaConverter.ofx")) "pelicula-cli resolve --ofx-pasta copia o plugin OpenFX"
 } else {
     # Sem o pelicula/cli.py, o Python do pacote sobe e só falha ao importar o módulo.
     Confere ($saidaCli -match "No module named 'pelicula") "pelicula-cli sobe (pelicula/cli.py ainda não existe neste commit)"

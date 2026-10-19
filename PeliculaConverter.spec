@@ -75,6 +75,19 @@ for _sub in ("locales", "novidades"):
     if os.path.isdir(_src):
         DATAS.append((_src, os.path.join("pelicula", _sub)))
 
+# Plugin OpenFX do DaVinci Resolve (funciona no gratuito), já compilado por plugins/ofx/build.py:
+# vai em _internal/ofx/PeliculaConverter.ofx.bundle e a janela do Resolve só copia para a pasta do
+# OpenFX. Sem ele o app funciona e a janela explica como compilar; o CI define
+# PELICULA_EXIGIR_OFX=1 para que um pacote nunca saia sem o plugin.
+OFX_BUNDLE = os.path.join(ROOT, "plugins", "ofx", "dist", "PeliculaConverter.ofx.bundle")
+_OFX_ARCH = {"win32": "Win64", "darwin": "MacOS"}.get(sys.platform, "Linux-x86-64")
+if os.path.isfile(os.path.join(OFX_BUNDLE, "Contents", _OFX_ARCH, "PeliculaConverter.ofx")):
+    DATAS.append((OFX_BUNDLE, os.path.join("ofx", "PeliculaConverter.ofx.bundle")))
+elif os.environ.get("PELICULA_EXIGIR_OFX") == "1":
+    raise SystemExit("Plugin OpenFX não compilado: rode python plugins/ofx/build.py antes do PyInstaller.")
+else:
+    print("AVISO: plugin OpenFX não compilado (plugins/ofx/dist); o pacote sai sem ele.")
+
 COMMON = dict(
     pathex=[ROOT],
     binaries=[],

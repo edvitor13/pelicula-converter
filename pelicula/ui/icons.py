@@ -284,6 +284,165 @@ def draw(name: str, p: QPainter, c: QColor) -> None:
             back = -1 if name == "fullscreen" else 1
             p.drawPolyline([QPointF(tip.x() + back * sx * 4.5, tip.y()), tip,
                             QPointF(tip.x(), tip.y() + back * sy * 4.5)])
+    else:
+        _draw_edit(name, p, c)
+
+
+def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
+    """Ícones do modo Edição (mesma grade de 24 unidades)."""
+    if name == "scissors":
+        _pen(p, c)
+        p.drawEllipse(QPointF(7, 17), 2.8, 2.8)
+        p.drawEllipse(QPointF(17, 17), 2.8, 2.8)
+        p.drawLine(QPointF(8.8, 14.8), QPointF(17, 4))
+        p.drawLine(QPointF(15.2, 14.8), QPointF(7, 4))
+    elif name == "magnet":
+        _pen(p, c, 2.0)
+        path = QPainterPath()
+        path.moveTo(6, 4.5)
+        path.lineTo(6, 12)
+        path.arcTo(QRectF(6, 6, 12, 12), 180, 180)
+        path.lineTo(18, 4.5)
+        p.drawPath(path)
+        p.drawLine(QPointF(4.5, 8), QPointF(7.5, 8))
+        p.drawLine(QPointF(16.5, 8), QPointF(19.5, 8))
+    elif name in ("link", "unlink"):
+        _pen(p, c)
+        p.save()
+        p.translate(12, 12)
+        p.rotate(-45)
+        gap = 2.2 if name == "unlink" else 0.0
+        p.drawRoundedRect(QRectF(-9 - gap, -3.2, 9, 6.4), 3.2, 3.2)
+        p.drawRoundedRect(QRectF(0 + gap, -3.2, 9, 6.4), 3.2, 3.2)
+        if name == "link":
+            p.drawLine(QPointF(-3, 0), QPointF(3, 0))
+        p.restore()
+        if name == "unlink":
+            p.drawLine(QPointF(4, 4), QPointF(7, 7))
+            p.drawLine(QPointF(17, 17), QPointF(20, 20))
+    elif name == "track_add":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 6, 11, 4.5), 1.5, 1.5)
+        p.drawRoundedRect(QRectF(3.5, 13.5, 11, 4.5), 1.5, 1.5)
+        p.drawLine(QPointF(18.5, 9), QPointF(18.5, 17))
+        p.drawLine(QPointF(14.5, 13), QPointF(22.5, 13))
+    elif name == "ripple_delete":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 8, 6, 8), 1.5, 1.5)
+        p.drawRoundedRect(QRectF(14.5, 8, 6, 8), 1.5, 1.5)
+        p.drawPolyline([QPointF(13.5, 12), QPointF(10.5, 12)])
+        p.drawPolyline([QPointF(12, 10.2), QPointF(10.3, 12), QPointF(12, 13.8)])
+        p.drawLine(QPointF(5, 4), QPointF(8, 4))
+        p.drawLine(QPointF(5, 20), QPointF(8, 20))
+    elif name == "pointer":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        path = QPainterPath()
+        path.moveTo(6, 3.5)
+        path.lineTo(18, 14)
+        path.lineTo(12.5, 14.5)
+        path.lineTo(15.5, 20.5)
+        path.lineTo(13, 21.5)
+        path.lineTo(10, 15.5)
+        path.lineTo(6, 19)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "wand":
+        _pen(p, c)
+        p.drawLine(QPointF(4.5, 19.5), QPointF(15, 9))
+        p.drawLine(QPointF(14, 8), QPointF(16, 10))
+        for x, y, r in ((18, 5, 1.6), (20, 11, 1.1), (12.5, 4, 1.1)):
+            p.drawLine(QPointF(x - r * 1.6, y), QPointF(x + r * 1.6, y))
+            p.drawLine(QPointF(x, y - r * 1.6), QPointF(x, y + r * 1.6))
+    elif name == "copy":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(8.5, 8.5, 11, 11), 2, 2)
+        p.drawPolyline([QPointF(15.5, 8.5), QPointF(15.5, 4.5), QPointF(4.5, 4.5), QPointF(4.5, 15.5),
+                        QPointF(8.5, 15.5)])
+    elif name == "paste":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(5, 5.5, 14, 15), 2, 2)
+        p.drawRoundedRect(QRectF(9, 3.5, 6, 4), 1.2, 1.2)
+        p.drawLine(QPointF(8.5, 12), QPointF(15.5, 12))
+        p.drawLine(QPointF(8.5, 16), QPointF(13.5, 16))
+    elif name == "music":
+        _pen(p, c)
+        p.drawLine(QPointF(9.5, 17), QPointF(9.5, 5.5))
+        p.drawLine(QPointF(18.5, 15), QPointF(18.5, 3.5))
+        p.drawLine(QPointF(9.5, 5.5), QPointF(18.5, 3.5))
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(7.2, 17.3), 2.5, 2)
+        p.drawEllipse(QPointF(16.2, 15.3), 2.5, 2)
+    elif name in ("eye", "eye_off"):
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(3, 12)
+        path.quadTo(12, 3.5, 21, 12)
+        path.quadTo(12, 20.5, 3, 12)
+        p.drawPath(path)
+        p.drawEllipse(QPointF(12, 12), 2.8, 2.8)
+        if name == "eye_off":
+            p.drawLine(QPointF(4.5, 19.5), QPointF(19.5, 4.5))
+    elif name in ("lock", "unlock"):
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(5.5, 11, 13, 9.5), 2, 2)
+        path = QPainterPath()
+        path.moveTo(8.5, 11)
+        path.lineTo(8.5, 8)
+        path.arcTo(QRectF(8.5, 4.5, 7, 7), 180, -180)
+        if name == "lock":
+            path.lineTo(15.5, 11)
+        else:
+            path.lineTo(15.5, 9)
+        p.drawPath(path)
+    elif name == "headphones":
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(4.5, 15)
+        path.lineTo(4.5, 12)
+        path.arcTo(QRectF(4.5, 4.5, 15, 15), 180, -180)
+        path.lineTo(19.5, 15)
+        p.drawPath(path)
+        p.drawRoundedRect(QRectF(3.5, 13.5, 4, 6.5), 1.5, 1.5)
+        p.drawRoundedRect(QRectF(16.5, 13.5, 4, 6.5), 1.5, 1.5)
+    elif name == "edit_mode":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5, 17, 14), 2, 2)
+        p.drawLine(QPointF(3.5, 12), QPointF(20.5, 12))
+        p.drawLine(QPointF(10, 5), QPointF(10, 12))
+        p.drawLine(QPointF(15, 12), QPointF(15, 19))
+    elif name == "film_mode":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(5.5, 3.5, 13, 17), 1.5, 1.5)
+        p.drawRect(QRectF(8.5, 7, 7, 10))
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.PenStyle.NoPen)
+        for y in (5.5, 9.5, 13.5, 17.5):
+            p.drawRect(QRectF(6.3, y - 0.6, 1.2, 1.4))
+            p.drawRect(QRectF(16.5, y - 0.6, 1.2, 1.4))
+    elif name == "speed":
+        _pen(p, c)
+        path = QPainterPath()
+        path.arcMoveTo(QRectF(3.5, 5.5, 17, 17), 0)
+        path.arcTo(QRectF(3.5, 5.5, 17, 17), 0, 180)
+        p.drawPath(path)
+        p.drawLine(QPointF(12, 14), QPointF(16.5, 9))
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(12, 14), 1.4, 1.4)
+    elif name == "davinci":
+        # Peça de quebra-cabeça (plugin), sem logotipo de marca.
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(4.5, 8)
+        path.lineTo(9, 8)
+        path.arcTo(QRectF(9, 4.5, 5, 5), 180, -180)
+        path.lineTo(18.5, 8)
+        path.lineTo(18.5, 12)
+        path.arcTo(QRectF(16, 12, 5, 5), 90, -180)
+        path.lineTo(18.5, 19.5)
+        path.lineTo(4.5, 19.5)
+        path.closeSubpath()
+        p.drawPath(path)
 
 
 @lru_cache(maxsize=256)

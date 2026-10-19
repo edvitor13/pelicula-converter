@@ -18,6 +18,9 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 10. [Dependências externas (deps.py)](#10-dependências-externas-depspy)
 11. [Persistência e arquivos](#11-persistência-e-arquivos)
 12. [Testes](#12-testes)
+13. [Modo Edição](#13-modo-edição)
+14. [Laboratório: emulação por densidade](#14-laboratório-emulação-por-densidade)
+15. [Plugin do DaVinci Resolve (`resolve.py`)](#15-plugin-do-davinci-resolve-resolvepy)
 
 ---
 
@@ -82,11 +85,11 @@ Três ideias guiam o projeto:
 | `pelicula/__main__.py` | `python -m pelicula`. |
 | `pelicula/__init__.py` | `__version__` e `APP_NAME`. |
 | `pelicula/app.py` | `main()`: `QApplication`, estilo Fusion, paleta e folha de estilo, ícone; bloqueio do macOS (desativado); oferta de `pip install` se faltar `moderngl`/`numpy`/`glcontext`; cria a `MainWindow`; arquivos da linha de comando; gancho `PELICULA_SCREENSHOT`. |
-| `pelicula/params.py` | `Param`, `Section`, `SECTIONS`, `PARAMS`, `defaults()`, `sanitize()`. |
-| `pelicula/look.py` | Tabelas de bitolas (`GAUGES`), cópias (`PRINTS`), scan (`SCAN_FORMATS`), filtros P&B, viragens, primárias e matrizes de gamut; `build_plan()` → `Plan`. |
+| `pelicula/params.py` | `Param`, `Section`, `Schema` (esquema genérico: padrões e limpeza), `SECTIONS`/`FILM`, `PARAMS`, `defaults()`, `sanitize()`. |
+| `pelicula/look.py` | Tabelas de bitolas (`GAUGES`), cópias (`PRINTS`), scan (`SCAN_FORMATS`), filtros P&B, viragens, primárias e matrizes de gamut; Laboratório (negativos, cópias, processos, calibração `lab_paths`); `build_plan()` → `Plan`. |
 | `pelicula/shaders.py` | GLSL: `VERT`, `COMMON` (curvas, transferências log, look, cópia, LUT), `BASE`, `EXTRACT`, `BLUR`, `NOISE`, `FINAL`, `BAKE`. |
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
-| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (33 presets), presets do usuário (JSON), importar/exportar. |
+| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()`, `measure_speed()`. |
@@ -94,6 +97,18 @@ Três ideias guiam o projeto:
 | `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema. |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
+| `pelicula/timeline.py` | Modo Edição: `Source`, `Clip`, `Track`, `Layer`, `Sequence` (montagem, tempo, transições, JSON) e `History` (desfazer). Sem Qt. |
+| `pelicula/editparams.py` | Esquemas dos ajustes por clipe (`VIDEO`, `AUDIO`), cores do HSL, ajustes rápidos. |
+| `pelicula/compositor.py` | Ajustes do clipe → uniforms do `CLIP` (`clip_uniforms`), enquadramento (`fit_box`, `transform`), `auto_adjust`. |
+| `pelicula/editshaders.py` | GLSL do modo Edição: `CLIP` (uma camada sobre a tela) e `OUT` (tela → 8/16 bits inteiros). |
+| `pelicula/resolve.py` | Plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor e os de cada preset), os LUTs e o `LEIA-ME`; instala na pasta de LUTs do Resolve. |
+| `pelicula/ui/edit_model.py` | `TimelineModel`: a sequência da edição, seleção, histórico e as edições que a interface pede (sinal `changed`). |
+| `pelicula/ui/timeline_view.py` | `TimelineEditor`: barra de ferramentas, régua, cabeçalhos das faixas, clipes, forma de onda, arrastar/aparar/lâmina/ímã. |
+| `pelicula/ui/edit_panels.py` | `MediaBin` (Mídia) e `ClipInspector` (ajustes do clipe gerados de `editparams`). |
+| `pelicula/ui/scopes.py` | Medidores: histograma, forma de onda, parada RGB e vetorscópio. |
+| `pelicula/ui/sequence_dialog.py` / `resolve_dialog.py` | Resolução e fps da sequência; instalação do plugin do DaVinci. |
+| `pelicula/sequence.py` | Quadros da sequência: `grab` (acesso direto), `SequenceReader` (em ordem, com pré-abertura), `media_info`. |
+| `pelicula/audiomix.py` | Mixagem do som da sequência com o ffmpeg (`render_mix`), chave da prévia (`mix_key`), forma de onda (`peaks`). |
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
 | `pelicula/ui/store.py` | `ParamStore`: valores atuais, sinal `changed`, desfazer/refazer (agrupado por 400 ms, até 300 passos). |
 | `pelicula/ui/widgets.py` | `FilmSlider`, `ToggleSwitch`, linhas de parâmetro, `LutRow`, `SectionCard`, `Segmented`, `Histogram`, `Timeline`, `timecode()`. |
@@ -206,6 +221,8 @@ Em ordem:
 3. Bloom (`+ bloom·força·0,22`), halação (`+ halo·cor·força·0,32`) e vazamento de luz (duas
    gaussianas coloridas que passeiam pelas bordas).
 4. `colorPipe(lin)`:
+   - **Laboratório** (se ligado): `lin` passa por `labPipe` (negativo → copiadora → cópia, seção 14)
+     e volta para luz linear pela curva neutra inversa; daí em diante o resto do caminho vale igual;
    - **neutro** = curva neutra de exibição;
    - **LUT no lugar do look** → `mix(neutro, LUT(codificado no espaço do LUT), força)`;
    - senão **filmLook** (P&B com pesos do filtro → stops → saturação em log → contraste e
@@ -477,3 +494,174 @@ A suíte fica em `tests/` (configuração em `pytest.ini`, que já põe a raiz n
 .venv/bin/python -m pytest -q          # Linux
 QT_QPA_PLATFORM=offscreen python -m pytest -q   # sem tela (como no CI)
 ```
+
+## 13. Modo Edição
+
+O modo Edição monta uma **sequência** (faixas de vídeo e de som com clipes) que vira a entrada do look
+de película. A regra do caminho único continua: tudo que muda a imagem de um clipe vive em
+`compositor.clip_uniforms()` + `editshaders.CLIP` / `Engine.compose()`; tudo que muda o tempo vive em
+`timeline.Sequence` (`src_frame`, `layers_at`); tudo que muda o som vive em `audiomix.py`. Prévia, "Salvar
+quadro", terminal e exportação chamam as mesmas funções.
+
+```mermaid
+flowchart LR
+    SEQ["timeline.Sequence<br/>faixas, clipes, transições"]
+    GR["sequence.grab()<br/>(arrastar, salvar quadro)"]
+    RD["sequence.SequenceReader<br/>(reprodução, exportação)"]
+    FL["FrameLayers<br/>imagens das camadas"]
+    CO["Engine.compose()<br/>CLIP por camada · tela f4"]
+    FI["build_plan + Engine.render()<br/>look de película"]
+    MX["audiomix.render_mix()<br/>WAV 48 kHz"]
+    EN[["ffmpeg (codificar)"]]
+    SEQ --> GR --> FL
+    SEQ --> RD --> FL
+    FL --> CO --> FI --> EN
+    SEQ --> MX --> EN
+```
+
+### 13.1 Modelo (`timeline.py`)
+
+- **Tempo da sequência** em quadros inteiros no fps da sequência; **tempo do arquivo** em segundos
+  (`Clip.src_in`), para misturar fps diferentes e arquivos só de som.
+- `Sequence.src_frame(clip, t)` = `floor((src_in + (t − start)/fps · velocidade) · fps_do_arquivo + 1e-6)`,
+  limitado ao arquivo; imagens e "congelar quadro" usam sempre o mesmo quadro. É a única regra de
+  mapeamento: o leitor em ordem e a busca direta dão o mesmo quadro.
+- Faixa 0 = V1/A1, a de baixo. Vídeo e som do mesmo arquivo nascem **ligados** (`Clip.link`): mover,
+  aparar, dividir, mudar a velocidade e apagar valem para o grupo, com o deslocamento limitado pelo membro
+  mais restrito (o grupo nunca sai de sincronia). Faixas travadas não mudam (arrastar um clipe travado
+  não mexe em nada).
+- Colocar um clipe sobre outro **sobrescreve** (`_clear_range`: apaga, encurta ou divide o que estava
+  embaixo). `delete(ripple=True)` fecha o espaço; `close_gaps()` junta os clipes de uma faixa.
+- Velocidade: `set_speed()` mantém o trecho do arquivo e muda a duração (sem invadir o clipe seguinte).
+- `layers_at(t)` resolve as transições: surgir/sumir no preto ou branco (`Layer.fade`), "dissolver"
+  (o clipe anterior da mesma faixa continua por baixo, além do fim — `Layer.extension`) e "sumir
+  mostrando a faixa de baixo" (`Layer.alpha`).
+- `is_trivial()`: a sequência é só "o arquivo inteiro, sem ajustes" → o modo Película lê o arquivo
+  direto (exatamente o caminho de antes do modo Edição).
+- `History`: desfazer/refazer por instantâneos JSON (até 200).
+
+### 13.2 Decodificação (`sequence.py`)
+
+- `decode_size()`: cada clipe é decodificado no tamanho da sua caixa na tela (encaixe × escala, sem passar
+  da resolução do arquivo). Na prévia a tela é menor (`canvas_size(seq, altura)`), então a decodificação
+  também é.
+- `grab()` usa `media.grab_frame()` com um cache LRU de 16 imagens (arrastar a linha do tempo).
+- `SequenceReader` mantém um `FrameReader` por clipe ativo, anda só para a frente (lê e descarta até o
+  quadro pedido; reabre se o salto passar de 2 s), repete o último quadro em câmera lenta e **abre antes**
+  (thread `seq-prefetch`) os leitores dos clipes que começam no próximo 1,5 s, para os cortes não
+  engasgarem. Com `fps_out`, o quadro i da saída é `start + floor(i · fps_seq / fps_out)`.
+- O leitor devolve só imagens (`FrameLayers`); a montagem é feita na thread da GPU.
+- `media.probe_source()` abre vídeos, imagens e arquivos só de som (`media.AUDIO_EXT`).
+
+### 13.3 Montagem na GPU (`compositor.py`, `editshaders.py`, `Engine.compose`)
+
+| Passo | Como |
+|---|---|
+| Tela | Dois alvos RGBA f4 (`canvas_a`/`canvas_b`) alternados; começa com a cor de fundo da sequência. |
+| Camada | `CLIP` lê o clipe (`t_clip`) e a tela anterior (`t_dst`), aplica detalhe → cor → vinheta/desbotar → fade e mistura (normal, tela, multiplicar, sobrepor, adicionar, clarear, escurecer) com a opacidade. |
+| Enquadramento | `u_xf` (mat3) leva o pixel da tela ao uv do clipe: caixa do encaixe, escala, rotação (positivo = horário), posição (fração da tela, y para baixo) e espelhos. A borda do corte tem antisserrilhado analítico (distância em px). |
+| Exatidão | Clipe neutro com o tamanho da tela usa `texelFetch` (`u_exact`) e a saída `OUT` arredonda para inteiros (`u1`/`u2`): o resultado é **bit a bit** o arquivo, em 8 e 16 bits. |
+| Cor | Exposição e balanço de branco em luz (código^2,2); tons por canal (pontos preto/branco, realces/sombras, curva de 4 faixas, brilho, contraste em S); levantar/gama/ganho das rodas; saturação, vibração, matiz e HSL de 8 faixas. |
+| Rodas | Ponto [x, y] no disco: matiz = `atan2(y, x)` em graus como no HSV (0° vermelho em +x, sentido anti-horário com y para cima: 60° amarelo, 120° verde, 180° ciano, 240° azul, 300° magenta); força = distância (≤ 1). O desvio de cor não muda a luminância. |
+| Detalhe | Bilateral 5×5, desfoque por mipmap (12 amostras), nitidez (máscara de nitidez) e clareza (mipmap bem desfocado); passos proporcionais à altura do clipe. |
+
+`neutral=True` mantém enquadramento, opacidade e transições mas desliga cor e detalhe: é a imagem
+"original" da comparação no modo Edição. `auto_adjust()` (numpy) calcula exposição, balanço de branco e
+níveis com a mesma matemática do shader; `editparams.apply_quick_look()` aplica um ajuste rápido.
+
+### 13.4 Som (`audiomix.py`)
+
+Um WAV de 48 kHz estéreo em 24 bits por trecho. Cada clipe de som vira uma entrada (`-ss`/`-t` no trecho
+usado do arquivo) com a cadeia: `aresample` → `atempo` (encadeado fora de 0,5–2) → volume do clipe +
+da faixa → realce de voz (`highpass` + `acompressor`) → `bass`/`equalizer`/`treble` → `afftdn` →
+`loudnorm` → balanço (`pan`) → `afade` de entrada e saída (no tempo do clipe) → `atrim` no trecho →
+`adelay` até a posição. Tudo é somado com `amix=normalize=0` sobre um `anullsrc` com a duração exata do
+trecho. Grafos longos vão por `-filter_complex_script`. A prévia guarda o WAV da sequência inteira e só
+o refaz quando `mix_key()` muda. `peaks()` decodifica o som em mono numa taxa baixa para desenhar a forma
+de onda (com cache por arquivo).
+
+### 13.5 Exportação e projetos
+
+- `ExportJob.sequence`: `run_job()` mixa o som do trecho num WAV temporário (cancelável), passa-o como
+  entrada de áudio **sem** `-ss` (`build_encoder_cmd(audio_path=…)`), lê com `SequenceReader` e chama
+  `engine.compose()` antes de `build_plan`/`render`. O número do quadro do look é o quadro da sequência,
+  como na prévia — a exportação FFV1 16 bits de uma edição é conferida bit a bit (`tests/test_sequence.py`).
+- `sequence.media_info(seq)`: `MediaInfo` virtual (tamanho, fps, duração, som, formato do 1º vídeo) usado
+  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal.
+- `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
+  como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
+  continuam `1` e abrem nas versões antigas.
+- Terminal: `exportar`/`quadro` de um `.plc` com edição renderizam a montagem (`cli.project_sequence`); o
+  comando `resolve` (`davinci`) instala ou grava o plugin do DaVinci Resolve.
+
+### 13.6 Na janela (`ui/main_window.py`)
+
+- Seletor **Película | Edição** no topo (`set_mode`). Na Edição aparecem a Mídia (esquerda), a linha do
+  tempo (embaixo da prévia) e o inspetor com medidores (direita); a barra da prévia ganha *Com
+  película*, *Sequência* e desfazer/refazer da edição.
+- `_refresh_source()` escolhe a fonte da prévia: na Edição, sempre a sequência; na Película, a
+  sequência só quando ela não é trivial (senão o arquivo, pelo caminho antigo). A prévia trabalha com
+  uma **cópia** da sequência (`src_seq`), entregue às threads de leitura; `TimelineModel.changed`
+  com `"values"` só remonta o quadro atual na GPU (as camadas já decodificadas recebem os ajustes
+  atuais), o resto recarrega a fonte.
+- O `FrameLoader` e o `Player` aceitam arquivo ou sequência (`sequence.grab` / `SequenceReader`);
+  a montagem (`Engine.compose`) acontece na thread principal, com o mesmo contexto da prévia.
+- Som da prévia da sequência: `audiomix.render_mix` num WAV temporário em segundo plano (troca de nome
+  a cada versão, porque o player segura o arquivo aberto), refeito quando `mix_key()` muda.
+- O que a prévia mostra é o que sai: no modo Edição sem *Com película*, exportar e salvar quadro
+  saem só com a montagem (look "Original").
+
+## 14. Laboratório: emulação por densidade
+
+Uma alternativa física à curva paramétrica do look, toda dentro de `colorPipe` (entra no LUT exportado
+e no plugin do Resolve). Tabelas e calibração em `look.py`; GLSL em `shaders.COMMON` (`labSoftplus`,
+`labCurve`, `labPath`, `labPipe`).
+
+1. **Negativo**: `e = sens · lin` (sensibilidade das camadas, linhas somam 1) → `le = log10(e / 0,18)`
+   → densidade `dn = ii · curva(le)`; a curva característica é um *softplus duplo*
+   `g·w·(sp((x−pé)/w) − sp((x−ombro)/w))` (pé, trecho reto com gama `g`, ombro) e `ii` é a diafonia
+   entre camadas (efeitos de interimagem) no espaço de densidade. A revelação forçada multiplica a gama
+   (`1 + 0,12·push`) e sobe o pé (`+0,08·push`).
+2. **Copiadora**: a exposição da cópia é `off − dn`, onde `off` = calibração + luzes da copiadora
+   (`0,025 log E` por ponto, 12 pontos = 1 stop).
+3. **Cópia**: `dl = curva_da_cópia(off − dn)`; densidade final `d = dye · dl + (key · dl)` (diafonia dos
+   corantes e, no Technicolor, a chave preta; na retenção de prata, a prata somada às três cores).
+   Exibição: `10^(−d / 2,6)`.
+4. **Sem cópia** (negativo escaneado): inversão digital `(dn − meio) / (g · 0,30103)` em stops e a curva
+   neutra de exibição.
+5. **Processos**: o caminho A é o negativo + cópia escolhidos; Technicolor 3 tiras / 2 cores usam um
+   caminho B (registros P&B, corantes puros, chave) misturado por *Força do processo*.
+
+A **calibração** (`look.lab_paths`, com `lru_cache`) acha por Newton/mínimos quadrados o `off` que leva
+o cinza 18% ao código 0,45 em todos os canais, para toda combinação negativo × cópia × processo × push ×
+diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um tom mínimo, < 0,006).
+`look.lab_eval()` é a referência em numpy usada nos testes. Com `lab_on` desligado o plano só leva
+`u_lab_on = 0` e a imagem não muda.
+
+## 15. Plugin do DaVinci Resolve (`resolve.py`)
+
+`build_package(pasta)` grava `PeliculaConverter/` com:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `PeliculaConverter Cor.dctl` | Perfil de entrada, exposição/balanço, Laboratório, look de película, pele, cópia, envelhecimento, força geral. Só cor (funciona também como LUT). |
+| `PeliculaConverter Textura.dctl` | Grão animado (`TIMELINE_FRAME_INDEX`), halação, bloom, névoa, maciez, nitidez, aberração, distorção, vinheta. |
+| `PeliculaConverter Projetor.dctl` | Tremor, cintilação, clarões, cor instável, emendas, vazamento, poeira, riscos, fio de cabelo, manchas, marcas de rolo, moldura. |
+| `Presets/` | Os DCTLs de cada preset (Cor, Textura e, se o preset usa, Projetor) com os valores do preset como padrão. |
+| `LUTs/` | Um `.cube` por preset (assado com `Engine.bake_lut` numa thread com contexto próprio) — Resolve gratuito, Premiere etc. |
+| `LEIA-ME.txt`, `VERSAO.txt` | Guia (PT-BR e EN) e marcador de versão para a instalação. |
+
+- **Um código, dois dialetos**: `source(kind, dialect)` gera o mesmo kernel em DCTL (para o Resolve) ou
+  em GLSL (para os testes, com os controles como uniforms). `tests/test_resolve.py` roda o dialeto GLSL
+  com o moderngl e compara com o app: a cor bate com `Engine.bake_lut` (≤ 8e-7 nos 44 presets e em todos os controles novos, < 1,3e-4
+  na varredura das 180 combinações do Laboratório); textura e projetor ficam a 1/255 de
+  `Engine.render`, exceto halação/bloom/névoa (aproximação de passo único por amostragem esparsa).
+- **Laboratório no DCTL**: a calibração das luzes da copiadora é resolvida no próprio kernel, em forma
+  fechada (a curva da cópia tem pé zero e se inverte exatamente; as densidades das camadas saem de um
+  sistema 3×3), então qualquer push, diafonia, chave e força funciona sem tabelas enormes.
+- **Restrições do DCTL** respeitadas pelo gerador: texto ASCII, sem *swizzles*, sem sobrecarga de
+  funções (OpenCL), literais com `f`, até 64 controles por tipo e 5 seletores de cor, tabelas
+  `__CONSTANT__`. Tudo vem das tabelas de `look.py`/`params.py`/`presets.py` — o plugin não deriva do app.
+- `install()` grava numa pasta temporária e troca a antiga de uma vez; recusa uma pasta
+  `PeliculaConverter` que não foi criada por ele. `lut_dirs()` procura a pasta de LUTs do Resolve no
+  Windows, Linux e macOS.

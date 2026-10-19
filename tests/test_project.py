@@ -39,8 +39,9 @@ def test_file_is_readable_json(tmp_path):
     project.save(p, str(tmp_path / "a.plc"))
     data = json.loads((tmp_path / "a.plc").read_text(encoding="utf-8"))
     assert data["app"] == "PeliculaConverter"
-    assert data["formato"] == project.FORMAT
+    assert data["formato"] == project.FORMAT_SIMPLE  # sem sequência: abre nas versões antigas
     assert data["midia"]["relativo"] == "video.mp4"
+    assert data["modo"] == "pelicula" and "edicao" not in data
 
 
 def test_relink_by_relative_path(tmp_path):
@@ -113,3 +114,57 @@ def test_open_dialog_lists_projects():
     assert "*.plc" in filters[0] and "*.mp4" in filters[0] and "*.exr" in filters[0]
     assert any(f.endswith("(*.plc)") for f in filters[1:])
     assert "*.plc" not in main_window.media_filter()
+
+
+# ------------------------------------------------------------------ modo Edição
+def _seq_json(media_path: str) -> dict:
+    from pelicula import timeline
+    src = timeline.Source(media_path, 320, 180, 24.0, "24/1", 48, 2.0, has_audio=True)
+    seq = timeline.Sequence.for_source(src)
+    seq.split(20)
+    return seq.to_json()
+
+
+def test_sequence_roundtrip_and_format(tmp_path):
+    p = make(tmp_path)
+    p.sequence = _seq_json(p.media_path)
+    p.mode = "edicao"
+    project.save(p, str(tmp_path / "ed.plc"))
+    data = json.loads((tmp_path / "ed.plc").read_text(encoding="utf-8"))
+    assert data["formato"] == project.FORMAT == 2 and data["modo"] == "edicao"
+    assert data["edicao"]["fontes"][0]["relativo"] == "video.mp4"
+    q = project.load(str(tmp_path / "ed.plc"))
+    assert q.mode == "edicao"
+    assert q.sequence["clipes"] == p.sequence["clipes"]
+
+
+def test_sequence_sources_relinked_when_folder_moves(tmp_path):
+    a = tmp_path / "a"
+    a.mkdir()
+    p = make(a)
+    p.sequence = _seq_json(p.media_path)
+    project.save(p, str(a / "ed.plc"))
+    b = tmp_path / "b"
+    shutil.move(str(a), str(b))
+    q = project.load(str(b / "ed.plc"))
+    from pelicula import timeline
+    seq = timeline.Sequence.from_json(q.sequence)
+    new = str(b / "video.mp4")
+    assert set(seq.sources) == {os.path.normpath(new)}
+    assert all(c.src == os.path.normpath(new) for c in seq.clips) and len(seq.clips) == 4
+
+
+def test_old_project_without_sequence(tmp_path):
+    p = make(tmp_path)
+    project.save(p, str(tmp_path / "v.plc"))
+    data = json.loads((tmp_path / "v.plc").read_text(encoding="utf-8"))
+    data.pop("modo")
+    data["formato"] = 1
+    (tmp_path / "v.plc").write_text(json.dumps(data), encoding="utf-8")
+    q = project.load(str(tmp_path / "v.plc"))
+    assert q.sequence is None and q.mode == "pelicula"
+    data["modo"] = "outro"
+    data["edicao"] = "lixo"
+    (tmp_path / "v.plc").write_text(json.dumps(data), encoding="utf-8")
+    q = project.load(str(tmp_path / "v.plc"))
+    assert q.sequence is None and q.mode == "pelicula"

@@ -6,7 +6,11 @@ Exemplos:
     pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --inicio 00:00:05 --fim 00:00:12
     pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
     pelicula-cli lut --preset vision3_250d -o 250d.cube
+    pelicula-cli resolve --ofx-instalar    (plugin OpenFX: funciona no DaVinci Resolve gratuito)
+    pelicula-cli resolve --instalar        (DCTLs do Resolve Studio e LUTs)
     pelicula-cli presets | parametros | qualidades | info video.mp4 | ffmpeg --baixar | versao
+
+Projetos .plc com uma edição (modo Edição) exportam a montagem: cortes, cor dos clipes e som mixado.
 
 Cada comando tem um apelido em inglês (export, project, frame, list-presets, params,
 qualities, version). O idioma das mensagens segue o app (ou a variável PELICULA_LANG).
@@ -38,6 +42,7 @@ COMMANDS = {
     "qualidades": "qualities", "qualities": "qualities",
     "info": "info",
     "ffmpeg": "ffmpeg",
+    "resolve": "resolve", "davinci": "resolve",
     "versao": "version", "version": "version", "--version": "version",
 }
 
@@ -156,8 +161,25 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
+def project_sequence(proj):
+    """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro)."""
+    from . import sequence, timeline
+    if not proj or not proj.sequence:
+        return None
+    seq = timeline.Sequence.from_json(proj.sequence)
+    if not seq.clips:
+        return None
+    trivial = seq.is_trivial()
+    if trivial and (not proj.media_path or os.path.abspath(trivial) == os.path.abspath(proj.media_path)):
+        return None
+    missing = sequence.missing_sources(seq)
+    if missing:
+        raise CliError(_("Arquivos da edição não encontrados:\n{lista}").format(lista="\n".join(missing[:10])))
+    return seq
+
+
 def _source_and_values(path: str, preset, sets):
-    """Entrada pode ser vídeo/imagem ou um projeto .plc."""
+    """Entrada pode ser vídeo/imagem ou um projeto .plc. Devolve (arquivo, valores, preset, projeto, sequência)."""
     from . import project
     proj = None
     if path.lower().endswith(project.EXT):
@@ -165,14 +187,18 @@ def _source_and_values(path: str, preset, sets):
             proj = project.load(path)
         except project.ProjectError as exc:
             raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
+        values, pid = build_values(proj.values, preset, sets)
+        seq = project_sequence(proj)
+        if seq is not None:
+            from . import sequence
+            return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
         if not proj.media_path or not os.path.exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        values, pid = build_values(proj.values, preset, sets)
-        return proj.media_path, values, pid or proj.preset_id, proj
+        return proj.media_path, values, pid or proj.preset_id, proj, None
     if not os.path.exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
-    return path, values, pid, None
+    return path, values, pid, None, None
 
 
 def _need_ffmpeg() -> None:
@@ -186,8 +212,12 @@ def cmd_export(a) -> int:
     from . import export, media
     from .engine import Engine
     _need_ffmpeg()
-    src, values, pid, proj = _source_and_values(a.entrada, a.preset, a.set)
-    info = media.probe(src)
+    src, values, pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
+    if seq is not None:
+        from . import sequence
+        info = sequence.media_info(seq)
+    else:
+        info = media.probe(src)
     presets_q = {k: s for k, _l, s in export.quality_presets(info)}
     qkey = a.qualidade or (proj.export_quality if proj and proj.export_quality in presets_q else None)
     qkey = qkey or ("img_png" if info.is_image else "mp4")
@@ -224,7 +254,7 @@ def cmd_export(a) -> int:
     if values.get("scan_on"):
         _gui_app()
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name)
+                           name=Path(out).name, sequence=seq)
     if not a.json:
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
         print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix}").format(
@@ -318,15 +348,22 @@ def cmd_frame(a) -> int:
     from . import look, media
     from .engine import Engine, lut_info
     _need_ffmpeg()
-    src, values, _pid, proj = _source_and_values(a.entrada, a.preset, a.set)
-    info = media.probe(src)
+    src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
+    if seq is not None:
+        from . import sequence
+        info = sequence.media_info(seq)
+    else:
+        info = media.probe(src)
     frame = parse_time(a.tempo, info.fps) if a.tempo else (proj.frame if proj else 0)
     frame = max(0, min(frame, info.frames - 1))
     if values.get("scan_on"):
         _gui_app()
     w, h = info.width, info.height
-    img = media.grab_frame(info, frame, w, h, 16, hq=True)
     engine = Engine()
+    if seq is not None:
+        img = engine.compose(sequence.grab(seq, frame, w, h, 16, hq=True), seq, w, h, 16)
+    else:
+        img = media.grab_frame(info, frame, w, h, 16, hq=True)
     engine.set_input(img)
     li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
     out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False), 16)
@@ -449,6 +486,75 @@ def cmd_info(a) -> int:
     return 0
 
 
+def _resolve_module():
+    try:
+        from . import resolve
+    except ImportError as exc:
+        raise CliError(_("O plugin do DaVinci Resolve não está disponível nesta versão.")) from exc
+    return resolve
+
+
+def _ofx_status(resolve) -> None:
+    if not hasattr(resolve, "ofx_bundle_version"):
+        return
+    shipped = resolve.ofx_bundle_version()
+    installed = resolve.ofx_installed_version()
+    print(_("Plugin OpenFX (funciona no DaVinci Resolve gratuito):"))
+    print("  " + (_("neste app: versão {versao}").format(versao=shipped) if shipped
+                  else _("não vem neste app (compile com plugins/ofx/build_windows.bat ou build_linux.sh)")))
+    print("  " + (_("instalado em {pasta}: versão {versao}").format(pasta=resolve.ofx_install_dir(), versao=installed)
+                  if installed else _("não instalado ({pasta})").format(pasta=resolve.ofx_install_dir())))
+
+
+def cmd_resolve(a) -> int:
+    """Plugin do PeliculaConverter para o DaVinci Resolve (OpenFX, DCTLs e LUTs)."""
+    resolve = _resolve_module()
+    ofx_any = a.ofx_instalar or a.ofx_pasta or a.ofx_fonte
+    if a.ofx_fonte:
+        files = resolve.ofx_generate(a.ofx_fonte)
+        print(_("{n} arquivos do código do plugin OpenFX gravados em {pasta}").format(n=len(files), pasta=a.ofx_fonte))
+    if a.ofx_pasta:
+        try:
+            dest = resolve.ofx_save_bundle(a.ofx_pasta)
+        except (OSError, RuntimeError) as exc:
+            raise CliError(str(exc)) from exc
+        print(_("Plugin OpenFX copiado para {pasta}").format(pasta=dest))
+    if a.ofx_instalar:
+        try:
+            dest = resolve.ofx_install()
+        except (OSError, RuntimeError) as exc:
+            raise CliError(_("Não foi possível instalar o plugin: {erro}").format(erro=exc)) from exc
+        print(_("Plugin OpenFX instalado em {pasta}. Reabra o DaVinci Resolve e use Color > OpenFX > "
+                "PeliculaConverter.").format(pasta=dest))
+    if ofx_any and not (a.listar or a.instalar or a.pasta):
+        return 0
+    if a.listar or not (a.instalar or a.pasta):
+        _ofx_status(resolve)
+        dirs = [d for d in resolve.lut_dirs() if d.is_dir()]
+        if dirs:
+            print(_("Pastas de LUT do DaVinci Resolve encontradas:"))
+            version = getattr(resolve, "installed_version", lambda _d=None: None)
+            for d in dirs:
+                ver = version(d)
+                extra = "  " + _("(plugin instalado: versão {versao})").format(versao=ver) if ver else ""
+                print(f"  {d}{extra}")
+        else:
+            print(_("Nenhuma pasta de LUT do DaVinci Resolve foi encontrada neste computador."))
+        if not (a.instalar or a.pasta):
+            return 0
+    if a.pasta:
+        files = resolve.build_package(a.pasta)
+        print(_("{n} arquivos do plugin gravados em {pasta}").format(n=len(files), pasta=a.pasta))
+    if a.instalar:
+        try:
+            dest = resolve.install(a.destino)
+        except (OSError, RuntimeError) as exc:
+            raise CliError(_("Não foi possível instalar o plugin: {erro}").format(erro=exc)) from exc
+        print(_("Plugin instalado em {pasta}. Abra o DaVinci Resolve (ou atualize a lista de LUTs).").format(
+            pasta=dest))
+    return 0
+
+
 def cmd_ffmpeg(a) -> int:
     from . import deps, media
     ok = media.configure()
@@ -556,6 +662,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("ffmpeg", help=_("mostra, baixa ou atualiza o ffmpeg"))
     p.add_argument("--baixar", action="store_true", help=_("baixa a versão oficial e confere o SHA-256"))
     p.set_defaults(func=cmd_ffmpeg)
+
+    p = sub.add_parser("resolve", aliases=["davinci"],
+                       help=_("plugin para o DaVinci Resolve: instala ou grava os DCTLs e LUTs"))
+    p.add_argument("--instalar", action="store_true", help=_("instala na pasta de LUTs do DaVinci Resolve"))
+    p.add_argument("--destino", help=_("pasta de LUTs do Resolve (padrão: a encontrada automaticamente)"))
+    p.add_argument("--pasta", help=_("grava o pacote do plugin nesta pasta (para instalar em outro computador)"))
+    p.add_argument("--listar", action="store_true", help=_("mostra as pastas de LUT do Resolve encontradas"))
+    p.add_argument("--ofx-instalar", action="store_true",
+                   help=_("instala o plugin OpenFX (funciona no Resolve gratuito; pede administrador)"))
+    p.add_argument("--ofx-pasta", help=_("copia o plugin OpenFX (.ofx.bundle) para esta pasta"))
+    p.add_argument("--ofx-fonte", help=_("gera o código C++ do plugin OpenFX nesta pasta (desenvolvimento)"))
+    p.set_defaults(func=cmd_resolve)
 
     p = sub.add_parser("versao", aliases=["version"], help=_("mostra a versão"))
     p.set_defaults(func=lambda a: (print(f"{APP_NAME} {__version__}"), 0)[1])

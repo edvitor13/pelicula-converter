@@ -446,3 +446,17 @@ def test_original_preset_matches_source(fake_ffmpeg, make_info, src, codec, cont
     s = export._original(make_info(**src))
     assert (s.codec, s.container, s.pix, s.profile) == (codec, container, pix, profile)
     assert_coherent("original", s)
+
+
+def test_sequence_audio_input_has_no_seek(fake_ffmpeg, make_info):
+    """Modo Edição: o som já vem mixado e recortado num WAV; entra sem -ss, com a duração do trecho."""
+    info = make_info(audio_codec="pcm_s24le")
+    s = ExportSettings(codec="x264", container="mp4", pix="yuv420p", audio="aac192")
+    cmd = export.build_encoder_cmd("o.mp4", info, s, 320, 180, "24/1", 8, 2.5, 4.0, audio_path="mix.wav")
+    i = cmd.index("mix.wav")
+    assert cmd[i - 1] == "-i" and cmd[i - 3:i - 1] == ["-t", "4.000000"]
+    assert "-ss" not in cmd and info.path not in cmd
+    assert value_after(cmd, "-c:a") == "aac"
+    s.container, s.codec, s.audio = "mkv", "x264", "copy"
+    cmd = export.build_encoder_cmd("o.mkv", info, s, 320, 180, "24/1", 8, 2.5, 4.0, audio_path="mix.wav")
+    assert value_after(cmd, "-c:a") == "copy"  # PCM cabe no MKV; sem recorte no arquivo, sem recodificar

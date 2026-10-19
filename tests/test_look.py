@@ -35,7 +35,7 @@ ALWAYS = ["u_res", "u_scale", "u_input", "u_gamut", "u_shift", "u_rot", "u_zoom"
           "u_tone_amt", "u_tone_sh", "u_tone_hi", "u_age", "u_print_on", "u_lut_on", "u_grain_on", "u_dust",
           "u_dust_size", "u_dust_type", "u_scratch", "u_scratch_w", "u_hair", "u_stain", "u_cue", "u_splice",
           "u_dmg_on", "u_frame", "u_seed_d", "u_scan_on", "u_text_aspect", "u_frame_on", "u_aspect_t", "u_corner",
-          "u_edge_soft", "u_edge_rough", "u_bar_color", "u_mix", "u_dither"]
+          "u_edge_soft", "u_edge_rough", "u_bar_color", "u_mix", "u_dither", "u_lab_on", "u_skin"]
 
 
 def plan(v=None, w=1920, h=1080, frame=0, fps=24.0, lut=None, dither=True, **over):
@@ -120,6 +120,10 @@ def test_tables_cover_every_choice():
     assert set(ch["scan_formato"]) - {"bitola"} <= set(look.SCAN_FORMATS)
     assert set(look.GAUGE_SCAN.values()) <= set(look.SCAN_FORMATS)
     assert set(ch["scan_texto"]) - {"auto", "nenhum"} == set(look.EDGE_TEXTS)
+    assert set(ch["lab_negativo"]) == set(look.NEGATIVES)
+    assert set(ch["lab_copia"]) == set(look.LAB_PRINTS)
+    assert set(ch["lab_processo"]) == set(look.LAB_PROCESSES)
+    assert set(ch["mtf"]) == set(look.MTF_SIGMA) and look.MTF_SIGMA["nenhum"] == 0.0
     for k in ("bitola", "proporcao"):
         assert ch[k]
     for prop in ch["proporcao"]:
@@ -127,6 +131,19 @@ def test_tables_cover_every_choice():
             assert float(prop) > 1.0
     assert len(set(look.INPUT_IDS.values())) == len(look.INPUT_IDS)
     assert set(look.INPUT_GAMUT.values()) <= set(look._PRIMARIES)
+
+
+def test_lab_post_uniforms_follow_the_controls():
+    v = params.defaults()
+    v["lab_on"] = True
+    U = look.build_plan(v, 320, 180, 0, 24.0).uniforms
+    assert U["u_lab_ops"] == 0
+    v.update(lab_luzes_rolagem=0.5, lab_saturacao=1.2, lab_dens_b=1.4, lab_pele_sat=0.3)
+    U = look.build_plan(v, 320, 180, 0, 24.0).uniforms
+    assert U["u_lab_ops"] == 2 | 4 | 8 | 16
+    assert U["u_lab_sat"] == pytest.approx(1.2)
+    assert tuple(U["u_lab_dens"]) == pytest.approx((0.0, 0.0, 0.4))
+    assert U["u_lab_skin"][1] == pytest.approx(0.3)
 
 
 @pytest.mark.parametrize("filtro", list(look.BW_WEIGHTS))

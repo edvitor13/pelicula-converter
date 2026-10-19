@@ -11,12 +11,15 @@ from .. import params
 
 
 class ParamStore(QObject):
+    """Valores de um esquema (`params.FILM` por padrão; o modo Edição usa os de `editparams`)."""
+
     changed = Signal(str)  # chave alterada, ou "*" quando tudo muda
     historyChanged = Signal()
 
-    def __init__(self, values: dict[str, Any] | None = None):
+    def __init__(self, values: dict[str, Any] | None = None, schema: params.Schema | None = None):
         super().__init__()
-        self.values = params.sanitize(values or params.defaults())
+        self.schema = schema or params.FILM
+        self.values = self.schema.sanitize(values or self.schema.defaults())
         self._hist = [copy.deepcopy(self.values)]
         self._pos = 0
         self._timer = QTimer(self)
@@ -28,8 +31,8 @@ class ParamStore(QObject):
         return self.values[key]
 
     def set(self, key: str, value: Any, record: bool = True) -> None:
-        p = params.PARAMS[key]
-        if p.kind == "color":
+        p = self.schema.params[key]
+        if p.kind in params.LIST_KINDS:
             value = [float(c) for c in value]
         if self.values.get(key) == value:
             return
@@ -40,7 +43,7 @@ class ParamStore(QObject):
 
     def set_all(self, values: dict[str, Any], record: bool = True) -> None:
         self._timer.stop()
-        self.values = params.sanitize(values)
+        self.values = self.schema.sanitize(values)
         self.changed.emit("*")
         if record:
             self.commit()

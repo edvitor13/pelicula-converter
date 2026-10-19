@@ -25,7 +25,9 @@ título restaura a seção inteira e o dado (*Sortear*) troca as sementes aleat�
 ```
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
       → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
-      → maciez / nitidez → névoa → bloom → halação → vazamento de luz
+      → maciez (bitola, lente e MTF da película) / nitidez → névoa → bloom → halação → vazamento de luz
+      → [laboratório: negativo (separação de cores, saturação do filme) → copiadora → cópia
+         → rolagens, saturação final, densidade por cor, pele]
       → cor da película (ou LUT "no lugar do look") → cópia → envelhecimento → LUT "depois"
       → grão → defeitos → força geral do efeito → moldura → pontilhado → saída
 ```
@@ -45,6 +47,8 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 | **Desfoque da bitola** | liga/desliga | ligado | Maciez natural de cada bitola (desfoque gaussiano). Em 1080p: 8 mm 2,4 px, Super 8 1,9 px, 16 mm 1,1 px, Super 16 0,9 px, 35 mm 0,35 px, 65 mm e IMAX nenhum (em 4K, o dobro). Desligado, o vídeo mantém a nitidez original; *Lente e nitidez → Recuperar detalhe* devolve ainda mais detalhe. |
 | **Intensidade do desfoque** | 0–100% | 100% | Quanto desse desfoque é aplicado (100% = o natural da bitola; 0% = nenhum). Chave `bitola_resolucao`. |
 | **Vinheta da bitola** | 0–100% | 100% | Escurecimento natural das bordas em bitolas pequenas. Vale mesmo com a seção *Lente* desligada. |
+| **MTF da película (maciez fina)** | Desligado, Close (rosto), Plano médio, Plano aberto, Textura 16 mm, Textura Super 8 | Desligado | A resposta de detalhe (MTF) de um filme: tira a nitidez "digital" demais (poros, serrilhado) e mantém o detalhe maior. Escolha pelo enquadramento — o close suaviza mais a pele, o plano aberto menos. É uma gaussiana fina somada em quadratura com o desfoque da bitola e a maciez da lente: σ em 1080p = 1,6 / 1,1 / 0,7 / 1,5 / 2,3 px × 2 × *Quantidade*. Chave `mtf`. |
+| **Quantidade do MTF** | 0–100% | 50% | 50% = o valor do enquadramento escolhido; 100% = o dobro. Chave `mtf_forca`. |
 | **Força geral do efeito** | 0–100% | 100% | Mistura o resultado com o vídeo original (antes da moldura). |
 
 Valores por bitola (multiplicadores internos):
@@ -94,13 +98,120 @@ Perfis disponíveis:
 | RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE | Log3G10 | REDWideGamutRGB | RED R3D e Nikon N-RAW convertidos no DaVinci Resolve. |
 | DaVinci Intermediate (DaVinci Wide Gamut) | DaVinci Intermediate | DaVinci Wide Gamut | Arquivos exportados do Resolve em DWG/Intermediate. |
 | Cineon / DPX log | Cineon (685/300) | Rec.709 | Scans de película em DPX/Cineon. |
+| Blackmagic Film Gen 5 (Blackmagic Wide Gamut) | Blackmagic Film Gen 5 | Blackmagic Wide Gamut | Câmeras Blackmagic (BRAW e ProRes em *Film*, geração 5). |
+| ARRI LogC4 (ARRI Wide Gamut 4) | LogC4 | ARRI Wide Gamut 4 | ARRI Alexa 35 (LogC4). |
+| Apple Log (Rec.2020) — iPhone | Apple Log | Rec.2020 | iPhone 15 Pro e mais novos gravando em Apple Log. |
+
+---
+
+## Laboratório (negativo e cópia)
+
+*Simula a película de verdade: negativo, revelação, luzes da copiadora e cópia.* Chave: liga o
+modelo de densidade. Desligada (o padrão), nada muda.
+
+Enquanto a seção **Cor da película** desenha um look com curvas e tons, o **Laboratório** refaz o
+caminho físico que a imagem percorria num laboratório de cinema, em **densidade** (o quanto cada
+camada de corante escurece o filme):
+
+```
+cena → cada camada do negativo vê uma faixa de cor (sensibilidade)
+     → curva característica do negativo (pé, trecho reto com gama ~0,6 e ombro) → densidade
+     → efeito entre camadas, separação de cores (Hue Split), saturação do filme, prata retida
+     → copiadora: a luz atravessa o negativo; os pontos de vermelho, verde e azul decidem a exposição
+     → curva característica da cópia (gama ~3, pé ajustável) → corantes ciano, magenta e amarelo
+     → absorções indesejadas dos corantes (diafonia), prata retida na cópia → projeção (gama 2,6)
+     → rolagens das sombras e das altas luzes, saturação final, densidade por cor, pele → tela
+```
+
+O cinza médio é **calibrado** para sair neutro (0,45) em qualquer combinação, como o "25-25-25"
+de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois.
+Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
+trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
+baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
+comportamento de cada um, sem dados nem curvas dos fabricantes.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
+| **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
+| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
+| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
+| **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
+| **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
+| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (12 pontos = 0,3 log E ≈ 1 stop). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). |
+| **Luz verde da copiadora** | −12 a +12 pt | 0 | Mais verde deixa a cópia mais magenta. |
+| **Luz azul da copiadora** | −12 a +12 pt | 0 | Mais azul deixa a cópia mais amarela (quente). |
+| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
+| **Separação de cores (Hue Split)** | 0–100% | 0% | Afasta as cores em volta de um eixo, como a separação das câmeras de três tiras: na densidade do negativo, o eixo laranja ↔ azul-esverdeado é esticado (× 1 + 0,60 × quantidade) e o perpendicular, verde ↔ magenta, comprimido (× 1 − 0,45 × quantidade). Pele mais quente, céu e sombras mais frios, verdes puxados para o amarelo ou o ciano. O cinza e a média das camadas não mudam e, por ser em densidade (log), o efeito é o mesmo em qualquer exposição. |
+| Eixo da separação (**avançado**) | 0–360° | 35° | Matiz do polo quente do eixo (35° = laranja, o par *teal & orange*; 215° inverte os polos). |
+| **Saturação do filme** | 0,00–2,00× | 1,00× | Saturação dentro do negativo, na densidade (a mistura s·I + (1 − s)/3 da matriz de camadas): muda a cor como o próprio filme, antes da cópia. O cinza não muda. |
+| **Saturação final** | 0,00–2,00× | 1,00× | Saturação depois da cópia, em volta da luminância Rec.709 (0 = preto e branco). |
+| **Densidade dos vermelhos / verdes / azuis** | 0,00–2,00× | 1,00× | Densidade a mais (acima de 1) ou a menos só nas cores daquele canal: o peso é o quanto o canal passa dos outros dois, então cinzas e as outras cores não mudam. Azuis acima de 1 dão o céu denso do *teal & orange*. |
+| **Pé da cópia (preto)** | −1,00 a +1,00 | 0,00 | Densidade máxima da cópia × 2^(−0,6 × pé): positivo lava os pretos, negativo aprofunda. O cinza médio é recalibrado e não muda. |
+| **Rolagem das sombras** | 0–100% | 0% | Entrada mais suave no preto (mesma rolagem da *Cor da película*), depois da cópia. |
+| **Rolagem das altas luzes** | 0–100% | 0% | Chegada mais suave ao branco: as altas luzes estouram menos. |
+| **Matiz da pele** | −30° a +30° | 0° | Negativo puxa a pele para o vermelho; positivo para o amarelo (só a faixa de matiz da pele). |
+| **Saturação da pele** | −1,00 a +1,00 | 0,00 | Mais ou menos cor só nos tons de pele. |
+| **Bleach bypass no negativo** | 0–100% | 0% | A prata fica no negativo e soma uma imagem neutra às camadas: contraste neutro × (1 + 0,5 × quantidade) e cor dos corantes × (1 − 0,3 × quantidade). Mais contraste, menos cor e altas luzes mais duras. |
+| **Bleach bypass na cópia** | 0–100% | 0% | A prata fica na cópia (a chave neutra de 0,8 × quantidade do processo *Retenção de prata*, agora em qualquer processo): pretos mais profundos e cor mais contida. Sem efeito em *Sem cópia*. |
+| Curva neutra do negativo (**avançado**) | 0–100% | 0% | Aproxima o gama, o pé e o ombro das três camadas do negativo da média delas: tira a virada de cor entre sombras e luzes do filme. |
+| Curva neutra da cópia (**avançado**) | 0–100% | 0% | O mesmo para o gama e a densidade máxima das camadas da cópia. |
+| Mistura entre camadas (**avançado**) | 0,00–2,00× | 1,00× | Multiplica as absorções indesejadas dos corantes da cópia: acima de 1 a cor fica mais suja e densa; abaixo, mais pura. |
+
+**Processos.**
+
+- **Technicolor 3 tiras** (1932–1955, *O Mágico de Oz*, *E o Vento Levou*): a câmera separava a
+  cena em três negativos preto e branco por filtros estreitos; de cada um saía uma matriz que
+  transferia um corante puro (ciano, magenta, amarelo) para a cópia, por cima de uma imagem preta
+  de baixo contraste (a **chave**). O resultado são cores densas e saturadas, pretos profundos e
+  pouca latitude nas altas luzes. Aqui: registros de pouca latitude, separação estreita (efeito
+  entre camadas forte), corantes puros e chave preta.
+- **Technicolor 2 cores** (anos 1920): só dois registros, vermelho-laranja e verde-azul, impressos
+  em dois corantes. Pele e vermelhos ficam bons; azuis e verdes viram tons de verde-azulado e
+  cinza-ciano. Com duas cores para três canais, o cinza pode guardar um tom muito leve.
+- **Retenção de prata** (*bleach bypass*, *O Resgate do Soldado Ryan*): a prata não é retirada
+  da cópia e soma uma imagem preto e branca aos corantes: menos cor, mais contraste, pretos
+  profundos. Os controles *Bleach bypass no negativo* e *na cópia* fazem o mesmo em qualquer
+  processo e em quantidade ajustável.
+
+**Calibração.** Tudo o que muda as curvas (negativo, revelação, separação, saturação do filme,
+bleach bypass, curvas neutras, pé, diafonia, chave) entra na calibração do cinza: o cinza médio
+continua saindo neutro em 0,45. O que vem depois da cópia (rolagens, saturação final, densidade por
+cor e pele) não mexe no cinza por construção.
+
+**O fluxo dos plugins de emulação de película.** Os plugins de emulação vendidos para o Resolve (como
+o do tutorial "Three-Strip Technicolor Look") seguem quase sempre a mesma receita, que aqui vira:
+
+1. *Espaço de cor e gama da câmera* → **Perfil do vídeo** (seção *Entrada e exposição*).
+2. *Negativo* e *Print* → **Negativo** e **Cópia** (por exemplo Eastman ECN-II 5297 → EXR Print
+   5386, ou Vision2 5201 → 2393).
+3. *Hue Split* perto de 0,7 → **Separação de cores** 69%; *saturação do filme* um pouco acima de 1 →
+   **Saturação do filme** 1,3×.
+4. *Exposição* um pouco abaixo e *printer lights* → **Exposição** e **Luzes da copiadora** /
+   **Densidade da cópia**.
+5. Ajustes finos → **Densidade dos azuis** (céu), **Pé da cópia**, **Rolagens**, **Pele**,
+   **Bleach bypass** e **Curvas neutras**.
+6. *Film texture*: *MTF* do enquadramento, grão e halação de 35 mm → **MTF da película**, **Grão** e
+   **Halação** com **Bitola** 35 mm.
+
+Os presets *Technicolor (5297 → 5386, Hue Split)* e *Teal & orange (5201 → 2393, Hue Split)* (grupo
+*Laboratório*) já vêm assim. No DaVinci Resolve, o nó **PeliculaConverter Laboratorio** tem esses
+mesmos controles (e *Mostrar curva*, que desenha as curvas R, G e B) e o nó **Textura** tem o MTF —
+veja [DAVINCI.md](DAVINCI.md). Os nomes dos filmes continuam sendo aproximações artísticas.
+
+Tudo isso fica dentro da parte de cor do app, então entra nos **LUTs exportados** (menu de
+presets → *Exportar a cor como LUT*) e no plugin do DaVinci Resolve. Para o resultado mais fiel
+use o Laboratório com **Cor da película** desligada e **Cópia (print)** em *Nenhuma* (é assim
+nos presets do grupo *Laboratório*); se ligar a *Cor da película*, ela atua por cima do
+resultado do laboratório.
 
 ---
 
 ## Cor da película
 
 *Curva, cor e tons da emulsão.* Chave: liga a emulação de cor. (No esquema começa desligada; quase
-todos os presets a ligam — as exceções são *Só textura* e *Original*.)
+todos os presets a ligam — as exceções são *Só textura*, *Original* e os do grupo *Laboratório*,
+que usam o modelo de densidade no lugar.)
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
@@ -124,6 +235,8 @@ todos os presets a ligam — as exceções são *Só textura* e *Original*.)
 | Matiz dos verdes (**avançado**) | −40° a +40° | 0° | Gira só os verdes (folhagem mais amarela ou mais azulada). |
 | Matiz dos azuis (**avançado**) | −40° a +40° | 0° | Gira só os azuis (céu mais ciano ou mais violeta). |
 | Saturação da pele (**avançado**) | −1,00 a +1,00 | 0,00 | Satura ou dessatura só os tons de pele. |
+| Matiz da pele (**avançado**) | −30° a +30° | 0° | Gira só os tons de pele: negativo puxa para o vermelho, positivo para o amarelo. |
+| Luz da pele (**avançado**) | −1,00 a +1,00 | 0,00 | Muda só a luminância dos tons de pele (até ±25%): negativo deixa a pele mais densa e escura, positivo clareia. |
 | **Preto e branco** | liga/desliga | desligado | Converte para P&B antes da curva, usando o filtro abaixo. |
 | **Filtro do P&B** | Pancromático (neutro), Vermelho (céu escuro), Laranja, Amarelo, Verde, Azul (ortocromático) | Pancromático | Peso de cada cor na conversão, como um filtro na frente da lente. Vermelho escurece céus azuis; verde clareia folhagem; azul imita filmes ortocromáticos antigos. |
 | **Viragem do P&B** | Nenhuma, Sépia, Selênio, Cianótipo, Ouro | Nenhuma | Banho químico que tinge o P&B (só vale com *Preto e branco* ligado). |
@@ -141,7 +254,7 @@ Laranja 0,55/0,38/0,07 · Amarelo 0,40/0,52/0,08 · Verde 0,18/0,72/0,10 · Azul
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Arquivo .cube** | lista + *Procurar arquivo .cube…* | (nenhum) | LUTs encontrados no computador (Premiere Pro, DaVinci Resolve e *Meus LUTs*) ou qualquer arquivo. **Instalar LUTs…** copia `.cube` para a pasta do app; **Pasta** abre essa pasta. Escolher um LUT liga a seção e adivinha a entrada. |
-| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Linear | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. |
+| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. |
 | **Aplicar** | Depois do look de película, No lugar do look | Depois | *Depois*: o LUT entra sobre o resultado da cor da película e da cópia. *No lugar*: só o LUT (a cor da película e a cópia são ignoradas; o envelhecimento continua valendo se a *Cor da película* estiver ligada). |
 | **Intensidade do LUT** | 0–100% | 100% | Mistura com a imagem sem o LUT. |
 
@@ -336,6 +449,7 @@ tremor do projetor move a tira inteira.
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
-tonalidade, cor da película, cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
+tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
+cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
 dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura e scan.

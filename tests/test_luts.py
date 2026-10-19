@@ -137,6 +137,12 @@ def test_load_cube_with_utf8_bom_before_title(tmp_path):
     (r"D:\luts\nlog_to_rec709.cube", "nlog"),
     (r"D:\luts\Panasonic V-Log to V-709.cube", "vlog"),
     (r"D:\luts\VLOG_film.cube", "vlog"),
+    (r"D:\luts\ARRI_LogC4_to_Rec709.cube", "logc4"),
+    (r"D:\luts\AWG4 Look.cube", "logc4"),
+    (r"D:\luts\Apple Log to Rec709.cube", "applelog"),
+    (r"D:\luts\AppleLog_film.cube", "applelog"),
+    (r"D:\luts\BMD Film Gen5 to Video.cube", "bmd_gen5"),
+    (r"D:\luts\Blackmagic_Film_Gen_5_look.cube", "bmd_gen5"),
     (r"D:\luts\Teal Orange.cube", "rec709"),
     (r"C:\Program Files\Adobe\Adobe Premiere Pro 2025\Lumetri\LUTs\Creative\Fuji F125 Kodak 2393.cube", "rec709"),
 ])

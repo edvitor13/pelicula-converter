@@ -8,6 +8,7 @@ Textos coletados:
 1. Todo literal passado para `_()` ou `N_()` em `pelicula/**/*.py` (lido com `ast`, sem importar).
 2. Textos de dados que a interface traduz na hora de mostrar:
    - `params.SECTIONS`: título, subtítulo, rótulo, dica e rótulos das opções de cada parâmetro;
+   - `editparams.VIDEO_SECTIONS` e `AUDIO_SECTIONS` (ajustes por clipe do modo Edição), do mesmo jeito;
    - `presets.BUILTIN` (nome, desc, grupo), `presets.GROUPS` e os grupos escritos em `presets.py`
      (por exemplo "Meus presets");
    - tabelas de `export`: rótulos de `CODECS` (e perfis), `AUDIO`, `RESOLUTIONS`, `FPS`,
@@ -105,7 +106,7 @@ def data_strings() -> dict[str, list[str]]:
     """{texto: [origem, ...]} dos dados que a interface traduz na hora de mostrar."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    from pelicula import export, params, presets
+    from pelicula import editparams, export, params, presets
 
     out: dict[str, list[str]] = {}
 
@@ -113,14 +114,16 @@ def data_strings() -> dict[str, list[str]]:
         if text and translatable(text):
             out.setdefault(text, []).append(where)
 
-    for sec in params.SECTIONS:
-        add(sec.title, f"params:{sec.key}.title")
-        add(sec.subtitle, f"params:{sec.key}.subtitle")
-        for p in sec.params:
-            add(p.label, f"params:{p.key}.label")
-            add(p.tip, f"params:{p.key}.tip")
-            for value, label in p.choices or []:
-                add(label, f"params:{p.key}.choices[{value}]")
+    for origin, sections in (("params", params.SECTIONS), ("editparams.video", editparams.VIDEO_SECTIONS),
+                             ("editparams.audio", editparams.AUDIO_SECTIONS)):
+        for sec in sections:
+            add(sec.title, f"{origin}:{sec.key}.title")
+            add(sec.subtitle, f"{origin}:{sec.key}.subtitle")
+            for p in sec.params:
+                add(p.label, f"{origin}:{p.key}.label")
+                add(p.tip, f"{origin}:{p.key}.tip")
+                for value, label in p.choices or []:
+                    add(label, f"{origin}:{p.key}.choices[{value}]")
 
     for item in presets.BUILTIN:
         for k in ("nome", "desc", "grupo"):

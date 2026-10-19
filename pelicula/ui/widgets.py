@@ -9,7 +9,8 @@ import random
 import numpy as np
 from PySide6.QtCore import (Property, QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer,
                             Signal)
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPainterPath,
+                           QPen)
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QColorDialog, QComboBox, QFileDialog, QFrame,
                                QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy,
                                QToolButton, QVBoxLayout, QWidget)
@@ -487,6 +488,231 @@ class LutRow(ParamRow):
         self.path.setText(path if path else _("Os LUTs do Premiere e do Resolve instalados aparecem na lista."))
 
 
+# ------------------------------------------------------------------ roda de cor (modo Edição)
+def wheel_hue(x: float, y: float) -> float:
+    """Matiz (graus, 0 = vermelho) de um ponto [x, y] da roda.
+
+    Convenção das rodas: 0° (vermelho) à direita, crescendo no sentido anti-horário com y para cima
+    (60° amarelo, 120° verde, 180° ciano, 240° azul, 300° magenta), como o matiz HSV.
+    """
+    return math.degrees(math.atan2(y, x)) % 360.0
+
+
+def hue_color(hue_deg: float, sat: float = 1.0, val: float = 1.0) -> QColor:
+    return QColor.fromHsvF((hue_deg % 360.0) / 360.0, min(max(sat, 0.0), 1.0), min(max(val, 0.0), 1.0))
+
+
+_WHEEL_CACHE: dict = {}
+
+
+def _wheel_image(size: int) -> QImage:
+    """Disco de matiz × saturação (mesma convenção de `wheel_hue`), desenhado com numpy."""
+    img = _WHEEL_CACHE.get(size)
+    if img is not None:
+        return img
+    r = size / 2.0
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    dx = (xx + 0.5 - r) / r
+    dy = -(yy + 0.5 - r) / r
+    dist = np.sqrt(dx * dx + dy * dy)
+    h6 = (np.degrees(np.arctan2(dy, dx)) % 360.0) / 60.0
+    val = 0.82
+    c = val * np.clip(dist, 0.0, 1.0) * 0.78
+    x = c * (1.0 - np.abs(h6 % 2.0 - 1.0))
+    z = np.zeros_like(c)
+    sector = np.floor(h6).astype(np.int32) % 6
+    table = [(c, x, z), (x, c, z), (z, c, x), (z, x, c), (x, z, c), (c, z, x)]
+    rgb = np.zeros((size, size, 3), np.float32)
+    for k, chans in enumerate(table):
+        sel = sector == k
+        for ch, arr in enumerate(chans):
+            rgb[..., ch][sel] = arr[sel]
+    rgb += (val - c)[..., None]
+    alpha = np.clip((1.0 - dist) * r, 0.0, 1.0)  # borda suave de 1 px
+    out = np.zeros((size, size, 4), np.uint8)
+    out[..., :3] = np.clip(rgb * 255.0 * alpha[..., None], 0, 255).astype(np.uint8)
+    out[..., 3] = (alpha * 255.0).astype(np.uint8)
+    out = np.ascontiguousarray(out)
+    img = QImage(out.data, size, size, 4 * size, QImage.Format.Format_RGBA8888_Premultiplied).copy()
+    _WHEEL_CACHE[size] = img
+    return img
+
+
+class ColorWheel(QWidget):
+    """Disco de cor com um ponto arrastável, sempre dentro do círculo unitário."""
+
+    valueChanged = Signal(float, float)
+    released = Signal()
+    resetRequested = Signal()
+
+    def __init__(self, size: int = 112, parent=None):
+        super().__init__(parent)
+        self._size = size
+        self._v = (0.0, 0.0)
+        self._drag = False
+        self._fine = None
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
+    def value(self) -> tuple[float, float]:
+        return self._v
+
+    def setValue(self, x: float, y: float, emit: bool = False) -> None:
+        r = math.hypot(x, y)
+        if r > 1.0:
+            x, y = x / r, y / r
+        v = (float(x), float(y))
+        if v != self._v:
+            self._v = v
+            self.update()
+            if emit:
+                self.valueChanged.emit(*v)
+
+    def radius(self) -> float:
+        return self._size / 2.0 - 4.0
+
+    def center(self) -> QPointF:
+        return QPointF(self._size / 2.0, self._size / 2.0)
+
+    def value_at(self, pos: QPointF) -> tuple[float, float]:
+        c, r = self.center(), self.radius()
+        return (pos.x() - c.x()) / r, -(pos.y() - c.y()) / r
+
+    def puck_pos(self) -> QPointF:
+        c, r = self.center(), self.radius()
+        return QPointF(c.x() + self._v[0] * r, c.y() - self._v[1] * r)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c, r = self.center(), self.radius()
+        d = int(round(r * 2))
+        p.drawImage(QRectF(c.x() - r, c.y() - r, d, d), _wheel_image(d))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(0, 0, 0, 110), 1))
+        p.drawEllipse(c, r, r)
+        p.setPen(QPen(QColor(255, 255, 255, 55), 1))
+        p.drawLine(QPointF(c.x() - r, c.y()), QPointF(c.x() + r, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - r), QPointF(c.x(), c.y() + r))
+        p.drawEllipse(c, r * 0.5, r * 0.5)
+        pk = self.puck_pos()
+        active = math.hypot(*self._v) > 1e-4
+        p.setPen(QPen(QColor("#1b1205"), 3))
+        p.drawEllipse(pk, 6, 6)
+        p.setPen(QPen(QColor(theme.ACCENT_HI) if active else QColor("#f6eee2"), 2))
+        p.setBrush(hue_color(wheel_hue(*self._v), math.hypot(*self._v), 1.0) if active else QColor(0, 0, 0, 0))
+        p.drawEllipse(pk, 6, 6)
+        p.end()
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        self._drag = True
+        if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._fine = (e.position(), self._v)
+        else:
+            self._fine = None
+            self.setValue(*self.value_at(e.position()), emit=True)
+
+    def mouseMoveEvent(self, e):
+        if not self._drag:
+            return
+        if self._fine is not None:
+            p0, v0 = self._fine
+            r = self.radius()
+            d = e.position() - p0
+            self.setValue(v0[0] + d.x() / r * 0.15, v0[1] - d.y() / r * 0.15, emit=True)
+        else:
+            self.setValue(*self.value_at(e.position()), emit=True)
+
+    def mouseReleaseEvent(self, e):
+        if self._drag:
+            self._drag = False
+            self.released.emit()
+
+    def mouseDoubleClickEvent(self, e):
+        self.resetRequested.emit()
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
+class WheelRow(ParamRow):
+    """Roda de cor de um parâmetro "wheel" (valor [x, y] no disco unitário)."""
+
+    def __init__(self, param, store, parent=None):
+        super().__init__(param, store, parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(4)
+        top = QHBoxLayout()
+        top.addWidget(self._label(_(param.label)))
+        top.addStretch(1)
+        self.text = QLabel()
+        self.text.setObjectName("Faint")
+        top.addWidget(self.text)
+        lay.addLayout(top)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.wheel = ColorWheel()
+        self.wheel.setToolTip(_(param.tip) if param.tip else
+                              _("Arraste para dar cor. Duplo clique zera. Shift + arrastar: ajuste fino."))
+        self.wheel.valueChanged.connect(lambda x, y: self.store.set(param.key, [x, y]))
+        self.wheel.released.connect(self.store.commit)
+        self.wheel.resetRequested.connect(self._reset)
+        row.addWidget(self.wheel)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.refresh()
+
+    def _reset(self) -> None:
+        self.store.set(self.param.key, [0.0, 0.0])
+        self.store.commit()
+
+    def refresh(self) -> None:
+        x, y = self.store.get(self.param.key)
+        self.wheel.setValue(x, y)
+        amt = math.hypot(x, y)
+        if amt < 1e-4:
+            self.text.setText(_("neutro"))
+        else:
+            self.text.setText(f"{wheel_hue(x, y):.0f}° • {amt * 100:.0f}%")
+
+
+class ColorChip(QAbstractButton):
+    """Bolinha de cor (faixa do HSL); um ponto claro indica que a faixa tem ajuste."""
+
+    def __init__(self, color: QColor, parent=None):
+        super().__init__(parent)
+        self.color = color
+        self.marked = False
+        self.setCheckable(True)
+        self.setFixedSize(24, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def sizeHint(self) -> QSize:
+        return QSize(24, 24)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QPointF(12, 12)
+        if self.isChecked():
+            p.setPen(QPen(QColor(theme.ACCENT_HI), 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(c, 10.5, 10.5)
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1))
+        p.setBrush(self.color)
+        p.drawEllipse(c, 7.5, 7.5)
+        if self.marked:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor("#f6eee2"))
+            p.drawEllipse(QPointF(18.5, 5.5), 2.6, 2.6)
+        p.end()
+
+
 def make_row(param: params.Param, store: ParamStore) -> ParamRow:
     if param.kind in ("float", "int"):
         return NumberRow(param, store)
@@ -498,6 +724,8 @@ def make_row(param: params.Param, store: ParamStore) -> ParamRow:
         return ColorRow(param, store)
     if param.kind == "file":
         return LutRow(param, store)
+    if param.kind == "wheel":
+        return WheelRow(param, store)
     raise ValueError(param.kind)
 
 
@@ -552,12 +780,18 @@ class SectionCard(QFrame):
         bl.setContentsMargins(0, 6, 0, 0)
         bl.setSpacing(4)
         self.rows: list[ParamRow] = []
+        self._chips: dict[str, ColorChip] = {}
+        self.hsl_color = ""
+        if section.layout == "hsl":
+            self._build_hsl_chips(bl)
         for p in section.params:
             if p.key == section.toggle:
                 continue
             row = make_row(p, store)
             self.rows.append(row)
             bl.addWidget(row)
+        if section.layout == "hsl" and self._chips:
+            self.set_hsl_color(next(iter(self._chips)))
         lay.addWidget(self.body)
         self._fx = QGraphicsOpacityEffect(self.body)
         self._fx.setOpacity(1.0)
@@ -576,21 +810,66 @@ class SectionCard(QFrame):
         self.chev.setPixmap(pm)
 
     def set_advanced(self, show: bool) -> None:
+        if self._chips:
+            return
         for r in self.rows:
             if r.param.advanced:
                 r.setVisible(show)
+
+    # ------------------------------------------------------------ HSL (cor por faixa)
+    def _build_hsl_chips(self, layout: QVBoxLayout) -> None:
+        from .. import editparams
+        row = QHBoxLayout()
+        row.setSpacing(2)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for key, label, hue in editparams.HSL_COLORS:
+            chip = ColorChip(hue_color(hue, 0.85, 0.95))
+            chip.setToolTip(_(label))
+            chip.clicked.connect(lambda _checked=False, k=key: self.set_hsl_color(k))
+            group.addButton(chip)
+            row.addWidget(chip)
+            self._chips[key] = chip
+        row.addStretch(1)
+        layout.addLayout(row)
+        self._hsl_names = {key: label for key, label, _hue in editparams.HSL_COLORS}
+        self.hsl_label = QLabel()
+        self.hsl_label.setObjectName("Muted")
+        layout.addWidget(self.hsl_label)
+
+    def set_hsl_color(self, key: str) -> None:
+        """Mostra só as linhas (matiz, saturação, luminância) da faixa de cor escolhida."""
+        if key not in self._chips:
+            return
+        self.hsl_color = key
+        self._chips[key].setChecked(True)
+        self.hsl_label.setText(_(self._hsl_names[key]))
+        prefix = f"hsl_{key}_"
+        for r in self.rows:
+            r.setVisible(r.param.key.startswith(prefix))
+
+    def _refresh_chips(self) -> None:
+        for key, chip in self._chips.items():
+            prefix = f"hsl_{key}_"
+            marked = any(abs(float(self.store.get(p.key))) > 1e-6 for p in self.section.params
+                         if p.key.startswith(prefix))
+            if marked != chip.marked:
+                chip.marked = marked
+                chip.update()
 
     def _reset(self) -> None:
         for p in self.section.params:
             if p.key == self.section.toggle:
                 continue
-            self.store.set(p.key, list(p.default) if p.kind == "color" else p.default, record=False)
+            self.store.set(p.key, list(p.default) if p.kind in params.LIST_KINDS else p.default, record=False)
         self.store.commit()
 
     def refresh(self, key: str = "*") -> None:
         for r in self.rows:
             if key == "*" or r.param.key == key:
                 r.refresh()
+        if self._chips:
+            self._refresh_chips()
         if self.switch is not None and key in ("*", self.section.toggle):
             on = bool(self.store.get(self.section.toggle))
             self.switch.blockSignals(True)

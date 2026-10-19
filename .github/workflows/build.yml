@@ -77,7 +77,30 @@ jobs:
 
       - name: Instalar o ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: |
+          # O feed do Chocolatey às vezes recusa conexões dos runners (erro 499). Tenta 3 vezes e, se não
+          # der, baixa o mesmo build que o app usa (gyan.dev), conferindo o SHA-256 publicado (deps.py).
+          for ($i = 1; $i -le 3; $i++) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Chocolatey falhou (tentativa $i de 3)"
+            Start-Sleep -Seconds (20 * $i)
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "ffmpeg-gyan"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          $zip = Join-Path $dir "ffmpeg.zip"
+          $sha = Join-Path $dir "ffmpeg.zip.sha256"
+          Invoke-WebRequest $url -OutFile $zip
+          Invoke-WebRequest "$url.sha256" -OutFile $sha
+          $esperado = (Get-Content $sha -Raw).Trim().Split()[0].ToLower()
+          $real = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($esperado -ne $real) { throw "SHA-256 do ffmpeg não confere: $real (esperado $esperado)" }
+          Expand-Archive $zip -DestinationPath $dir
+          $bin = (Get-ChildItem $dir -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          Add-Content $env:GITHUB_PATH $bin
+          Write-Host "ffmpeg do gyan.dev (SHA-256 conferido) em $bin"
 
       - name: Conferir o ffmpeg
         shell: bash
@@ -92,6 +115,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install "pytest>=8"
           python --version
+
+      # Plugin OpenFX do DaVinci Resolve (C++): MSVC no Windows (achado pelo vswhere), g++ no Linux.
+      # Os testes (tests/test_ofx.py) usam este mesmo binário e comparam com o app.
+      - name: Compilar o plugin OpenFX
+        shell: bash
+        run: python plugins/ofx/build.py
 
       - name: Testes
         shell: bash
@@ -198,11 +227,33 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Versão $ver; pacotes PeliculaConverter-$label-$TARGET.*"
 
+      # O plugin OpenFX vai pronto dentro de todo pacote (.msi, .zip, .deb, .tar.gz): quem usa só
+      # clica em "Instalar" no app. PELICULA_EXIGIR_OFX=1 faz o PyInstaller falhar se ele faltar.
+      - name: Compilar o plugin OpenFX (MSVC / g++)
+        shell: bash
+        run: |
+          python plugins/ofx/build.py
+          ls -laR plugins/ofx/dist
+
       - name: Gerar os executáveis (PyInstaller)
         shell: bash
+        env:
+          PELICULA_EXIGIR_OFX: "1"
         run: |
           python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
           ls -la dist/PeliculaConverter
+
+      - name: Conferir o plugin OpenFX dentro do app
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in Windows) arch=Win64; cli=dist/PeliculaConverter/pelicula-cli.exe ;;
+                               *) arch=Linux-x86-64; cli=dist/PeliculaConverter/pelicula-cli ;; esac
+          f="dist/PeliculaConverter/_internal/ofx/PeliculaConverter.ofx.bundle/Contents/$arch/PeliculaConverter.ofx"
+          test -f "$f" || { echo "::error::O plugin OpenFX não entrou no app ($f)."; exit 1; }
+          # o app empacotado acha o plugin (sys._MEIPASS) e copia para uma pasta qualquer
+          "$cli" resolve --ofx-pasta ofx-copia
+          test -f "ofx-copia/PeliculaConverter.ofx.bundle/Contents/$arch/PeliculaConverter.ofx"
+          rm -rf ofx-copia
 
       # ------------------------------------------------------------ Windows: assinatura opcional
       # Só assina se os segredos WINDOWS_CERT_PFX_BASE64 e WINDOWS_CERT_PASSWORD existirem.

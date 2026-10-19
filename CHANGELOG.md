@@ -7,6 +7,69 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Modo Edição** (seletor *Película | Edição* no topo, Ctrl+1 / Ctrl+2): montagem em faixas de
+  vídeo e de áudio antes do look de película. Importar vídeos, imagens e músicas (Ctrl+I ou
+  arrastar), dividir no cursor (S), aparar pelas bordas, mover entre faixas (sobrescreve o que
+  estiver embaixo), apagar com ou sem fechar o espaço, ímã, zoom da linha do tempo, imagem e som
+  ligados (dá para desligar), velocidade (câmera lenta e acelerado), congelar quadro e transições
+  (dissolver, surgir do preto/branco, sumir). Desfazer/refazer de toda a edição.
+- **Cor e luz por clipe**, simples de usar: exposição, contraste, realces, sombras, brancos, pretos,
+  brilho, temperatura, tonalidade, vibração, saturação, matiz, rodas de cor (sombras, tons médios,
+  altas luzes), curva de tons por faixa, cor por faixa (HSL de 8 cores), nitidez, clareza, desfoque,
+  redução de ruído, vinheta, desbotado, enquadramento (escala, posição, rotação, espelhar, cortar,
+  opacidade, mesclagem). Ajustes rápidos (Mais vivo, Quente, Frio, Suave, Contraste, P&B, Antigo),
+  **cor automática**, copiar/colar ajustes e aplicar a todos os clipes.
+- **Som por clipe**: volume, mudo, balanço, aumentar no início e diminuir no fim, graves, médios,
+  agudos, realçar voz, redução de ruído e normalizar volume; faixas com mudo, solo, trava e volume;
+  forma de onda na linha do tempo. A prévia toca a mesma mixagem que a exportação grava.
+- **Medidores de cor**: histograma, forma de onda, parada RGB e vetorscópio.
+- O modo Película aplica o look na montagem (exportação, salvar quadro, estimativa e fila
+  incluídos). Projetos `.plc` guardam a montagem (`"formato": 2` só quando há edição).
+- **Laboratório (negativo e cópia)**: emulação por densidade, como no laboratório de verdade —
+  negativo (curva característica e sensibilidade de cada camada), revelação forçada (push/pull),
+  luzes da copiadora em pontos (vermelho, verde, azul e densidade), película de cópia com diafonia
+  dos corantes e processos **Technicolor 3 tiras** (com chave preta), **Technicolor 2 cores** e
+  **retenção de prata**. O cinza médio sai neutro em qualquer combinação. Novos presets no grupo
+  *Laboratório*.
+- **Controle de pele** no look: matiz e luz da pele, além da saturação.
+- Controles no estilo do tutorial de Technicolor da Cinesumer (SumerFade): **separação de cores
+  (Hue Split)** com eixo ajustável, **densidade dos vermelhos/verdes/azuis**, **saturação do filme**
+  e **saturação final**, **pé da cópia**, **rolagem das sombras e das altas luzes**, **pele** no
+  Laboratório, **bleach bypass no negativo e na cópia** e **curva neutra** do negativo e da cópia.
+- Negativos Vision2 5201 50D, Eastman ECN-II 5297 250D, Vision 5246 250D, Vision 5263 500T e
+  Vision2 Expression 5229 500T; cópias Eastman EXR Print 5386 e Eastman Color Print 5385 (todos
+  aproximações artísticas). Presets *Technicolor (5297 → 5386, Hue Split)* e *Teal & orange
+  (5201 → 2393, Hue Split)*.
+- Perfis de entrada **Blackmagic Film Gen 5** (Blackmagic Wide Gamut), **ARRI LogC4** (Wide Gamut 4)
+  e **Apple Log** (iPhone), também para LUTs; o palpite do espaço do LUT reconhece os nomes.
+- **MTF da película** (lente): suaviza a nitidez digital fina por enquadramento, com quantidade.
+- **Curva** no painel *Ajustes*: mostra a curva do look em R, G e B (calculada na GPU com o mesmo
+  caminho de cor da exportação).
+- **Plugin OpenFX do PeliculaConverter — funciona no DaVinci Resolve gratuito** (o DCTL exige o
+  Studio): um efeito nativo em C++ com o look inteiro (perfil da câmera, Laboratório, cor da película,
+  grão, halação, bloom, lente e MTF, tremor, defeitos e moldura), 44 presets e carregar um look `.json`
+  exportado pelo app. O código de cor é gerado das mesmas tabelas e da mesma matemática do app (cor a
+  menos de 0,0001; quadro inteiro a ~1 nível de 8 bits). Compilado pelo GitHub Actions (Windows e Linux)
+  e embutido em todos os pacotes; instale em *Configurações → Plugin para o DaVinci Resolve… → Instalar
+  o plugin OpenFX* (pede administrador) ou com `pelicula-cli resolve --ofx-instalar`. Calcula na CPU.
+- Plugin do DaVinci: nó **PeliculaConverter Laboratorio** com **Mostrar curva**, todos os controles
+  novos nos nós Cor e Laboratorio e o MTF no nó Textura.
+- **Plugin para o DaVinci Resolve** (*Configurações → Plugin para o DaVinci Resolve…* ou
+  `pelicula-cli resolve --instalar`): DCTLs *PeliculaConverter Cor*, *Textura* e *Projetor* (a
+  ordem dos nós é como LOOK → LAB → PRINT), um DCTL por preset e LUTs `.cube` de todos os presets
+  para o Resolve gratuito e o Premiere. A cor do plugin é conferida contra o app nos testes.
+
+### Corrigido
+- Arrastar o cursor na linha do tempo não faz mais o cursor voltar para trás por um instante: quadros
+  de posições anteriores que chegam atrasados aparecem na prévia, mas o cursor fica onde você deixou.
+- Painéis laterais (looks, ajustes, mídia e clipe) redimensionam direito: não recolhem por inteiro ao
+  arrastar o divisor e não cortam opções. As barras da prévia, do player, da linha do tempo e do
+  topo encolhem em etapas (botões só com ícone, extras escondidos, quebra de linha), a linha do
+  tempo do player sobe para uma linha própria quando falta espaço e os looks se reorganizam em
+  duas, três ou mais colunas conforme a largura (o painel nunca fica mais estreito que duas
+  miniaturas lado a lado).
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

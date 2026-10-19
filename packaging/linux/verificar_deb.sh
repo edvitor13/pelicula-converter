@@ -29,6 +29,8 @@ sudo apt-get install -y --no-install-recommends desktop-file-utils >/dev/null
 
 confere "executável do app em $APP" test -x "$APP/PeliculaConverter"
 confere "pelicula-cli em $APP" test -x "$APP/pelicula-cli"
+confere "plugin OpenFX do DaVinci Resolve no pacote" \
+    test -f "$APP/_internal/ofx/PeliculaConverter.ofx.bundle/Contents/Linux-x86-64/PeliculaConverter.ofx"
 confere "/usr/bin/pelicula-converter aponta para o app" \
     test "$(readlink -f /usr/bin/pelicula-converter)" = "$APP/PeliculaConverter"
 confere "/usr/bin/pelicula-cli aponta para o pelicula-cli" \
@@ -55,6 +57,10 @@ saida="$(/usr/bin/pelicula-cli --help 2>&1)" && codigo=0 || codigo=$?
 echo "$saida" | head -n 15
 if [ -f "$REPO/pelicula/cli.py" ]; then
     confere "pelicula-cli --help pelo link (código $codigo)" test "$codigo" -eq 0
+    ofx_copia="$(mktemp -d)"
+    confere "pelicula-cli resolve --ofx-pasta copia o plugin OpenFX" bash -c \
+        "/usr/bin/pelicula-cli resolve --ofx-pasta '$ofx_copia' && test -f '$ofx_copia/PeliculaConverter.ofx.bundle/Contents/Linux-x86-64/PeliculaConverter.ofx'"
+    rm -rf "$ofx_copia"
 else
     # Sem o pelicula/cli.py, o Python do pacote sobe e só falha ao importar o módulo.
     confere "pelicula-cli sobe pelo link (pelicula/cli.py ainda não existe neste commit)" \

@@ -48,9 +48,10 @@ class _Bridge(QObject):
 class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
-                 perf: dict | None = None, gpu_name: str = ""):
+                 perf: dict | None = None, gpu_name: str = "", sequence=None):
         super().__init__(parent)
         self.info = info
+        self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
         self.values = values
         self.preset_name = preset_name
         self.in_out = in_out
@@ -73,7 +74,7 @@ class ExportDialog(QDialog):
         k = QLabel(_("EXPORTAR"))
         k.setObjectName("Kicker")
         lay.addWidget(k)
-        t = QLabel(Path(info.path).name)
+        t = QLabel((sequence.name or _("Montagem da edição")) if sequence is not None else Path(info.path).name)
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 14pt;")
         lay.addWidget(t)
@@ -522,11 +523,11 @@ class ExportDialog(QDialog):
         token = self._est_token
         cancel = threading.Event()
         self._est_cancel = cancel
-        info, values = self.info, dict(self.values)
+        info, values, seq = self.info, dict(self.values), self.sequence
 
         def run():
             try:
-                fps = export.measure_speed(info, values, s, cancel)
+                fps = export.measure_speed(info, values, s, cancel, sequence=seq)
             except Exception:  # noqa: BLE001
                 fps = 0.0
             if not cancel.is_set():
@@ -574,7 +575,8 @@ class ExportDialog(QDialog):
         a, b = (self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, -1))
         return export.ExportJob(info=self.info, values=dict(self.values), settings=self.settings(),
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
-                                name=f"{Path(self.path.text()).name}  •  {self.preset_name}")
+                                name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
+                                sequence=self.sequence)
 
 
 def _describe(key: str) -> str:
