@@ -93,6 +93,12 @@ jobs:
           python -m pip install "pytest>=8"
           python --version
 
+      # Plugin OpenFX do DaVinci Resolve (C++): MSVC no Windows (achado pelo vswhere), g++ no Linux.
+      # Os testes (tests/test_ofx.py) usam este mesmo binário e comparam com o app.
+      - name: Compilar o plugin OpenFX
+        shell: bash
+        run: python plugins/ofx/build.py
+
       - name: Testes
         shell: bash
         run: |
@@ -198,11 +204,33 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Versão $ver; pacotes PeliculaConverter-$label-$TARGET.*"
 
+      # O plugin OpenFX vai pronto dentro de todo pacote (.msi, .zip, .deb, .tar.gz): quem usa só
+      # clica em "Instalar" no app. PELICULA_EXIGIR_OFX=1 faz o PyInstaller falhar se ele faltar.
+      - name: Compilar o plugin OpenFX (MSVC / g++)
+        shell: bash
+        run: |
+          python plugins/ofx/build.py
+          ls -laR plugins/ofx/dist
+
       - name: Gerar os executáveis (PyInstaller)
         shell: bash
+        env:
+          PELICULA_EXIGIR_OFX: "1"
         run: |
           python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
           ls -la dist/PeliculaConverter
+
+      - name: Conferir o plugin OpenFX dentro do app
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in Windows) arch=Win64; cli=dist/PeliculaConverter/pelicula-cli.exe ;;
+                               *) arch=Linux-x86-64; cli=dist/PeliculaConverter/pelicula-cli ;; esac
+          f="dist/PeliculaConverter/_internal/ofx/PeliculaConverter.ofx.bundle/Contents/$arch/PeliculaConverter.ofx"
+          test -f "$f" || { echo "::error::O plugin OpenFX não entrou no app ($f)."; exit 1; }
+          # o app empacotado acha o plugin (sys._MEIPASS) e copia para uma pasta qualquer
+          "$cli" resolve --ofx-pasta ofx-copia
+          test -f "ofx-copia/PeliculaConverter.ofx.bundle/Contents/$arch/PeliculaConverter.ofx"
+          rm -rf ofx-copia
 
       # ------------------------------------------------------------ Windows: assinatura opcional
       # Só assina se os segredos WINDOWS_CERT_PFX_BASE64 e WINDOWS_CERT_PASSWORD existirem.

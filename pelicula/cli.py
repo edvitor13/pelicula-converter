@@ -6,7 +6,8 @@ Exemplos:
     pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --inicio 00:00:05 --fim 00:00:12
     pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
     pelicula-cli lut --preset vision3_250d -o 250d.cube
-    pelicula-cli resolve --instalar        (plugin do PeliculaConverter para o DaVinci Resolve)
+    pelicula-cli resolve --ofx-instalar    (plugin OpenFX: funciona no DaVinci Resolve gratuito)
+    pelicula-cli resolve --instalar        (DCTLs do Resolve Studio e LUTs)
     pelicula-cli presets | parametros | qualidades | info video.mp4 | ffmpeg --baixar | versao
 
 Projetos .plc com uma edição (modo Edição) exportam a montagem: cortes, cor dos clipes e som mixado.
@@ -493,10 +494,42 @@ def _resolve_module():
     return resolve
 
 
+def _ofx_status(resolve) -> None:
+    if not hasattr(resolve, "ofx_bundle_version"):
+        return
+    shipped = resolve.ofx_bundle_version()
+    installed = resolve.ofx_installed_version()
+    print(_("Plugin OpenFX (funciona no DaVinci Resolve gratuito):"))
+    print("  " + (_("neste app: versão {versao}").format(versao=shipped) if shipped
+                  else _("não vem neste app (compile com plugins/ofx/build_windows.bat ou build_linux.sh)")))
+    print("  " + (_("instalado em {pasta}: versão {versao}").format(pasta=resolve.ofx_install_dir(), versao=installed)
+                  if installed else _("não instalado ({pasta})").format(pasta=resolve.ofx_install_dir())))
+
+
 def cmd_resolve(a) -> int:
-    """Plugin do PeliculaConverter para o DaVinci Resolve (DCTLs e LUTs)."""
+    """Plugin do PeliculaConverter para o DaVinci Resolve (OpenFX, DCTLs e LUTs)."""
     resolve = _resolve_module()
+    ofx_any = a.ofx_instalar or a.ofx_pasta or a.ofx_fonte
+    if a.ofx_fonte:
+        files = resolve.ofx_generate(a.ofx_fonte)
+        print(_("{n} arquivos do código do plugin OpenFX gravados em {pasta}").format(n=len(files), pasta=a.ofx_fonte))
+    if a.ofx_pasta:
+        try:
+            dest = resolve.ofx_save_bundle(a.ofx_pasta)
+        except (OSError, RuntimeError) as exc:
+            raise CliError(str(exc)) from exc
+        print(_("Plugin OpenFX copiado para {pasta}").format(pasta=dest))
+    if a.ofx_instalar:
+        try:
+            dest = resolve.ofx_install()
+        except (OSError, RuntimeError) as exc:
+            raise CliError(_("Não foi possível instalar o plugin: {erro}").format(erro=exc)) from exc
+        print(_("Plugin OpenFX instalado em {pasta}. Reabra o DaVinci Resolve e use Color > OpenFX > "
+                "PeliculaConverter.").format(pasta=dest))
+    if ofx_any and not (a.listar or a.instalar or a.pasta):
+        return 0
     if a.listar or not (a.instalar or a.pasta):
+        _ofx_status(resolve)
         dirs = [d for d in resolve.lut_dirs() if d.is_dir()]
         if dirs:
             print(_("Pastas de LUT do DaVinci Resolve encontradas:"))
@@ -636,6 +669,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--destino", help=_("pasta de LUTs do Resolve (padrão: a encontrada automaticamente)"))
     p.add_argument("--pasta", help=_("grava o pacote do plugin nesta pasta (para instalar em outro computador)"))
     p.add_argument("--listar", action="store_true", help=_("mostra as pastas de LUT do Resolve encontradas"))
+    p.add_argument("--ofx-instalar", action="store_true",
+                   help=_("instala o plugin OpenFX (funciona no Resolve gratuito; pede administrador)"))
+    p.add_argument("--ofx-pasta", help=_("copia o plugin OpenFX (.ofx.bundle) para esta pasta"))
+    p.add_argument("--ofx-fonte", help=_("gera o código C++ do plugin OpenFX nesta pasta (desenvolvimento)"))
     p.set_defaults(func=cmd_resolve)
 
     p = sub.add_parser("versao", aliases=["version"], help=_("mostra a versão"))

@@ -46,6 +46,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **MTF da película** (lente): suaviza a nitidez digital fina por enquadramento, com quantidade.
 - **Curva** no painel *Ajustes*: mostra a curva do look em R, G e B (calculada na GPU com o mesmo
   caminho de cor da exportação).
+- **Plugin OpenFX do PeliculaConverter — funciona no DaVinci Resolve gratuito** (o DCTL exige o
+  Studio): um efeito nativo em C++ com o look inteiro (perfil da câmera, Laboratório, cor da película,
+  grão, halação, bloom, lente e MTF, tremor, defeitos e moldura), 44 presets e carregar um look `.json`
+  exportado pelo app. O código de cor é gerado das mesmas tabelas e da mesma matemática do app (cor a
+  menos de 0,0001; quadro inteiro a ~1 nível de 8 bits). Compilado pelo GitHub Actions (Windows e Linux)
+  e embutido em todos os pacotes; instale em *Configurações → Plugin para o DaVinci Resolve… → Instalar
+  o plugin OpenFX* (pede administrador) ou com `pelicula-cli resolve --ofx-instalar`. Calcula na CPU.
 - Plugin do DaVinci: nó **PeliculaConverter Laboratorio** com **Mostrar curva**, todos os controles
   novos nos nós Cor e Laboratorio e o MTF no nó Textura.
 - **Plugin para o DaVinci Resolve** (*Configurações → Plugin para o DaVinci Resolve…* ou

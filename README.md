@@ -76,8 +76,8 @@ O app tem **dois modos**, escolhidos no topo da janela:
   velocidade, acerte a cor e a luz de cada clipe (rodas de cor, curva, HSL, nitidez…) e trate o som
   (volume, fades, graves e agudos, voz, ruído). A montagem vira a entrada do look de película.
 
-E vem com um **plugin para o DaVinci Resolve** (DCTLs e LUTs) que leva os mesmos looks para dentro
-do Resolve.
+E vem com um **plugin para o DaVinci Resolve** que leva os mesmos looks para dentro do Resolve —
+um efeito **OpenFX que funciona também no Resolve gratuito**, além de DCTLs e LUTs.
 
 Toda a interface está em português do Brasil.
 
@@ -202,8 +202,9 @@ quadros vizinhos:
   que o LUT espera e se ele entra depois do look ou no lugar dele.
 - **Exportar LUT**: grava a parte de cor do look atual num `.cube` de 33 ou 65 pontos, ou gera um
   **pacote de LUTs gratuito** com todos os presets.
-- **Plugin para o DaVinci Resolve**: DCTLs *PeliculaConverter Cor*, *Textura* e *Projetor*, um DCTL
-  por preset e os LUTs de todos os presets, instalados com um clique.
+- **Plugin para o DaVinci Resolve**: o efeito OpenFX *PeliculaConverter* (look inteiro, funciona no
+  Resolve **gratuito**) e, para o Studio, os DCTLs *Cor*, *Textura* e *Projetor*, um DCTL por preset e os
+  LUTs de todos os presets, instalados com um clique.
 
 ### Visualização
 - Comparação **Película / Dividido / Lado a lado / Original**, botão direito para espiar o original.
@@ -807,7 +808,25 @@ como no laboratório) e vira a **cópia** projetada. Os processos **Technicolor 
 
 ## Plugin para o DaVinci Resolve
 
-O PeliculaConverter gera um pacote para o Resolve com os mesmos looks do app:
+### Plugin OpenFX — funciona no Resolve gratuito
+
+O app traz, já compilado, o efeito **OpenFX *PeliculaConverter***: o look inteiro num efeito só — perfil
+da câmera, Laboratório (negativo, cópia, Hue Split, densidades, bleach bypass, luzes da copiadora), cor
+da película, grão, halação, bloom, névoa, lente e MTF, tremor, defeitos e moldura —, com a mesma conta do
+app (cor igual a menos de 0,0001; quadro inteiro a ~1 nível de 8 bits). Funciona no **DaVinci Resolve
+gratuito** e no Studio, nas páginas *Color* e *Edit*.
+
+- Instale em **Configurações → Plugin para o DaVinci Resolve… → Instalar o plugin OpenFX** (o sistema
+  pede permissão de administrador, porque a pasta do OpenFX é do sistema) ou com
+  `pelicula-cli resolve --ofx-instalar`, e reabra o Resolve.
+- Na página **Color**, arraste **OpenFX → PeliculaConverter** para um nó; na **Edit**, *Effects → OpenFX →
+  PeliculaConverter*. Escolha um dos **44 presets** ou **carregue um look `.json`** exportado pelo app.
+- Calcula na CPU (1080p: ~0,25–0,3 s por quadro com o look completo; 4K: ~1 s); use o *Render Cache* do
+  Resolve para tocar em tempo real.
+
+### DCTLs e LUTs (Resolve Studio)
+
+O PeliculaConverter também gera um pacote de DCTLs e LUTs com os mesmos looks do app:
 
 - **PeliculaConverter Laboratorio** (DCTL): o nó no estilo dos plugins de emulação — perfil de
   entrada, exposição, negativo, cópia, luzes da copiadora, Hue Split, densidades, saturação do filme,
@@ -824,7 +843,8 @@ Instale em **Configurações → Plugin para o DaVinci Resolve…** (ou `pelicul
 e reabra o Resolve. Na página **Color**, use nós em série — *Laboratorio* (ou *Cor*) → *Textura* →
 *Projetor* — com o
 efeito **OpenFX → ResolveFX Color → DCTL**. O plugin DCTL precisa do **DaVinci Resolve Studio**;
-os LUTs funcionam em qualquer versão. Guia completo: [docs/DAVINCI.md](docs/DAVINCI.md).
+os LUTs funcionam em qualquer versão (e o plugin OpenFX, acima, no gratuito). Guia completo:
+[docs/DAVINCI.md](docs/DAVINCI.md).
 
 ## Modo terminal (pelicula-cli)
 
@@ -844,7 +864,7 @@ tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável 
 | `qualidades` (`qualities`) | Lista as qualidades de exportação (para um arquivo, se informado) |
 | `info` | Mostra resolução, fps, codec e áudio de um arquivo |
 | `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
-| `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--instalar`, `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
+| `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--ofx-instalar` (plugin OpenFX, Resolve gratuito), `--ofx-pasta DIR`, `--instalar` (DCTLs e LUTs), `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
 | `versao` (`version`) | Mostra a versão |
 
 Exemplos:
@@ -866,7 +886,8 @@ pelicula-cli exportar edicao.plc -o montagem.mp4 --preset lab_technicolor3
 
 # plugin do DaVinci Resolve
 pelicula-cli resolve --listar
-pelicula-cli resolve --instalar
+pelicula-cli resolve --ofx-instalar      # plugin OpenFX (funciona no Resolve gratuito)
+pelicula-cli resolve --instalar          # DCTLs e LUTs (Resolve Studio)
 pelicula-cli resolve --pasta "D:/plugins/PeliculaConverter"
 
 # ver o que existe

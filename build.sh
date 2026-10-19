@@ -18,6 +18,18 @@ fi
 echo " Instalando o PyInstaller no ambiente .venv..."
 "$PY" -m pip install --upgrade "pyinstaller>=6.10"
 
+if [ "$(uname -s)" != Darwin ]; then
+    echo
+    echo " Compilando o plugin OpenFX do DaVinci Resolve (vai pronto dentro do app)..."
+    codigo=0
+    bash plugins/ofx/build_linux.sh || codigo=$?
+    if [ "$codigo" -eq 2 ]; then
+        echo " Sem g++ (sudo apt install g++): o pacote sai sem o plugin OpenFX."
+    elif [ "$codigo" -ne 0 ]; then
+        exit "$codigo"
+    fi
+fi
+
 echo
 echo " Gerando os executáveis..."
 "$PY" -m PyInstaller --noconfirm --clean PeliculaConverter.spec

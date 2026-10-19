@@ -47,7 +47,7 @@ from .i18n import _
 
 PACKAGE_NAME = "PeliculaConverter"
 MARKER = "VERSAO.txt"
-DCTL, GLSL = "dctl", "glsl"
+DCTL, GLSL, CPP = "dctl", "glsl", "cpp"  # cpp: plugin OpenFX (pelicula/ofx.py)
 KINDS = ("cor", "laboratorio", "textura", "projetor")
 COLOR_KINDS = ("cor", "laboratorio")  # nós só de cor (entrada por pixel, funcionam como LUT)
 FILE_NAMES = {"cor": "PeliculaConverter Cor.dctl", "laboratorio": "PeliculaConverter Laboratorio.dctl",
@@ -314,6 +314,8 @@ def _table(dialect: str, name: str, values: Iterable[float], typ: str = "float")
     lit = [flt(v) for v in vals] if typ == "float" else [str(int(v)) for v in vals]
     if dialect == DCTL:
         return f"__CONSTANT__ {typ} {name}[{len(vals)}] = {{ {', '.join(lit)} }};\n"
+    if dialect == CPP:
+        return f"static const {typ} {name}[{len(vals)}] = {{ {', '.join(lit)} }};\n"
     return f"const {typ} {name}[{len(vals)}] = {typ}[{len(vals)}]({', '.join(lit)});\n"
 
 
@@ -593,14 +595,29 @@ PC_DEVICE float3 pc_aged(float3 y) {
 }
 """
 
-# Corpo da função principal do nó Cor. Variáveis v_<chave> já estão no formato do app.
-B_COR = r"""
-    float3 code = rgb;
+# Perfil de entrada (curva + gamut): código do vídeo `code` → luz linear `lin_in`. Também no plugin OFX.
+B_INPUT = r"""
     int ent = v_entrada;
     float3 lin_in = pc_to_linear(code, PC_IN_ID[ent]);
     lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
                      make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
                      make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
+"""
+
+# Exposição e balanço (u_gain do app) sobre `lin`; `gx` soma ganhos por canal (cintilação etc., no OFX).
+B_GAIN = r"""
+    float tmp = v_temperatura / 100.0f;
+    float tnt = v_tint / 100.0f;
+    lin = make_float3(_fmaxf(lin.x, 0.0f) * _exp2f(v_exposicao + 0.28f * tmp + 0.08f * tnt + gx.x),
+                      _fmaxf(lin.y, 0.0f) * _exp2f(v_exposicao - 0.22f * tnt + gx.y),
+                      _fmaxf(lin.z, 0.0f) * _exp2f(v_exposicao - 0.38f * tmp + 0.08f * tnt + gx.z));
+"""
+
+# Corpo da função principal do nó Cor. Variáveis v_<chave> já estão no formato do app.
+B_COR = r"""
+    float3 code = rgb;
+""" + B_INPUT + r"""
+    float3 gx = pc_s3(0.0f);
     // "Mostrar curva": uma segunda passada com um cinza de -8 a +8 stops ao longo da largura
     int npass = (v_mostrar_curva == 1) ? 2 : 1;
     float curve_t = -8.0f + 16.0f * (PC_F(p_X) + 0.5f) / PC_F(p_Width);
@@ -609,11 +626,7 @@ B_COR = r"""
     for (int pass = 0; pass < npass; pass = pass + 1) {
     float3 lin = lin_in;
     if (pass == 1) lin = pc_s3(0.18f * _exp2f(curve_t));
-    float tmp = v_temperatura / 100.0f;
-    float tnt = v_tint / 100.0f;
-    lin = make_float3(_fmaxf(lin.x, 0.0f) * _exp2f(v_exposicao + 0.28f * tmp + 0.08f * tnt),
-                      _fmaxf(lin.y, 0.0f) * _exp2f(v_exposicao - 0.22f * tnt),
-                      _fmaxf(lin.z, 0.0f) * _exp2f(v_exposicao - 0.38f * tmp + 0.08f * tnt));
+""" + B_GAIN + r"""
 /*LAB*/
 /*LOOK*/
     if (pass == 0) res = pc_clamp3(pc_lerp3(code, y, v_mix_geral), 0.0f, 1.0f);
@@ -1860,7 +1873,10 @@ Como usar (pagina Color):
     Resolve gratuito, no Premiere, no Final Cut e em qualquer programa que aceite .cube.
 
 Resolve Studio x gratuito: o efeito DCTL (OpenFX > DCTL) e do DaVinci Resolve Studio. No Resolve
-gratuito use os LUTs da pasta LUTs (clique com o botao direito no no > LUT).
+GRATUITO use o plugin OpenFX "PeliculaConverter" (o look inteiro num efeito so): instale pelo app em
+Configuracoes > Plugin para o DaVinci Resolve > Plugin OpenFX > Instalar (ou "pelicula-cli resolve
+--ofx-instalar") e use Color > OpenFX > PeliculaConverter. Os LUTs da pasta LUTs tambem funcionam
+(clique com o botao direito no no > LUT).
 O grao e os defeitos mudam a cada quadro a partir do Resolve 19.1 (TIMELINE_FRAME_INDEX).
 
 Atualizar: no PeliculaConverter, Configuracoes > Plugin para o DaVinci Resolve > Instalar (ou
@@ -1878,7 +1894,9 @@ Textura" (grain, halation, bloom, mist, softness, film MTF, aberration, vignette
 Projetor" (gate weave, flicker, dust, scratches, hair, stains, light leaks, frame mask). Color page: add
 three serial nodes and drop OpenFX > ResolveFX Color > DCTL on each one. Set "Perfil do video" to the
 camera log (or put a Color Space Transform to Rec.709/Gamma 2.4 before it). The DCTL effect requires
-DaVinci Resolve Studio; the free version can use the .cube LUTs in the LUTs folder. Grain and damage
+DaVinci Resolve Studio; on the free version use the "PeliculaConverter" OpenFX plugin (install it from
+the app: Settings > DaVinci Resolve plugin > OpenFX plugin, then Color > OpenFX > PeliculaConverter) or
+the .cube LUTs in the LUTs folder. Grain and damage
 animate per frame on Resolve 19.1+. Presets/ has one node set per app preset. Update from the app
 (Settings > DaVinci Resolve plugin > Install) and press Refresh in Resolve.
 
@@ -2079,3 +2097,46 @@ def control_counts(kind: str) -> dict[str, int]:
     for c in spec(kind).controls:
         out[c.kind] = out.get(c.kind, 0) + 1
     return out
+
+
+# ------------------------------------------------------------------ plugin OpenFX (funciona no Resolve gratuito)
+# A implementação fica em ofx.py (que importa este módulo); aqui só os atalhos usados pela janela e pela CLI.
+OFX_BUNDLE_NAME = "PeliculaConverter.ofx.bundle"
+
+def ofx_bundle_path() -> Path | None:
+    """Pacote PeliculaConverter.ofx.bundle que vem com o app (ou compilado em plugins/ofx/dist)."""
+    from . import ofx
+    return ofx.bundle_path()
+
+
+def ofx_bundle_version() -> str | None:
+    from . import ofx
+    return ofx.bundle_version(ofx.bundle_path())
+
+
+def ofx_install_dir() -> Path:
+    """Pasta padrão do OpenFX: Windows "%CommonProgramFiles%/OFX/Plugins", Linux /usr/OFX/Plugins."""
+    from . import ofx
+    return ofx.install_dir()
+
+
+def ofx_installed_version(folder: str | Path | None = None) -> str | None:
+    from . import ofx
+    return ofx.installed_version(folder)
+
+
+def ofx_install(target_dir: str | Path | None = None) -> Path:
+    """Instala o plugin OpenFX (pede administrador quando a pasta é do sistema)."""
+    from . import ofx
+    return ofx.install(target_dir)
+
+
+def ofx_save_bundle(dest_dir: str | Path) -> Path:
+    from . import ofx
+    return ofx.save_bundle(dest_dir)
+
+
+def ofx_generate(dest_dir: str | Path | None = None) -> list[Path]:
+    """Gera o código C++ do plugin OpenFX (kernels e parâmetros) a partir dos kernels deste módulo."""
+    from . import ofx
+    return ofx.generate(dest_dir)

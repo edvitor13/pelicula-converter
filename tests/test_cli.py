@@ -214,6 +214,55 @@ class _FakeResolve:
         return self.tmp / "LUT" / "PeliculaConverter"
 
 
+class _FakeResolveOfx(_FakeResolve):
+    """Com o plugin OpenFX (nada é instalado de verdade: pastas temporárias)."""
+
+    def __init__(self, tmp):
+        super().__init__(tmp)
+        self.ofx_installed = False
+
+    def ofx_bundle_version(self):
+        return "9.8.7"
+
+    def ofx_install_dir(self):
+        return self.tmp / "OFX" / "Plugins"
+
+    def ofx_installed_version(self, folder=None):
+        return "9.8.7" if self.ofx_installed else None
+
+    def ofx_install(self, target_dir=None):
+        self.ofx_installed = True
+        return self.ofx_install_dir() / "PeliculaConverter.ofx.bundle"
+
+    def ofx_save_bundle(self, dest):
+        from pathlib import Path
+        b = Path(dest) / "PeliculaConverter.ofx.bundle"
+        b.mkdir(parents=True)
+        return b
+
+    def ofx_generate(self, dest=None):
+        from pathlib import Path
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        return [Path(dest) / "pc_kernels.h", Path(dest) / "pc_params.h"]
+
+
+def test_resolve_command_ofx(tmp_path, capsys, monkeypatch):
+    import sys
+    fake = _FakeResolveOfx(tmp_path)
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", fake)
+    import pelicula
+    monkeypatch.setattr(pelicula, "resolve", fake, raising=False)
+    assert cli.main(["resolve", "--listar"]) == 0
+    out = capsys.readouterr().out
+    assert "OpenFX" in out and "9.8.7" in out
+    assert cli.main(["resolve", "--ofx-pasta", str(tmp_path / "copia")]) == 0
+    assert (tmp_path / "copia" / "PeliculaConverter.ofx.bundle").is_dir()
+    assert cli.main(["resolve", "--ofx-instalar"]) == 0 and fake.ofx_installed
+    assert fake.installed is None  # só o OpenFX: os DCTLs não foram instalados
+    assert cli.main(["resolve", "--ofx-fonte", str(tmp_path / "fonte")]) == 0
+    assert "2" in capsys.readouterr().out
+
+
 def test_resolve_command(tmp_path, capsys, monkeypatch):
     import sys
     fake = _FakeResolve(tmp_path)

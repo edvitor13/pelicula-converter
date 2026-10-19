@@ -56,7 +56,10 @@ pelicula/
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação), forma de onda
-  resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs
+  resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
+                             dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
+  ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
+                             instalação (pasta do OpenFX, com administrador)
   ui/                        main_window, export_dialog, queue_dialog, deps_dialog, viewer, looks,
                              widgets, store (desfazer/refazer), theme, icons, prefs (QSettings),
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
@@ -64,7 +67,12 @@ pelicula/
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci)
-tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…)
+plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
+                             generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
+                             build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
+tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated)
+tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
+                             (host OpenFX mínimo em ctypes para tests/test_ofx.py)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
 docs/                        ARQUITETURA.md, EFEITOS.md, ASSINATURA.md, img/ (capturas de tela)
 PeliculaConverter.spec       PyInstaller (onedir com PeliculaConverter + pelicula-cli, BUNDLE para macOS)
@@ -144,6 +152,9 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     Mudou a cor em `shaders.py`? Atualize o kernel em `resolve.py` e rode esse teste. Nada de
     instalar no Resolve do usuário em testes (use pastas temporárias). DCTL: sem *swizzles*, sem
     sobrecarga de funções (OpenCL), literais com `f`, até 64 controles por tipo e 5 seletores de cor.
+    O plugin OpenFX usa o mesmo kernel (dialeto `cpp`): `plugins/ofx/generated` é gerado e tem que estar
+    em dia (`tests/test_ofx.py`); nunca instale em `Common Files\OFX\Plugins` ou `/usr/OFX/Plugins` em
+    testes nem copie código de exemplo da Blackmagic para o repositório.
 
 ## Rodar
 
@@ -203,6 +214,7 @@ Testes do modo Edição e do plugin:
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
+| `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
 
@@ -275,6 +287,29 @@ do app? Porte a mudança para o kernel do DCTL e rode `tests/test_resolve.py` (p
 documentadas em `docs/DAVINCI.md`. São quatro tipos de nó (`COLOR_KINDS` e `NODE_LABELS`):
 *Laboratorio* (entrada + laboratório inteiro + "Mostrar curva"), *Cor* (laboratório + cor
 paramétrica + cópia), *Textura* e *Projetor*; cada um tem no máximo 64 controles de cada tipo.
+
+### Plugin OFX (OpenFX, Resolve gratuito)
+
+O plugin é C++ e reaproveita a matemática dos DCTLs:
+
+1. Mudou a cor, um kernel de `resolve.py`, um parâmetro, um preset ou uma tabela de `look.py`? Rode
+   `python tools/gerar_ofx.py` (regrava `plugins/ofx/generated/`) e commite os arquivos gerados;
+   `tests/test_ofx.py::test_generated_files_are_up_to_date` falha se esquecer.
+2. Mudou uma **passada** do `Engine.render()` (desfoque, mipmap, grão, ordem da composição em `FINAL`)?
+   Mude também `plugins/ofx/src/pc_core.cpp` — é a única parte escrita à mão — e rode
+   `tests/test_ofx.py` (paridade do quadro com `Engine.render`).
+3. Compile: `plugins\ofx\build_windows.bat` (MSVC; acha o `vcvars64.bat` pelo vswhere) ou
+   `bash plugins/ofx/build_linux.sh` (g++). Saída: `plugins/ofx/dist/PeliculaConverter.ofx.bundle`
+   (`Contents/Win64` ou `Contents/Linux-x86-64`, `Contents/Resources/pelicula-ofx.txt` com a versão e a
+   impressão digital das fontes). Ponto flutuante preciso: nada de `/fp:fast` ou `-ffast-math`.
+4. Parâmetro novo do app aparece sozinho no plugin se estiver num dos nós Cor/Textura/Projetor de
+   `resolve.py`; o nome do parâmetro no OFX é a chave do app — **não renomeie** (projetos do Resolve
+   guardam os valores por esse nome). O identificador do plugin (`com.peliculaconverter.pelicula`) também
+   não muda; a versão segue `__version__` (maior.menor).
+5. O pacote do app leva o plugin pronto (spec: `_internal/ofx/`; CI com `PELICULA_EXIGIR_OFX=1`); o
+   usuário só clica em *Instalar o plugin OpenFX* (`ofx.install()`, com UAC/pkexec). Testes instalam só em
+   pastas temporárias. O OpenFX em `plugins/ofx/openfx` é a cópia oficial (BSD-3, `SOURCE.txt` com commit
+   e SHA-256): não edite.
 
 ### Adicionar um preset pronto
 
@@ -365,7 +400,12 @@ A pasta do PyInstaller (`dist/PeliculaConverter/`, com `PeliculaConverter[.exe]`
   (ou `WINDOWS_CERT_SHA1` no build local); opções e custos em [docs/ASSINATURA.md](docs/ASSINATURA.md).
 - **Build local**: `build.bat` (Windows; o `.msi` só se o WiX estiver instalado:
   `dotnet tool install --global wix --version 5.0.2`) ou `bash build.sh` (Linux; o `.deb` só com
-  `dpkg-deb`).
+  `dpkg-deb`). Os dois compilam antes o plugin OpenFX quando há compilador C++ (sem ele, o pacote sai
+  sem o plugin e a janela do Resolve explica como compilar).
+- **Plugin OpenFX dentro dos pacotes**: o CI compila `plugins/ofx` (MSVC/g++) antes do PyInstaller, que
+  o põe em `_internal/ofx/PeliculaConverter.ofx.bundle` (o `.msi` colhe a pasta inteira, o `.zip`, o
+  `.deb` e o `.tar.gz` também). `PELICULA_EXIGIR_OFX=1` faz o PyInstaller falhar sem ele;
+  `verificar_msi.ps1` e `verificar_deb.sh` conferem o arquivo e o `pelicula-cli resolve --ofx-pasta`.
 
 ### CI e Discord
 
