@@ -7,6 +7,37 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Modo Edição** (seletor *Película | Edição* no topo, Ctrl+1 / Ctrl+2): montagem em faixas de
+  vídeo e de áudio antes do look de película. Importar vídeos, imagens e músicas (Ctrl+I ou
+  arrastar), dividir no cursor (S), aparar pelas bordas, mover entre faixas (sobrescreve o que
+  estiver embaixo), apagar com ou sem fechar o espaço, ímã, zoom da linha do tempo, imagem e som
+  ligados (dá para desligar), velocidade (câmera lenta e acelerado), congelar quadro e transições
+  (dissolver, surgir do preto/branco, sumir). Desfazer/refazer de toda a edição.
+- **Cor e luz por clipe**, simples de usar: exposição, contraste, realces, sombras, brancos, pretos,
+  brilho, temperatura, tonalidade, vibração, saturação, matiz, rodas de cor (sombras, tons médios,
+  altas luzes), curva de tons por faixa, cor por faixa (HSL de 8 cores), nitidez, clareza, desfoque,
+  redução de ruído, vinheta, desbotado, enquadramento (escala, posição, rotação, espelhar, cortar,
+  opacidade, mesclagem). Ajustes rápidos (Mais vivo, Quente, Frio, Suave, Contraste, P&B, Antigo),
+  **cor automática**, copiar/colar ajustes e aplicar a todos os clipes.
+- **Som por clipe**: volume, mudo, balanço, aumentar no início e diminuir no fim, graves, médios,
+  agudos, realçar voz, redução de ruído e normalizar volume; faixas com mudo, solo, trava e volume;
+  forma de onda na linha do tempo. A prévia toca a mesma mixagem que a exportação grava.
+- **Medidores de cor**: histograma, forma de onda, parada RGB e vetorscópio.
+- O modo Película aplica o look na montagem (exportação, salvar quadro, estimativa e fila
+  incluídos). Projetos `.plc` guardam a montagem (`"formato": 2` só quando há edição).
+- **Laboratório (negativo e cópia)**: emulação por densidade, como no laboratório de verdade —
+  negativo (curva característica e sensibilidade de cada camada), revelação forçada (push/pull),
+  luzes da copiadora em pontos (vermelho, verde, azul e densidade), película de cópia com diafonia
+  dos corantes e processos **Technicolor 3 tiras** (com chave preta), **Technicolor 2 cores** e
+  **retenção de prata**. O cinza médio sai neutro em qualquer combinação. Novos presets no grupo
+  *Laboratório*.
+- **Controle de pele** no look: matiz e luz da pele, além da saturação.
+- **Plugin para o DaVinci Resolve** (*Configurações → Plugin para o DaVinci Resolve…* ou
+  `pelicula-cli resolve --instalar`): DCTLs *PeliculaConverter Cor*, *Textura* e *Projetor* (a
+  ordem dos nós é como LOOK → LAB → PRINT), um DCTL por preset e LUTs `.cube` de todos os presets
+  para o Resolve gratuito e o Premiere. A cor do plugin é conferida contra o app nos testes.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

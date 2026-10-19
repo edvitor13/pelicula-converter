@@ -31,6 +31,9 @@
   - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
   - [Dependências e por que cada uma existe](#dependências-e-por-que-cada-uma-existe)
 - [Guia de uso](#guia-de-uso)
+- [Modo Edição: montar, cortar e ajustar antes da película](#modo-edição-montar-cortar-e-ajustar-antes-da-película)
+- [Laboratório: negativo, luzes da copiadora e cópia](#laboratório-negativo-luzes-da-copiadora-e-cópia)
+- [Plugin para o DaVinci Resolve](#plugin-para-o-davinci-resolve)
 - [Modo terminal (pelicula-cli)](#modo-terminal-pelicula-cli)
 - [Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)](#arquivos-raw-n-raw-r3d-braw-prores-raw)
 - [Bitolas e formatos de película](#bitolas-e-formatos-de-película)
@@ -65,6 +68,16 @@ quadro passa por uma cadeia parecida com a da película real.
 
 Tudo roda em shaders OpenGL 3.3 na placa de vídeo. A prévia é a mesma conta da exportação, quadro a
 quadro: o que você vê é o que vai para o arquivo final.
+
+O app tem **dois modos**, escolhidos no topo da janela:
+
+- **Película** — aplica o look de película num vídeo, numa imagem ou na sua montagem.
+- **Edição** — um editor simples, em faixas de vídeo e de áudio: junte clipes, corte, mude a
+  velocidade, acerte a cor e a luz de cada clipe (rodas de cor, curva, HSL, nitidez…) e trate o som
+  (volume, fades, graves e agudos, voz, ruído). A montagem vira a entrada do look de película.
+
+E vem com um **plugin para o DaVinci Resolve** (DCTLs e LUTs) que leva os mesmos looks para dentro
+do Resolve.
 
 Toda a interface está em português do Brasil.
 
@@ -117,6 +130,31 @@ quadros vizinhos:
 - **Preto e branco** com filtros de lente (pancromático, vermelho, laranja, amarelo, verde, azul) e
   **viragens** (sépia, selênio, cianótipo, ouro).
 
+### Laboratório (negativo → cópia)
+- **Emulação por densidade**, como num laboratório de cinema: o negativo (curva característica de
+  cada camada, sensibilidade e diafonia), a **revelação forçada** (push/pull), as **luzes da
+  copiadora** em pontos (vermelho, verde, azul e densidade, 12 pontos = 1 stop) e a película de
+  **cópia** (2383, 2393, 3513, 2302 P&B ou o negativo escaneado, sem cópia).
+- **Processos**: **Technicolor 3 tiras** (três registros P&B, corantes puros e chave preta),
+  **Technicolor 2 cores** (anos 20) e **retenção de prata** (bleach bypass).
+- O cinza médio sai neutro em qualquer combinação; exposição + luzes da copiadora funcionam como
+  no laboratório de verdade. Controle de **pele** (matiz, saturação e luz) no look.
+
+### Edição
+- **Faixas de vídeo e de áudio**, imagem e som ligados, importar vídeos, imagens e músicas.
+- **Dividir no cursor**, lâmina, aparar pelas bordas, mover entre faixas, apagar fechando o espaço,
+  ímã, zoom da linha do tempo, desfazer/refazer.
+- **Velocidade** (0,1× a 8×), **congelar quadro** e **transições** (dissolver, surgir do preto ou
+  do branco, sumir).
+- **Cor e luz por clipe**: exposição, contraste, realces, sombras, brancos, pretos, temperatura,
+  tonalidade, vibração, saturação, matiz, **rodas de cor**, curva de tons, **HSL de 8 cores**,
+  nitidez, clareza, desfoque, redução de ruído, vinheta, desbotado; enquadramento (escala,
+  posição, rotação, espelhar, cortar, opacidade e mesclagem). **Cor automática**, ajustes rápidos
+  e copiar/colar ajustes entre clipes.
+- **Som por clipe**: volume, mudo, balanço, fades, graves, médios, agudos, realçar voz, redução de
+  ruído e normalizar; faixas com mudo, solo, trava e volume; forma de onda na linha do tempo.
+- **Medidores**: histograma, forma de onda, parada RGB e vetorscópio.
+
 ### Entrada
 - **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
   ARRI LogC3 (EI 800), Panasonic V-Log, RED Log3G10 (RWG — para R3D e Nikon N-RAW convertidos),
@@ -142,8 +180,9 @@ quadros vizinhos:
   (furos escuros).
 
 ### Presets e LUTs
-- **33 presets prontos** em seis grupos (Cinema 35 mm, Bitolas e formatos, Preto e branco,
-  Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro e busca.
+- **42 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
+  branco, Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro
+  e busca.
 - **Presets do usuário**: salvar como, atualizar, excluir, voltar ao preset, importar e exportar
   em `.json`.
 - **LUT externo** `.cube` (3D): usa os LUTs que **já estão instalados** pelo Premiere Pro e pelo
@@ -151,6 +190,8 @@ quadros vizinhos:
   que o LUT espera e se ele entra depois do look ou no lugar dele.
 - **Exportar LUT**: grava a parte de cor do look atual num `.cube` de 33 ou 65 pontos, ou gera um
   **pacote de LUTs gratuito** com todos os presets.
+- **Plugin para o DaVinci Resolve**: DCTLs *PeliculaConverter Cor*, *Textura* e *Projetor*, um DCTL
+  por preset e os LUTs de todos os presets, instalados com um clique.
 
 ### Visualização
 - Comparação **Película / Dividido / Lado a lado / Original**, botão direito para espiar o original.
@@ -432,6 +473,7 @@ mesmo preset aparece na lista do painel **Ajustes**.
 | Grupo | Presets |
 |---|---|
 | Cinema 35 mm | Kodak Vision3 250D · Kodak Vision3 50D · Kodak Vision3 200T · Kodak Vision3 500T · Fujifilm Eterna 250D · Fujifilm Eterna Vivid 500 · Blockbuster (teal & orange) |
+| Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) |
 | Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm |
 | Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo |
 | Fotografia | Kodak Portra 400 · Kodak Ektar 100 · Fujifilm Velvia 50 · Fujifilm Superia 400 · CineStill 800T |
@@ -439,7 +481,8 @@ mesmo preset aparece na lista do painel **Ajustes**.
 | Básicos | Só textura (cor original) · Original (sem efeito) |
 
 Todos os presets de película partem da mesma base (35 mm, ISO 250, cópia Kodak 2383, grão, halação,
-bloom e lente ligados) e mudam só o que os diferencia.
+bloom e lente ligados) e mudam só o que os diferencia. Os do grupo **Laboratório** desligam a cor
+paramétrica e usam a emulação por densidade (negativo → copiadora → cópia).
 
 ### 3. Ajustar
 
@@ -649,8 +692,17 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
 | `F11` | Prévia em tela cheia, com a barra da prévia e o player (`Esc` sai) |
 | `Shift+F11` | Janela inteira em tela cheia, com os painéis |
+| `Ctrl+1` / `Ctrl+2` | Modo Película / modo Edição |
+| `Ctrl+I` | Importar para a edição |
+| `S` (Edição) | Dividir no cursor |
+| `Delete` / `Shift+Delete` (Edição) | Apagar / apagar e fechar o espaço |
+| `B` / `V` / `N` (linha do tempo) | Lâmina / seleção / ímã |
+| `Ctrl` + roda (linha do tempo) | Zoom da linha do tempo |
+| `Ctrl+Alt+C` / `Ctrl+Alt+V` (Edição) | Copiar / colar os ajustes de cor do clipe |
 
-A lista também está em **Configurações → Atalhos do teclado**.
+No modo Edição, `Ctrl+Z` e `Ctrl+Y` desfazem e refazem a montagem (cortes, movimentos e ajustes dos
+clipes); no modo Película, os ajustes do look. A lista também está em **Configurações → Atalhos do
+teclado**.
 
 ### 9. Projetos (.plc): continuar de onde parou
 
@@ -667,6 +719,10 @@ qualidade da prévia e uma miniatura.
 - Também abre com dois cliques no `.plc` (quando instalado pelo `.msi`/`.deb`), arrastando o arquivo
   para a janela ou pela linha de comando (`PeliculaConverter projeto.plc`).
 - O `.plc` é JSON legível (UTF-8). Valores desconhecidos ou fora da faixa são corrigidos ao abrir.
+- Com o **modo Edição**, o projeto guarda também a montagem (faixas, clipes, cortes e ajustes de
+  cada clipe, com o caminho relativo de cada arquivo) e o modo em que você estava. Esses projetos
+  são gravados com `"formato": 2`; projetos sem edição continuam no formato 1 e abrem nas versões
+  antigas.
 
 ### 10. Idiomas, boas-vindas e novidades
 
@@ -697,6 +753,63 @@ Quando há, aparece **Atualizar para X.Y.Z** na barra de status e na tela de boa
 - O repositório precisa ser **público** para a verificação funcionar sem login. Para testar com o
   repositório privado, defina `PELICULA_GITHUB_TOKEN` com um token de leitura.
 
+## Modo Edição: montar, cortar e ajustar antes da película
+
+Clique em **Edição** no topo da janela (ou `Ctrl+2`). O arquivo que estava aberto já aparece na
+linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados.
+
+1. **Importar** (`Ctrl+I`, botão *Importar* ou arrastar arquivos para a linha do tempo): vídeos e
+   imagens vão para o fim da faixa de vídeo; músicas entram no começo da primeira faixa de áudio
+   livre. Tudo fica também no painel **Mídia**, de onde dá para arrastar de novo.
+2. **Cortar**: posicione o cursor e aperte **S** (divide), ou use a **lâmina** (B) e clique no
+   clipe. **Delete** apaga; **Shift+Delete** apaga e fecha o espaço. Arraste as bordas para aparar
+   e o meio para mover (o que estiver embaixo é sobrescrito). O **ímã** (N) gruda nos cortes.
+3. **Ajustar a cor**: selecione o clipe e use o painel **Clipe** à direita — *Automático* acerta
+   exposição, níveis e balanço de branco; os ajustes rápidos dão um ponto de partida; as seções
+   *Luz*, *Cor*, *Rodas de cor*, *Curva de tons*, *Cor por faixa (HSL)*, *Detalhe* e *Efeitos*
+   refinam. **Copiar/Colar ajustes** (`Ctrl+Alt+C` / `Ctrl+Alt+V`) e **Aplicar a todos** igualam a
+   cor da montagem. Os medidores (forma de onda, parada RGB, vetorscópio) ficam acima do painel.
+4. **Som**: em clipes de áudio (ou *Som*, num clipe ligado), volume, fades, balanço, graves, médios,
+   agudos, *Realçar voz*, *Redução de ruído* e *Normalizar volume*. Cada faixa tem mudo, solo,
+   trava e volume.
+5. **Velocidade e transições**: *Velocidade* (câmera lenta ou acelerado, a duração acompanha),
+   *Congelar quadro*, e em *Transições* dissolver, surgir do preto/branco e sumir.
+6. **Sequência** (barra da prévia): resolução, quadros por segundo e cor de fundo. A primeira mídia
+   importada define o formato.
+
+Ligue **Com película** na barra da prévia para ver a montagem já com o look; o que aparece é o que
+sai na exportação. Ao voltar para o modo **Película**, o look é aplicado na montagem (exportar,
+salvar quadro e fila incluídos). Projetos `.plc` guardam a montagem inteira. Guia completo:
+[docs/EDICAO.md](docs/EDICAO.md).
+
+## Laboratório: negativo, luzes da copiadora e cópia
+
+A seção **Laboratório (negativo e cópia)** do painel *Ajustes* simula o caminho do filme no
+laboratório, em densidade: o **negativo** escolhido registra a luz (cada camada com sua curva e sua
+sensibilidade), pode ser **revelado forçado** (push/pull), é copiado com as **luzes da copiadora**
+(vermelho, verde, azul e densidade, em pontos: mais pontos de vermelho deixam a cópia mais ciano,
+como no laboratório) e vira a **cópia** projetada. Os processos **Technicolor 3 tiras**,
+**Technicolor 2 cores** e **retenção de prata** trocam a química do caminho. Os presets do grupo
+*Laboratório* são o jeito mais rápido de começar. Detalhes de cada controle em
+[docs/EFEITOS.md](docs/EFEITOS.md).
+
+## Plugin para o DaVinci Resolve
+
+O PeliculaConverter gera um pacote para o Resolve com os mesmos looks do app:
+
+- **PeliculaConverter Cor** (DCTL): perfil de entrada, exposição, Laboratório, cor da película e
+  cópia — a mesma matemática do app (conferida nos testes).
+- **PeliculaConverter Textura** (DCTL): grão animado, halação, bloom e lente.
+- **PeliculaConverter Projetor** (DCTL): tremor, cintilação, poeira, riscos e moldura.
+- Os DCTLs de cada preset (pasta *Presets*, com os valores do preset já como padrão) e um **LUT
+  `.cube` por preset** (pasta *LUTs*), que funciona também no Resolve gratuito, no Premiere e em outros
+  programas.
+
+Instale em **Configurações → Plugin para o DaVinci Resolve…** (ou `pelicula-cli resolve --instalar`)
+e reabra o Resolve. Na página **Color**, use três nós em série — *Cor → Textura → Projetor* — com o
+efeito **OpenFX → ResolveFX Color → DCTL**. O plugin DCTL precisa do **DaVinci Resolve Studio**;
+os LUTs funcionam em qualquer versão. Guia completo: [docs/DAVINCI.md](docs/DAVINCI.md).
+
 ## Modo terminal (pelicula-cli)
 
 Tudo o que a janela faz com os looks também dá para fazer no terminal, sem abrir a interface —
@@ -715,6 +828,7 @@ tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável 
 | `qualidades` (`qualities`) | Lista as qualidades de exportação (para um arquivo, se informado) |
 | `info` | Mostra resolução, fps, codec e áudio de um arquivo |
 | `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
+| `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--instalar`, `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
 | `versao` (`version`) | Mostra a versão |
 
 Exemplos:
@@ -730,6 +844,14 @@ pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --trecho
 # um quadro em 16 bits e o LUT do look
 pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
 pelicula-cli lut --preset vision3_250d -o vision3_250d.cube
+
+# exportar a montagem do modo Edição (projeto salvo pela janela)
+pelicula-cli exportar edicao.plc -o montagem.mp4 --preset lab_technicolor3
+
+# plugin do DaVinci Resolve
+pelicula-cli resolve --listar
+pelicula-cli resolve --instalar
+pelicula-cli resolve --pasta "D:/plugins/PeliculaConverter"
 
 # ver o que existe
 pelicula-cli presets

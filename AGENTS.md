@@ -3,13 +3,24 @@
 Este arquivo é a referência rápida para trabalhar no **PeliculaConverter**: o que é cada módulo,
 quais regras não podem ser quebradas, como rodar e testar, e receitas para as mudanças mais comuns.
 O mergulho técnico completo está em [docs/ARQUITETURA.md](docs/ARQUITETURA.md); o significado de
-cada ajuste para o usuário, em [docs/EFEITOS.md](docs/EFEITOS.md).
+cada ajuste para o usuário, em [docs/EFEITOS.md](docs/EFEITOS.md); o modo Edição para o usuário, em
+[docs/EDICAO.md](docs/EDICAO.md); o plugin do DaVinci Resolve, em [docs/DAVINCI.md](docs/DAVINCI.md).
 
 ## Em uma frase
 
 App de desktop em Python (PySide6) que simula película cinematográfica em vídeos: o ffmpeg decodifica
 os quadros, um pipeline de shaders OpenGL 3.3 (moderngl) aplica o look e o ffmpeg codifica o
 resultado. Windows e Linux; macOS preparado e desativado. Interface 100% em português do Brasil.
+
+O app tem **dois modos** (seletor no topo da janela):
+
+- **Película** — o modo de sempre: um arquivo (ou a montagem da edição) recebe o look de película.
+- **Edição** — montagem em faixas de vídeo e de áudio (cortar, aparar, mover, velocidade,
+  transições), cor e luz por clipe (rodas, curva, HSL, detalhe, enquadramento) e som por clipe
+  (volume, fades, equalização, voz, ruído). A montagem é a entrada do look de película.
+
+Junto vem um **plugin para o DaVinci Resolve** (DCTLs + LUTs) gerado a partir das mesmas tabelas e
+da mesma matemática do app (`pelicula/resolve.py`).
 
 ## Mapa do código
 
@@ -29,7 +40,7 @@ pelicula/
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
-  presets.py                 FILM_BASE, BUILTIN (33 presets), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (42 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, build_encoder_cmd(), ExportQueue, run_job(), measure_speed()
@@ -37,9 +48,21 @@ pelicula/
   system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
+  timeline.py                modo Edição: Source, Clip, Track, Layer, Sequence (montagem, sem Qt), History
+  editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
+  compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
+  editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela) e a saída da tela
+  sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
+                             canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
+  audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação), forma de onda
+  resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs
   ui/                        main_window, export_dialog, queue_dialog, deps_dialog, viewer, looks,
                              widgets, store (desfazer/refazer), theme, icons, prefs (QSettings),
-                             welcome (boas-vindas e novidades), language_dialog, update_dialog
+                             welcome (boas-vindas e novidades), language_dialog, update_dialog;
+                             modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
+                             timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             scopes (histograma, forma de onda, parada RGB, vetorscópio),
+                             sequence_dialog; resolve_dialog (plugin do DaVinci)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
 docs/                        ARQUITETURA.md, EFEITOS.md, ASSINATURA.md, img/ (capturas de tela)
@@ -61,7 +84,9 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
 1. **Prévia e exportação usam o mesmo caminho.** Todo efeito vive em `look.build_plan()` +
    `shaders.py`/`Engine.render()`. Nunca implemente um efeito só na interface, só na exportação ou
    só no "Salvar quadro". Prévia, miniaturas, salvar quadro, estimativa e exportação chamam as mesmas
-   funções.
+   funções. No modo Edição vale o mesmo: ajuste de clipe só em `compositor.py` + `editshaders.py` /
+   `Engine.compose()`; qual quadro de qual arquivo aparece só em `timeline.Sequence.src_frame()` /
+   `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem que a exportação grava).
 2. **Determinismo por quadro.** Tudo o que muda no tempo deriva do **número do quadro**, do fps e
    das **sementes** (`_hash`/`_vnoise` em `look.py`; `pcg`/`rnd`/`vnoise2` no GLSL). Proibido
    `random`, `np.random`, `time.time()` ou estado acumulado entre quadros no caminho de render. O
@@ -90,7 +115,8 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
 9. **Compatibilidade de presets.** Presets são JSON com chaves de `params.PARAMS` e passam por
    `params.sanitize()`. Não renomeie nem remova chaves sem migração. Parâmetros novos precisam de um
    **padrão neutro** (que não mude o visual de presets antigos). IDs de presets prontos são gravados
-   na sessão (`session_preset`): não renomeie.
+   na sessão (`session_preset`): não renomeie. O mesmo vale para os ajustes de clipe
+   (`editparams.VIDEO`/`AUDIO`, gravados nos projetos): padrão neutro = clipe idêntico ao arquivo.
 10. **Dependências mínimas.** Em tempo de execução só PySide6, moderngl (+glcontext) e numpy; o resto
     é biblioteca padrão. Nada de Pillow, OpenCV, SciPy, requests. O ffmpeg é externo e só é baixado
     de fontes confiáveis com conferência de SHA-256 (`deps.py`).
@@ -105,9 +131,18 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     `MainWindow` (o `closeEvent` grava a sessão).
 13. **Projetos `.plc` são um formato público.** Mantenha `project.FORMAT` e a leitura compatível com
     arquivos antigos; aumente `FORMAT` só com migração. Valores passam por `params.sanitize()`.
+    Projetos com montagem do modo Edição gravam o bloco `"edicao"` (JSON de `timeline.Sequence`) e
+    `"formato": 2`; projetos simples (só o arquivo inteiro, sem mudanças) continuam `"formato": 1`
+    para abrir nas versões antigas.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
     recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
     com os do CI, e cada pacote leva `pelicula-install.json` com o tipo de instalação.
+15. **O plugin do DaVinci acompanha o app.** Os DCTLs são gerados por `resolve.py` a partir das
+    tabelas de `look.py`/`presets.py`; a cor (`colorPipe`, incluindo o Laboratório) é portada à mão e
+    conferida contra `Engine.bake_lut` por `tests/test_resolve.py` (dialeto GLSL do mesmo código).
+    Mudou a cor em `shaders.py`? Atualize o kernel em `resolve.py` e rode esse teste. Nada de
+    instalar no Resolve do usuário em testes (use pastas temporárias). DCTL: sem *swizzles*, sem
+    sobrecarga de funções (OpenCL), literais com `f`, até 64 controles por tipo e 5 seletores de cor.
 
 ## Rodar
 
@@ -157,6 +192,22 @@ Atenção: `Engine._run()` ignora em silêncio uniforms que não existem no prog
 — um nome digitado errado não dá erro, só não faz nada. Os testes de `test_look.py` existem para
 pegar isso.
 
+Testes do modo Edição e do plugin:
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
+| `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
+| `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
+| `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
+| `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
+| `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
+| `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
+| `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
+
+Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFORM=offscreen` e
+`QApplication` própria (a sessão do pytest já tem uma `QGuiApplication`).
+
 ## Receitas
 
 ### Adicionar um parâmetro
@@ -175,6 +226,38 @@ pegar isso.
    exportados (`BAKE`). Efeitos espaciais ou temporais não cabem num LUT.
 5. Se um preset precisar dele, ajuste `presets.FILM_BASE` ou o preset.
 6. Documente em `docs/EFEITOS.md` (linha na tabela da seção) e no `CHANGELOG.md`; rode o `pytest`.
+
+### Adicionar um ajuste de clipe (modo Edição)
+
+1. **`editparams.py`**: um `F`/`B`/`C`/`W` (roda) na seção certa de `VIDEO_SECTIONS` ou
+   `AUDIO_SECTIONS`, com padrão neutro, chave sem acento e rótulo/dica em PT-BR. O inspetor aparece
+   sozinho. Se for de cor, ele entra no "Copiar/Colar ajustes" (seções em `COLOR_SECTIONS`).
+2. **Imagem**: `compositor.py` transforma o valor em uniform(s) e `editshaders.CLIP` usa; mantenha
+   o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
+   cadeia do clipe.
+3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
+
+### Mudar a montagem (timeline)
+
+Toda regra de tempo fica em `timeline.Sequence` (sem Qt): `src_frame()` decide o quadro do arquivo,
+`layers_at()` resolve camadas e transições, `audio_clips()` o que toca. A interface só chama os
+métodos do `ui/edit_model.TimelineModel`, que grava o histórico (instantâneos JSON) e emite
+`changed("structure" | "values" | "settings" | "*")`. A janela reage: `"values"` só remonta o quadro
+atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`.
+
+### Adicionar um negativo ou uma cópia do Laboratório
+
+`look.py` (tabelas do Laboratório: curvas características, sensibilidade das camadas, diafonia dos
+corantes; a calibração do cinza é automática), a escolha em `params.py` e, se quiser, um preset em
+`presets.py`. Rode `tests/test_lab.py` (cinza neutro em toda combinação) e `tests/test_resolve.py`
+(o plugin do DaVinci lê as mesmas tabelas). Nomes de filmes são aproximações artísticas (regra 8).
+
+### Atualizar o plugin do DaVinci Resolve
+
+`resolve.py` gera tudo: rode `pelicula-cli resolve --pasta saida/` para ver o pacote. Mudou a cor
+do app? Porte a mudança para o kernel do DCTL e rode `tests/test_resolve.py` (paridade com
+`Engine.bake_lut` na GPU). Textura (grão, halação) e projetor são aproximações de passo único,
+documentadas em `docs/DAVINCI.md`.
 
 ### Adicionar um preset pronto
 
