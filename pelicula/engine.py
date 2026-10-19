@@ -14,7 +14,7 @@ import threading
 import moderngl
 import numpy as np
 
-from . import look, luts, shaders
+from . import editshaders, look, luts, shaders
 
 _LUT_CACHE: dict[str, tuple[float, luts.Lut3D]] = {}
 _LUT_LOCK = threading.Lock()
@@ -52,7 +52,8 @@ class Engine:
         self.progs: dict[str, moderngl.Program] = {}
         self.vaos: dict[str, moderngl.VertexArray] = {}
         for name, src in (("base", shaders.BASE), ("extract", shaders.EXTRACT), ("blur", shaders.BLUR),
-                          ("noise", shaders.NOISE), ("final", shaders.FINAL), ("bake", shaders.BAKE)):
+                          ("noise", shaders.NOISE), ("final", shaders.FINAL), ("bake", shaders.BAKE),
+                          ("clip", editshaders.CLIP), ("canvas_out", editshaders.OUT)):
             prog = self.ctx.program(vertex_shader=shaders.VERT, fragment_shader=src)
             self.progs[name] = prog
             self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, "2f", "in_pos")])
@@ -64,6 +65,7 @@ class Engine:
         self._text_tex = self.ctx.texture((1, 1), 1, data=b"\x00", dtype="f1")
         self._text_key = None
         self._text_aspect = 0.0
+        self._clip_tex: dict[int, moderngl.Texture] = {}
 
     # ------------------------------------------------------------ recursos
     def _target(self, name: str, size: tuple[int, int], dtype: str = "f2", mip: bool = False):
@@ -234,7 +236,59 @@ class Engine:
         grid.release()
         return np.frombuffer(data, dtype=np.float32).reshape(-1, 3).copy()
 
+    # ------------------------------------------------------------ modo Edição
+    def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:
+        h, w = img.shape[:2]
+        dtype = "f1" if img.dtype == np.uint8 else "nu2"
+        t = self._clip_tex.get(slot)
+        if t is None or t.size != (w, h) or t.dtype != dtype:
+            if t is not None:
+                t.release()
+            t = self.ctx.texture((w, h), 3, dtype=dtype, alignment=1)
+            t.repeat_x = False
+            t.repeat_y = False
+            self._clip_tex[slot] = t
+        t.write(np.ascontiguousarray(img))
+        return t
+
+    def compose(self, frame_layers, seq, canvas_w: int, canvas_h: int, depth: int = 8,
+                neutral: bool = False) -> np.ndarray:
+        """Monta um quadro da sequência (modo Edição) e devolve (h, w, 3) uint8 ou uint16.
+
+        `frame_layers` é um `sequence.FrameLayers` (imagens já decodificadas, de baixo para cima).
+        Cada camada é desenhada por `editshaders.CLIP` com os valores de `compositor.clip_uniforms`
+        sobre uma tela RGBA de 32 bits (alterna entre dois alvos). Só na thread dona do contexto.
+        """
+        from . import compositor
+        size = (int(canvas_w), int(canvas_h))
+        a = self._target("canvas_a", size, dtype="f4")
+        b = self._target("canvas_b", size, dtype="f4")
+        bg = tuple(float(c) for c in seq.background)
+        a[1].use()
+        a[1].clear(bg[0], bg[1], bg[2], 1.0)
+        src, dst = a, b
+        for slot, li in enumerate(frame_layers.layers):
+            img = li.image
+            tex = self._clip_texture(slot, img)
+            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral)
+            if mip:
+                tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+                tex.build_mipmaps()
+            else:
+                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self._run("clip", dst, {"t_clip": tex, "t_dst": src[0]}, U)
+            src, dst = dst, src
+        out_dtype = "u1" if depth == 8 else "u2"
+        out = self._target("canvas_out8" if depth == 8 else "canvas_out16", size, dtype=out_dtype)
+        self._run("canvas_out", out, {"t_canvas": src[0]}, {"u_max": 255.0 if depth == 8 else 65535.0})
+        data = out[1].read(components=3, alignment=1, dtype=out_dtype)
+        arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
+        return arr.reshape(size[1], size[0], 3)
+
     def release(self) -> None:
+        for t in self._clip_tex.values():
+            t.release()
+        self._clip_tex.clear()
         for tex, fbo in self._targets.values():
             fbo.release()
             tex.release()

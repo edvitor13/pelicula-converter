@@ -144,3 +144,95 @@ def test_module_entry_point(ffmpeg_ok, tmp_path):
     r = subprocess.run([__import__("sys").executable, "-m", "pelicula", "versao"], capture_output=True, text=True,
                        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), env=env, timeout=60)
     assert r.returncode == 0 and "PeliculaConverter" in r.stdout
+
+
+# ------------------------------------------------------------------ modo Edição e DaVinci Resolve
+def _edit_project(tmp_path, sample_video):
+    from pelicula import media, timeline
+    src = media.probe_source(sample_video)
+    seq = timeline.Sequence.for_source(src)
+    seq.split(8)
+    v = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: c.start)
+    seq.delete([v[0].id], ripple=True)  # tira os 8 primeiros quadros
+    seq.insert_media(src)
+    p = project.Project(media_path=sample_video, values=params.defaults(), preset_id="", sequence=seq.to_json(),
+                        mode="edicao")
+    path = tmp_path / "edicao.plc"
+    project.save(p, str(path))
+    return path, seq
+
+
+def test_project_sequence_trivial_and_missing(tmp_path):
+    from pelicula import timeline
+    media_path = tmp_path / "v.mp4"
+    media_path.write_bytes(b"x")
+    src = timeline.Source(str(media_path), 320, 180, 24.0, "24/1", 48, 2.0, has_audio=False)
+    p = project.Project(media_path=str(media_path), sequence=timeline.Sequence.for_source(src).to_json())
+    assert cli.project_sequence(p) is None  # só o arquivo inteiro: usa o arquivo direto
+    seq = timeline.Sequence.for_source(src)
+    seq.split(10)
+    p.sequence = seq.to_json()
+    assert cli.project_sequence(p) is not None
+    media_path.unlink()
+    with pytest.raises(cli.CliError):
+        cli.project_sequence(p)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_export_and_frame_of_an_edit_project(gl_session, ffmpeg_ok, sample_video, tmp_path, capsys):
+    plc, seq = _edit_project(tmp_path, sample_video)
+    assert seq.duration == 40
+    out = tmp_path / "montagem.mp4"
+    assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "mp4", "--velocidade", "ultrafast",
+                     "-q"]) == 0
+    from pelicula import media
+    info = media.probe(str(out))
+    assert info.frames == 40 and info.has_audio
+    png = tmp_path / "q.png"
+    assert cli.main(["quadro", str(plc), "-o", str(png), "--tempo", "#30"]) == 0
+    assert png.stat().st_size > 1000
+
+
+class _FakeResolve:
+    def __init__(self, tmp):
+        self.tmp = tmp
+        self.installed = None
+
+    def lut_dirs(self):
+        return [self.tmp / "LUT"]
+
+    def build_package(self, dest):
+        from pathlib import Path
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        f = Path(dest) / "PeliculaConverter.dctl"
+        f.write_text("x")
+        return [f]
+
+    def install(self, target=None):
+        self.installed = target or str(self.tmp / "LUT")
+        return self.tmp / "LUT" / "PeliculaConverter"
+
+
+def test_resolve_command(tmp_path, capsys, monkeypatch):
+    import sys
+    fake = _FakeResolve(tmp_path)
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", fake)
+    import pelicula
+    monkeypatch.setattr(pelicula, "resolve", fake, raising=False)
+    assert cli.main(["resolve"]) == 0
+    assert "LUT" in capsys.readouterr().out
+    assert cli.main(["davinci", "--pasta", str(tmp_path / "pacote")]) == 0
+    assert (tmp_path / "pacote" / "PeliculaConverter.dctl").exists()
+    assert cli.main(["resolve", "--instalar", "--destino", str(tmp_path / "X")]) == 0
+    assert fake.installed == str(tmp_path / "X")
+    assert "resolve" in cli.COMMANDS and cli.COMMANDS["davinci"] == "resolve"
+
+
+def test_resolve_command_without_module(capsys, monkeypatch):
+    import sys
+    import pelicula
+    monkeypatch.setitem(sys.modules, "pelicula.resolve", None)
+    monkeypatch.delattr(pelicula, "resolve", raising=False)
+    assert cli.main(["resolve", "--listar"]) == 1
+    assert "DaVinci" in capsys.readouterr().err

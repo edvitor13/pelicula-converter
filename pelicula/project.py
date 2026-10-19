@@ -3,6 +3,10 @@
 O arquivo é JSON em UTF-8 com o vídeo de origem (caminho absoluto e relativo ao projeto),
 todos os ajustes, o look escolhido, entrada/saída, quadro atual, opções da prévia e uma
 miniatura em JPEG (base64) para a lista de projetos recentes.
+
+Com o modo Edição, o projeto também guarda a sequência (`"edicao"`, ver `timeline.Sequence`) e o
+modo aberto (`"modo"`). Projetos sem sequência continuam com `"formato": 1` (abrem nas versões
+antigas); com sequência, `"formato": 2`.
 """
 
 from __future__ import annotations
@@ -19,7 +23,9 @@ from . import APP_NAME, __version__, params
 from .i18n import _
 
 EXT = ".plc"
-FORMAT = 1
+FORMAT = 2          # maior formato que esta versão lê
+FORMAT_SIMPLE = 1   # projeto sem sequência do modo Edição
+MODES = ("pelicula", "edicao")
 
 
 @dataclass
@@ -37,19 +43,22 @@ class Project:
     saved_at: float = 0.0
     app_version: str = __version__
     thumbnail_jpeg: bytes = b""
+    sequence: dict[str, Any] | None = None  # JSON de timeline.Sequence (modo Edição)
+    mode: str = "pelicula"                  # "pelicula" | "edicao"
     path: str = ""  # onde o projeto está salvo (não vai para o arquivo)
 
     def to_json(self) -> dict[str, Any]:
         base = Path(self.path).parent if self.path else None
-        rel = ""
-        if base and self.media_path:
-            try:
-                rel = os.path.relpath(self.media_path, base)
-            except ValueError:  # outro disco no Windows
-                rel = ""
-        return {
+        rel = _relative(self.media_path, base)
+        edicao = None
+        if self.sequence:
+            edicao = json.loads(json.dumps(self.sequence))
+            for src in edicao.get("fontes") or []:
+                if isinstance(src, dict):
+                    src["relativo"] = _relative(str(src.get("caminho") or ""), base)
+        data = {
             "app": APP_NAME,
-            "formato": FORMAT,
+            "formato": FORMAT if edicao else FORMAT_SIMPLE,
             "versao_app": __version__,
             "salvo_em": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.saved_at or time.time())),
             "nome": self.name,
@@ -63,7 +72,38 @@ class Project:
             "previa": self.preview,
             "qualidade_exportacao": self.export_quality,
             "miniatura_jpeg": base64.b64encode(self.thumbnail_jpeg).decode("ascii") if self.thumbnail_jpeg else "",
+            "modo": self.mode if self.mode in MODES else "pelicula",
         }
+        if edicao:
+            data["edicao"] = edicao
+        return data
+
+
+def _relative(path: str, base: Path | None) -> str:
+    if not base or not path:
+        return ""
+    try:
+        return os.path.relpath(path, base)
+    except ValueError:  # outro disco no Windows
+        return ""
+
+
+def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
+    """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu."""
+    if not isinstance(data, dict):
+        return None
+    from . import timeline
+    seq = timeline.Sequence.from_json(data)
+    folder = os.path.dirname(os.path.abspath(project_path))
+    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "")
+            for s in data.get("fontes") or [] if isinstance(s, dict)}
+    for old in list(seq.sources):
+        rel = rels.get(old, "")
+        if not os.path.exists(old) and rel:
+            cand = os.path.normpath(os.path.join(folder, rel))
+            if os.path.exists(cand):
+                seq.relink(old, cand)
+    return seq.to_json()
 
 
 class ProjectError(Exception):
@@ -127,6 +167,8 @@ def load(path: str) -> Project:
         saved_at=saved,
         app_version=str(data.get("versao_app") or ""),
         thumbnail_jpeg=thumb,
+        sequence=_relink_sequence(data.get("edicao"), path),
+        mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
         path=str(Path(path).resolve()),
     )
 

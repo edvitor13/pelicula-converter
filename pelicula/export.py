@@ -246,18 +246,20 @@ def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.
 
 
 def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w: int, h: int, fps_str: str,
-                      depth: int, start_time: float, duration: float, input_path: str = "pipe:0") -> list[str]:
+                      depth: int, start_time: float, duration: float, input_path: str = "pipe:0",
+                      audio_path: str | None = None) -> list[str]:
+    """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss."""
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
     th = int(s.threads)
     args = [media.ffmpeg(), "-y", "-v", "error", "-hide_banner", "-progress", "pipe:2", "-stats_period", "0.5",
             "-f", "rawvideo", "-pix_fmt", in_pix,
             "-s", f"{w}x{h}", "-framerate", fps_str, "-i", input_path]
-    audio = _audio_args(s, info, start_time)
+    audio = _audio_args(s, info, 0.0 if audio_path else start_time)
     if audio != ["-an"]:
-        if start_time > 0:
+        if start_time > 0 and not audio_path:
             args += ["-ss", f"{start_time:.6f}"]
-        args += ["-t", f"{duration:.6f}", "-i", info.path, "-map", "0:v:0", "-map", "1:a:0?"]
+        args += ["-t", f"{duration:.6f}", "-i", audio_path or info.path, "-map", "0:v:0", "-map", "1:a:0?"]
     else:
         args += ["-map", "0:v:0"]
     rgb_out = s.pix.startswith(("rgb", "gbr", "pal"))
@@ -370,6 +372,7 @@ class ExportJob:
     t_warm: float = 0.0      # momento em que o quadro `warmup` foi gravado
     rendered: int = 0        # quadros processados pela GPU
     encoded: int = 0         # quadros já gravados pelo codificador (progresso do ffmpeg)
+    sequence: Any = None     # timeline.Sequence do modo Edição (None = o arquivo de `info`)
 
     @property
     def progress(self) -> float:
@@ -421,6 +424,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     perf = s.perf()
     job.status = "exportando"
     job.started = time.time()
+    seq = job.sequence
     w, h = output_size(info, s)
     fps_str = info.fps_str if s.fps == "original" else s.fps
     fps_out = None if s.fps == "original" else s.fps
@@ -436,10 +440,56 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     out_path = job.out_path
     if s.codec in ("png_seq", "tiff_seq"):
         out_path = sequence_path(out_path)
+    mix_path = None
+    if seq is not None:
+        # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
+        from . import audiomix
+        if _audio_args(s, info, 0.0) != ["-an"] and audiomix.has_audio(seq, start, end + 1):
+            import tempfile
+            fd, mix_path = tempfile.mkstemp(prefix="pelicula_som_", suffix=".wav")
+            os.close(fd)
+            try:
+                ok = audiomix.render_mix(seq, mix_path, start, end + 1, job.cancel, perf)
+            except RuntimeError as exc:
+                _remove_file(mix_path)
+                job.status = "erro"
+                job.error = str(exc)[-1500:]
+                return
+            if job.cancel.is_set():
+                _remove_file(mix_path)
+                job.status = "cancelado"
+                return
+            if not ok:
+                _remove_file(mix_path)
+                mix_path = None
+        has = mix_path is not None
+        info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
+    try:
+        _encode(job, engine, info, s, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time,
+                duration, out_path, seq, mix_path)
+    finally:
+        if mix_path:
+            _remove_file(mix_path)
+
+
+def _remove_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSettings, perf: media.Perf, w: int,
+            h: int, fps_str: str, fps_out: str | None, fps_val: float, depth: int, start: int, total: int,
+            start_time: float, duration: float, out_path: str, seq, mix_path: str | None) -> None:
     pipe = media.NamedPipe(False) if media.use_named_pipes() else None
     cmd = build_encoder_cmd(out_path, info, s, w, h, fps_str, depth, start_time, duration,
-                            pipe.name if pipe else "pipe:0")
-    if fps_out:
+                            pipe.name if pipe else "pipe:0", audio_path=mix_path)
+    if seq is not None:
+        from .sequence import SequenceReader
+        reader = SequenceReader(seq, w, h, depth, start, total, hq=True, perf=perf, fps_out=fps_out)
+        skip = 0
+    elif fps_out:
         # Com troca de fps a decodificação começa no tempo e não no quadro.
         reader = media.FrameReader(info, w, h, depth, 0, None, fps_out, hq=True, perf=perf)
         skip = round(start_time * fps_val)
@@ -538,6 +588,8 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                 break
             if job.cancel.is_set() or write_err:
                 break
+            if seq is not None:
+                img = engine.compose(img, seq, w, h, depth)
             engine.set_input(img)
             plan = look.build_plan(job.values, w, h, first_index + i, fps_val, info_lut, dither=s.dither and depth == 8)
             out = engine.render(plan, depth)
@@ -591,7 +643,7 @@ def job_frames(info: media.MediaInfo, s: ExportSettings, start: int = 0, end: in
 
 
 def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings, cancel: threading.Event,
-                  frames: int = 60, limit: float = 15.0) -> float:
+                  frames: int = 60, limit: float = 15.0, sequence=None) -> float:
     """Exporta um trecho num arquivo temporário e devolve a velocidade real (quadros/s).
 
     Os primeiros quadros (abertura do ffmpeg e do codificador) ficam de fora da conta, e a
@@ -605,7 +657,7 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
     start = 0 if info.frames <= frames * 2 else info.frames // 3
     out = os.path.join(tmp, "teste." + s.container)
     job = ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start,
-                    end_frame=min(info.frames - 1, start + frames - 1))
+                    end_frame=min(info.frames - 1, start + frames - 1), sequence=sequence)
     stop = threading.Event()
 
     def watch():

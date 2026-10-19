@@ -21,6 +21,7 @@ NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".dpx", ".exr"}
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v", ".mts", ".m2ts", ".wmv", ".mpg", ".mpeg",
              ".nev", ".r3d", ".braw", ".flv", ".3gp", ".ts"}
+AUDIO_EXT = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".ogg", ".opus", ".aif", ".aiff", ".wma"}
 
 _tools: dict[str, str | None] = {"ffmpeg": None, "ffprobe": None}
 
@@ -155,12 +156,47 @@ def _depth(pix: str, raw: str | None) -> int:
         return 8
 
 
-def probe(path: str) -> MediaInfo:
+def _probe_json(path: str) -> dict:
     cmd = [ffprobe(), "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path]
     res = subprocess.run(cmd, capture_output=True, creationflags=NO_WINDOW)
     if res.returncode != 0:
         raise RuntimeError(res.stderr.decode("utf-8", "replace").strip() or _("Não foi possível ler o arquivo."))
-    data = json.loads(res.stdout.decode("utf-8", "replace") or "{}")
+    return json.loads(res.stdout.decode("utf-8", "replace") or "{}")
+
+
+def probe(path: str) -> MediaInfo:
+    return _info_from(path, _probe_json(path))
+
+
+def probe_source(path: str):
+    """Arquivo para o modo Edição: vídeo, imagem parada ou só áudio (música, narração).
+
+    Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`.
+    """
+    from . import timeline
+    data = _probe_json(path)
+    streams = data.get("streams", [])
+    has_video = any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
+                    for s in streams)
+    if has_video:
+        return timeline.Source.from_info(_info_from(path, data))
+    aus = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if aus is None:
+        raise RuntimeError(_("O arquivo não tem imagem nem som."))
+    fmt = data.get("format", {})
+    try:
+        dur = float(aus.get("duration") or fmt.get("duration") or 0.0)
+    except (TypeError, ValueError):
+        dur = 0.0
+    if dur <= 0:
+        raise RuntimeError(_("Não foi possível saber a duração do som."))
+    return timeline.Source(path=path, width=0, height=0, fps=24.0, fps_str="24/1", frames=1, duration=dur,
+                           is_image=False, has_video=False, has_audio=True, codec="",
+                           bitrate=int(aus.get("bit_rate") or fmt.get("bit_rate") or 0),
+                           audio_codec=aus.get("codec_name", ""), container=fmt.get("format_name", ""))
+
+
+def _info_from(path: str, data: dict) -> MediaInfo:
     streams = data.get("streams", [])
     vs = next((s for s in streams if s.get("codec_type") == "video"
                and not s.get("disposition", {}).get("attached_pic")), None)
