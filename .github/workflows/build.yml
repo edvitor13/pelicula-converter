@@ -79,11 +79,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # O feed do Chocolatey às vezes recusa conexões dos runners (erro 499). Tenta 3 vezes e, se não
-          # der, baixa o mesmo build que o app usa (gyan.dev), conferindo o SHA-256 publicado (deps.py).
+          # O feed do Chocolatey às vezes recusa conexões dos runners (erros 499/503). Tenta 3 vezes e, se
+          # não der, baixa o mesmo build que o app usa (gyan.dev), conferindo o SHA-256 publicado (deps.py).
+          # Com 503 o choco sai com código 0 sem instalar nada: confere se o ffmpeg existe de fato.
           for ($i = 1; $i -le 3; $i++) {
             choco install ffmpeg -y --no-progress
-            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue)) { exit 0 }
             Write-Host "Chocolatey falhou (tentativa $i de 3)"
             Start-Sleep -Seconds (20 * $i)
           }

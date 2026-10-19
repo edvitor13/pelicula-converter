@@ -1,3 +1,15 @@
+## Version 1.3.0 — October 19, 2026
+
+**Edit mode, film Lab and a DaVinci Resolve plugin.**
+
+- 🎬 **Edit mode.** At the top of the window, switch between *Film* and *Edit*. In Edit, build the video on picture and sound tracks: import videos, photos and music, cut (S key), trim, move, change the speed and use transitions such as dissolve and fade from black. Then Film mode applies the look on top of the edit.
+- 🎨 **Each clip's color and light, made simple.** An *Auto* button, quick looks (Vivid, Warm, Cool, B&W…), exposure, highlights, shadows, color wheels, curve, per-color adjustments (HSL), sharpness and clarity. Copy and paste settings between clips. The scopes show histogram, waveform and vectorscope.
+- 🔊 **Each clip's sound.** Volume, fade in and out, bass and treble, voice enhancement and noise reduction.
+- 🧪 **Lab.** Simulates the film's path: the negative, the printer lights and the print, including three-strip Technicolor. Color separation (Hue Split), red, green and blue density, bleach bypass and more — with new Kodak and Eastman negatives and prints.
+- 📷 **More cameras.** Blackmagic Film Gen 5, ARRI LogC4 and Apple Log (iPhone) inputs.
+- 🔌 **DaVinci Resolve plugin.** In Settings → DaVinci Resolve plugin, install the *PeliculaConverter* effect, which works even in the free Resolve, with every preset. For Studio there are also DCTLs and LUTs.
+- 📐 **Panels that adapt.** Drag the dividers freely: nothing disappears or gets cut off, and the looks rearrange into columns.
+
 ## Version 1.2.2 — October 16, 2026
 
 **Handier full screen and control over the film gauge blur.**

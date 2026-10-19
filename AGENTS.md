@@ -423,10 +423,14 @@ A pasta do PyInstaller (`dist/PeliculaConverter/`, com `PeliculaConverter[.exe]`
 
 ### Versão e release
 
-1. Atualize `pelicula/__init__.py` (`__version__`), `pyproject.toml` (`version`),
-   `PeliculaConverter.spec` (`CFBundleShortVersionString`), o `CHANGELOG.md` e escreva
-   `pelicula/novidades/release_vX.Y.Z.md`.
-2. Crie a tag `vX.Y.Z` e envie. O workflow gera os pacotes, publica a Release e avisa no Discord.
+1. Atualize `pelicula/__init__.py` (`__version__` e `__date__`; o `pyproject.toml` e o
+   `PeliculaConverter.spec` leem a versão de lá), o `CHANGELOG.md` (a seção "Não lançado" vira
+   `[X.Y.Z] - data`), as novidades em linguagem simples (`pelicula/novidades/pt_BR.md`, `en.md`,
+   `es.md`) e escreva `pelicula/novidades/release_vX.Y.Z.md`.
+2. Rode `python tools/gerar_ofx.py`: o código gerado do plugin OpenFX leva a versão do app
+   (`tests/test_ofx.py` falha se esquecer).
+3. Antes da tag, valide a branch com `gh workflow run build.yml --ref <branch>` (pacotes completos).
+4. Crie a tag `vX.Y.Z` e envie. O workflow gera os pacotes, publica a Release e avisa no Discord.
 
 ## Estilo
 

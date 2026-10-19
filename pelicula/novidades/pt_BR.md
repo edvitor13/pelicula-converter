@@ -1,3 +1,15 @@
+## Versão 1.3.0 — 19 de outubro de 2026
+
+**Modo Edição, Laboratório de película e plugin para o DaVinci Resolve.**
+
+- 🎬 **Modo Edição.** No topo da janela, troque entre *Película* e *Edição*. Na edição, monte o vídeo em faixas de imagem e de som: importe vídeos, fotos e músicas, corte (tecla S), apare, mova, mude a velocidade e use transições como dissolver e surgir do preto. Depois, o modo Película aplica o look em cima da montagem.
+- 🎨 **Cor e luz de cada clipe, sem complicação.** Botão *Automático*, ajustes rápidos (Mais vivo, Quente, Frio, P&B…), exposição, realces, sombras, rodas de cor, curva, cor por faixa (HSL), nitidez e clareza. Copie e cole os ajustes entre clipes. Os medidores mostram histograma, forma de onda e vetorscópio.
+- 🔊 **Som de cada clipe.** Volume, aumentar no início e diminuir no fim, graves e agudos, realçar voz e reduzir ruído.
+- 🧪 **Laboratório.** Simula o caminho do filme: o negativo, as luzes da copiadora e a cópia, incluindo Technicolor de três tiras. Separação de cores (Hue Split), densidade dos vermelhos, verdes e azuis, bleach bypass e mais — com novos negativos e cópias Kodak e Eastman.
+- 📷 **Mais câmeras.** Entradas Blackmagic Film Gen 5, ARRI LogC4 e Apple Log (iPhone).
+- 🔌 **Plugin para o DaVinci Resolve.** Em Configurações → Plugin para o DaVinci Resolve, instale o efeito *PeliculaConverter*, que funciona até no Resolve gratuito, com todos os presets. Para o Studio também há DCTLs e LUTs.
+- 📐 **Painéis que se ajustam.** Arraste os divisores à vontade: nada some nem fica cortado, e os looks se reorganizam em colunas.
+
 ## Versão 1.2.2 — 16 de outubro de 2026
 
 **Tela cheia mais prática e controle do desfoque das bitolas.**
