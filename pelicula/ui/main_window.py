@@ -15,7 +15,7 @@ import dataclasses
 
 import numpy as np
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Qt, QTimer, QSettings, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QImage, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QBrush, QColor, QFontMetrics, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
@@ -31,6 +31,7 @@ from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
 from .viewer import Viewer
 from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
+from .flow import AdaptiveBar, ElideLabel, FlowLayout
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .scopes import Scopes
@@ -184,6 +185,42 @@ class Player:
         self._stop.set()
 
 
+class _TransportBar(AdaptiveBar):
+    """Player: com pouca largura a linha do tempo sobe para uma linha própria, acima dos botões."""
+
+    WRAP = 860  # px abaixo dos quais a linha do tempo não cabe bem ao lado dos botões
+
+    def __init__(self):
+        super().__init__()
+        self.scrub: QWidget | None = None
+        self.top_row: QHBoxLayout | None = None
+        self.row: QHBoxLayout | None = None
+        self.scrub_index = 0
+        self.stacked = False
+
+    def place_scrub(self, width: int) -> None:
+        if self.scrub is None:
+            return
+        stacked = width < self.WRAP
+        if stacked == self.stacked:
+            return
+        self.stacked = stacked
+        (self.row if stacked else self.top_row).removeWidget(self.scrub)
+        if stacked:
+            self.top_row.addWidget(self.scrub, 1)
+            self.row.insertStretch(self.scrub_index, 1)
+        else:
+            stretch = self.row.itemAt(self.scrub_index)
+            if stretch is not None and stretch.spacerItem() is not None:
+                self.row.takeAt(self.scrub_index)
+            self.row.insertWidget(self.scrub_index, self.scrub, 1)
+        self.updateGeometry()
+
+    def resizeEvent(self, e) -> None:
+        self.place_scrub(e.size().width())
+        super().resizeEvent(e)
+
+
 class _MixBridge(QObject):
     """Som da prévia da sequência renderizado em segundo plano."""
 
@@ -238,7 +275,8 @@ class MainWindow(QMainWindow):
         self.queue = export.ExportQueue()
         self.queue_dialog: QueueDialog | None = None
         self.info: media.MediaInfo | None = None
-        self.frame_idx = 0
+        self.frame_idx = 0     # posição do cursor
+        self.cur_frame = 0     # quadro da imagem que está na tela (pode estar chegando atrasado)
         self.cur: np.ndarray | None = None
         self.cur_q: QImage | None = None
         self.project_path: str | None = None
@@ -340,6 +378,14 @@ class MainWindow(QMainWindow):
         st = self.settings.value("splitter")
         if st is not None:
             self.split.restoreState(st)
+        # Estados antigos podiam ter um painel recolhido (largura 0): volta ao padrão.
+        self.split.setChildrenCollapsible(False)
+        if min(self.split.sizes()) <= 0:
+            self.split.setSizes([290, 980, 380])
+        st = self.settings.value("splitter_edit")
+        if st is not None:
+            self.center_split.restoreState(st)
+        self.center_split.setChildrenCollapsible(False)
 
     # ================================================================ interface
     def _build_ui(self) -> None:
@@ -373,6 +419,7 @@ class MainWindow(QMainWindow):
         self.center_split.addWidget(self.tl_editor)
         self.center_split.setStretchFactor(0, 3)
         self.center_split.setStretchFactor(1, 2)
+        self.center_split.setChildrenCollapsible(False)
         self.split.addWidget(self.center_split)
         self.right_panel = QStackedWidget()
         self.right_panel.addWidget(self._right_panel())
@@ -381,6 +428,7 @@ class MainWindow(QMainWindow):
         self.split.setStretchFactor(0, 0)
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 0)
+        self.split.setChildrenCollapsible(False)
         self.split.setSizes([290, 980, 380])
         root.addWidget(self.split, 1)
         self.setCentralWidget(central)
@@ -411,7 +459,7 @@ class MainWindow(QMainWindow):
         return b
 
     def _top_bar(self) -> QWidget:
-        bar = QWidget()
+        bar = AdaptiveBar()
         bar.setObjectName("TopBar")
         hl = QHBoxLayout(bar)
         hl.setContentsMargins(14, 8, 14, 8)
@@ -432,9 +480,10 @@ class MainWindow(QMainWindow):
         self.mode_switch.changed.connect(self.set_mode)
         hl.addWidget(self.mode_switch)
         hl.addSpacing(10)
-        self.file_label = QLabel("")
+        self.file_label = ElideLabel("")
         self.file_label.setObjectName("Muted")
         hl.addWidget(self.file_label, 1)
+        self._brand = name
         self.btn_project = self._flat("save", _("Projeto: salvar e abrir a edição"), _("Projeto"))
         self.project_menu = QMenu(self)
         self.project_menu.aboutToShow.connect(self._fill_project_menu)
@@ -483,6 +532,9 @@ class MainWindow(QMainWindow):
         self.btn_settings.setMenu(menu)
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
+        # Janela estreita: os botões ficam só com o ícone e o nome do app some.
+        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue],
+                         optional=[self._brand])
         return bar
 
     def _center(self) -> QWidget:
@@ -490,11 +542,10 @@ class MainWindow(QMainWindow):
         vl = QVBoxLayout(w)
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
-        bar = QWidget()
+        bar = AdaptiveBar()
         bar.setObjectName("ViewerBar")
-        hl = QHBoxLayout(bar)
+        hl = FlowLayout(bar, 8, 6)
         hl.setContentsMargins(12, 8, 12, 8)
-        hl.setSpacing(8)
         self.compare = Segmented([
             ("proc", _("Película"), _("Só o resultado")),
             ("split", _("Dividido"), _("Arraste a linha para comparar. Segure o botão direito para ver o original.")),
@@ -505,7 +556,7 @@ class MainWindow(QMainWindow):
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
-        hl.addSpacing(10)
+        hl.add_spacing(2)
         self.btn_zoom_out = self._flat("zoom_out", _("Menos zoom (−). A roda do mouse também dá zoom."))
         self.btn_zoom_out.clicked.connect(lambda: self.viewer.zoom_step(-1))
         hl.addWidget(self.btn_zoom_out)
@@ -515,6 +566,7 @@ class MainWindow(QMainWindow):
         self.btn_fit = self._flat("fit", _("Ajustar à janela (F)"), _("Ajustar"))
         self.btn_fit.clicked.connect(lambda: self.viewer.set_zoom(None))
         hl.addWidget(self.btn_fit)
+        zoom_buttons = []
         for z in (1.0, 2.0):
             b = QToolButton()
             b.setObjectName("Flat")
@@ -525,12 +577,12 @@ class MainWindow(QMainWindow):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _checked=False, zz=z: self.viewer.set_zoom(zz))
             hl.addWidget(b)
+            zoom_buttons.append(b)
         self.zoom_label = QLabel("")
         self.zoom_label.setObjectName("Faint")
         self.zoom_label.setMinimumWidth(44)
         self.zoom_label.setToolTip(_("Zoom atual (100% = um pixel da prévia por pixel da tela)"))
         hl.addWidget(self.zoom_label)
-        hl.addSpacing(6)
         self.btn_edit_film = self._flat("film", _("Mostrar a montagem já com o look de película (mais lento). "
                                                   "O que aparece aqui é o que sai na exportação."),
                                         _("Com película"), checkable=True)
@@ -550,7 +602,7 @@ class MainWindow(QMainWindow):
         self._edit_only = [self.btn_edit_film, self.btn_seq, self.btn_edit_undo, self.btn_edit_redo]
         for wdg in self._edit_only:
             wdg.setVisible(False)
-        hl.addStretch(1)
+        hl.add_stretch()
         lab = QLabel(_("Prévia"))
         lab.setObjectName("Muted")
         hl.addWidget(lab)
@@ -562,10 +614,12 @@ class MainWindow(QMainWindow):
         self.prev_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
-        hl.addSpacing(4)
         self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia (F11). Esc sai."))
         self.btn_full.clicked.connect(self.toggle_preview_fullscreen)
         hl.addWidget(self.btn_full)
+        # Prévia estreita: botões só com ícone, somem os extras e, se ainda faltar espaço, quebra a linha.
+        bar.set_adaptive(compact=[self.btn_fit, self.btn_edit_film, self.btn_seq],
+                         optional=zoom_buttons + [self.zoom_label, lab])
         vl.addWidget(bar)
         self.viewer_bar = bar
         self.viewer = Viewer()
@@ -575,11 +629,17 @@ class MainWindow(QMainWindow):
         self.viewer.filesDropped.connect(self.handle_files)
         self.viewer.zoomChanged.connect(self._zoom_changed)
         vl.addWidget(self.viewer, 1)
-        tr = QWidget()
+        tr = _TransportBar()
         tr.setObjectName("Transport")
-        th = QHBoxLayout(tr)
-        th.setContentsMargins(10, 6, 12, 10)
+        tv = QVBoxLayout(tr)
+        tv.setContentsMargins(10, 6, 12, 10)
+        tv.setSpacing(2)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        tv.addLayout(top)
+        th = QHBoxLayout()
         th.setSpacing(4)
+        tv.addLayout(th)
         self.btn_back = self._flat("step_back", _("Quadro anterior (←)"))
         self.btn_back.clicked.connect(lambda: self.step(-1))
         self.btn_play = self._flat("play", _("Reproduzir / pausar (Espaço)"))
@@ -591,11 +651,13 @@ class MainWindow(QMainWindow):
             th.addWidget(b)
         self.time_label = QLabel("00:00:00:00")
         self.time_label.setObjectName("Time")
-        self.time_label.setMinimumWidth(190)
+        # Largura fixa do texto mais longo (fonte monoespaçada): o rótulo não pula nem corta.
+        self.time_label.setMinimumWidth(QFontMetrics(theme.mono_font()).horizontalAdvance("00:00:00:00  /  00:00:00:00") + 8)
         th.addSpacing(6)
         th.addWidget(self.time_label)
         self.timeline = Timeline()
         self.timeline.seek.connect(self.seek)
+        tr.scrub, tr.top_row, tr.row, tr.scrub_index = self.timeline, top, th, th.count()
         th.addWidget(self.timeline, 1)
         self.btn_in = self._flat("mark_in", _("Marcar entrada (I)"))
         self.btn_in.clicked.connect(self.mark_in)
@@ -617,6 +679,7 @@ class MainWindow(QMainWindow):
         self.vol.setToolTip(_("Volume da prévia"))
         self.vol.valueChanged.connect(self._set_volume)
         th.addWidget(self.vol)
+        tr.set_adaptive(optional=[self.vol])
         vl.addWidget(tr)
         self.transport = tr
         return w
@@ -624,7 +687,7 @@ class MainWindow(QMainWindow):
     def _right_panel(self) -> QWidget:
         w = QWidget()
         w.setObjectName("Panel")
-        w.setMinimumWidth(340)
+        w.setMinimumWidth(300)
         vl = QVBoxLayout(w)
         vl.setContentsMargins(12, 12, 6, 8)
         vl.setSpacing(8)
@@ -704,7 +767,7 @@ class MainWindow(QMainWindow):
         """Painel da direita no modo Edição: medidores de cor e o inspetor do clipe escolhido."""
         w = QWidget()
         w.setObjectName("Panel")
-        w.setMinimumWidth(340)
+        w.setMinimumWidth(300)
         vl = QVBoxLayout(w)
         vl.setContentsMargins(12, 12, 6, 8)
         vl.setSpacing(8)
@@ -901,12 +964,16 @@ class MainWindow(QMainWindow):
         expected = self.src_seq if self.src_seq is not None else self.info
         if source is not expected or self.playing:
             return
-        self._set_frame(frame, img)
+        # Arrastando o cursor, quadros de posições anteriores ainda podem chegar: a imagem aparece,
+        # mas o cursor continua onde a pessoa deixou (antes ele voltava para trás por um instante).
+        self._set_frame(frame, img, move_cursor=frame == self.frame_idx)
         self.thumb_timer.start()
 
-    def _set_frame(self, frame: int, img) -> None:
+    def _set_frame(self, frame: int, img, move_cursor: bool = True) -> None:
         """Mostra um quadro: imagem do arquivo ou camadas da montagem (compostas aqui, na GPU)."""
-        self.frame_idx = frame
+        self.cur_frame = frame
+        if move_cursor:
+            self.frame_idx = frame
         if isinstance(img, sequence.FrameLayers):
             self.cur_layers = img
             if not self._compose_current():
@@ -916,7 +983,8 @@ class MainWindow(QMainWindow):
             self.cur_neutral_q = None
             self.cur = img
             self.cur_q = qimage_from(img)
-        self._update_time()
+        if move_cursor:
+            self._update_time()
         self.render_now()
 
     def _live_layers(self, fl):
@@ -1342,7 +1410,7 @@ class MainWindow(QMainWindow):
         info = lut_info(v["lut_arquivo"]) if v["lut_on"] and v["lut_arquivo"] else None
         t0 = time.perf_counter()
         try:
-            plan = look.build_plan(v, w, h, self.frame_idx, self.info.fps if self.info else 24.0, info)
+            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info)
             out = self.engine.render(plan, 8)
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
@@ -2417,4 +2485,5 @@ class MainWindow(QMainWindow):
         self.settings.setValue("session_preset", self.preset_id)
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("splitter", self.split.saveState())
+        self.settings.setValue("splitter_edit", self.center_split.saveState())
         super().closeEvent(e)

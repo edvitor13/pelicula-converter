@@ -14,6 +14,7 @@ from ..i18n import N_, _, decimal_sep
 from ..timeline import AUDIO, VIDEO, Clip, Source
 from . import icons, theme
 from .edit_model import TimelineModel
+from .flow import flow_widget
 from .store import ParamStore
 from .timeline_view import MIME_SOURCE
 from .widgets import SectionCard, Segmented, timecode
@@ -270,21 +271,9 @@ class _Chip(QToolButton):
             f"QToolButton:hover {{ border-color: {theme.ACCENT_DIM}; color: {theme.ACCENT_HI}; }}")
 
 
-class _FlowRow(QWidget):
-    """Linha de botões que quebra em várias linhas quando o painel é estreito."""
-
-    def __init__(self, widgets: list[QWidget], per_row: int = 4, parent=None):
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
-        for i in range(0, len(widgets), per_row):
-            row = QHBoxLayout()
-            row.setSpacing(4)
-            for w in widgets[i:i + per_row]:
-                row.addWidget(w)
-            row.addStretch(1)
-            lay.addLayout(row)
+def _FlowRow(widgets: list[QWidget], per_row: int = 4) -> QWidget:
+    """Botões lado a lado que quebram em quantas linhas a largura do painel pedir."""
+    return flow_widget(widgets, 4, 4)
 
 
 class ClipInspector(QWidget):
@@ -299,7 +288,7 @@ class ClipInspector(QWidget):
         super().__init__(parent)
         self.model = model
         self.setObjectName("Panel")
-        self.setMinimumWidth(340)
+        self.setMinimumWidth(270)
         self.clip_id: str | None = None
         self.kind = VIDEO
         self._loading = False
@@ -391,8 +380,6 @@ class ClipInspector(QWidget):
         self.chip_reset = reset
         self.look_chips = chips
         vl.addWidget(_FlowRow(chips, 4))
-        row = QHBoxLayout()
-        row.setSpacing(4)
         self.btn_copy = QPushButton(_("Copiar ajustes"))
         self.btn_copy.setIcon(icons.icon("copy", theme.TEXT, 14))
         self.btn_copy.setToolTip(_("Copia a cor e a luz deste clipe (Ctrl+Alt+C)"))
@@ -406,9 +393,7 @@ class ClipInspector(QWidget):
         self.btn_all.clicked.connect(self.apply_all)
         for b in (self.btn_copy, self.btn_paste, self.btn_all):
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            row.addWidget(b)
-        row.addStretch(1)
-        vl.addLayout(row)
+        vl.addWidget(flow_widget([self.btn_copy, self.btn_paste, self.btn_all], 4, 4))
         return w
 
     # -------------------------------------------------------- seleção e valores

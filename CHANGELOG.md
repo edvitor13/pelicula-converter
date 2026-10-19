@@ -38,6 +38,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   ordem dos nós é como LOOK → LAB → PRINT), um DCTL por preset e LUTs `.cube` de todos os presets
   para o Resolve gratuito e o Premiere. A cor do plugin é conferida contra o app nos testes.
 
+### Corrigido
+- Arrastar o cursor na linha do tempo não faz mais o cursor voltar para trás por um instante: quadros
+  de posições anteriores que chegam atrasados aparecem na prévia, mas o cursor fica onde você deixou.
+- Painéis laterais (looks, ajustes, mídia e clipe) redimensionam direito: não recolhem por inteiro ao
+  arrastar o divisor e não cortam opções. As barras da prévia, do player, da linha do tempo e do
+  topo encolhem em etapas (botões só com ícone, extras escondidos, quebra de linha), a linha do
+  tempo do player sobe para uma linha própria quando falta espaço e os looks se reorganizam em
+  uma, duas ou mais colunas conforme a largura.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

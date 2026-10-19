@@ -626,3 +626,87 @@ def test_new_icons_draw_something():
         img = icons.icon(n, "#ffffff", 24).pixmap(24, 24).toImage()
         alpha = sum(img.pixelColor(x, y).alpha() for x in range(24) for y in range(24))
         assert alpha > 0, n
+
+
+# ------------------------------------------------------------------ layouts que acompanham a largura
+def test_flow_layout_wraps_and_stretches():
+    from PySide6.QtWidgets import QToolButton, QWidget
+    from pelicula.ui.flow import FlowLayout
+    box = QWidget()
+    lay = FlowLayout(box, 4, 4)
+    lay.setContentsMargins(0, 0, 0, 0)
+    buttons = []
+    for i in range(6):
+        b = QToolButton()
+        b.setText(f"Botão {i}")
+        b.setFixedSize(80, 24)
+        lay.addWidget(b)
+        buttons.append(b)
+        if i == 2:
+            lay.add_stretch()
+    box.resize(1000, 40)
+    box.show()
+    APP.processEvents()
+    assert len({b.y() for b in buttons}) == 1                  # cabe numa linha
+    assert buttons[3].x() + 80 * 3 + 8 > 900                     # o espaçador empurrou o resto para a direita
+    assert lay.minimumSize().width() == 80
+    h1 = lay.heightForWidth(1000)
+    h3 = lay.heightForWidth(180)
+    assert h3 > h1 and h3 >= 24 * 3                              # estreito: quebra em várias linhas
+    box.resize(180, h3)
+    APP.processEvents()
+    assert len({b.y() for b in buttons}) >= 3
+    assert all(b.x() + b.width() <= 180 for b in buttons)
+    box.close()
+
+
+def test_adaptive_bar_compacts_before_wrapping():
+    from PySide6.QtWidgets import QLabel, QToolButton
+    from pelicula.ui.flow import AdaptiveBar, FlowLayout
+    bar = AdaptiveBar()
+    lay = FlowLayout(bar, 4, 4)
+    lay.setContentsMargins(0, 0, 0, 0)
+    tools = []
+    for i in range(5):
+        b = QToolButton()
+        b.setIcon(icons.icon("film", "#ffffff", 16))
+        b.setText(f"Ferramenta {i}")
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        lay.addWidget(b)
+        tools.append(b)
+    extra = QLabel("100%")
+    lay.addWidget(extra)
+    bar.set_adaptive(compact=tools, optional=[extra])
+    bar.resize(2000, 40)
+    bar.show()
+    APP.processEvents()
+    assert bar.level == 0 and tools[0].toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+    icon_w = 5 * 36
+    bar.resize(icon_w + 60, 40)
+    APP.processEvents()
+    assert bar.level >= 1 and tools[0].toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    assert tools[0].toolTip() == "Ferramenta 0"                    # o texto continua na dica
+    bar.resize(2000, 40)
+    APP.processEvents()
+    assert bar.level == 0 and extra.isVisible()
+    bar.close()
+
+
+def test_looks_panel_reflows_columns():
+    from pelicula.ui.looks import LooksPanel
+    p = LooksPanel()
+    p.rebuild([{"id": f"p{i}", "nome": f"Preset {i}", "grupo": "Cinema 35 mm", "desc": "", "valores": {}}
+               for i in range(6)])
+    p.resize(560, 700)
+    p.show()
+    APP.processEvents()
+    APP.processEvents()
+    thumbs = list(p.thumbs.values())
+    wide = len({t.x() for t in thumbs})
+    p.resize(p.minimumWidth(), 700)
+    APP.processEvents()
+    APP.processEvents()
+    narrow = len({t.x() for t in thumbs})
+    assert wide >= 3 and narrow == 1, (wide, narrow)
+    assert all(t.x() + t.width() <= p.scroll.viewport().width() for t in thumbs)
+    p.close()

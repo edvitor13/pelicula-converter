@@ -21,6 +21,7 @@ from ..i18n import _, decimal_sep
 from ..timeline import AUDIO, VIDEO, Clip
 from . import icons, theme
 from .edit_model import TimelineModel
+from .flow import AdaptiveBar, FlowLayout
 from .widgets import FilmSlider, timecode
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
@@ -993,11 +994,10 @@ class TimelineEditor(QWidget):
         return b
 
     def _toolbar(self) -> QWidget:
-        bar = QWidget()
+        bar = AdaptiveBar()
         bar.setObjectName("ViewerBar")
-        hl = QHBoxLayout(bar)
+        hl = FlowLayout(bar, 2, 2)
         hl.setContentsMargins(8, 4, 8, 4)
-        hl.setSpacing(2)
         c = self.canvas
         m = self.model
         self.btn_select = self._btn("pointer", _("Selecionar e mover (V)"), checkable=True)
@@ -1009,7 +1009,7 @@ class TimelineEditor(QWidget):
             hl.addWidget(b)
         self.btn_select.clicked.connect(lambda: c.set_tool("select"))
         self.btn_blade.clicked.connect(lambda: c.set_tool("blade"))
-        hl.addSpacing(8)
+        hl.add_spacing(8)
         self.btn_split = self._btn("split", _("Dividir no cursor (S)"), _("Dividir"))
         self.btn_split.clicked.connect(lambda: m.split_at(c.playhead))
         self.btn_delete = self._btn("trash", _("Excluir os clipes selecionados (Delete)"))
@@ -1024,14 +1024,14 @@ class TimelineEditor(QWidget):
         self.btn_snap.toggled.connect(self._set_snap)
         for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap):
             hl.addWidget(b)
-        hl.addSpacing(8)
+        hl.add_spacing(8)
         self.btn_add_v = self._btn("track_add", _("Nova faixa de vídeo"), _("Vídeo"))
         self.btn_add_v.clicked.connect(lambda: m.add_track(VIDEO))
         self.btn_add_a = self._btn("track_add", _("Nova faixa de áudio"), _("Áudio"))
         self.btn_add_a.clicked.connect(lambda: m.add_track(AUDIO))
         hl.addWidget(self.btn_add_v)
         hl.addWidget(self.btn_add_a)
-        hl.addStretch(1)
+        hl.add_stretch()
         zo = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também."))
         zo.clicked.connect(lambda: c.set_ppf(c.ppf * 0.8))
         self.zoom = FilmSlider(0.0, 1.0, 0.001, self._ppf_to_t(4.0))
@@ -1044,6 +1044,8 @@ class TimelineEditor(QWidget):
         fit.clicked.connect(self.zoom_fit)
         for b in (zo, self.zoom, zi, fit):
             hl.addWidget(b)
+        # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
+        bar.set_adaptive(compact=[self.btn_split, self.btn_add_v, self.btn_add_a, fit], optional=[self.zoom])
         return bar
 
     @staticmethod

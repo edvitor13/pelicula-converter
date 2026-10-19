@@ -43,6 +43,15 @@ def title_font() -> str:
     return ui_font()
 
 
+def mono_font(size: float = 9.5) -> QFont:
+    """Fonte do tempo (QLabel#Time na folha de estilo)."""
+    fams = set(QFontDatabase.families())
+    f = QFont(next((n for n in ("Cascadia Mono", "Consolas", "DejaVu Sans Mono") if n in fams), "monospace"))
+    f.setStyleHint(QFont.StyleHint.Monospace)
+    f.setPointSizeF(size)
+    return f
+
+
 def font(size: float = 9.5, weight: QFont.Weight = QFont.Weight.Normal, title: bool = False) -> QFont:
     f = QFont(title_font() if title else ui_font())
     f.setPointSizeF(size)
