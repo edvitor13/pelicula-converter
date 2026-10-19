@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.3.0] - 2026-10-19
+
 ### Adicionado
 - **Modo Edição** (seletor *Película | Edição* no topo, Ctrl+1 / Ctrl+2): montagem em faixas de
   vídeo e de áudio antes do look de película. Importar vídeos, imagens e músicas (Ctrl+I ou
@@ -69,10 +75,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   tempo do player sobe para uma linha própria quando falta espaço e os looks se reorganizam em
   duas, três ou mais colunas conforme a largura (o painel nunca fica mais estreito que duas
   miniaturas lado a lado).
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.2.2] - 2026-10-16
 
