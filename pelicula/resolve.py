@@ -92,7 +92,9 @@ def flt(x: float) -> str:
     x = float(x)
     if not math.isfinite(x):
         raise ValueError(x)
-    if x == 0.0:
+    if abs(x) < 1e-12:
+        # Zeros calculados (ex.: fora da diagonal de uma matriz de gamut identidade) saem como 1e-17
+        # com sinal e dígitos que mudam conforme a CPU/BLAS; num float32 eles são zero de qualquer jeito.
         return "0.0f"
     s = f"{x:.9g}"
     if "e" in s or "E" in s:

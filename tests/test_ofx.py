@@ -142,6 +142,19 @@ def test_generated_comparison_tolerates_last_digit_only():
     assert ofx._same_code(a, a.replace("0.123456789f", "0.123456788f")) == ""
     assert ofx._same_code(a, a.replace("0.123456789f", "0.1235f")) != ""
     assert ofx._same_code(a, a.replace("int k", "int j")) != ""
+    # ruído perto de zero (matrizes calculadas em outra CPU) não conta
+    z = "float g[2] = {1.0f, 9.14550809e-18f};"
+    assert ofx._same_code(z, z.replace("9.14550809e-18f", "1.94542837e-16f")) == ""
+
+
+def test_generated_tables_have_no_floating_noise():
+    """Zeros calculados saem como 0.0f, não como 1e-17 que muda de máquina para máquina."""
+    import re
+    for text in (ofx.kernels_source(), ofx.params_source()):
+        # Só os números escritos por resolve.flt() (sempre com ponto na mantissa): os epsilons fixos
+        # do código, como 1e-30f, são escritos à mão e ficam de fora.
+        tiny = re.findall(r"[-+]?\d+\.\d+e-(?:1[3-9]|[2-9]\d)f", text)
+        assert not tiny, tiny[:5]
 
 
 def test_plugin_has_every_control_of_the_dctl_nodes():

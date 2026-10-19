@@ -352,7 +352,7 @@ def generate(dest: str | Path | None = None) -> list[Path]:
 _NUM = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?f?")
 
 
-def _same_code(a: str, b: str, rel: float = 1e-6) -> str:
+def _same_code(a: str, b: str, rel: float = 1e-6, absolute: float = 1e-9) -> str:
     """"" se os dois códigos são iguais; senão, a primeira linha diferente (para a mensagem do teste).
 
     Os números são comparados com tolerância: tabelas calculadas com o numpy (matrizes de gamut,
@@ -368,7 +368,7 @@ def _same_code(a: str, b: str, rel: float = 1e-6) -> str:
             return f"linha {i}:\n  {x.strip()[:160]}\n  {y.strip()[:160]}"
         for n1, n2 in zip(_NUM.findall(x), _NUM.findall(y)):
             f1, f2 = float(n1.rstrip("fF")), float(n2.rstrip("fF"))
-            if abs(f1 - f2) > rel * max(abs(f1), abs(f2), 1e-30):
+            if abs(f1 - f2) > max(rel * max(abs(f1), abs(f2)), absolute):
                 return f"linha {i}: {n1} × {n2}"
     return ""
 
