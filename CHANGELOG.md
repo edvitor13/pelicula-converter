@@ -60,7 +60,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   arrastar o divisor e não cortam opções. As barras da prévia, do player, da linha do tempo e do
   topo encolhem em etapas (botões só com ícone, extras escondidos, quebra de linha), a linha do
   tempo do player sobe para uma linha própria quando falta espaço e os looks se reorganizam em
-  uma, duas ou mais colunas conforme a largura.
+  duas, três ou mais colunas conforme a largura (o painel nunca fica mais estreito que duas
+  miniaturas lado a lado).
 
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas

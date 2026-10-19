@@ -696,7 +696,7 @@ def test_looks_panel_reflows_columns():
     from pelicula.ui.looks import LooksPanel
     p = LooksPanel()
     p.rebuild([{"id": f"p{i}", "nome": f"Preset {i}", "grupo": "Cinema 35 mm", "desc": "", "valores": {}}
-               for i in range(6)])
+               for i in range(30)])  # muitas miniaturas: a barra de rolagem aparece
     p.resize(560, 700)
     p.show()
     APP.processEvents()
@@ -707,6 +707,6 @@ def test_looks_panel_reflows_columns():
     APP.processEvents()
     APP.processEvents()
     narrow = len({t.x() for t in thumbs})
-    assert wide >= 3 and narrow == 1, (wide, narrow)
+    assert wide >= 3 and narrow == 2, (wide, narrow)  # no mínimo, duas miniaturas lado a lado
     assert all(t.x() + t.width() <= p.scroll.viewport().width() for t in thumbs)
     p.close()

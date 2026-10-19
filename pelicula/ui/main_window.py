@@ -388,7 +388,7 @@ class MainWindow(QMainWindow):
         # Estados antigos podiam ter um painel recolhido (largura 0): volta ao padrão.
         self.split.setChildrenCollapsible(False)
         if min(self.split.sizes()) <= 0:
-            self.split.setSizes([290, 980, 380])
+            self.split.setSizes([310, 960, 380])
         st = self.settings.value("splitter_edit")
         if st is not None:
             self.center_split.restoreState(st)
@@ -436,7 +436,7 @@ class MainWindow(QMainWindow):
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 0)
         self.split.setChildrenCollapsible(False)
-        self.split.setSizes([290, 980, 380])
+        self.split.setSizes([310, 960, 380])
         root.addWidget(self.split, 1)
         self.setCentralWidget(central)
         sb = self.statusBar()

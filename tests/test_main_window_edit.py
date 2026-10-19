@@ -168,9 +168,9 @@ def test_edit_mode_end_to_end(gl_engine, sample_video, tmp_path):
     assert out["final_frame_cursor"] == [18, 18, 18]
     assert out["collapsible"] == [False, False]
     left, center, right, top = out["min_widths"]
-    assert left <= 240 and center <= 700 and right <= 320 and top <= 720, out["min_widths"]
+    assert left <= 320 and center <= 700 and right <= 320 and top <= 720, out["min_widths"]
     assert min(out["narrow_sides"]) >= 200, out["narrow_sides"]
-    assert out["look_columns"] >= 3 and out["look_columns_narrow"] == 1, (out["look_columns"],
+    assert out["look_columns"] >= 3 and out["look_columns_narrow"] == 2, (out["look_columns"],
                                                                            out["look_columns_narrow"])
     assert out["clips_after_split"] == 4
     assert out["clips_after_delete"] == 2

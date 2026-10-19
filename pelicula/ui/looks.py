@@ -88,8 +88,6 @@ class LooksPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("Panel")
-        # Uma coluna no mínimo; mais largo, as miniaturas se reorganizam em mais colunas.
-        self.setMinimumWidth(THUMB_W + 48)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 6, 6)
         lay.setSpacing(8)
@@ -109,6 +107,11 @@ class LooksPanel(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lay.addWidget(self.scroll, 1)
+        # No mínimo duas miniaturas lado a lado (com a barra de rolagem visível); mais largo, as
+        # miniaturas se reorganizam em três ou mais colunas.
+        m = lay.contentsMargins()
+        bar = self.scroll.verticalScrollBar().sizeHint().width()
+        self.setMinimumWidth(2 * (THUMB_W + 6) + 4 + 6 + m.left() + m.right() + bar + 4)
         self.inner = QWidget()
         self.vl = QVBoxLayout(self.inner)
         self.vl.setContentsMargins(0, 0, 6, 0)
