@@ -116,7 +116,7 @@ win.toggle_preview_fullscreen()
 out["fs"] = win.preview_fullscreen
 out["fs_size"] = list(win.preview_size())
 out["fs_rendered"] = wait_width(960)
-out["hidden"] = [w.isHidden() for w in (win.top_bar, win.looks, win.right_panel, win.statusBar())]
+out["hidden"] = [w.isHidden() for w in (win.top_bar, win.left_stack, win.right_panel, win.statusBar())]
 out["kept"] = [w.isHidden() for w in (win.viewer_bar, win.transport, win.prev_combo, win.btn_play, win.timeline)]
 out["btn_text"] = win.btn_full.text()
 out["viewer_fs"] = win.viewer.fullscreen
@@ -128,7 +128,7 @@ win.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Minus, Qt.KeyboardM
 out["minus_back_to_fit"] = win.viewer.zoom
 win.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
 out["after_esc"] = win.preview_fullscreen
-out["shown_again"] = [w.isHidden() for w in (win.top_bar, win.looks, win.right_panel, win.viewer_bar, win.transport,
+out["shown_again"] = [w.isHidden() for w in (win.top_bar, win.left_stack, win.right_panel, win.viewer_bar, win.transport,
                                              win.statusBar())]
 out["btn_text_after"] = win.btn_full.text()
 out["size_after"] = list(win.preview_size())

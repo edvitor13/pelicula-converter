@@ -16,6 +16,16 @@ ACCENT_DIM = "#7a5320"
 DANGER = "#e5534b"
 OK = "#5cc48a"
 
+# Linha do tempo do modo Edição
+CLIP_VIDEO = "#a8692a"
+CLIP_VIDEO_HI = "#d18a3f"
+CLIP_IMAGE = "#8c6a3c"
+CLIP_AUDIO = "#2c7a70"
+CLIP_AUDIO_HI = "#3fa597"
+TRACK_BG = "#141210"
+TRACK_BG2 = "#181513"
+PLAYHEAD = "#ffcf7a"
+
 
 def ui_font() -> str:
     fams = set(QFontDatabase.families())
