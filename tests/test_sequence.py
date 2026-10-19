@@ -223,7 +223,8 @@ def test_export_edit_mixes_audio(gl_engine, ffmpeg_ok, sample_video, second_vide
 
 @pytest.mark.gpu
 @pytest.mark.ffmpeg
-def test_measure_speed_with_sequence(ffmpeg_ok, sample_video, second_video, film):
+def test_measure_speed_with_sequence(gl_engine, ffmpeg_ok, sample_video, second_video, film):
+    # gl_engine só para pular sem OpenGL 3.3 (CI): measure_speed cria o próprio Engine na thread.
     seq = edit(sample_video, second_video)
     s = ExportSettings(codec="x264", container="mp4", pix="yuv420p", quality=23, preset="ultrafast")
     out: list[float] = []

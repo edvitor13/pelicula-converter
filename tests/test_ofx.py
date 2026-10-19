@@ -133,7 +133,15 @@ def _color_diff(core: Core, gl_engine, values: dict, n: int = 17) -> float:
 # ------------------------------------------------------------------ código gerado (sem compilador)
 def test_generated_files_are_up_to_date():
     """plugins/ofx/generated vem dos kernels de resolve.py e das tabelas do app: rode tools/gerar_ofx.py."""
-    assert ofx.generated_up_to_date() == []
+    details: dict[str, str] = {}
+    assert ofx.generated_up_to_date(details) == [], details
+
+
+def test_generated_comparison_tolerates_last_digit_only():
+    a = "float m[3] = {0.123456789f, 1.0f};\nint k = 3;"
+    assert ofx._same_code(a, a.replace("0.123456789f", "0.123456788f")) == ""
+    assert ofx._same_code(a, a.replace("0.123456789f", "0.1235f")) != ""
+    assert ofx._same_code(a, a.replace("int k", "int j")) != ""
 
 
 def test_plugin_has_every_control_of_the_dctl_nodes():

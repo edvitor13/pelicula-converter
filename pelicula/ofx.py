@@ -20,6 +20,7 @@ Compilar: `python plugins/ofx/build.py` (MSVC no Windows, g++ no Linux). Os test
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -348,13 +349,40 @@ def generate(dest: str | Path | None = None) -> list[Path]:
     return files
 
 
-def generated_up_to_date() -> list[str]:
+_NUM = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?f?")
+
+
+def _same_code(a: str, b: str, rel: float = 1e-6) -> str:
+    """"" se os dois códigos são iguais; senão, a primeira linha diferente (para a mensagem do teste).
+
+    Os números são comparados com tolerância: tabelas calculadas com o numpy (matrizes de gamut,
+    calibração) podem mudar no último dígito impresso entre máquinas com outra CPU/BLAS.
+    """
+    la, lb = a.splitlines(), b.splitlines()
+    if len(la) != len(lb):
+        return f"{len(la)} linhas × {len(lb)} linhas"
+    for i, (x, y) in enumerate(zip(la, lb), 1):
+        if x == y:
+            continue
+        if _NUM.sub("#", x) != _NUM.sub("#", y):
+            return f"linha {i}:\n  {x.strip()[:160]}\n  {y.strip()[:160]}"
+        for n1, n2 in zip(_NUM.findall(x), _NUM.findall(y)):
+            f1, f2 = float(n1.rstrip("fF")), float(n2.rstrip("fF"))
+            if abs(f1 - f2) > rel * max(abs(f1), abs(f2), 1e-30):
+                return f"linha {i}: {n1} × {n2}"
+    return ""
+
+
+def generated_up_to_date(details: dict[str, str] | None = None) -> list[str]:
     """Arquivos gerados que estão diferentes do que o código atual produziria (vazio = em dia)."""
     stale = []
     for name, text in (("pc_kernels.h", kernels_source()), ("pc_params.h", params_source())):
         path = SRC_DIR / "generated" / name
-        if not path.is_file() or path.read_text(encoding="ascii") != text:
+        diff = "arquivo não existe" if not path.is_file() else _same_code(path.read_text(encoding="ascii"), text)
+        if diff:
             stale.append(name)
+            if details is not None:
+                details[name] = diff
     return stale
 
 
