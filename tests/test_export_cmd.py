@@ -54,17 +54,38 @@ def build(key, make_info, out="saida", depth=None, has_audio=False, start=0.0, d
 
 # ------------------------------------------------------------------ tamanho de saída
 @pytest.mark.parametrize("codec, res, src, expected", [
+    # deitado: a resolução é a altura (como sempre foi)
     ("x264", "original", (1920, 1080), (1920, 1080)),
     ("x264", "720", (1920, 1080), (1280, 720)),
     ("x264", "2160", (1920, 1080), (3840, 2160)),
     ("x264", "480", (1920, 1080), (852, 480)),       # 853,33 -> 853 -> par
     ("x264", "original", (1921, 1081), (1920, 1080)),
     ("x265", "1080", (4096, 2160), (2048, 1080)),
-    ("x264", "720", (1080, 1920), (404, 720)),       # vertical: a altura manda
+    ("x264", "1080", (3840, 1606), (2582, 1080)),    # 2,39:1
+    # vertical: a resolução vale para o lado menor (a largura), como no YouTube e nos celulares
+    ("x264", "1080", (1080, 1920), (1080, 1920)),    # "Redes sociais 1080p": antes saía 608 × 1080
+    ("x264", "720", (1080, 1920), (720, 1280)),
+    ("x264", "2160", (1080, 1920), (2160, 3840)),    # YouTube 4K vertical
+    ("x264", "480", (1080, 1920), (480, 852)),       # 853,33 -> 853 -> par
+    ("x264", "1080", (2160, 3840), (1080, 1920)),
+    ("x264", "1080", (1080, 1350), (1080, 1350)),    # retrato 4:5
+    ("x264", "720", (1080, 1350), (720, 900)),
+    ("x264", "original", (1080, 1920), (1080, 1920)),
+    # quadrado
+    ("x264", "720", (1080, 1080), (720, 720)),
+    ("x264", "2160", (1080, 1080), (2160, 2160)),
+    # tamanhos ímpares: pares nos codecs de vídeo, exatos nos sem perdas e imagens
+    ("x264", "720", (1081, 1921), (720, 1278)),      # 1279,48 -> 1279 -> par
+    ("x264", "original", (1081, 1921), (1080, 1920)),
+    ("ffv1", "720", (1081, 1921), (720, 1279)),
+    ("x264", "541", (1920, 1080), (962, 540)),       # resolução ímpar (terminal): 961,78 -> 962; 541 -> 540
     ("ffv1", "original", (1921, 1081), (1921, 1081)),
     ("png", "original", (1921, 1081), (1921, 1081)),
+    ("png", "1080", (3000, 4000), (1080, 1440)),     # foto em pé
     ("png_seq", "original", (321, 181), (321, 181)),
+    ("png_seq", "90", (181, 321), (90, 160)),
     ("gif", "480", (1920, 1080), (853, 480)),
+    ("gif", "480", (1080, 1920), (480, 853)),
     ("x264", "original", (1, 1), (2, 2)),
 ])
 def test_output_size(make_info, codec, res, src, expected):
@@ -77,11 +98,31 @@ def test_output_size(make_info, codec, res, src, expected):
                                  and k not in ("png_seq", "tiff_seq", "ffv1", "gif")])
 @pytest.mark.parametrize("res", [r for r, _ in export.RESOLUTIONS])
 def test_output_size_even_for_video_codecs(make_info, key, res):
-    for w, h in ((1921, 1081), (1279, 719), (3839, 2161), (1080, 1920)):
+    for w, h in ((1921, 1081), (1279, 719), (3839, 2161), (1080, 1920), (1081, 1921), (719, 1279), (1080, 1080)):
         ow, oh = export.output_size(make_info(width=w, height=h), ExportSettings(codec=key, resolution=res))
         assert ow % 2 == 0 and oh % 2 == 0
+        assert (ow >= oh) == (w >= h), "a orientação do vídeo não pode mudar"
         if res != "original":
-            assert oh == int(res) - int(res) % 2
+            assert min(ow, oh) == int(res) - int(res) % 2  # a resolução é o lado menor
+
+
+@pytest.mark.parametrize("res", [r for r, _ in export.RESOLUTIONS if r != "original"])
+def test_output_size_keeps_the_aspect_ratio(make_info, res):
+    for w, h in ((1920, 1080), (1080, 1920), (1080, 1350), (3840, 1606), (1440, 1080), (1080, 1080)):
+        ow, oh = export.output_size(make_info(width=w, height=h), ExportSettings(codec="ffv1", resolution=res))
+        assert abs(ow / oh - w / h) < 0.01 * (w / h), (w, h, ow, oh)
+
+
+def test_social_preset_keeps_a_vertical_video_vertical(fake_ffmpeg, make_info):
+    """Regressão (issue #35): 1080 × 1920 em "Redes sociais 1080p" saía 608 × 1080."""
+    for w, h in ((1080, 1920), (1920, 1080), (1080, 1080)):
+        info = make_info(width=w, height=h)
+        by = {pid: s for pid, _label, s in export.quality_presets(info)}
+        assert export.output_size(info, by["social"]) == (w, h)
+        assert export.output_size(info, by["fhd"]) == (w, h)
+        assert min(export.output_size(info, by["leve"])) == 720
+        assert min(export.output_size(info, by["yt4k_hevc"])) == 2160
+        assert min(export.output_size(info, by["gif"])) == 480
 
 
 # ------------------------------------------------------------------ áudio
@@ -283,6 +324,148 @@ def test_sequence_path(tmp_path):
     p = export.sequence_path(str(tmp_path / "saida.png"))
     assert (tmp_path / "saida").is_dir()
     assert Path(p) == tmp_path / "saida" / "saida_%06d.png"
+
+
+# ------------------------------------------------------------------ gravação segura (sem ffmpeg)
+VIDEO = ExportSettings(codec="x264", container="mp4")
+PNG_SEQ = ExportSettings(codec="png_seq", container="png", pix="rgb48be")
+
+
+def names(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir())
+
+
+def fake_frames(folder: Path, stem: str, ext: str, n: int, tag: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for k in range(1, n + 1):
+        (folder / f"{stem}_{k:06d}{ext}").write_text(f"{tag}{k}")
+
+
+def test_partial_names_keep_the_real_extension_last():
+    """`video.parcial-pelicula.mp4`: o ffmpeg escolhe o formato pela extensão, igual ao do arquivo final."""
+    assert Path(export.partial_output("C:/v/saida.mp4", VIDEO)) == Path("C:/v/saida.parcial-pelicula.mp4")
+    assert Path(export.partial_output("C:/v/meu.filme.mov", VIDEO)) == Path("C:/v/meu.filme.parcial-pelicula.mov")
+    assert Path(export.partial_output("C:/v/quadros.png", PNG_SEQ)) == Path("C:/v/quadros.parcial-pelicula")
+    assert export.output_target("C:/v/saida.mp4", VIDEO) == "C:/v/saida.mp4"
+    assert Path(export.output_target("C:/v/quadros.png", PNG_SEQ)) == Path("C:/v/quadros")
+    assert export.is_sequence(PNG_SEQ) and export.is_sequence(ExportSettings(codec="tiff_seq"))
+    assert not export.is_sequence(VIDEO) and not export.is_sequence(ExportSettings(codec="png"))
+
+
+def test_encoder_writes_to_the_partial_and_the_name_changes_at_the_end(tmp_path):
+    out = tmp_path / "saida.mp4"
+    out.write_bytes(b"antigo")
+    stale = tmp_path / "saida.parcial-pelicula.mp4"
+    stale.write_bytes(b"sobra de uma exportacao interrompida")
+    target = export._prepare_output(str(out), VIDEO)
+    assert Path(target) == stale and not stale.exists()  # o parcial velho foi apagado
+    Path(target).write_bytes(b"novo")
+    assert out.read_bytes() == b"antigo"  # até o fim, o antigo continua lá
+    export._commit_output(str(out), VIDEO)
+    assert out.read_bytes() == b"novo" and names(tmp_path) == ["saida.mp4"]
+
+
+def test_discard_keeps_the_old_file(tmp_path):
+    out = tmp_path / "saida.mp4"
+    out.write_bytes(b"antigo")
+    Path(export._prepare_output(str(out), VIDEO)).write_bytes(b"pela metade")
+    export._discard_output(str(out), VIDEO)
+    assert out.read_bytes() == b"antigo" and names(tmp_path) == ["saida.mp4"]
+
+
+def test_output_exists_for_files_and_sequences(tmp_path):
+    out = str(tmp_path / "quadros.png")
+    assert not export.output_exists(out, PNG_SEQ) and not export.output_exists(out, VIDEO)
+    (tmp_path / "quadros").mkdir()
+    (tmp_path / "quadros" / "outra_coisa.png").write_text("x")
+    assert not export.output_exists(out, PNG_SEQ)  # pasta sem quadros desta sequência
+    fake_frames(tmp_path / "quadros", "quadros", ".png", 1, "v")
+    assert export.output_exists(out, PNG_SEQ)
+    Path(out).write_text("x")
+    assert export.output_exists(out, VIDEO)
+
+
+def test_new_sequence_folder_appears_in_one_step(tmp_path):
+    out = str(tmp_path / "quadros.png")
+    target = export._prepare_output(out, PNG_SEQ)
+    assert Path(target) == tmp_path / "quadros.parcial-pelicula" / "quadros_%06d.png"
+    assert names(tmp_path) == ["quadros.parcial-pelicula"]
+    fake_frames(tmp_path / "quadros.parcial-pelicula", "quadros", ".png", 3, "novo")
+    export._commit_output(out, PNG_SEQ)
+    assert names(tmp_path) == ["quadros"]
+    assert names(tmp_path / "quadros") == [f"quadros_{k:06d}.png" for k in (1, 2, 3)]
+
+
+def test_sequence_replaces_old_frames_only_at_the_end(tmp_path):
+    """Quadros antigos ficam intactos até o fim; os que sobram de uma exportação mais longa saem, e
+    arquivos da pessoa na mesma pasta nunca são apagados."""
+    out = str(tmp_path / "quadros.png")
+    final = tmp_path / "quadros"
+    fake_frames(final, "quadros", ".png", 6, "velho")
+    (final / "notas.txt").write_text("minhas notas")
+    (final / "quadros_final.png").write_text("da pessoa")
+    export._prepare_output(out, PNG_SEQ)
+    fake_frames(tmp_path / "quadros.parcial-pelicula", "quadros", ".png", 4, "novo")
+    assert (final / "quadros_000001.png").read_text() == "velho1"
+    export._commit_output(out, PNG_SEQ)
+    assert names(final) == ["notas.txt", "quadros_000001.png", "quadros_000002.png", "quadros_000003.png",
+                            "quadros_000004.png", "quadros_final.png"]
+    assert [(final / f"quadros_{k:06d}.png").read_text() for k in (1, 4)] == ["novo1", "novo4"]
+    assert names(tmp_path) == ["quadros"]
+
+
+def test_partial_marker_is_not_a_common_word(tmp_path):
+    """`entrevista.parcial.mp4` pode ser um arquivo da pessoa: a exportação para `entrevista.mp4` não o apaga."""
+    mine = tmp_path / "entrevista.parcial.mp4"
+    mine.write_bytes(b"corte parcial da pessoa")
+    out = tmp_path / "entrevista.mp4"
+    Path(export._prepare_output(str(out), VIDEO)).write_bytes(b"novo")
+    export._commit_output(str(out), VIDEO)
+    assert mine.read_bytes() == b"corte parcial da pessoa" and out.read_bytes() == b"novo"
+    assert names(tmp_path) == ["entrevista.mp4", "entrevista.parcial.mp4"]
+
+
+def test_partial_clash_with_an_input(tmp_path, make_info):
+    out = str(tmp_path / "x.mp4")
+    part = export.partial_output(out, VIDEO)
+    assert export.partial_clash(out, VIDEO, [part]) == part
+    assert export.partial_clash(out, VIDEO, [str(tmp_path / "x.mp4"), str(tmp_path / "y.mp4"), ""]) == ""
+    seq_out = str(tmp_path / "q.png")
+    inside = str(Path(export.partial_output(seq_out, PNG_SEQ)) / "q_000001.png")
+    assert export.partial_clash(seq_out, PNG_SEQ, [inside]) == inside
+    assert export.partial_clash(seq_out, VIDEO, [inside]) == ""
+    info = make_info(path=part)
+    assert export.job_inputs(info) == [part]
+
+
+def test_run_job_refuses_to_delete_an_input_named_like_its_partial(tmp_path, make_info):
+    """A pessoa abriu o parcial que sobrou (`x.parcial-pelicula.mp4`) e exporta para `x.mp4`: nada é apagado."""
+    src = tmp_path / "x.parcial-pelicula.mp4"
+    src.write_bytes(b"o resultado que tinha ficado no parcial")
+    job = export.ExportJob(info=make_info(path=str(src)), values={}, settings=VIDEO, out_path=str(tmp_path / "x.mp4"))
+    export.run_job(job, None)  # recusa antes de usar a GPU ou o ffmpeg
+    assert job.status == "erro" and str(src) in job.error
+    assert src.read_bytes() == b"o resultado que tinha ficado no parcial"
+    assert names(tmp_path) == ["x.parcial-pelicula.mp4"]
+
+
+def test_sequence_discard_and_stale_partial_folder(tmp_path):
+    out = str(tmp_path / "quadros.tif")
+    s = ExportSettings(codec="tiff_seq", container="tif", pix="rgb48le")
+    final = tmp_path / "quadros"
+    fake_frames(final, "quadros", ".tif", 2, "velho")
+    fake_frames(tmp_path / "quadros.parcial-pelicula", "quadros", ".tif", 5, "sobra")  # exportação interrompida
+    export._prepare_output(out, s)
+    assert names(tmp_path / "quadros.parcial-pelicula") == []  # o parcial velho foi limpo
+    fake_frames(tmp_path / "quadros.parcial-pelicula", "quadros", ".tif", 3, "pela metade")
+    export._discard_output(out, s)
+    assert names(tmp_path) == ["quadros"]
+    assert [(final / n).read_text() for n in names(final)] == ["velho1", "velho2"]
+    # algo que não é desta sequência na pasta parcial nunca é apagado
+    fake_frames(tmp_path / "quadros.parcial-pelicula", "quadros", ".tif", 2, "x")
+    (tmp_path / "quadros.parcial-pelicula" / "outro.txt").write_text("x")
+    export._discard_output(out, s)
+    assert names(tmp_path / "quadros.parcial-pelicula") == ["outro.txt"]
 
 
 # ------------------------------------------------------------------ profundidade e configurações

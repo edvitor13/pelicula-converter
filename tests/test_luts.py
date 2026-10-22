@@ -60,6 +60,25 @@ def test_save_cube_writes_lf_and_header(tmp_path):
     assert "LUT_3D_SIZE 2\n" in text and "DOMAIN_MIN 0.0 0.0 0.0" in text and "DOMAIN_MAX 1.0 1.0 1.0" in text
 
 
+def test_save_cube_replaces_an_old_lut_without_leaving_partials(tmp_path):
+    p = tmp_path / "look.cube"
+    p.write_text("LUT antigo", encoding="utf-8")
+    luts.save_cube(str(p), identity(3), 3, "novo")
+    assert luts.load_cube(str(p)).size == 3
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["look.cube"]
+
+
+def test_save_cube_failure_keeps_the_old_lut(tmp_path):
+    """Uma falha no meio da gravação não deixa o LUT pela metade nem apaga o antigo."""
+    p = tmp_path / "look.cube"
+    p.write_text("LUT antigo", encoding="utf-8")
+    bad = np.array([[0.1, 0.2]], dtype=np.float32)  # linha com 2 valores: a gravação quebra no meio
+    with pytest.raises(ValueError):
+        luts.save_cube(str(p), bad, 2, "x")
+    assert p.read_text(encoding="utf-8") == "LUT antigo"
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["look.cube"]
+
+
 def test_load_cube_domain_min_max(tmp_path):
     p = write_text(tmp_path / "dom.cube",
                    cube_text(2, header='TITLE "Dom"\n# comentário\n\nDOMAIN_MIN -0.1 -0.2 -0.3\nDOMAIN_MAX 1.5 2 4\n'))

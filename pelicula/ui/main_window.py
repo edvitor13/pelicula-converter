@@ -1929,7 +1929,8 @@ class MainWindow(QMainWindow):
             if j.status in ("concluido", "erro") and j.id not in self._seen_done:
                 self._seen_done.add(j.id)
                 if j.status == "concluido":
-                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=j.out_path), 10000)
+                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(
+                        caminho=export.output_target(j.out_path, j.settings)), 10000)
                 else:
                     self.statusBar().showMessage(_("Uma exportação falhou. Veja os detalhes na fila."), 10000)
                     self.show_queue()
@@ -1961,14 +1962,7 @@ class MainWindow(QMainWindow):
                 self.engine.set_input(img)
                 info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
                 out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False), 16)
-            ext = Path(path).suffix.lower()
-            pix = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
-                   ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}.get(ext, [])
-            cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}",
-                   "-i", "pipe:0", *pix, "-frames:v", "1", "-update", "1", path]
-            res = subprocess.run(cmd, input=out.tobytes(), capture_output=True, creationflags=media.NO_WINDOW)
-            if res.returncode != 0:
-                raise RuntimeError(res.stderr.decode("utf-8", "replace"))
+            export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
         except Exception as exc:  # noqa: BLE001
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, APP_NAME, _("Não foi possível salvar o quadro.\n\n{erro}").format(erro=exc))

@@ -315,5 +315,7 @@ def import_file(path: str) -> str:
 
 
 def export_file(path: str, name: str, values: dict[str, Any]) -> None:
+    from .system import atomic_write
     data = {"nome": name, "app": "PeliculaConverter", "versao": 1, "valores": values}
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with atomic_write(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(data, ensure_ascii=False, indent=2))

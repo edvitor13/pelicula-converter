@@ -223,7 +223,11 @@ quadros vizinhos:
   PNG/TIFF/JPEG/WebP.
 - **Qualidades prontas**: *Original — mesmo formato*, MP4, MOV, MKV, YouTube 4K (H.265 10 bits ou
   H.264), Full HD, redes sociais, leve 720p, WebM, AVI, GIF, masters ProRes/DNxHR, FFV1 e
-  sequência PNG.
+  sequência PNG. A resolução (1080p, 720p, 4K…) vale para o **lado menor**: vídeo vertical continua
+  vertical (1080 × 1920 em 1080p).
+- **Gravação segura**: o vídeo é gravado num arquivo parcial ao lado do destino e só ganha o nome final
+  quando termina; cancelar, dar erro ou o computador desligar no meio nunca deixa um arquivo quebrado
+  com o nome final nem apaga antes da hora o antigo com o mesmo nome.
 - **Áudio**: copiar o original, AAC 320/192 kb/s, MP3 320 kb/s, Opus 192 kb/s, PCM 24 bits ou sem áudio
   (com correção automática quando o recipiente não aceita o formato).
 - Processamento em **16 bits por canal** sempre que o formato de saída tem mais de 8 bits;
@@ -633,6 +637,10 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 | Rápido na GPU NVIDIA / Intel / AMD — H.265 | NVENC (CQ 17, `p6`, 10 bits), Quick Sync ou AMF — só aparecem se o codificador funcionar nesta máquina |
 | Sequência PNG 16 bits (para efeitos visuais) | Uma pasta com `nome_000001.png`, `nome_000002.png`… |
 
+As resoluções das qualidades (2160p, 1080p, 720p, 480p) valem para o **lado menor** do quadro, como no
+YouTube e nos celulares: em *Redes sociais 1080p*, um vídeo deitado sai 1920 × 1080 e um vertical sai
+1080 × 1920 (um 4:5 sai 1080 × 1350). A proporção nunca muda.
+
 Para **imagens**, as qualidades são PNG 16 bits, TIFF 16 bits, JPEG alta qualidade e WebP.
 
 Escolhendo **Personalizado** (ou mexendo em qualquer campo) você controla tudo:
@@ -640,7 +648,8 @@ Escolhendo **Personalizado** (ou mexendo em qualquer campo) você controla tudo:
 - **Codec**, **recipiente** e **formato de cor** (4:2:0, 4:2:2, 4:4:4, 8/10/12/16 bits, RGB);
 - **qualidade** (CRF, CQ, QP… — menor é melhor) ou **taxa de bits** fixa em Mb/s;
 - **velocidade** do codificador (`ultrafast`…`veryslow`, `p1`…`p7` etc.) e **perfil** (ProRes, DNxHR);
-- **resolução** (original, 8K, 4K, 1440p, 1080p, 720p, 540p, 480p, 360p) e **quadros/s**
+- **resolução** (original, 8K, 4K, 1440p, 1080p, 720p, 540p, 480p, 360p — o número é o lado menor, e
+  cada opção já mostra o tamanho que sai deste vídeo, por exemplo *1080p — 1080 × 1920*) e **quadros/s**
   (original, 12, 15, 23,976, 24, 25, 29,97, 30, 50, 59,94, 60);
 - **áudio** (copiar, AAC, MP3, Opus, PCM 24 bits, sem áudio). Se o áudio original não couber no
   recipiente, o app converte: WebM → Opus, AVI → MP3, MOV → PCM, MP4 → AAC;
@@ -648,7 +657,13 @@ Escolhendo **Personalizado** (ou mexendo em qualquer campo) você controla tudo:
 
 Detalhes que o app cuida sozinho: dimensões pares para codecs de vídeo, metadados de cor BT.709,
 `+faststart` em MP4/MOV, tag `hvc1` em H.265 (compatível com Apple), processamento em 16 bits
-sempre que a saída tem mais de 8 bits, e remoção do arquivo parcial quando a exportação é cancelada.
+sempre que a saída tem mais de 8 bits, e **gravação segura**: o vídeo é gravado em
+`nome.parcial-pelicula.mp4` (nas sequências, na pasta `nome.parcial-pelicula`) ao lado do destino e só
+ganha o nome final quando termina. Se você cancelar ou der erro, o parcial é apagado; se o app fechar no
+meio, ele é apagado na próxima exportação com o mesmo nome. Em todos os casos o arquivo antigo com o
+mesmo nome continua intacto — ele só é trocado no último instante (por isso, ao substituir um arquivo, é
+preciso espaço no disco para os dois até o fim). "Salvar quadro" e os LUTs e presets exportados também
+são gravados assim.
 
 **Trecho**: *Vídeo inteiro* ou *Só o trecho marcado* (com entrada/saída marcadas).
 
@@ -898,11 +913,13 @@ pelicula-cli qualidades video.mp4
 
 Opções de `exportar`: `-o/--saida`, `--preset`, `--set CHAVE=VALOR` (repetível; cores em `#RRGGBB`,
 porcentagens como `45%`, booleanos `true/false`), `--qualidade` (chaves de `qualidades`), `--codec`,
-`--recipiente`, `--pix`, `--crf`, `--taxa` (Mb/s), `--velocidade`, `--perfil`, `--resolucao`,
+`--recipiente`, `--pix`, `--crf`, `--taxa` (Mb/s), `--velocidade`, `--perfil`, `--resolucao`
+(`original` ou o lado menor em pixels, `1080` ou `1080p`: vertical em 1080 sai 1080 × 1920),
 `--fps`, `--audio`, `--inicio`/`--fim` (segundos, `00:01:02.5` ou `#quadro`), `--trecho` (usa a
 entrada/saída do projeto), `--threads`, `--prioridade`, `--hwaccel`, `--buffer`, `-y` (substituir),
 `--json` (progresso em JSON, uma linha por segundo) e `-q` (sem barra de progresso). `Ctrl+C`
-cancela e apaga o arquivo parcial. Códigos de saída: 0 sucesso, 1 erro, 2 uso incorreto,
+cancela e apaga o arquivo parcial; um arquivo antigo com o mesmo nome continua intacto (com `-y`, ele
+só é trocado quando a exportação termina). Códigos de saída: 0 sucesso, 1 erro, 2 uso incorreto,
 130 cancelado.
 
 ## Arquivos RAW (N-RAW, R3D, BRAW, ProRes RAW)
@@ -1017,6 +1034,9 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Exportação falha com erro do ffmpeg | A fila mostra a mensagem do ffmpeg. Combinações comuns: H.264/H.265 exigem dimensões pares (o app já ajusta), MP4 não aceita PCM (o app troca por AAC), NVENC exige driver recente. Tente a qualidade *MP4 H.264*. |
 | Efeitos lentos / prévia travando | Use a prévia *Rápida (540p)* ou *Normal (720p)*. Em notebooks, force a GPU dedicada (*Alto desempenho*). Halação, bloom e névoa com raios grandes custam mais. |
 | Exportação deixa o computador lento | Prioridade *Baixa* e menos núcleos na seção *Desempenho*. |
+| Ficou um `nome.parcial-pelicula.mp4` (ou uma pasta `nome.parcial-pelicula`) ao lado do vídeo | Sobra de uma exportação interrompida (o app fechou ou o computador desligou no meio). O arquivo final e o antigo não foram tocados. Pode apagar; a próxima exportação com o mesmo nome também apaga. |
+| *"A exportação terminou, mas não foi possível substituir…"* | O arquivo antigo estava aberto em outro programa (um player, por exemplo). O vídeo novo está completo no `nome.parcial-pelicula.mp4` indicado: feche o programa e renomeie, ou exporte de novo. |
+| Vídeo vertical saiu pequeno (608 × 1080 em 1080p) | Versões antigas usavam a resolução como altura. Agora ela vale para o lado menor (1080p vertical = 1080 × 1920); confira o tamanho em *Resolução* e na linha *Saída* da janela de exportação. |
 | Faixas (*banding*) em degradês | Mantenha o *Pontilhado (dither)* ligado em 8 bits ou exporte em 10 bits (MKV H.265, YouTube 4K H.265). |
 | O LUT não muda nada ou fica estranho | Confira *O LUT espera* (Cineon × Rec.709 × log da câmera) e se a seção *LUT externo* está ligada. LUTs 1D não são suportados. |
 | Linux: `qt.qpa.plugin: Could not load the Qt platform plugin "xcb"` | Instale `libxcb-cursor0 libxkbcommon-x11-0` (e as outras bibliotecas listadas na instalação). |

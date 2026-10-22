@@ -60,7 +60,9 @@ def load_cube(path: str) -> Lut3D:
 
 
 def save_cube(path: str, data: np.ndarray, size: int, title: str) -> None:
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+    """Grava o LUT num parcial ao lado e só troca o destino no fim (um LUT antigo nunca fica pela metade)."""
+    from .system import atomic_write
+    with atomic_write(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(f'TITLE "{title}"\n')
         fh.write("# Gerado pelo PeliculaConverter\n")
         fh.write(f"LUT_3D_SIZE {size}\n")

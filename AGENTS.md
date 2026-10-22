@@ -44,9 +44,11 @@ pelicula/
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
-  export.py                  CODECS, qualidades prontas, build_encoder_cmd(), ExportQueue, run_job(), measure_speed()
+  export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
+                             run_job() (grava num parcial e troca no fim), measure_speed(), save_still()
   deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), pip_install()
-  system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema
+  system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema, gravação segura
+                             (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Sequence (montagem, sem Qt), History
@@ -334,11 +336,29 @@ O plugin é C++ e reaproveita a matemática dos DCTLs:
 5. Áudio: confira a tabela de recipientes em `_audio_args()` (ao copiar áudio a partir do meio do
    arquivo, MKV/WebM/AVI recodificam para não deslocar o vídeo; MKV usa FLAC, sem perdas).
    Profundidade: `high_depth()` decide 8 ou 16 bits com `media.pix_depth()` (`nv12` é 8 bits,
-   `p010le` 10, `rgb48le` 16). Dimensões pares: `output_size()`.
+   `p010le` 10, `rgb48le` 16). Tamanho: `output_size()` — a resolução (`"1080"`…) é o **lado menor**
+   (vertical 1080 × 1920) e codecs de vídeo recebem dimensões pares; um codec que aceita tamanho ímpar
+   entra na lista de exceções de lá.
 6. Codificadores de hardware: `available()` já testa NVENC/QSV/AMF de verdade via
    `media.encoder_works()`; mantenha esse padrão para qualquer codificador que "aparece mas não
    funciona".
 7. Teste em `tests/test_export_cmd.py` (estrutura do comando) e documente no README.
+
+### Gravar arquivos do usuário
+
+Nada é gravado direto no destino escolhido pela pessoa: grave num parcial ao lado e troque no fim, para
+que cancelar, uma falha ou o app fechar no meio nunca deixem um arquivo quebrado com o nome final nem
+apaguem o antigo antes da hora.
+
+- Vídeo, imagem e sequência: `export.run_job()` já faz isso (`video.parcial-pelicula.mp4`, pasta
+  `quadros.parcial-pelicula/`; a extensão real fica no fim para o ffmpeg escolher o mesmo formato). Não
+  passe o destino final para `build_encoder_cmd()` fora desse caminho. A marca `parcial-pelicula`
+  (`system.PARTIAL`) é reservada: o parcial que sobrou de uma exportação interrompida é apagado na
+  próxima para o mesmo destino, e uma entrada com esse nome faz a exportação ser recusada
+  (`export.partial_clash`).
+- Um quadro: `export.save_still()`. Texto ou binário pequeno (LUT, preset): `with system.atomic_write(path)`.
+- Teste o caminho de erro: o arquivo antigo continua igual e nenhum `*.parcial-pelicula*` sobra
+  (`tests/test_export_e2e.py`, `tests/test_misc.py`).
 
 ### Adicionar um perfil de entrada (câmera)
 

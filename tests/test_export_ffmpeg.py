@@ -149,3 +149,25 @@ def test_audio_is_muxed_and_trimmed(ffmpeg_ok, raw_inputs, tmp_path, sample_info
 def test_x264_bitrate_mode_encodes(ffmpeg_ok, raw_inputs, tmp_path, make_info):
     _, out = run_encode("x264", raw_inputs, tmp_path, make_info, bitrate=2.5, threads=2, preset="ultrafast")
     assert media.probe(out).codec == "h264"
+
+
+# ------------------------------------------------------------------ "Salvar quadro"
+@pytest.mark.parametrize("ext, codec", [(".png", "png"), (".tif", "tiff"), (".tiff", "tiff"), (".jpg", "mjpeg"),
+                                        (".jpeg", "mjpeg")])
+def test_save_still_replaces_the_old_file_without_partials(ffmpeg_ok, tmp_path, test_rgb, ext, codec):
+    img = test_rgb.astype(np.uint16) * 257
+    out = tmp_path / f"quadro{ext}"
+    out.write_bytes(b"quadro antigo")
+    export.save_still(img, str(out))
+    i = media.probe(str(out))
+    assert i.is_image and i.codec == codec and (i.width, i.height) == (SAMPLE_W, SAMPLE_H)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [out.name]
+
+
+def test_save_still_failure_keeps_the_old_file(ffmpeg_ok, tmp_path, test_rgb):
+    out = tmp_path / "quadro.xyz"  # o ffmpeg não sabe gravar .xyz
+    out.write_bytes(b"quadro antigo")
+    with pytest.raises(RuntimeError):
+        export.save_still(test_rgb.astype(np.uint16) * 257, str(out))
+    assert out.read_bytes() == b"quadro antigo"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["quadro.xyz"]

@@ -202,6 +202,19 @@ def sample_video(ffmpeg_ok, tmp_path_factory) -> str:
 
 
 @pytest.fixture(scope="session")
+def sample_vertical_video(ffmpeg_ok, tmp_path_factory) -> str:
+    """Vídeo em pé, como o de um celular: 0,5 s, 180x320 (9:16), 24 fps, H.264, sem som."""
+    out = tmp_path_factory.mktemp("vertical") / "celular.mp4"
+    cmd = [ffmpeg_ok, "-v", "error", "-y", "-nostdin",
+           "-f", "lavfi", "-i", f"testsrc2=size={SAMPLE_H}x{SAMPLE_W}:rate={SAMPLE_FPS}:duration=0.5",
+           "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", str(out)]
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0 or not out.exists():
+        pytest.skip("não foi possível gerar o vídeo vertical: " + res.stderr.decode("utf-8", "replace"))
+    return str(out)
+
+
+@pytest.fixture(scope="session")
 def sample_info(sample_video):
     from pelicula import media
     return media.probe(sample_video)

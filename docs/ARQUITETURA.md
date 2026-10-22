@@ -92,9 +92,9 @@ Três ideias guiam o projeto:
 | `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
-| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()`, `measure_speed()`. |
+| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor), `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial), `measure_speed()`, `save_still()`. |
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), pasta do app, pacotes Python, `pip_install()`. |
-| `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema. |
+| `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema, gravação segura (`partial_path`, `replace_file`, `atomic_write`). |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
 | `pelicula/timeline.py` | Modo Edição: `Source`, `Clip`, `Track`, `Layer`, `Sequence` (montagem, tempo, transições, JSON) e `History` (desfazer). Sem Qt. |
@@ -356,8 +356,8 @@ Regras que decorrem disso:
 - **Nada de Qt de interface fora da thread principal.** As threads de trabalho só trocam dados por
   sinais, filas ou campos simples.
 - **Cancelamento cooperativo.** `ExportJob.cancel` (`threading.Event`) é conferido na leitura, na
-  GPU e na gravação; o processo do codificador é morto e o arquivo parcial é apagado (sequências de
-  imagens ficam).
+  GPU e na gravação; o processo do codificador é morto e o parcial é apagado (arquivo ou pasta da
+  sequência). O destino antigo nunca é tocado (veja a gravação segura em 9.2).
 
 ## 8. Leitura de quadros com o ffmpeg
 
@@ -403,10 +403,30 @@ pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
 
 ### 9.2 `run_job()`
 
-1. Tamanho de saída (`output_size`, dimensões pares quando o codec exige), fps, profundidade
-   (`high_depth`: 16 bits se o formato tiver 10/12/16 bits, `p010`, RGB 48 ou for ProRes/FFV1),
-   trecho em quadros e total de quadros na taxa de saída.
-2. Pipe nomeado de saída (Windows) e comando do codificador (`build_encoder_cmd`):
+1. Tamanho de saída (`output_size`), fps, profundidade (`high_depth`: 16 bits se o formato tiver
+   10/12/16 bits, `p010`, RGB 48 ou for ProRes/FFV1), trecho em quadros e total de quadros na taxa de
+   saída. A resolução escolhida (`"2160"`, `"1080"`, `"720"`…) é o **lado menor** do quadro, como no
+   YouTube e nos celulares: deitado, ela é a altura (1920 × 1080); em pé, a largura (1080 × 1920); o
+   outro lado segue a proporção. Codecs de vídeo recebem dimensões pares (arredondadas para baixo);
+   FFV1, GIF, imagens e sequências ficam com o tamanho exato. A janela mostra em cada opção o tamanho
+   que sai (`ExportDialog._res_labels`) e o terminal aceita `--resolucao 1080` ou `1080p`.
+2. **Gravação segura** (`_prepare_output` / `_commit_output` / `_discard_output`): o codificador nunca
+   grava no destino. Ele recebe `system.partial_path()` — `video.parcial-pelicula.mp4`, ao lado do
+   destino, com a extensão real no fim para o ffmpeg escolher exatamente o mesmo formato (mp4, mov,
+   matroska, gif, image2…) sem `-f` nem tabela própria de formatos — ou, nas sequências,
+   `quadros.parcial-pelicula/quadros_%06d.png`. A marca não é só `.parcial` porque essa é uma palavra
+   comum (`entrevista.parcial.mp4` pode ser da pessoa). Um parcial que sobrou de uma exportação
+   interrompida é apagado antes de começar; se um arquivo de **entrada** tem o nome do parcial
+   (`partial_clash`), a exportação é recusada em vez de apagá-lo. Só quando tudo deu certo o resultado
+   vai para o lugar do destino com `os.replace` (`system.replace_file`, que tenta de novo por até 2 s
+   quando o Windows segura o arquivo): o arquivo antigo fica intacto até esse instante. Nas sequências,
+   uma pasta nova troca de nome inteira; se a pasta já existe, cada quadro é movido, os quadros que
+   sobram de uma exportação anterior mais longa (`nome_NNNNNN.ext` além do último) saem, e arquivos da
+   pessoa na pasta nunca são apagados. Cancelado ou com erro (inclusive exceção no meio), o parcial é
+   apagado. Se o destino não puder ser trocado (aberto num player), o trabalho vira `erro` e o resultado
+   completo fica no parcial, com o caminho na mensagem. A janela e o terminal perguntam (ou pedem `-y`)
+   antes de substituir um arquivo ou uma pasta de sequência que já tem quadros (`output_exists`).
+3. Pipe nomeado de saída (Windows) e comando do codificador (`build_encoder_cmd`):
    - entrada 0: `rawvideo` RGB (8/16 bits) pelo pipe, com `-progress pipe:2`;
    - entrada 1 (se houver áudio e o formato aceitar): o arquivo original com `-ss`/`-t` do trecho,
      mapeando `1:a:0?`;
@@ -416,13 +436,19 @@ pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
      `-tag:v hvc1`, opções de NVENC/QSV/AMF, FFV1 nível 3 com GOP 1 e 16 *slices*, TIFF com
      *deflate* etc.);
    - tags de cor BT.709, `+faststart` em MP4/MOV, áudio conforme `_audio_args()`.
-3. `FrameReader` em alta qualidade. Com troca de fps, o leitor aplica o filtro `fps=` desde o
+4. `FrameReader` em alta qualidade. Com troca de fps, o leitor aplica o filtro `fps=` desde o
    começo e pula os quadros antes do trecho.
-4. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*.
-5. Progresso: quadros **gravados** pelo ffmpeg (`frame=` do `-progress`) ou, antes disso, quadros
+5. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*.
+6. Progresso: quadros **gravados** pelo ffmpeg (`frame=` do `-progress`) ou, antes disso, quadros
    processados; velocidade e tempo restante a partir daí.
-6. Fim: fecha o pipe, espera o ffmpeg, confere código de saída e erros de escrita; status
-   `concluido`, `erro` (com o final do `stderr`) ou `cancelado`.
+7. Fim: fecha o pipe, espera o ffmpeg, confere código de saída e erros de escrita; troca o destino
+   pelo parcial e só então marca `concluido`; ou `erro` (com o final do `stderr`) ou `cancelado`, com o
+   parcial apagado.
+
+Os outros arquivos que o usuário grava seguem a mesma regra: "Salvar quadro" e `pelicula-cli quadro`
+usam `export.save_still()` (ffmpeg no parcial + `replace_file`); LUTs `.cube` (`luts.save_cube`, também
+no pacote do DaVinci) e presets exportados (`presets.export_file`) usam `system.atomic_write()`. Os
+projetos `.plc` já eram gravados num `.tmp` e trocados com `os.replace`.
 
 ### 9.3 Qualidades prontas e codecs
 
@@ -474,6 +500,7 @@ PyInstaller as bibliotecas já estão embutidas (`sys.frozen`).
 | Meus LUTs | `luts.user_dir()` = `$APPDATA/PeliculaConverter/luts`. |
 | ffmpeg baixado | `deps.ffmpeg_dir()` (veja a seção 10). |
 | Temporários | `pelicula_seta.png` (seta das listas), `pelicula_cena_de_teste.png` (cena de teste), `pelicula_medida_*` (estimativa, apagada no fim), `pelicula_ffmpeg_*` (download, apagada no fim). |
+| Parciais | `nome.parcial-pelicula.ext` (e a pasta `nome.parcial-pelicula/` das sequências) ao lado do destino enquanto uma exportação, um quadro, um LUT ou um preset é gravado; trocam de nome no fim. Um que sobrou de uma exportação interrompida é apagado na próxima com o mesmo destino. |
 
 Formato do preset: `{"nome", "desc", "app": "PeliculaConverter", "versao": 1, "valores": {…}}`.
 `params.sanitize()` completa as chaves que faltam com o padrão, descarta chaves desconhecidas,
@@ -587,7 +614,9 @@ de onda (com cache por arquivo).
   `engine.compose()` antes de `build_plan`/`render`. O número do quadro do look é o quadro da sequência,
   como na prévia — a exportação FFV1 16 bits de uma edição é conferida bit a bit (`tests/test_sequence.py`).
 - `sequence.media_info(seq)`: `MediaInfo` virtual (tamanho, fps, duração, som, formato do 1º vídeo) usado
-  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal.
+  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal. Como a
+  resolução da exportação vale para o lado menor, uma sequência vertical (1080 × 1920) continua vertical
+  nas qualidades prontas (*Redes sociais 1080p* → 1080 × 1920, *Leve 720p* → 720 × 1280).
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
   como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
   continuam `1` e abrem nas versões antigas.

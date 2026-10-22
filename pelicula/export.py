@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -12,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import look, media
+from . import look, media, system
 from .engine import Engine, lut_info
 from .i18n import _
 
@@ -205,11 +206,19 @@ def quality_presets(info: media.MediaInfo | None) -> list[tuple[str, str, Export
 
 
 def output_size(info: media.MediaInfo, s: ExportSettings) -> tuple[int, int]:
-    if s.resolution == "original":
-        w, h = info.width, info.height
-    else:
-        h = int(s.resolution)
-        w = round(info.width * h / info.height)
+    """Largura e altura da saída.
+
+    A resolução escolhida ("2160", "1080", "720"…) vale para o **lado menor** do quadro, como no YouTube
+    e nos celulares: em 1080p, um vídeo deitado sai 1920 × 1080 e um vertical sai 1080 × 1920 (antes a
+    altura mandava e o vertical encolhia para 608 × 1080). Codecs de vídeo recebem dimensões pares.
+    """
+    w, h = max(1, int(info.width)), max(1, int(info.height))
+    if s.resolution != "original":
+        short = int(s.resolution)
+        if w >= h:
+            w, h = round(w * short / h), short
+        else:
+            w, h = short, round(h * short / w)
     if not CODECS[s.codec].get("image") and s.codec not in ("png_seq", "tiff_seq", "ffv1", "gif"):
         w -= w % 2
         h -= h % 2
@@ -341,11 +350,148 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     return args
 
 
-def sequence_path(path: str) -> str:
+SEQUENCE_CODECS = ("png_seq", "tiff_seq")
+
+
+def is_sequence(s: ExportSettings) -> bool:
+    return s.codec in SEQUENCE_CODECS
+
+
+def sequence_dir(path: str) -> Path:
+    """Pasta dos quadros de uma sequência: `saida/quadros.png` → `saida/quadros/`."""
+    return Path(path).with_suffix("")
+
+
+def _frame_name(path: str) -> str:
     p = Path(path)
-    folder = p.with_suffix("")
+    return f"{p.stem}_%06d{p.suffix}"
+
+
+def sequence_path(path: str) -> str:
+    """Padrão dos quadros dentro da pasta da sequência (`quadros/quadros_%06d.png`); cria a pasta."""
+    folder = sequence_dir(path)
     folder.mkdir(parents=True, exist_ok=True)
-    return str(folder / f"{p.stem}_%06d{p.suffix}")
+    return str(folder / _frame_name(path))
+
+
+def _partial_sequence_dir(path: str) -> Path:
+    """Pasta parcial da sequência, ao lado da final: `quadros.parcial-pelicula/`."""
+    p = Path(path)
+    return p.with_name(f"{p.stem}.{system.PARTIAL}")
+
+
+def _frames(folder: Path, path: str) -> list[str]:
+    """Nomes dos quadros desta sequência (`quadros_000001.png`…) que existem em `folder`."""
+    p = Path(path)
+    pattern = re.compile(re.escape(p.stem) + r"_\d{6,}" + re.escape(p.suffix))
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    return sorted(n for n in names if pattern.fullmatch(n))
+
+
+def output_target(path: str, s: ExportSettings) -> str:
+    """O que a exportação cria no fim: o arquivo ou, nas sequências de imagens, a pasta dos quadros."""
+    return str(sequence_dir(path)) if is_sequence(s) else path
+
+
+def output_exists(path: str, s: ExportSettings) -> bool:
+    """O destino já existe? Nas sequências, se a pasta já tem quadros com este nome."""
+    if is_sequence(s):
+        return bool(_frames(sequence_dir(path), path))
+    return os.path.exists(path)
+
+
+# ------------------------------------------------------------------ gravação segura
+# O ffmpeg nunca grava direto no destino: grava num parcial ao lado (`video.parcial-pelicula.mp4`; nas
+# sequências, a pasta `quadros.parcial-pelicula/`) e o resultado só troca de nome quando a exportação termina
+# bem. Cancelar, dar erro ou o app fechar no meio nunca deixa um arquivo quebrado com o nome final, e
+# o arquivo antigo com o mesmo nome continua intacto até o último instante.
+def partial_output(path: str, s: ExportSettings) -> str:
+    """O parcial desta exportação: `video.parcial-pelicula.mp4` ou, nas sequências, a pasta
+    `quadros.parcial-pelicula`."""
+    return str(_partial_sequence_dir(path)) if is_sequence(s) else system.partial_path(path)
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def job_inputs(info: media.MediaInfo, sequence=None) -> list[str]:
+    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, todos os arquivos da montagem."""
+    if sequence is not None:
+        return [str(p) for p in sequence.sources]
+    return [info.path]
+
+
+def partial_clash(path: str, s: ExportSettings, inputs: list[str]) -> str:
+    """Arquivo de entrada que tem o nome do parcial desta exportação ("" se nenhum).
+
+    O parcial que sobra de uma exportação interrompida é apagado antes de começar; se a pessoa abriu
+    justamente esse arquivo (`video.parcial-pelicula.mp4`) e exporta para `video.mp4`, ele não pode ser apagado.
+    """
+    part = _norm(partial_output(path, s))
+    for src in inputs:
+        if src and (_norm(src) == part or (is_sequence(s) and _norm(os.path.dirname(src)) == part)):
+            return src
+    return ""
+
+
+def partial_clash_message(src: str) -> str:
+    return _("O arquivo de entrada {caminho} tem o nome que esta exportação usa enquanto grava. Escolha outro nome "
+             "para a saída.").format(caminho=src)
+
+
+def _discard_output(path: str, s: ExportSettings) -> None:
+    """Apaga o parcial (desta exportação ou o que sobrou de uma interrompida)."""
+    if not is_sequence(s):
+        system.remove_file(system.partial_path(path))
+        return
+    folder = _partial_sequence_dir(path)
+    for name in _frames(folder, path):
+        system.remove_file(folder / name)
+    try:
+        folder.rmdir()  # só se ficou vazia: o que não é quadro desta sequência nunca é apagado
+    except OSError:
+        pass
+
+
+def _prepare_output(path: str, s: ExportSettings) -> str:
+    """Limpa o parcial antigo e devolve onde o codificador grava."""
+    _discard_output(path, s)
+    if is_sequence(s):
+        folder = _partial_sequence_dir(path)
+        folder.mkdir(parents=True, exist_ok=True)
+        return str(folder / _frame_name(path))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    return system.partial_path(path)
+
+
+def _commit_output(path: str, s: ExportSettings) -> None:
+    """Troca o destino pelo resultado (o antigo é substituído só agora, já com o novo completo)."""
+    if not is_sequence(s):
+        system.replace_file(system.partial_path(path), path)
+        return
+    part, final = _partial_sequence_dir(path), sequence_dir(path)
+    new = _frames(part, path)
+    if not final.exists() and len(new) == len(os.listdir(part)):
+        try:
+            os.replace(part, final)  # pasta nova: troca o nome da pasta inteira de uma vez
+            return
+        except OSError:
+            pass
+    final.mkdir(parents=True, exist_ok=True)
+    for name in new:
+        system.replace_file(part / name, final / name)
+    keep = set(new)
+    for name in _frames(final, path):
+        if name not in keep:
+            system.remove_file(final / name)  # sobra de uma exportação anterior mais longa
+    try:
+        part.rmdir()
+    except OSError:
+        pass
 
 
 # ------------------------------------------------------------------ trabalhos
@@ -420,6 +566,9 @@ class ExportQueue:
 
 
 def run_job(job: ExportJob, engine: Engine) -> None:
+    """Exporta um trabalho. O ffmpeg grava num parcial ao lado do destino e o resultado só vai para o
+    lugar do destino quando tudo deu certo; cancelado ou com erro, o parcial é apagado e o arquivo
+    antigo (se havia) fica como estava."""
     info, s = job.info, job.settings
     perf = s.perf()
     job.status = "exportando"
@@ -437,53 +586,66 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     duration = src_count / info.fps
     total = 1 if info.is_image else max(1, round(duration * fps_val))
     job.total = total
-    out_path = job.out_path
-    if s.codec in ("png_seq", "tiff_seq"):
-        out_path = sequence_path(out_path)
+    if job.cancel.is_set():
+        job.status = "cancelado"
+        return
+    clash = partial_clash(job.out_path, s, job_inputs(info, seq))
+    if clash:
+        job.status = "erro"
+        job.error = partial_clash_message(clash)
+        return
+    target = _prepare_output(job.out_path, s)
     mix_path = None
-    if seq is not None:
-        # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
-        from . import audiomix
-        if _audio_args(s, info, 0.0) != ["-an"] and audiomix.has_audio(seq, start, end + 1):
-            import tempfile
-            fd, mix_path = tempfile.mkstemp(prefix="pelicula_som_", suffix=".wav")
-            os.close(fd)
+    keep_partial = False
+    try:
+        if seq is not None:
+            # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
+            from . import audiomix
+            if _audio_args(s, info, 0.0) != ["-an"] and audiomix.has_audio(seq, start, end + 1):
+                import tempfile
+                fd, mix_path = tempfile.mkstemp(prefix="pelicula_som_", suffix=".wav")
+                os.close(fd)
+                try:
+                    ok = audiomix.render_mix(seq, mix_path, start, end + 1, job.cancel, perf)
+                except RuntimeError as exc:
+                    job.status = "erro"
+                    job.error = str(exc)[-1500:]
+                    return
+                if job.cancel.is_set():
+                    job.status = "cancelado"
+                    return
+                if not ok:
+                    system.remove_file(mix_path)
+                    mix_path = None
+            has = mix_path is not None
+            info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
+        if _encode(job, engine, info, s, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time,
+                   duration, target, seq, mix_path):
             try:
-                ok = audiomix.render_mix(seq, mix_path, start, end + 1, job.cancel, perf)
-            except RuntimeError as exc:
-                _remove_file(mix_path)
+                _commit_output(job.out_path, s)
+            except OSError as exc:
+                # O resultado está completo: não joga fora o trabalho; diz onde ele ficou.
+                keep_partial = True
                 job.status = "erro"
-                job.error = str(exc)[-1500:]
-                return
-            if job.cancel.is_set():
-                _remove_file(mix_path)
-                job.status = "cancelado"
-                return
-            if not ok:
-                _remove_file(mix_path)
-                mix_path = None
-        has = mix_path is not None
-        info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
-    try:
-        _encode(job, engine, info, s, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time,
-                duration, out_path, seq, mix_path)
+                job.error = _("A exportação terminou, mas não foi possível substituir {destino} (ele pode estar "
+                              "aberto em outro programa): {erro}\nO resultado ficou em: {parcial}").format(
+                    destino=output_target(job.out_path, s), erro=exc, parcial=partial_output(job.out_path, s))
+            else:
+                job.status = "concluido"
     finally:
+        if job.status != "concluido" and not keep_partial:
+            _discard_output(job.out_path, s)
         if mix_path:
-            _remove_file(mix_path)
-
-
-def _remove_file(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+            system.remove_file(mix_path)
 
 
 def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSettings, perf: media.Perf, w: int,
             h: int, fps_str: str, fps_out: str | None, fps_val: float, depth: int, start: int, total: int,
-            start_time: float, duration: float, out_path: str, seq, mix_path: str | None) -> None:
+            start_time: float, duration: float, target: str, seq, mix_path: str | None) -> bool:
+    """Lê, aplica o look e codifica em `target` (o parcial). True quando todos os quadros foram gravados;
+    senão marca o trabalho como cancelado ou com erro e devolve False."""
     pipe = media.NamedPipe(False) if media.use_named_pipes() else None
-    cmd = build_encoder_cmd(out_path, info, s, w, h, fps_str, depth, start_time, duration,
+    cmd = build_encoder_cmd(target, info, s, w, h, fps_str, depth, start_time, duration,
                             pipe.name if pipe else "pipe:0", audio_path=mix_path)
     if seq is not None:
         from .sequence import SequenceReader
@@ -535,7 +697,7 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
         enc.wait()
         job.status = "erro"
         job.error = (err_buf.decode("utf-8", "replace").strip() or str(exc))[-1500:]
-        return
+        return False
     nbuf = max(2, int(perf.buffer))
     frames_q: queue.Queue = queue.Queue(maxsize=nbuf)
     out_q: queue.Queue = queue.Queue(maxsize=nbuf)
@@ -622,18 +784,17 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
         rt.join(timeout=5)
     if job.cancel.is_set():
         job.status = "cancelado"
-        _remove_partial(job.out_path, s)
-        return
+        return False
     if rc != 0 or write_err:
         job.status = "erro"
         job.error = (err_buf.decode("utf-8", "replace").strip() or "; ".join(write_err) or reader.error)[-1500:]
-        return
+        return False
     if i == 0:
         job.status = "erro"
         job.error = reader.error or _("Nenhum quadro foi lido do arquivo.")
-        return
+        return False
     job.done = job.total = i
-    job.status = "concluido"
+    return True
 
 
 def job_frames(info: media.MediaInfo, s: ExportSettings, start: int = 0, end: int = -1) -> int:
@@ -685,13 +846,31 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
     return job.done / max(t_end - t0, 1e-3)
 
 
-def _remove_partial(path: str, s: ExportSettings) -> None:
-    if s.codec.endswith("_seq"):
-        return
+# "Salvar quadro" (janela e `pelicula-cli quadro`): formato de pixel e opções por extensão.
+STILL_ARGS = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
+              ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"],
+              ".jpeg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}
+
+
+def save_still(img, path: str) -> None:
+    """Grava um quadro RGB de 16 bits (array h × w × 3) em PNG, TIFF ou JPEG, conforme a extensão.
+
+    Grava num parcial ao lado e só então troca o destino; se o ffmpeg falhar, levanta RuntimeError e o
+    arquivo antigo com o mesmo nome fica intacto.
+    """
+    h, w = img.shape[:2]
+    part = system.partial_path(path)
+    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}",
+           "-i", "pipe:0", *STILL_ARGS.get(Path(path).suffix.lower(), []), "-frames:v", "1", "-update", "1", part]
+    res = subprocess.run(cmd, input=img.tobytes(), capture_output=True, creationflags=media.NO_WINDOW)
+    if res.returncode != 0 or not os.path.isfile(part):
+        system.remove_file(part)
+        raise RuntimeError(res.stderr.decode("utf-8", "replace").strip() or _("O ffmpeg não gravou o quadro."))
     try:
-        os.remove(path)
+        system.replace_file(part, path)
     except OSError:
-        pass
+        system.remove_file(part)
+        raise
 
 
 def eval_fraction(txt: str) -> float:
