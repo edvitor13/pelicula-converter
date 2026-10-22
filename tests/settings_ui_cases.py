@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# A página Recuperação lê a pasta do app (cópias e relatórios): uma pasta temporária, nunca a do usuário.
+_DATA = tempfile.mkdtemp(prefix="pelicula_settings_data_")
+os.environ["LOCALAPPDATA"] = os.environ["XDG_DATA_HOME"] = _DATA
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

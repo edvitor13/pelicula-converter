@@ -62,8 +62,20 @@ def main() -> int:
     app.setStyleSheet(theme.stylesheet(arrow.replace("\\", "/")))
     app.setFont(theme.font(9.5))
     app.setWindowIcon(icons.app_icon())
-    from .ui import prefs
+    from .ui import prefs, recovery_ui
     settings = prefs.settings()
+    # Marcador da sessão e registro de travamentos antes da janela (pega também uma falha ao iniciar o
+    # OpenGL); nada disso em automações de captura de tela. Fechamento normal = tudo limpo.
+    guard = None if os.environ.get("PELICULA_SCREENSHOT") else recovery_ui.Guard.start()
+    try:
+        return _start(app, settings, guard)
+    finally:
+        if guard is not None:
+            guard.close()
+
+
+def _start(app: QApplication, settings: QSettings, guard) -> int:
+    from .ui import recovery_ui
     lang, first_run = choose_language(settings)
     i18n.set_language(lang)
     if sys.platform == "darwin" and not os.environ.get("PELICULA_MACOS"):
@@ -92,13 +104,24 @@ def main() -> int:
     shot = os.environ.get("PELICULA_SCREENSHOT")
     updated = str(settings.value("last_seen_version", "")) not in ("", __version__)
     settings.setValue("last_seen_version", __version__)
-    if files:
-        QTimer.singleShot(0, lambda: win.handle_files(files))
-    elif not shot and (first_run or str(settings.value("show_welcome", "true")) != "false"):
-        QTimer.singleShot(250, win.show_welcome)
-    if updated and not shot:
-        from .ui.welcome import WhatsNewDialog
-        QTimer.singleShot(400, lambda: WhatsNewDialog(win).exec())
+    ctl = None
+    if guard is not None:
+        from .ui import notifier
+        win.notifier.set_backend(notifier.system_backend(win))  # notificações de verdade só aqui
+        ctl = recovery_ui.attach(win, settings, guard)
+
+    def start_flow():
+        # Depois de um travamento: o aviso de recuperação vem antes da tela de boas-vindas e das novidades.
+        recovered = ctl is not None and ctl.startup() in (recovery_ui.RECOVER, recovery_ui.OPEN_SAVED)
+        if files:
+            win.handle_files(files)
+        elif not shot and not recovered and (first_run or str(settings.value("show_welcome", "true")) != "false"):
+            QTimer.singleShot(250, win.show_welcome)
+        if updated and not shot:
+            from .ui.welcome import WhatsNewDialog
+            QTimer.singleShot(400, lambda: WhatsNewDialog(win).exec())
+
+    QTimer.singleShot(0, start_flow)
     if shot:
         def grab():
             win.grab().save(shot)
