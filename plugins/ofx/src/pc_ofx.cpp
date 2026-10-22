@@ -230,6 +230,7 @@ private:
         beginEditBlock(what);
         for (int i = 0; i < PC_PARAM_COUNT; ++i) {
             const pc_param_def& p = PC_PARAMS[i];
+            if (p.keep) continue;  // perfil e faixa do vídeo são do clipe: o preset não muda (como no app)
             const float* v = ui + p.offset;
             switch (p.kind) {
                 case 0: static_cast<OFX::DoubleParam*>(params_[i])->setValue(v[0]); break;
@@ -286,7 +287,8 @@ void PeliculaFactory::describeInContext(OFX::ImageEffectDescriptor& desc, OFX::C
     look->setOpen(true);
     OFX::ChoiceParamDescriptor* preset = desc.defineChoiceParam(P_PRESET);
     preset->setLabels("Preset", "Preset", "Preset");
-    preset->setHint("Aplica um dos presets prontos do PeliculaConverter (troca todos os ajustes abaixo).");
+    preset->setHint("Aplica um dos presets prontos do PeliculaConverter (troca os ajustes do look; o perfil e a "
+                    "faixa do v\303\255deo s\303\243o do clipe e ficam).");
     for (int i = 0; i < PC_PRESET_COUNT; ++i) preset->appendOption(PC_PRESET_NAMES[i]);
     preset->setDefault(PC_DEFAULT_PRESET);
     preset->setAnimates(false);
@@ -294,7 +296,8 @@ void PeliculaFactory::describeInContext(OFX::ImageEffectDescriptor& desc, OFX::C
     preset->setParent(*look);
     OFX::StringParamDescriptor* file = desc.defineStringParam(P_FILE);
     file->setLabels("Carregar look do PeliculaConverter (.json)", "Look .json", "Carregar look do PeliculaConverter (.json)");
-    file->setHint("Escolha um preset exportado pelo app (.json) ou um projeto .plc: os ajustes viram os deste efeito.");
+    file->setHint("Escolha um preset exportado pelo app (.json) ou um projeto .plc: os ajustes viram os deste efeito "
+                  "(menos o perfil e a faixa do v\303\255deo, que s\303\243o do clipe).");
     file->setStringType(OFX::eStringTypeFilePath);
     file->setFilePathExists(true);
     file->setAnimates(false);

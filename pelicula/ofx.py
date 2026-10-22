@@ -43,6 +43,18 @@ SRC_DIR = ROOT / "plugins" / "ofx"
 GENERATED = ("pc_kernels.h", "pc_params.h")
 KIND_CODES = {"float": 0, "int": 1, "check": 2, "combo": 3, "color": 4}
 SKIP = ("ui_qualidade", "ui_fps")  # só fazem sentido no DCTL (o OFX tem a imagem inteira e o fps do clipe)
+# Rótulo, dica e opções com acento dos controles só do plugin (os do app vêm de params.py).
+INTERNAL_TEXT = {
+    "ui_faixa_video": ("Faixa do vídeo",
+                       "Só muda S-Log3, V-Log e N-Log, curvas escritas no código de 10 bits. Vídeo (padrão): clipe "
+                       "em Data Levels Auto ou Video, que o Resolve expande de 64–940 para 0–1 (o plugin volta ao "
+                       "código da câmera). Cheia: o valor já é o código — clipe em Full em Clip Attributes (como "
+                       "a Sony recomenda) ou log que a câmera mandou reescalado pela saída HDMI “Limited”.",
+                       ["Vídeo (faixa legal, 64–940)", "Cheia (0–1023)"]),
+}
+# Ajustes do clipe, não do look: escolher um preset ou carregar um look .json não muda (como no app,
+# presets.SOURCE_KEYS que existem no plugin) — o perfil e a faixa do vídeo dependem do clipe no Resolve.
+KEEP_ON_PRESET = ("entrada", "faixa_video")
 
 
 class OfxError(RuntimeError):
@@ -85,7 +97,7 @@ def slots() -> list[Slot]:
     order = {s.key: i for i, s in enumerate(params.SECTIONS)}
     items = []
     for i, c in enumerate(controls()):
-        group = _section_of(c.key) if c.key else params.SECTIONS[0].key
+        group = _section_of(c.key) if c.key else (c.section or params.SECTIONS[0].key)
         items.append((order.get(group, 0), i, c, group))
     items.sort()
     out, off = [], 0
@@ -118,15 +130,25 @@ def ui_values(values: dict | None = None) -> list[float]:
 def label_of(c: Ctl) -> str:
     """Rótulo com acentos (o mesmo do app); percentuais avisam a unidade."""
     if not c.key:
-        return c.label
+        return INTERNAL_TEXT[c.name][0] if c.name in INTERNAL_TEXT else c.label
     p = params.PARAMS[c.key]
     return p.label + (" (%)" if p.percent else "")
 
 
 def hint_of(c: Ctl) -> str:
     if not c.key:
-        return c.tip
+        return INTERNAL_TEXT[c.name][1] if c.name in INTERNAL_TEXT else c.tip
     return params.PARAMS[c.key].tip
+
+
+def choice_labels(c: Ctl) -> list[str]:
+    """Opções de um combo com acentos: as do app ou as de INTERNAL_TEXT (senão, os rótulos ASCII)."""
+    if c.key:
+        names = dict(params.PARAMS[c.key].choices)
+        return [names.get(v, lab) for v, lab in c.choices]
+    if c.name in INTERNAL_TEXT:
+        return list(INTERNAL_TEXT[c.name][2])
+    return [lab for _v, lab in c.choices]
 
 
 def group_title(key: str) -> str:
@@ -278,12 +300,12 @@ def params_source() -> str:
            "    int offset;         // posicao no vetor de valores (cores: 3)\n"
            "    double def[3];\n    double lo, hi, step, scale;\n"
            "    int nchoices;\n    const char* const* choice_labels;\n"
-           "    const char* const* choice_values;\n};\n\n"]
+           "    const char* const* choice_values;\n"
+           "    int keep;           // 1 = preset e look .json nao mudam (ajuste do clipe: perfil e faixa)\n};\n\n"]
     for i, s in enumerate(sl):
         c = s.ctl
         if c.kind == "combo":
-            names = dict(params.PARAMS[c.key].choices) if c.key else {}
-            labels = [names.get(v, lab) for v, lab in c.choices]
+            labels = choice_labels(c)
             out.append(f"static const char* const PC_CHL_{i}[] = {{{', '.join(_cstr(x) for x in labels)}}};\n")
             out.append(f"static const char* const PC_CHV_{i}[] = {{{', '.join(_cstr(v) for v, _l in c.choices)}}};\n")
     out.append(f"\n#define PC_PARAM_COUNT {len(sl)}\n")
@@ -300,10 +322,11 @@ def params_source() -> str:
         nch = len(c.choices) if c.kind == "combo" else 0
         chl = f"PC_CHL_{i}" if nch else "0"
         chv = f"PC_CHV_{i}" if nch else "0"
+        keep = 1 if s.field in KEEP_ON_PRESET else 0
         out.append(f"    {{{_cstr(s.field)}, {_cstr(c.key)}, {_cstr(label_of(c))}, {_cstr(hint_of(c))}, "
                    f"{_cstr(s.group)}, {KIND_CODES[c.kind]}, {s.offset}, "
                    f"{{{', '.join(repr(float(x)) for x in d)}}}, {lo!r}, {hi!r}, {float(c.step)!r}, "
-                   f"{float(c.scale)!r}, {nch}, {chl}, {chv}}},\n")
+                   f"{float(c.scale)!r}, {nch}, {chl}, {chv}, {keep}}},\n")
     out.append("};\n\n")
     groups = []
     for s in sl:

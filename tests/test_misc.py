@@ -143,6 +143,80 @@ def test_open_path_and_reveal_use_the_file_manager(monkeypatch, tmp_path):
     assert opened[-1] == str(tmp_path)
 
 
+# ------------------------------------------------------------------ gravação segura
+@pytest.mark.parametrize("path, expected", [
+    ("C:/v/video.mp4", "C:/v/video.parcial-pelicula.mp4"),
+    ("saida/meu.filme.mov", "saida/meu.filme.parcial-pelicula.mov"),
+    ("look.cube", "look.parcial-pelicula.cube"),
+    ("quadro.png", "quadro.parcial-pelicula.png"),
+])
+def test_partial_path_keeps_the_extension_last(path, expected):
+    assert Path(system.partial_path(path)) == Path(expected)
+    assert Path(system.partial_path(Path(path))) == Path(expected)
+
+
+def test_atomic_write_replaces_only_at_the_end(tmp_path):
+    dst = tmp_path / "look.cube"
+    dst.write_text("antigo", encoding="utf-8")
+    with system.atomic_write(dst, "w", encoding="utf-8") as fh:
+        fh.write("novo")
+        fh.flush()
+        assert dst.read_text(encoding="utf-8") == "antigo"  # o antigo continua lá enquanto grava
+        assert Path(system.partial_path(dst)).is_file()
+    assert dst.read_text(encoding="utf-8") == "novo"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["look.cube"]
+
+
+def test_atomic_write_creates_a_new_file(tmp_path):
+    dst = tmp_path / "novo.json"
+    with system.atomic_write(dst, "w", encoding="utf-8") as fh:
+        fh.write("{}")
+    assert dst.read_text(encoding="utf-8") == "{}" and sorted(p.name for p in tmp_path.iterdir()) == ["novo.json"]
+
+
+def test_atomic_write_error_keeps_the_old_file(tmp_path):
+    dst = tmp_path / "look.cube"
+    dst.write_text("antigo", encoding="utf-8")
+    with pytest.raises(ZeroDivisionError):
+        with system.atomic_write(dst, "w", encoding="utf-8") as fh:
+            fh.write("pela metade")
+            1 / 0
+    assert dst.read_text(encoding="utf-8") == "antigo"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["look.cube"]
+
+
+def test_replace_file_retries_while_the_file_is_busy(tmp_path, monkeypatch):
+    """No Windows, antivírus e indexador seguram o arquivo por instantes: a troca tenta de novo."""
+    src, dst = tmp_path / "a.parcial-pelicula.mp4", tmp_path / "a.mp4"
+    src.write_text("novo")
+    dst.write_text("antigo")
+    real, calls = system.os.replace, []
+
+    def busy_twice(a, b):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(13, "em uso")
+        real(a, b)
+
+    monkeypatch.setattr(system.os, "replace", busy_twice)
+    system.replace_file(src, dst)
+    assert len(calls) == 3 and dst.read_text() == "novo" and not src.exists()
+
+
+def test_replace_file_gives_up_after_the_wait(tmp_path, monkeypatch):
+    src, dst = tmp_path / "a.parcial-pelicula.mp4", tmp_path / "a.mp4"
+    src.write_text("novo")
+    dst.write_text("antigo")
+
+    def always_busy(a, b):
+        raise PermissionError(13, "aberto em outro programa")
+
+    monkeypatch.setattr(system.os, "replace", always_busy)
+    with pytest.raises(PermissionError):
+        system.replace_file(src, dst, wait=0.2)
+    assert dst.read_text() == "antigo" and src.read_text() == "novo"
+
+
 # ------------------------------------------------------------------ deps (sem rede)
 @pytest.mark.parametrize("txt, expected", [("7.1", (7, 1)), ("9.0.2", (9, 0, 2)), ("7.1-essentials", (7, 1)),
                                            ("", None), (None, None), ("abc", None)])

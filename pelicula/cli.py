@@ -134,6 +134,8 @@ def build_values(base: dict | None, preset: str | None, sets: list[str]) -> tupl
                 raise CliError(_("Preset desconhecido: {nome}. Veja a lista com \"presets\".").format(nome=preset))
             values = dict(match[0]["valores"])
             pid = match[0]["id"]
+        if base:
+            values = presets.with_source(values, base)  # o preset troca o look; o perfil do projeto fica
     if values is None:
         values = presets.builtin_values(presets.DEFAULT_ID)
         pid = presets.DEFAULT_ID
@@ -143,6 +145,42 @@ def build_values(base: dict | None, preset: str | None, sets: list[str]) -> tupl
         k, v = item.split("=", 1)
         values[k.strip()] = parse_value(k.strip(), v)
     return params.sanitize(values), pid
+
+
+def parse_resolution(text: str) -> str:
+    """'original', '1080' ou '1080p' → chave da resolução de exportação (o número é o lado menor)."""
+    t = text.strip().lower()
+    if t == "original":
+        return t
+    num = t[:-1] if t.endswith("p") else t
+    if not num.isdigit() or not 2 <= int(num) <= 16384:
+        raise CliError(_("Resolução inválida: {valor}. Use original ou o número de pixels do lado menor "
+                         "(2160, 1080, 720…).").format(valor=text))
+    return str(int(num))
+
+
+def auto_input_profile(values: dict, sets: list[str] | None, info) -> str | None:
+    """Perfil de entrada pelos metadados do vídeo (HLG/PQ), como o app faz ao abrir um arquivo.
+
+    Só quando o perfil não veio de `--set entrada=…` (veja `media.auto_profile`: perfis log nunca mudam).
+    Muda `values` e devolve o perfil novo (None = nada mudou).
+    """
+    from . import media
+    if any(item.split("=", 1)[0].strip() == "entrada" for item in sets or [] if "=" in item):
+        return None
+    prof = media.auto_profile(values.get("entrada", "rec709"), info)
+    if prof:
+        values["entrada"] = prof
+    return prof
+
+
+def _report_auto_profile(prof: str | None) -> None:
+    if not prof:
+        return
+    from . import params
+    name = dict(params.PARAMS["entrada"].choices).get(prof, prof)
+    print(_("Perfil do vídeo pelos metadados do arquivo: {perfil} ({nome}). Para escolher outro, use "
+            "--set entrada=…").format(perfil=prof, nome=_(name)), file=sys.stderr)
 
 
 def parse_time(text: str, fps: float) -> int:
@@ -216,6 +254,7 @@ def _need_ffmpeg() -> None:
 def cmd_export(a) -> int:
     from . import export, media
     from .engine import Engine
+    resolution = parse_resolution(a.resolucao) if a.resolucao is not None else None
     _need_ffmpeg()
     src, values, pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
@@ -223,6 +262,8 @@ def cmd_export(a) -> int:
         info = sequence.media_info(seq)
     else:
         info = media.probe(src)
+        if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
+            _report_auto_profile(auto_input_profile(values, a.set, info))
     presets_q = {k: s for k, _l, s in export.quality_presets(info)}
     qkey = a.qualidade or (proj.export_quality if proj and proj.export_quality in presets_q else None)
     qkey = qkey or ("img_png" if info.is_image else "mp4")
@@ -230,7 +271,7 @@ def cmd_export(a) -> int:
         raise CliError(_("Qualidade desconhecida: {nome}. Veja a lista com \"qualidades\".").format(nome=qkey))
     s = export.ExportSettings.from_dict(presets_q[qkey].to_dict())
     overrides = {"codec": a.codec, "container": a.recipiente, "pix": a.pix, "preset": a.velocidade,
-                 "profile": a.perfil, "resolution": a.resolucao, "fps": a.fps, "audio": a.audio,
+                 "profile": a.perfil, "resolution": resolution, "fps": a.fps, "audio": a.audio,
                  "priority": a.prioridade, "hwaccel": a.hwaccel}
     for k, v in overrides.items():
         if v is not None:
@@ -251,7 +292,13 @@ def cmd_export(a) -> int:
     out = str(Path(out).with_suffix("." + s.container))
     if os.path.abspath(out) == os.path.abspath(src):
         raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))
-    if os.path.exists(out) and not a.sobrescrever:
+    clash = export.partial_clash(out, s, export.job_inputs(info, seq))
+    if clash:
+        raise CliError(export.partial_clash_message(clash))
+    if export.output_exists(out, s) and not a.sobrescrever:
+        if export.is_sequence(s):
+            raise CliError(_("A sequência já existe: {caminho} (use -y para substituir)").format(
+                caminho=export.output_target(out, s)))
         raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=out))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
@@ -261,9 +308,10 @@ def cmd_export(a) -> int:
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
                            name=Path(out).name, sequence=seq)
     if not a.json:
+        w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
-        print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix}").format(
-            preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix), file=sys.stderr)
+        print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix} • {w}×{h}").format(
+            preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
 
     def on_sigint(*_args):
         job.cancel.set()
@@ -306,8 +354,8 @@ def cmd_export(a) -> int:
         print(json.dumps({"status": job.status, "saida": out, "quadros": job.done, "erro": job.error}))
     if job.status == "concluido":
         if not a.json:
-            print(_("Pronto: {caminho} ({quadros} quadros em {tempo})").format(caminho=out, quadros=job.done,
-                                                                             tempo=elapsed))
+            print(_("Pronto: {caminho} ({quadros} quadros em {tempo})").format(
+                caminho=export.output_target(out, s), quadros=job.done, tempo=elapsed))
         return 0
     if job.status == "cancelado":
         print(_("Exportação cancelada."), file=sys.stderr)
@@ -349,18 +397,25 @@ def cmd_project(a) -> int:
 
 
 def cmd_frame(a) -> int:
-    import subprocess
-    from . import look, media
+    from . import export, look, media
     from .engine import Engine, lut_info
     _need_ffmpeg()
     src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
         from . import sequence
         info = sequence.media_info(seq)
+        legal = sequence.legal_range(seq)
     else:
         info = media.probe(src)
+        legal = media.legal_range(info)
+        if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
+            _report_auto_profile(auto_input_profile(values, a.set, info))
     frame = parse_time(a.tempo, info.fps) if a.tempo else (proj.frame if proj else 0)
     frame = max(0, min(frame, info.frames - 1))
+    path = a.saida or str(Path(src).with_name(f"{Path(src).stem}_quadro{frame}.png"))
+    ext = Path(path).suffix.lower()
+    if ext not in export.STILL_ARGS:
+        raise CliError(_("Formato de imagem não suportado: {ext} (use .png, .tif ou .jpg)").format(ext=ext))
     if values.get("scan_on"):
         _gui_app()
     w, h = info.width, info.height
@@ -371,20 +426,12 @@ def cmd_frame(a) -> int:
         img = media.grab_frame(info, frame, w, h, 16, hq=True)
     engine.set_input(img)
     li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
-    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False), 16)
+    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False, legal=legal), 16)
     engine.release()
-    path = a.saida or str(Path(src).with_name(f"{Path(src).stem}_quadro{frame}.png"))
-    ext = Path(path).suffix.lower()
-    pix = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
-           ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"],
-           ".jpeg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}.get(ext)
-    if pix is None:
-        raise CliError(_("Formato de imagem não suportado: {ext} (use .png, .tif ou .jpg)").format(ext=ext))
-    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}",
-           "-i", "pipe:0", *pix, "-frames:v", "1", "-update", "1", path]
-    res = subprocess.run(cmd, input=out.tobytes(), capture_output=True, creationflags=media.NO_WINDOW)
-    if res.returncode != 0:
-        raise CliError(res.stderr.decode("utf-8", "replace"))
+    try:
+        export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
+    except (RuntimeError, OSError) as exc:
+        raise CliError(str(exc)) from exc
     print(_("Quadro {n} salvo em {caminho}").format(n=frame, caminho=path))
     return 0
 
@@ -481,7 +528,8 @@ def cmd_info(a) -> int:
     data = {"arquivo": info.path, "largura": info.width, "altura": info.height, "fps": round(info.fps, 3),
             "quadros": info.frames, "duracao_s": round(info.duration, 3), "codec": info.codec,
             "pix_fmt": info.pix_fmt, "bits": info.bit_depth, "audio": info.audio_codec or None,
-            "imagem": info.is_image}
+            "imagem": info.is_image, "faixa": "legal" if media.legal_range(info) else "cheia",
+            "transferencia": info.color_transfer or None, "perfil_hdr": media.detect_profile(info)}
     if a.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
@@ -648,7 +696,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--taxa", type=float, help=_("taxa de bits em Mb/s (em vez da qualidade constante)"))
     p.add_argument("--velocidade", help=_("preset de velocidade do codec (slow, p6…)"))
     p.add_argument("--perfil", help=_("perfil do ProRes/DNxHR"))
-    p.add_argument("--resolucao", help=_("original, 2160, 1080, 720…"))
+    p.add_argument("--resolucao", help=_("original ou o lado menor em pixels: 2160, 1080, 720… (vertical em 1080 "
+                                         "sai 1080×1920)"))
     p.add_argument("--fps", help=_("original, 24, 24000/1001, 30…"))
     p.add_argument("--audio", help=_("copy, aac320, aac192, mp3, opus, pcm24, none"))
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))

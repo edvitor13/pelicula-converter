@@ -140,8 +140,10 @@ class ResolveDialog(QDialog):
             _("Na página <b>Color</b>, crie três nós em série (Alt+S)."),
             _("Em cada nó, arraste <b>OpenFX › ResolveFX Color › DCTL</b> e escolha, em ordem: "
               "<b>PeliculaConverter Cor</b>, <b>PeliculaConverter Textura</b> e <b>PeliculaConverter Projetor</b>."),
-            _("No nó Cor, escolha em <b>Perfil do video</b> a curva da câmera (S-Log3, LogC3, V-Log…). Se a linha "
-              "do tempo já está em Rec.709, deixe Rec.709."),
+            _("No nó Cor, escolha em <b>Perfil do video</b> a curva da câmera (S-Log3, LogC3, V-Log…) ou HLG/PQ "
+              "para vídeo HDR. Se a linha do tempo já está em Rec.709, deixe Rec.709. Em S-Log3, V-Log e N-Log, "
+              "<b>Faixa do video</b> fica em <i>Video</i> com o clipe em Data Levels Auto/Video e em <i>Cheia</i> "
+              "com o clipe em Full."),
             _("Na pasta <b>Presets</b> há os nós prontos de cada preset do app; na pasta <b>LUTs</b>, um .cube por "
               "preset."),
         ]

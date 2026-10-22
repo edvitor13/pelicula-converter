@@ -130,8 +130,51 @@ float appleEnc(float r) {
     if (r >= 0.01) return 0.08550479 * log2(r + 0.00964052) + 0.69336945;
     return (r >= -0.05641088) ? 47.28711236 * (r + 0.05641088) * (r + 0.05641088) : 0.0;
 }
+// HLG (ITU-R BT.2100): inverso da OETF, E′ → luz de cena E (0..1), × HLG_K: o cinza de referência da
+// BT.2408 (38% do sinal) vira 0,18 e o branco de referência (75%) ≈ 0,99 (look.HLG_SCALE).
+// Abaixo de 0 (pé da faixa legal) a curva é espelhada: monotônica e sem NaN.
+const float HLG_A = 0.17883277;
+const float HLG_B = 0.28466892;
+const float HLG_C = 0.55991073;
+const float HLG_K = 3.739612188365651;
+float hlgDec(float e) {
+    if (e <= 0.5) return e * abs(e) / 3.0 * HLG_K;
+    return (exp((e - HLG_C) / HLG_A) + HLG_B) / 12.0 * HLG_K;
+}
+float hlgEnc(float x) {
+    float e = x / HLG_K;
+    if (e <= 1.0 / 12.0) return sign(e) * sqrt(3.0 * abs(e));
+    return HLG_A * log(12.0 * e - HLG_B) + HLG_C;
+}
+// PQ (SMPTE ST 2084 / BT.2100): E′ → luz da tela em cd/m² (aqui ÷ 1000) → OOTF inversa do HLG com pico
+// nominal de 1000 cd/m² (γ = 1,2 pela luminância BT.2100, como na conversão PQ → HLG da BT.2408) → luz
+// de cena → × HLG_K. 26 cd/m² (cinza da BT.2408) ≈ 0,18; 203 cd/m² ≈ 0,99. Acima de 1000 cd/m² a luz
+// continua subindo, sem corte (4000 cd/m² ≈ 11,9; 10000 ≈ 25,5) e a curva do filme comprime.
+const float PQ_M1 = 0.1593017578125;
+const float PQ_M2 = 78.84375;
+const float PQ_C1 = 0.8359375;
+const float PQ_C2 = 18.8515625;
+const float PQ_C3 = 18.6875;
+const vec3 W2020 = vec3(0.2627, 0.6780, 0.0593);
+vec3 pqDec(vec3 e) {
+    vec3 p = pow(max(e, vec3(0.0)), vec3(1.0 / PQ_M2));
+    vec3 f = 10.0 * pow(max(p - PQ_C1, vec3(0.0)) / max(PQ_C2 - PQ_C3 * p, vec3(1e-6)), vec3(1.0 / PQ_M1));
+    return f * pow(max(dot(f, W2020), 1e-10), -1.0 / 6.0) * HLG_K;  // E = F·Y^((1 − γ)/γ)
+}
+vec3 pqEnc(vec3 x) {
+    vec3 s = max(x / HLG_K, vec3(0.0));
+    vec3 t = pow(s * pow(max(dot(s, W2020), 1e-10), 0.2) * 0.1, vec3(PQ_M1));  // F = E·Y^(γ − 1), ÷ 10000
+    return pow((PQ_C1 + PQ_C2 * t) / (1.0 + PQ_C3 * t), vec3(PQ_M2));
+}
 
-vec3 toLinear(vec3 c, int id) {
+// Curvas em código de 10 bits (look.INPUT_DOMAIN == "cv"): o decodificador expande a faixa legal
+// (v = (código − 64)/876) e a fórmula do fabricante espera CV = código/1023.
+vec3 legalToCv(vec3 v) { return (v * 876.0 + 64.0) / 1023.0; }
+
+// Valor do vídeo → luz linear da cena. cv: a curva é em código de 10 bits e a fonte veio em faixa
+// legal expandida (u_input_cv e u_legal): volta ao código da câmera antes da fórmula.
+vec3 toLinear(vec3 c, int id, bool cv) {
+    if (cv) c = legalToCv(c);
     if (id == 0) return stopsToLin(dispToStops(c));
     if (id == 1) return c;
     if (id == 2) return vec3(nlogDec(c.r), nlogDec(c.g), nlogDec(c.b));
@@ -143,6 +186,8 @@ vec3 toLinear(vec3 c, int id) {
     if (id == 9) return vec3(bmd5Dec(c.r), bmd5Dec(c.g), bmd5Dec(c.b));
     if (id == 10) return vec3(logc4Dec(c.r), logc4Dec(c.g), logc4Dec(c.b));
     if (id == 11) return vec3(appleDec(c.r), appleDec(c.g), appleDec(c.b));
+    if (id == 12) return vec3(hlgDec(c.r), hlgDec(c.g), hlgDec(c.b));
+    if (id == 13) return pqDec(c);
     return vec3(cineonDec(c.r), cineonDec(c.g), cineonDec(c.b));
 }
 
@@ -260,6 +305,9 @@ vec3 aged(vec3 y) {
     return c * vec3(1.07, 0.93, 0.98);
 }
 
+// Luz linear → valor que o LUT externo espera, no domínio da própria curva (look.INPUT_DOMAIN): o código
+// de 10 bits (código/1023) no S-Log3, V-Log e N-Log — a convenção dos LUTs dos fabricantes ("Full") e das
+// IDTs do ACES —, o sinal nas outras. Não depende da faixa do arquivo de origem.
 vec3 lutEncode(vec3 lin, int id) {
     if (id == 0) return stopsToDisp(linToStops(lin));
     vec3 n = u_lut_gamut * lin;
@@ -273,6 +321,8 @@ vec3 lutEncode(vec3 lin, int id) {
     if (id == 9) return vec3(bmd5Enc(n.r), bmd5Enc(n.g), bmd5Enc(n.b));
     if (id == 10) return vec3(logc4Enc(n.r), logc4Enc(n.g), logc4Enc(n.b));
     if (id == 11) return vec3(appleEnc(n.r), appleEnc(n.g), appleEnc(n.b));
+    if (id == 12) return vec3(hlgEnc(n.r), hlgEnc(n.g), hlgEnc(n.b));
+    if (id == 13) return pqEnc(n);
     return vec3(cineonEnc(n.r), cineonEnc(n.g), cineonEnc(n.b));
 }
 vec3 sampleLut(vec3 c) {
@@ -430,6 +480,8 @@ uniform float u_zoom;
 uniform float u_dist;
 uniform float u_ca;
 uniform int u_input;
+uniform int u_input_cv;  // 1 = curva em código de 10 bits (look.INPUT_DOMAIN), arquivo sem log_reescalado
+uniform int u_legal;     // 1 = a fonte veio em faixa legal expandida pelo decodificador (media.legal_range)
 uniform mat3 u_gamut;
 uniform vec3 u_gain;
 uniform vec4 u_vig;
@@ -475,7 +527,7 @@ vec3 imageLin(vec2 uv) {
     } else {
         code = texture(t_in, lens(uv, 1.0)).rgb;
     }
-    return max(u_gamut * toLinear(code, u_input), vec3(0.0)) * exp2(u_gain);
+    return max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
 }
 
 float vignette(vec2 uv) {
@@ -897,11 +949,13 @@ void main() {
 BAKE = COMMON + """
 uniform sampler2D t_grid;
 uniform int u_input;
+uniform int u_input_cv;
+uniform int u_legal;
 uniform mat3 u_gamut;
 uniform vec3 u_gain;
 void main() {
     vec3 code = texelFetch(t_grid, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec3 lin = max(u_gamut * toLinear(code, u_input), vec3(0.0)) * exp2(u_gain);
+    vec3 lin = max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
     f_out = vec4(colorPipe(lin), 1.0);
 }
 """

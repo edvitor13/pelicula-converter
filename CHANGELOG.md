@@ -7,6 +7,28 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- Perfis de entrada **HLG** e **PQ / HDR10** (Rec.2100, cinza de referência da BT.2408 em 0,18), também
+  no plugin do DaVinci. Ao abrir um vídeo HDR (o padrão do iPhone), o perfil é escolhido sozinho pelos
+  metadados do arquivo, com aviso na barra de status; projetos reabertos e presets nunca mudam o perfil.
+- Plugin do DaVinci: controle **Faixa do vídeo** (*Vídeo (faixa legal)*, o padrão, ou *Cheia*) nos nós
+  Cor e Laboratório.
+- Opção avançada **Log reescalado (HDMI Limited)** para gravações N-Log feitas pela saída HDMI em faixa
+  limitada.
+- Terminal: `pelicula-cli info` mostra a faixa, a transferência e o perfil HDR do arquivo;
+  `--resolucao` aceita `1080` ou `1080p`.
+
+### Corrigido
+- **S-Log3, V-Log e N-Log** eram lidos na escala errada em vídeos de faixa limitada (o normal das
+  câmeras): o cinza saía até 0,15 stop escuro e as altas luzes até 0,36 stop claras. Agora cada curva
+  usa o domínio da especificação do fabricante (código de 10 bits ou sinal), no app e no plugin.
+- Vídeo **vertical** encolhia nas qualidades prontas (1080 × 1920 em *Redes sociais 1080p* saía
+  608 × 1080): a resolução agora vale para o lado menor, e a janela mostra o tamanho que vai sair.
+- **Exportação segura**: o arquivo é gravado num parcial (`nome.parcial-pelicula.mp4`) e só troca o
+  destino no fim. Cancelar, um erro ou o app fechar no meio não deixam arquivo quebrado e não apagam o
+  arquivo antigo. O mesmo vale para quadros salvos, LUTs, presets e sequências de imagens.
+- Aplicar um preset não troca mais o perfil de entrada (ele descreve o vídeo, não o look).
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

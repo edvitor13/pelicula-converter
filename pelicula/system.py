@@ -1,4 +1,4 @@
-"""Informações da máquina: processador, memória e placas de vídeo."""
+"""Informações da máquina (processador, memória, placas de vídeo), pastas do sistema e gravação segura."""
 
 from __future__ import annotations
 
@@ -8,11 +8,19 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from functools import lru_cache
+from pathlib import Path
 
 from .i18n import _, fmt_decimal
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+# Marca dos arquivos parciais (`video.parcial-pelicula.mp4`). Fixa e sem tradução: é com ela que uma
+# exportação reconhece e apaga o parcial que sobrou de outra interrompida (o app fechou, faltou luz). Não é
+# só "parcial" porque essa é uma palavra comum: `entrevista.parcial.mp4` pode ser um arquivo da pessoa.
+PARTIAL = "parcial-pelicula"
 
 
 @lru_cache(maxsize=1)
@@ -60,6 +68,58 @@ def reveal(path) -> None:
         subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
     else:
         open_path(path if os.path.isdir(path) else os.path.dirname(path) or ".")
+
+
+# ------------------------------------------------------------------ gravação segura
+def partial_path(path) -> str:
+    """Arquivo parcial ao lado do destino: `video.mp4` → `video.parcial-pelicula.mp4`.
+
+    A extensão real fica no fim, então o ffmpeg escolhe para o parcial exatamente o mesmo formato
+    (mp4, mov, matroska, gif, image2…) que escolheria para o arquivo final.
+    """
+    p = Path(path)
+    return str(p.with_name(f"{p.stem}.{PARTIAL}{p.suffix}"))
+
+
+def remove_file(path) -> None:
+    """Apaga um arquivo se ele existir (sem erro se já não existe ou não deu para apagar)."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def replace_file(src, dst, wait: float = 2.0) -> None:
+    """Põe `src` no lugar de `dst` de uma vez só (`os.replace`): ou fica o antigo inteiro, ou o novo.
+
+    No Windows, antivírus e indexador seguram por instantes um arquivo recém-gravado; tenta de novo por
+    até `wait` segundos antes de desistir (um player com o arquivo antigo aberto também impede a troca).
+    """
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
+@contextmanager
+def atomic_write(path, mode: str = "w", **kwargs):
+    """`open()` que grava num arquivo parcial e só troca o destino quando tudo foi escrito.
+
+    Se algo falhar no meio, o parcial é apagado e o arquivo antigo (se havia) continua intacto.
+    """
+    part = partial_path(path)
+    try:
+        with open(part, mode, **kwargs) as fh:
+            yield fh
+        replace_file(part, path)
+    except BaseException:
+        remove_file(part)
+        raise
 
 
 def cpu_threads() -> int:

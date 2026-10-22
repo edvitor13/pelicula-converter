@@ -10,7 +10,9 @@ from pelicula import cli, i18n, params, project
 
 
 @pytest.fixture(autouse=True)
-def portuguese():
+def portuguese(monkeypatch):
+    # main() escolhe o idioma pela PELICULA_LANG (senão, pelas preferências ou pelo sistema).
+    monkeypatch.setenv("PELICULA_LANG", "pt_BR")
     i18n.set_language("pt_BR")
     yield
     i18n.set_language("pt_BR")
@@ -48,6 +50,31 @@ def test_parse_value_errors(key, text):
                                          ("#120", 120), ("q7", 7)])
 def test_parse_time(text, frame):
     assert cli.parse_time(text, 24.0) == frame
+
+
+@pytest.mark.parametrize("text, expected", [("original", "original"), ("Original", "original"), ("1080", "1080"),
+                                            ("1080p", "1080"), (" 720P ", "720"), ("0541", "541"), ("2160", "2160")])
+def test_parse_resolution(text, expected):
+    assert cli.parse_resolution(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "grande", "4k", "-720", "0", "1080x1920", "99999"])
+def test_parse_resolution_errors(text):
+    with pytest.raises(cli.CliError):
+        cli.parse_resolution(text)
+
+
+def test_export_rejects_an_invalid_resolution_right_away(tmp_path, capsys):
+    assert cli.main(["exportar", str(tmp_path / "nao_existe.mp4"), "--resolucao", "grande"]) == 1
+    err = capsys.readouterr().err
+    assert "Resolução inválida: grande" in err and "lado menor" in err
+
+
+def test_resolution_help_says_it_is_the_short_side(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["exportar", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "lado menor em pixels" in out and "1080×1920" in out
 
 
 def test_build_values_preset_and_sets():
@@ -128,14 +155,64 @@ def test_export_project_range(gl_engine, ffmpeg_ok, sample_video, tmp_path, caps
 
 @pytest.mark.gpu
 @pytest.mark.ffmpeg
+def test_export_vertical_video_keeps_its_orientation(gl_engine, ffmpeg_ok, sample_vertical_video, tmp_path, capsys):
+    """Regressão (issue #35): "leve 720p" num vídeo em pé sai 720 × 1280, não 404 × 720."""
+    out = tmp_path / "vertical.mp4"
+    assert cli.main(["exportar", sample_vertical_video, "-o", str(out), "--qualidade", "leve", "--fim", "#3",
+                     "--velocidade", "ultrafast", "-q"]) == 0
+    from pelicula import media
+    info = media.probe(str(out))
+    assert (info.width, info.height) == (720, 1280) and info.frames == 4
+    assert "720×1280" in capsys.readouterr().err
+    out2 = tmp_path / "vertical90.mp4"
+    assert cli.main(["exportar", sample_vertical_video, "-o", str(out2), "--resolucao", "90p", "--fim", "#1",
+                     "--velocidade", "ultrafast", "-q"]) == 0
+    assert (media.probe(str(out2)).width, media.probe(str(out2)).height) == (90, 160)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["vertical.mp4", "vertical90.mp4"]
+
+
+@pytest.mark.ffmpeg
+def test_export_does_not_replace_a_sequence_without_y(ffmpeg_ok, sample_video, tmp_path, capsys):
+    folder = tmp_path / "q"
+    folder.mkdir()
+    (folder / "q_000001.png").write_bytes(b"quadro antigo")
+    assert cli.main(["exportar", sample_video, "-o", str(tmp_path / "q.png"), "--qualidade", "png_seq", "-q"]) == 1
+    err = capsys.readouterr().err
+    assert "A sequência já existe" in err and str(folder) in err
+    assert (folder / "q_000001.png").read_bytes() == b"quadro antigo"
+
+
+@pytest.mark.ffmpeg
+def test_export_refuses_an_input_named_like_the_partial(ffmpeg_ok, sample_video, tmp_path, capsys):
+    import shutil
+    src = tmp_path / "x.parcial-pelicula.mp4"
+    shutil.copy(sample_video, src)
+    size = src.stat().st_size
+    assert cli.main(["exportar", str(src), "-o", str(tmp_path / "x.mp4"), "-q"]) == 1
+    assert "tem o nome que esta exportação usa" in capsys.readouterr().err
+    assert src.stat().st_size == size and sorted(p.name for p in tmp_path.iterdir()) == [src.name]
+
+
+@pytest.mark.ffmpeg
+def test_frame_rejects_an_unknown_image_format_before_rendering(ffmpeg_ok, sample_video, tmp_path, capsys):
+    assert cli.main(["quadro", sample_video, "-o", str(tmp_path / "q.bmp")]) == 1
+    assert ".bmp" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
 def test_frame_and_lut(gl_session, ffmpeg_ok, sample_video, tmp_path, capsys):
     png = tmp_path / "q.png"
+    png.write_bytes(b"quadro antigo")
     assert cli.main(["quadro", sample_video, "-o", str(png), "--tempo", "#5", "--preset", "double_x"]) == 0
     assert png.stat().st_size > 1000
     cube = tmp_path / "x.cube"
+    cube.write_text("LUT antigo")
     assert cli.main(["lut", "--preset", "vision3_250d", "-o", str(cube), "--tamanho", "17"]) == 0
     lines = [ln for ln in cube.read_text().splitlines() if ln and ln[0].isdigit()]
     assert len(lines) == 17 ** 3
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["q.png", "x.cube"]  # nada de parciais
 
 
 @pytest.mark.ffmpeg

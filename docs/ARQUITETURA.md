@@ -95,11 +95,11 @@ Três ideias guiam o projeto:
 | `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
-| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()`, `measure_speed()`. |
+| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor), `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial), `measure_speed()`, `save_still()`. |
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
 | `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17). |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
-| `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema. |
+| `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema, gravação segura (`partial_path`, `replace_file`, `atomic_write`). |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
 | `pelicula/timeline.py` | Modo Edição: `Source`, `Clip`, `Track`, `Layer`, `Sequence` (montagem, tempo, transições, JSON) e `History` (desfazer). Sem Qt. |
@@ -185,8 +185,10 @@ Todos os passos desenham um quadrilátero de tela cheia (`VERT`) num *framebuffe
 1. **Tremor**: `weave()` aplica zoom, rotação e deslocamento em pixels.
 2. **Lente**: `lens()` aplica a distorção radial normalizada (o canto continua no canto) e, com
    aberração cromática, amostra R, G e B com escalas `1 + ca`, `1` e `1 − ca`.
-3. **Entrada**: `toLinear(código, perfil)` desfaz a curva (Rec.709 neutra, N-Log, S-Log3, LogC3,
-   V-Log, Cineon, DaVinci Intermediate, Log3G10) e `u_gamut` converte o gamut para Rec.709.
+3. **Entrada**: `toLinear(código, perfil, cv)` desfaz a curva (Rec.709 neutra, N-Log, S-Log3, LogC3,
+   V-Log, Cineon, DaVinci Intermediate, Log3G10, Blackmagic Gen 5, LogC4, Apple Log, HLG, PQ) e `u_gamut`
+   converte o gamut para Rec.709. Com `cv` (curva em código de 10 bits e fonte em faixa legal expandida,
+   seção 5.1) o valor volta ao código da câmera antes da curva.
 4. **Exposição e balanço**: `× exp2(u_gain)` por canal.
 5. **Vinheta** (bitola + lente) em EV.
 6. **Scan** (se ligado): converte o pixel para milímetros na tira (`u_scan_view`), calcula em qual
@@ -254,9 +256,12 @@ Em ordem:
 
 ### 4.6 Exportar LUT (`BAKE`)
 
-`Engine.bake_lut(values, n)` desenha uma grade `n² × n` (R varia mais rápido, depois G, depois B —
+`Engine.bake_lut(values, n, legal=False)` desenha uma grade `n² × n` (R varia mais rápido, depois G, depois B —
 a ordem do `.cube`) e roda só `toLinear → gamut → ganho → colorPipe`, com o projetor desligado e sem
-pontilhado. O resultado vai para `luts.save_cube()` (domínio 0–1, valores limitados a 0–1).
+pontilhado. O resultado vai para `luts.save_cube()` (domínio 0–1, valores limitados a 0–1). A grade está no
+domínio da própria curva (`legal=False`: código de 10 bits no S-Log3/V-Log/N-Log, como os LUTs dos
+fabricantes); `legal=True` é o clipe de faixa legal expandido (o gráfico *Curva* de um vídeo comum e a
+referência do plugin do Resolve com *Faixa do vídeo = Vídeo*).
 
 ### 4.7 Coordenadas
 
@@ -269,11 +274,16 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
 
 - **Espaço de trabalho**: luz linear de cena com primárias Rec.709/D65; cinza médio = 0,18.
 - **Gamut**: matrizes calculadas em `look.py` a partir das primárias xy (Rec.709, Rec.2020,
-  S-Gamut3.Cine, ARRI Wide Gamut 3, V-Gamut, DaVinci Wide Gamut, REDWideGamutRGB), todas com
-  branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
+  S-Gamut3.Cine, ARRI Wide Gamut 3/4, V-Gamut, DaVinci Wide Gamut, REDWideGamutRGB, Blackmagic Wide
+  Gamut), todas com branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
 - **Curvas de câmera** em GLSL: N-Log, S-Log3, LogC3 (EI 800), V-Log, Cineon (685/300 com preto
-  offset), DaVinci Intermediate e Log3G10 — decodificação e codificação (a codificação serve para
-  alimentar LUTs que esperam log).
+  offset), DaVinci Intermediate, Log3G10, Blackmagic Film Gen 5, LogC4, Apple Log, HLG e PQ —
+  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log).
+- **HLG e PQ** (BT.2100): HLG é a OETF inversa × `HLG_SCALE` (o cinza da BT.2408, 38% do sinal, vira
+  0,18); PQ é a EOTF da ST 2084 (cd/m²) seguida da OOTF inversa do HLG a 1000 cd/m² (γ = 1,2 pela
+  luminância BT.2100, como a conversão PQ → HLG da BT.2408) e da mesma escala. Acima de 1000 cd/m² não há
+  corte; valores negativos (pé da faixa legal) não geram NaN. Constantes em `look.HLG_*`/`PQ_*`, repetidas
+  no GLSL e no plugin (`tests/test_entrada.py` confere).
 - **Curva neutra de exibição** (`D_SLOPE = 0,155` por stop, `D_MID = 0,45`, `D_P = 4`): uma
   sigmoide de *soft clip* em stops, **inversível**. Ela é usada para levar Rec.709 até a luz linear
   e de volta, então com todos os efeitos desligados o vídeo sai igual ao que entrou (a menos do
@@ -285,6 +295,46 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
 - **Saída**: valores de exibição BT.709. O codificador recebe RGB e o ffmpeg converte para YUV com
   matriz BT.709 em faixa limitada (BT.601 em faixa cheia para JPEG/WebP), gravando as tags
   `bt709` de primárias, transferência e matriz.
+
+### 5.1 Faixa do arquivo e domínio das curvas
+
+O `FrameReader` expande o vídeo YUV de faixa legal (`in_range=limited`): em 10 bits o shader recebe
+v = (código − 64)/876, a fração de "IRE" — o mesmo valor que o DaVinci Resolve tem de um clipe em *Video
+levels*. Vídeo de faixa cheia (`pc`, `yuvj`) e imagens RGB chegam como v = código/1023. Cada curva declara em
+`look.INPUT_DOMAIN` em que escala o fabricante escreveu a fórmula (fontes no comentário do código):
+
+| Domínio | Perfis | O que o shader faz |
+|---|---|---|
+| `"cv"`: código de 10 bits, gravado como está | S-Log3 (Sony), V-Log (Panasonic), N-Log (Nikon) | com `u_legal = 1`: CV = (v·876 + 64)/1023 antes da curva; com faixa cheia, CV = v |
+| `"sinal"`: o próprio sinal E′ (quantização padrão 64 + 876·E′) | LogC3, LogC4, Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709, linear | usa v como está |
+
+O fluxo da faixa:
+
+```
+arquivo ──ffprobe──► MediaInfo ──media.legal_range()──┐
+montagem (Edição) ──sequence.legal_range()─────────────┤  (faixa da maioria dos clipes de vídeo)
+                                                       ▼
+build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → u_input_cv
+                                                       ▼
+          BASE / BAKE: toLinear(código, u_input, u_input_cv == 1 && u_legal == 1)
+```
+
+- **Quem passa a faixa**: prévia, miniaturas, gráfico *Curva* e "Salvar quadro" (`MainWindow._source_legal`),
+  exportação (`export._encode`, também na estimativa) e o terminal (`quadro`, `exportar`).
+- **Modo Edição**: cada clipe é decodificado com a sua faixa e a tela montada guarda esses valores; o look
+  usa a faixa da maioria dos clipes de vídeo (empate: o primeiro; imagens só contam sem vídeo). Clipes log de
+  faixas diferentes na mesma montagem ficam com uma faixa só (perfil por clipe fica para depois).
+- **`log_reescalado`** (avançado, fora dos presets): gravação externa em que a câmera mandou o log já
+  reescalado para 64–940 (saída HDMI *Limited*, comum na Nikon) — desliga a volta ao código.
+- **LUTs**: o LUT externo (`lutEncode`) e os `.cube` exportados (`Engine.bake_lut`, padrão `legal=False`)
+  usam o domínio da própria curva — o código de 10 bits nas curvas `"cv"`, a convenção dos LUTs "Full" dos
+  fabricantes e das IDTs do ACES (que aplicam a fórmula direto na entrada). Assim um LUT oficial da Sony
+  recebe 420/1023 no cinza, venha o arquivo em faixa legal ou cheia.
+- **Plugin do Resolve**: o nó recebe o valor que o Resolve tem do clipe, sem saber a faixa do arquivo; o
+  controle *Faixa do vídeo* (padrão *Vídeo* = `bake_lut(legal=True)`, *Cheia* = `legal=False`) faz o papel de
+  `u_legal` (seção 15).
+- **Limite conhecido**: a saída RGB inteira do decodificador corta em 1,0 o que passa do código 940 (super
+  brancos). No S-Log3, que usa códigos até ~1000, isso corta as luzes mais de ~6,7 stops acima do cinza.
 
 ## 6. Determinismo e independência de resolução
 
@@ -368,8 +418,8 @@ Regras que decorrem disso:
 - **Nada de Qt de interface fora da thread principal.** As threads de trabalho só trocam dados por
   sinais, filas ou campos simples.
 - **Cancelamento cooperativo.** `ExportJob.cancel` (`threading.Event`) é conferido na leitura, na
-  GPU e na gravação; o processo do codificador é morto e o arquivo parcial é apagado (sequências de
-  imagens ficam).
+  GPU e na gravação; o processo do codificador é morto e o parcial é apagado (arquivo ou pasta da
+  sequência). O destino antigo nunca é tocado (veja a gravação segura em 9.2).
 
 ## 8. Leitura de quadros com o ffmpeg
 
@@ -389,7 +439,10 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
 
 - A busca usa `-ss` antes do `-i` meio quadro antes do alvo (rápido e preciso).
 - A matriz de entrada vem dos metadados (`bt709`, `bt601`, `bt2020`, `smpte240m`; sem metadado,
-  BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj`.
+  BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj` (`_in_range`). `media.legal_range(info)`
+  diz se o leitor expandiu a faixa legal — é o `legal` do `build_plan` (seção 5.1).
+- `MediaInfo.color_transfer` (`arib-std-b67` = HLG, `smpte2084` = PQ) sugere o perfil de entrada
+  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso.
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
@@ -415,10 +468,30 @@ pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
 
 ### 9.2 `run_job()`
 
-1. Tamanho de saída (`output_size`, dimensões pares quando o codec exige), fps, profundidade
-   (`high_depth`: 16 bits se o formato tiver 10/12/16 bits, `p010`, RGB 48 ou for ProRes/FFV1),
-   trecho em quadros e total de quadros na taxa de saída.
-2. Pipe nomeado de saída (Windows) e comando do codificador (`build_encoder_cmd`):
+1. Tamanho de saída (`output_size`), fps, profundidade (`high_depth`: 16 bits se o formato tiver
+   10/12/16 bits, `p010`, RGB 48 ou for ProRes/FFV1), trecho em quadros e total de quadros na taxa de
+   saída. A resolução escolhida (`"2160"`, `"1080"`, `"720"`…) é o **lado menor** do quadro, como no
+   YouTube e nos celulares: deitado, ela é a altura (1920 × 1080); em pé, a largura (1080 × 1920); o
+   outro lado segue a proporção. Codecs de vídeo recebem dimensões pares (arredondadas para baixo);
+   FFV1, GIF, imagens e sequências ficam com o tamanho exato. A janela mostra em cada opção o tamanho
+   que sai (`ExportDialog._res_labels`) e o terminal aceita `--resolucao 1080` ou `1080p`.
+2. **Gravação segura** (`_prepare_output` / `_commit_output` / `_discard_output`): o codificador nunca
+   grava no destino. Ele recebe `system.partial_path()` — `video.parcial-pelicula.mp4`, ao lado do
+   destino, com a extensão real no fim para o ffmpeg escolher exatamente o mesmo formato (mp4, mov,
+   matroska, gif, image2…) sem `-f` nem tabela própria de formatos — ou, nas sequências,
+   `quadros.parcial-pelicula/quadros_%06d.png`. A marca não é só `.parcial` porque essa é uma palavra
+   comum (`entrevista.parcial.mp4` pode ser da pessoa). Um parcial que sobrou de uma exportação
+   interrompida é apagado antes de começar; se um arquivo de **entrada** tem o nome do parcial
+   (`partial_clash`), a exportação é recusada em vez de apagá-lo. Só quando tudo deu certo o resultado
+   vai para o lugar do destino com `os.replace` (`system.replace_file`, que tenta de novo por até 2 s
+   quando o Windows segura o arquivo): o arquivo antigo fica intacto até esse instante. Nas sequências,
+   uma pasta nova troca de nome inteira; se a pasta já existe, cada quadro é movido, os quadros que
+   sobram de uma exportação anterior mais longa (`nome_NNNNNN.ext` além do último) saem, e arquivos da
+   pessoa na pasta nunca são apagados. Cancelado ou com erro (inclusive exceção no meio), o parcial é
+   apagado. Se o destino não puder ser trocado (aberto num player), o trabalho vira `erro` e o resultado
+   completo fica no parcial, com o caminho na mensagem. A janela e o terminal perguntam (ou pedem `-y`)
+   antes de substituir um arquivo ou uma pasta de sequência que já tem quadros (`output_exists`).
+3. Pipe nomeado de saída (Windows) e comando do codificador (`build_encoder_cmd`):
    - entrada 0: `rawvideo` RGB (8/16 bits) pelo pipe, com `-progress pipe:2`;
    - entrada 1 (se houver áudio e o formato aceitar): o arquivo original com `-ss`/`-t` do trecho,
      mapeando `1:a:0?`;
@@ -428,13 +501,19 @@ pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
      `-tag:v hvc1`, opções de NVENC/QSV/AMF, FFV1 nível 3 com GOP 1 e 16 *slices*, TIFF com
      *deflate* etc.);
    - tags de cor BT.709, `+faststart` em MP4/MOV, áudio conforme `_audio_args()`.
-3. `FrameReader` em alta qualidade. Com troca de fps, o leitor aplica o filtro `fps=` desde o
+4. `FrameReader` em alta qualidade. Com troca de fps, o leitor aplica o filtro `fps=` desde o
    começo e pula os quadros antes do trecho.
-4. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*.
-5. Progresso: quadros **gravados** pelo ffmpeg (`frame=` do `-progress`) ou, antes disso, quadros
+5. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*.
+6. Progresso: quadros **gravados** pelo ffmpeg (`frame=` do `-progress`) ou, antes disso, quadros
    processados; velocidade e tempo restante a partir daí.
-6. Fim: fecha o pipe, espera o ffmpeg, confere código de saída e erros de escrita; status
-   `concluido`, `erro` (com o final do `stderr`) ou `cancelado`.
+7. Fim: fecha o pipe, espera o ffmpeg, confere código de saída e erros de escrita; troca o destino
+   pelo parcial e só então marca `concluido`; ou `erro` (com o final do `stderr`) ou `cancelado`, com o
+   parcial apagado.
+
+Os outros arquivos que o usuário grava seguem a mesma regra: "Salvar quadro" e `pelicula-cli quadro`
+usam `export.save_still()` (ffmpeg no parcial + `replace_file`); LUTs `.cube` (`luts.save_cube`, também
+no pacote do DaVinci) e presets exportados (`presets.export_file`) usam `system.atomic_write()`. Os
+projetos `.plc` já eram gravados num `.tmp` e trocados com `os.replace`.
 
 ### 9.3 Qualidades prontas e codecs
 
@@ -495,6 +574,7 @@ novo.
 | ffmpeg baixado | `deps.ffmpeg_dir()` (veja a seção 10). |
 | Ferramentas baixadas | `tools.tools_dir()` = `<pasta do app>/ferramentas/<id>/<versão>/`, cada versão com `pelicula-origem.json` (URL, SHA-256, data). Pastas `.novo-*` (instalação em andamento) e `.removendo-*` (remoção) são temporárias. |
 | Temporários | `pelicula_seta.png` (seta das listas), `pelicula_cena_de_teste.png` (cena de teste), `pelicula_medida_*` (estimativa, apagada no fim), `pelicula_ffmpeg_*` (download, apagada no fim). |
+| Parciais | `nome.parcial-pelicula.ext` (e a pasta `nome.parcial-pelicula/` das sequências) ao lado do destino enquanto uma exportação, um quadro, um LUT ou um preset é gravado; trocam de nome no fim. Um que sobrou de uma exportação interrompida é apagado na próxima com o mesmo destino. |
 
 Formato do preset: `{"nome", "desc", "app": "PeliculaConverter", "versao": 1, "valores": {…}}`.
 `params.sanitize()` completa as chaves que faltam com o padrão, descarta chaves desconhecidas,
@@ -611,7 +691,10 @@ de onda (com cache por arquivo).
   `engine.compose()` antes de `build_plan`/`render`. O número do quadro do look é o quadro da sequência,
   como na prévia — a exportação FFV1 16 bits de uma edição é conferida bit a bit (`tests/test_sequence.py`).
 - `sequence.media_info(seq)`: `MediaInfo` virtual (tamanho, fps, duração, som, formato do 1º vídeo) usado
-  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal.
+  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal. Como a
+  resolução da exportação vale para o lado menor, uma sequência vertical (1080 × 1920) continua vertical
+  nas qualidades prontas (*Redes sociais 1080p* → 1080 × 1920, *Leve 720p* → 720 × 1280). A faixa
+  da tela para o look vem de `sequence.legal_range(seq)` (a dos clipes de vídeo), nunca desse `MediaInfo`.
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
   como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
   continuam `1` e abrem nas versões antigas.
@@ -680,6 +763,11 @@ diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um
   com o moderngl e compara com o app: a cor bate com `Engine.bake_lut` (≤ 8e-7 nos 44 presets e em todos os controles novos, < 1,3e-4
   na varredura das 180 combinações do Laboratório); textura e projetor ficam a 1/255 de
   `Engine.render`, exceto halação/bloom/névoa (aproximação de passo único por amostragem esparsa).
+- **Faixa do vídeo**: o nó não sabe a faixa do arquivo; o controle *Faixa do vídeo* (só do plugin, logo
+  depois do *Perfil do video*) diz se o valor chegou expandido (*Vídeo*, padrão: clipe em Data Levels
+  Auto/Video) ou já é o código (*Cheia*). A tabela `PC_IN_CV` (de `look.INPUT_DOMAIN`) marca as curvas em
+  código de 10 bits; `B_INPUT` volta ao código como o `toLinear` do app. No OpenFX, presets e looks `.json`
+  não mudam o perfil nem a faixa (`ofx.KEEP_ON_PRESET`, campo `keep` de `pc_param_def`).
 - **Laboratório no DCTL**: a calibração das luzes da copiadora é resolvida no próprio kernel, em forma
   fechada (a curva da cópia tem pé zero e se inverte exatamente; as densidades das camadas saem de um
   sistema 3×3), então qualquer push, diafonia, chave e força funciona sem tabelas enormes.

@@ -260,6 +260,39 @@ def _in_range(info: MediaInfo) -> str:
     return "limited" if info.pix_fmt.startswith(("yuv", "nv", "p0")) else "auto"
 
 
+def legal_range(info) -> bool:
+    """O `FrameReader` expande este arquivo da faixa legal para 0–1? (`build_plan(..., legal=...)`)
+
+    Vídeo YUV de faixa legal (o comum): sim, o shader recebe v = (código − 64)/876. Faixa cheia
+    (`color_range` pc/jpeg, yuvj) e imagens/vídeo RGB: não, v = código/1023. Aceita `MediaInfo` ou
+    qualquer objeto com `pix_fmt` e `color_range` (um `timeline.Source`, por exemplo).
+    """
+    return _in_range(info) == "limited"
+
+
+# Transferências HDR do ffprobe (`color_transfer`) → perfil de entrada. O vídeo HDR do iPhone (Dolby
+# Vision 8.4) é marcado como HLG (arib-std-b67).
+HDR_TRANSFERS = {"arib-std-b67": "hlg", "smpte2084": "pq"}
+
+
+def detect_profile(info) -> str | None:
+    """Perfil de entrada sugerido pelos metadados do arquivo (só HDR: HLG ou PQ); None se não há."""
+    return HDR_TRANSFERS.get(str(getattr(info, "color_transfer", "") or "").strip().lower())
+
+
+def auto_profile(current: str, info, default: str = "rec709") -> str | None:
+    """Novo perfil de entrada ao abrir `info`, ou None para manter `current`.
+
+    Os perfis HDR seguem os metadados do arquivo: com o perfil no padrão (Rec.709) ou num perfil HDR,
+    um vídeo HLG/PQ escolhe o seu e um arquivo sem HDR volta ao padrão. Perfis log (escolhidos à mão,
+    porque câmeras não marcam a curva log nos metadados) nunca mudam.
+    """
+    if current != default and current not in HDR_TRANSFERS.values():
+        return None
+    want = detect_profile(info) or default
+    return None if want == current else want
+
+
 PRIORITY = {"baixa": 0x00004000, "normal": 0, "alta": 0x00008000}
 
 
