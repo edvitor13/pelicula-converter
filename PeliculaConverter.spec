@@ -11,7 +11,7 @@
 # Uso:  python -m PyInstaller --noconfirm --clean PeliculaConverter.spec
 #
 # Só o ffmpeg fica de fora: o app procura no PATH e em pastas comuns e, se não achar,
-# oferece baixar de uma fonte confiável (Configurações > Dependências e atualizações).
+# oferece baixar de uma fonte confiável (Configurações > Componentes).
 # Os instaladores (.msi, .deb, .dmg) são montados a partir desta pasta: veja packaging/.
 
 import os
@@ -33,6 +33,13 @@ elif sys.platform == "darwin":
     GL_BACKENDS = ["glcontext.darwin"]
 else:
     GL_BACKENDS = ["glcontext.x11", "glcontext.egl"]
+
+# Páginas de Configurações: ui/settings_dialog.py as carrega com importlib (pelo nome), e o PyInstaller
+# não enxerga esse import sozinho. Sem isto o executável abre Configurações sem as páginas (e o aviso
+# de "ffmpeg ausente", que abre a página Componentes, falha).
+SETTINGS_PAGES = sorted(
+    "pelicula.ui.pages." + _f[:-3] for _f in os.listdir(os.path.join(ROOT, "pelicula", "ui", "pages"))
+    if _f.endswith(".py") and not _f.startswith("_"))
 
 # Ícone só no Windows (.ico). No Linux o ícone vem do tema / arquivo .desktop.
 ICON = os.path.join(ROOT, "assets", "logo.ico") if sys.platform == "win32" else None
@@ -92,7 +99,7 @@ COMMON = dict(
     pathex=[ROOT],
     binaries=[],
     datas=DATAS,
-    hiddenimports=["glcontext", *GL_BACKENDS],
+    hiddenimports=["glcontext", *GL_BACKENDS, *SETTINGS_PAGES],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

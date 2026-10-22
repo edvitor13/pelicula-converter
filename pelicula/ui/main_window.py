@@ -540,7 +540,7 @@ class MainWindow(QMainWindow):
         menu.addAction(_("Novidades desta versão"), lambda: welcome.WhatsNewDialog(self).exec())
         menu.addAction(_("Tela de boas-vindas"), self.show_welcome)
         menu.addSeparator()
-        menu.addAction(_("Dependências e atualizações…"), self.show_deps)
+        menu.addAction(icons.icon("box", theme.TEXT, 16), _("Componentes…"), lambda: self.show_settings("componentes"))
         menu.addAction(_("Pasta do ffmpeg…"), self.choose_ffmpeg)
         menu.addAction(_("Abrir pasta dos meus presets"), lambda: system.open_path(presets.user_dir()))
         menu.addAction(_("Abrir pasta dos meus LUTs"), self.open_lut_dir)
@@ -2397,11 +2397,15 @@ class MainWindow(QMainWindow):
             self.settings.setValue("ffmpeg_skip", latest or "sempre")
 
     def show_deps(self, reason: str = "", auto_download: bool = False) -> None:
-        from .deps_dialog import DepsDialog
-        dlg = DepsDialog(self, f"{self.engine.renderer} • OpenGL {self.engine.ctx.info.get('GL_VERSION', '?')}",
-                         self.settings, reason)
-        if auto_download and dlg.btn_get.isEnabled():
-            QTimer.singleShot(200, dlg._download)
+        """Configurações › Componentes com um aviso (ffmpeg ausente ou antigo) e, se pedido, já
+        baixando o ffmpeg."""
+        from .settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self, self.settings, "componentes", main=self)
+        dlg.settings_changed.connect(self.settings_changed)
+        page = dlg.page("componentes")
+        page.set_reason(reason)
+        if auto_download:
+            QTimer.singleShot(200, lambda: page.download("ffmpeg"))
         dlg.exec()
         if self.info is not None:
             self.request_frame(self.frame_idx)
