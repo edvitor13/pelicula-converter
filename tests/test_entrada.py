@@ -679,8 +679,9 @@ app.exit(0)
 '''
 
 
+@pytest.mark.gpu
 @pytest.mark.ffmpeg
-def test_main_window_detects_hdr_and_presets_keep_it(ffmpeg_ok, tmp_path):
+def test_main_window_detects_hdr_and_presets_keep_it(gl_engine, ffmpeg_ok, tmp_path):
     hlg = _hdr_clip(ffmpeg_ok, tmp_path / "hlg.mp4", "arib-std-b67")
     sdr = _hdr_clip(ffmpeg_ok, tmp_path / "sdr.mp4", "bt709", "bt709", "bt709")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PELICULA_SETTINGS_DIR=str(tmp_path / "cfg"),
