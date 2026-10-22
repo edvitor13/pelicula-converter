@@ -16,6 +16,9 @@ modo Edição em [docs/EDICAO.md](docs/EDICAO.md); plugin do DaVinci Resolve em 
 - **Determinismo por quadro**: nada de `random`/`time` no render; use número do quadro, fps e sementes.
 - **px@1080**: distâncias do esquema são pixels de um quadro de 1080 linhas, convertidas com
   `scale = altura / 1080`.
+- **Curvas de câmera declaram o domínio** (`look.INPUT_DOMAIN`: código de 10 bits ou sinal) e a faixa do
+  arquivo chega ao shader por `build_plan(..., legal=media.legal_range(info))`; LUTs ficam no domínio da
+  própria curva; o plugin do Resolve tem o controle *Faixa do vídeo*.
 - **Shaders com y para baixo** (linha 0 = topo); sem inversões.
 - **Um `Engine` (contexto OpenGL) por thread**; Qt de interface só na thread principal.
 - **Nunca incluir LUTs proprietários** (Adobe, Blackmagic): só ler onde já estão instalados.

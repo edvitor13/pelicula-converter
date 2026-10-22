@@ -72,6 +72,8 @@ ENTRADAS = [
     ("bmd_gen5", "Blackmagic Film Gen 5 (Blackmagic Wide Gamut)"),
     ("logc4", "ARRI LogC4 (ARRI Wide Gamut 4)"),
     ("applelog", "Apple Log (Rec.2020) — iPhone"),
+    ("hlg", "HLG (HDR de celular, Rec.2100)"),
+    ("pq", "PQ / HDR10 (Rec.2100)"),
 ]
 
 LUT_ENTRADAS = [
@@ -87,6 +89,8 @@ LUT_ENTRADAS = [
     ("logc4", "ARRI LogC4"),
     ("applelog", "Apple Log"),
     ("linear", "Linear"),
+    ("hlg", "HLG (Rec.2100)"),
+    ("pq", "PQ / HDR10 (Rec.2100)"),
 ]
 
 # Laboratório: aproximações artísticas do comportamento de cada filme (sem dados dos fabricantes).
@@ -198,7 +202,13 @@ SECTIONS: list[Section] = [
 
     Section("entrada", "Entrada e exposição", None, [
         C("entrada", "Perfil do vídeo", "rec709", ENTRADAS,
-          "Como o vídeo foi gravado. Use o perfil log da câmera se gravou em log."),
+          "Como o vídeo foi gravado. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR "
+          "(os celulares costumam gravar em HLG). Trocar de preset não muda este ajuste."),
+        B("log_reescalado", "Log reescalado (HDMI “Limited”)", False,
+          "Só para S-Log3, V-Log e N-Log, que a câmera grava no código de 10 bits. Ligue em gravações externas em "
+          "que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em “Limited”, comum na Nikon): "
+          "o app deixa de converter de volta para o código da câmera. Trocar de preset não muda este ajuste.",
+          advanced=True),
         F("exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
         F("temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
         F("tint", "Tonalidade", 0.0, -100, 100, 1, 0, "", "Negativo puxa para verde, positivo para magenta."),

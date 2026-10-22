@@ -215,8 +215,14 @@ class Engine:
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
         return arr.reshape(h, w, 3)
 
-    def bake_lut(self, values: dict, size: int = 33) -> np.ndarray:
-        """Grava só a parte de cor do look num LUT 3D (ordem .cube)."""
+    def bake_lut(self, values: dict, size: int = 33, legal: bool = False) -> np.ndarray:
+        """Grava só a parte de cor do look num LUT 3D (ordem .cube).
+
+        A entrada do LUT é o valor no perfil escolhido. Padrão (`legal=False`): o domínio da própria curva,
+        a convenção dos LUTs .cube (no S-Log3, V-Log e N-Log, o código de 10 bits, como os LUTs "Full" dos
+        fabricantes). `legal=True` trata a entrada como vídeo de faixa legal já expandido (um clipe em
+        "Video levels" no Resolve: é o padrão do plugin; também a curva do gráfico para um arquivo comum).
+        """
         n = size
         axis = np.linspace(0.0, 1.0, n, dtype=np.float32)
         img = np.zeros((n, n * n, 3), dtype=np.float32)
@@ -229,7 +235,7 @@ class Engine:
         vals = dict(values)
         vals["proj_on"] = False
         info = lut_info(vals.get("lut_arquivo", "")) if vals.get("lut_on") else None
-        plan = look.build_plan(vals, n * n, n, 0, 24.0, info, dither=False)
+        plan = look.build_plan(vals, n * n, n, 0, 24.0, info, dither=False, legal=legal)
         out = self._target("bake", (n * n, n), dtype="f4")
         self._run("bake", out, {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)}, plan.uniforms)
         data = out[1].read(components=3, alignment=1, dtype="f4")

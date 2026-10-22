@@ -124,8 +124,9 @@ def _grid(n: int) -> np.ndarray:
 
 
 def _color_diff(core: Core, gl_engine, values: dict, n: int = 17) -> float:
+    """Cor do plugin com os controles padrão (Faixa do vídeo = Vídeo, faixa legal expandida) × o app."""
     vals = dict(values, proj_on=False, lut_on=False)
-    want = np.clip(gl_engine.bake_lut(vals, n), 0.0, 1.0)
+    want = np.clip(gl_engine.bake_lut(vals, n, legal=True), 0.0, 1.0)
     got = np.clip(core.color(vals, _grid(n)).reshape(-1, 3), 0.0, 1.0)
     return float(np.abs(want - got).max())
 
@@ -333,9 +334,56 @@ def test_color_matches_the_app_for_every_preset(core, gl_engine, pid):
 @pytest.mark.gpu
 @pytest.mark.parametrize("entrada", [c[0] for c in params.PARAMS["entrada"].choices])
 def test_color_matches_the_app_for_every_input_profile(core, gl_engine, entrada):
-    v = presets.builtin_values("vision3_500t")
-    v["entrada"] = entrada
-    assert _color_diff(core, gl_engine, v) < 1e-4
+    v = dict(presets.builtin_values("vision3_500t"), entrada=entrada, proj_on=False, lut_on=False)
+    n = 17
+    _assert_close(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1),
+                  np.clip(core.color(v, _grid(n)).reshape(-1, 3), 0, 1), entrada)
+
+
+def _assert_close(want: np.ndarray, got: np.ndarray, entrada: str) -> None:
+    d = np.abs(want - got).max(axis=1)
+    if entrada == "pq":
+        # PQ vai até 10000 cd/m² (≈ 25 no linear do app): em cores HDR muito saturadas a matriz BT.2020 → Rec.709
+        # subtrai números grandes e a diferença de float32 entre a GPU e a CPU cresce (sempre < 1/1000).
+        assert d.max() < 1e-3 and np.percentile(d, 99) < 1e-4, (d.max(), np.percentile(d, 99))
+    else:
+        assert d.max() < 1e-4, d.max()
+
+
+def _with_range(core: Core, values: dict, rgb: np.ndarray, cheia: bool) -> np.ndarray:
+    """Cor do plugin com a Faixa do vídeo escolhida (controle só do plugin, fora dos ajustes do app)."""
+    ui = core.ui(values)
+    slot = next(s for s in ofx.slots() if s.field == "faixa_video")
+    ui[slot.offset] = float([k for k, _l in resolve.RANGE_CHOICES].index("cheia" if cheia else "legal"))
+    src = np.ascontiguousarray(rgb.reshape(-1, 3), np.float32)
+    out = np.zeros_like(src)
+    core.lib.pc_color(core._p(ui), core._p(src), core._p(out), src.shape[0], 1)
+    return out
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("entrada", ["slog3", "vlog", "nlog", "logc4", "hlg", "pq"])
+def test_video_range_matches_the_app(core, gl_engine, entrada):
+    v = dict(presets.builtin_values("vision3_500t"), entrada=entrada, proj_on=False, lut_on=False)
+    n = 13
+    full = np.clip(_with_range(core, v, _grid(n), True), 0, 1)
+    video = np.clip(_with_range(core, v, _grid(n), False), 0, 1)
+    _assert_close(np.clip(gl_engine.bake_lut(v, n, legal=False), 0, 1), full, entrada)
+    _assert_close(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1), video, entrada)
+    assert (np.abs(full - video).max() > 0.01) == look.code_value_curve(entrada)
+
+
+def test_video_range_is_a_plugin_control_in_the_input_group():
+    slots = ofx.slots()
+    fields = [s.field for s in slots]
+    s = slots[fields.index("faixa_video")]
+    assert fields[fields.index("entrada") + 1] == "faixa_video" and s.group == "entrada" and not s.ctl.key
+    assert ofx.label_of(s.ctl) == "Faixa do vídeo" and "S-Log3" in ofx.hint_of(s.ctl)
+    assert ofx.choice_labels(s.ctl)[0].startswith("Vídeo") and ofx.choice_labels(s.ctl)[1].startswith("Cheia")
+    src = (ROOT / "plugins" / "ofx" / "generated" / "pc_params.h").read_text(encoding="ascii")
+    assert ofx._cstr("Vídeo (faixa legal, 64–940)") in src
+    assert set(ofx.KEEP_ON_PRESET) == {"entrada", "faixa_video"}
+    assert {k for k in presets.SOURCE_KEYS if k in fields} <= set(ofx.KEEP_ON_PRESET)  # como no app
 
 
 @pytest.mark.gpu
@@ -576,6 +624,25 @@ def test_choosing_a_preset_sets_every_parameter(host):
     host.set_param("exposicao", 1.25)
     host.change("pc_preset", reason="kOfxChangePluginEdited")
     assert host.param("exposicao").value == [1.25]
+
+
+def test_presets_and_looks_keep_the_clip_profile_and_range(host, tmp_path):
+    """Perfil e faixa do vídeo são do clipe (como no app, presets.SOURCE_KEYS): preset e look .json não mudam."""
+    host.create_instance(64, 36)
+    hlg = [c[0] for c in params.ENTRADAS].index("hlg")
+    host.set_param("entrada", hlg)
+    host.set_param("faixa_video", 1)
+    host.set_param("pc_preset", [p["id"] for p in presets.BUILTIN].index("super8_kodachrome"))
+    assert host.change("pc_preset") in (0, 14)
+    assert host.param("entrada").value == [hlg] and host.param("faixa_video").value == [1]
+    want = ofx.ui_values(presets.builtin_values("super8_kodachrome"))
+    s = next(s for s in ofx.slots() if s.field == "iso")
+    assert [float(x) for x in host.param("iso").value] == pytest.approx(want[s.offset:s.offset + 1])
+    path = tmp_path / "look.json"
+    presets.export_file(str(path), "Look", dict(presets.builtin_values("vision3_500t"), entrada="slog3"))
+    host.set_param("pc_arquivo", str(path))
+    assert host.change("pc_arquivo") in (0, 14)
+    assert host.param("entrada").value == [hlg] and host.param("faixa_video").value == [1]
 
 
 def test_loading_a_look_json_from_the_app(host, tmp_path):

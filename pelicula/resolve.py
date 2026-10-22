@@ -133,6 +133,7 @@ class Ctl:
     tip: str = ""
     scale: float = 1.0             # valor do app = valor da interface × scale (percentuais: 0,01)
     key: str = ""                  # chave do app (para ler presets); "" = controle interno
+    section: str = ""              # controle interno: seção do app onde ele aparece no OpenFX
 
     @property
     def var(self) -> str:
@@ -207,11 +208,33 @@ def ctl(key: str, label: str | None = None, tip: str | None = None, **over) -> C
     return c
 
 
+# Faixa em que o Resolve entrega o clipe ao nó. Clipes de câmera (YUV, Data Levels Auto/Video) chegam
+# expandidos (64–940 → 0–1) e as curvas em código de 10 bits (look.INPUT_DOMAIN: S-Log3, V-Log, N-Log)
+# voltam ao código da câmera, como o app faz com o arquivo; "Cheia" é para quando o valor já é o código
+# (clipe em Full em Clip Attributes, como a Sony recomenda, ou log que a câmera mandou reescalado pela saída
+# HDMI "Limited" — o `log_reescalado` do app).
+RANGE_CHOICES = [("legal", "Video faixa legal 64-940"), ("cheia", "Cheia 0-1023")]
+ENTRADA_TIP = ("Curva e gamut da camera ou HLG-PQ para video HDR. Se a linha do tempo ja esta em Rec.709 - "
+               "Gamma 2.4 deixe Rec.709.")
+
+
+def range_control() -> Ctl:
+    """Faixa do vídeo (controle só do plugin; o app sabe a faixa pelo arquivo: `media.legal_range`)."""
+    return Ctl("ui_faixa_video", "Faixa do video", "combo", "legal", choices=list(RANGE_CHOICES),
+               tip=ascii_tip("So muda S-Log3 V-Log e N-Log que usam o codigo de 10 bits. Video e o padrao para "
+                             "clipes em Data Levels Auto ou Video. Cheia para clipes em Full ou log que a camera "
+                             "mandou reescalado pela saida HDMI Limited."),
+               section="entrada")
+
+
+def input_controls() -> list[Ctl]:
+    """Perfil do vídeo, faixa, exposição e balanço (o começo dos nós Cor e Laboratório)."""
+    return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(),
+            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
+
+
 def cor_controls() -> list[Ctl]:
-    out = [
-        ctl("entrada", "Perfil do video"),
-        ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade"),
-    ]
+    out = input_controls()
     out += lab_controls()
     out += [
         ctl("cor_on", "Cor da pelicula"),
@@ -265,8 +288,8 @@ def curve_control() -> Ctl:
 
 def laboratorio_controls() -> list[Ctl]:
     """Nó Laboratório: entrada, exposição e o laboratório (sempre ligado), como um nó de emulação de filme."""
-    return ([ctl("entrada", "Perfil do video"), ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
-            + lab_controls(with_switch=False) + [ctl("mix_geral", "Forca geral do look"), curve_control()])
+    return (input_controls() + lab_controls(with_switch=False)
+            + [ctl("mix_geral", "Forca geral do look"), curve_control()])
 
 
 # ------------------------------------------------------------------ dialetos
@@ -486,7 +509,26 @@ PC_DEVICE float pc_apple_dec(float p) {
     if (p >= 0.20855531595464202f) return _exp2f((p - 0.69336945f) / 0.08550479f) - 0.00964052f;
     return (p >= 0.0f) ? _sqrtf(p / 47.28711236f) - 0.05641088f : -0.05641088f;
 }
-PC_DEVICE float3 pc_to_linear(float3 c, int id) {
+// HLG (ITU-R BT.2100): OETF inversa x HLG_K (cinza da BT.2408 em 38% -> 0,18), espelhada abaixo de 0
+PC_DEVICE float pc_hlg_dec(float e) {
+    if (e <= 0.5f) return e * _fabs(e) / 3.0f * PC_HLG_K;
+    return (_expf((e - PC_HLG_C) / PC_HLG_A) + PC_HLG_B) / 12.0f * PC_HLG_K;
+}
+// PQ (SMPTE ST 2084): luz da tela / 1000 cd/m2, depois a OOTF inversa do HLG (gama 1,2 pela luminancia)
+PC_DEVICE float pc_pq_disp(float e) {
+    float p = _powf(_fmaxf(e, 0.0f), 1.0f / PC_PQ_M2);
+    return 10.0f * _powf(_fmaxf(p - PC_PQ_C1, 0.0f) / _fmaxf(PC_PQ_C2 - PC_PQ_C3 * p, 1e-6f), 1.0f / PC_PQ_M1);
+}
+PC_DEVICE float3 pc_pq_dec(float3 c) {
+    float3 f = make_float3(pc_pq_disp(c.x), pc_pq_disp(c.y), pc_pq_disp(c.z));
+    float y = _fmaxf(0.2627f * f.x + 0.6780f * f.y + 0.0593f * f.z, 1e-10f);
+    return f * (_powf(y, -1.0f / 6.0f) * PC_HLG_K);
+}
+// cv = 1: a curva e escrita no codigo de 10 bits (codigo/1023) e o clipe chegou em faixa legal expandida
+// (v = (codigo - 64)/876): volta ao codigo antes da formula (look.INPUT_DOMAIN).
+PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
+    if (cv == 1) c = make_float3((c.x * 876.0f + 64.0f) / 1023.0f, (c.y * 876.0f + 64.0f) / 1023.0f,
+                                 (c.z * 876.0f + 64.0f) / 1023.0f);
     if (id == 0) return pc_code_to_lin(c);
     if (id == 1) return c;
     if (id == 2) return make_float3(pc_nlog_dec(c.x), pc_nlog_dec(c.y), pc_nlog_dec(c.z));
@@ -498,6 +540,8 @@ PC_DEVICE float3 pc_to_linear(float3 c, int id) {
     if (id == 9) return make_float3(pc_bmd5_dec(c.x), pc_bmd5_dec(c.y), pc_bmd5_dec(c.z));
     if (id == 10) return make_float3(pc_logc4_dec(c.x), pc_logc4_dec(c.y), pc_logc4_dec(c.z));
     if (id == 11) return make_float3(pc_apple_dec(c.x), pc_apple_dec(c.y), pc_apple_dec(c.z));
+    if (id == 12) return make_float3(pc_hlg_dec(c.x), pc_hlg_dec(c.y), pc_hlg_dec(c.z));
+    if (id == 13) return pc_pq_dec(c);
     return make_float3(pc_cineon_dec(c.x), pc_cineon_dec(c.y), pc_cineon_dec(c.z));
 }
 """
@@ -598,9 +642,12 @@ PC_DEVICE float3 pc_aged(float3 y) {
 """
 
 # Perfil de entrada (curva + gamut): código do vídeo `code` → luz linear `lin_in`. Também no plugin OFX.
+# Curvas em código de 10 bits (PC_IN_CV) com o clipe em faixa legal (Faixa do vídeo = Vídeo) voltam ao
+# código antes da fórmula, como `u_input_cv`/`u_legal` no app.
 B_INPUT = r"""
     int ent = v_entrada;
-    float3 lin_in = pc_to_linear(code, PC_IN_ID[ent]);
+    int in_cv = (PC_IN_CV[ent] == 1 && v_faixa_video == 0) ? 1 : 0;
+    float3 lin_in = pc_to_linear(code, PC_IN_ID[ent], in_cv);
     lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
                      make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
                      make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
@@ -685,7 +732,12 @@ def _cor_tables(dialect: str) -> str:
     out += _define("PC_C4S", (7 * math.log(2) * 2 ** (7 - 14 * c4 / b4)) / (a4 * b4))
     out += _define("PC_C4T", (2 ** (14 * (-c4 / b4) + 6) - 64) / a4)
     out += _define("PC_SKIN_LUM", 0.25)  # luz da pele: até ±25% (hueAdjust do app)
+    out += (_define("PC_HLG_A", look.HLG_A) + _define("PC_HLG_B", look.HLG_B) + _define("PC_HLG_C", look.HLG_C)
+            + _define("PC_HLG_K", look.HLG_SCALE))
+    out += (_define("PC_PQ_M1", look.PQ_M1) + _define("PC_PQ_M2", look.PQ_M2) + _define("PC_PQ_C1", look.PQ_C1)
+            + _define("PC_PQ_C2", look.PQ_C2) + _define("PC_PQ_C3", look.PQ_C3))
     out += _table(dialect, "PC_IN_ID", [look.INPUT_IDS[e] for e in entradas], "int")
+    out += _table(dialect, "PC_IN_CV", [1 if look.code_value_curve(e) else 0 for e in entradas], "int")
     gam = []
     for e in entradas:
         m = look.gamut_to_709(look.INPUT_GAMUT[e])
@@ -1863,9 +1915,12 @@ Como usar (pagina Color):
     "PeliculaConverter Laboratorio" (ou "PeliculaConverter Cor"), "PeliculaConverter Textura" e
     "PeliculaConverter Projetor".
   - No primeiro no, escolha em "Perfil do video" a curva da camera (S-Log3, LogC3, LogC4, V-Log, N-Log,
-    Blackmagic Film Gen 5, Apple Log, DWG...). Se a linha do tempo ja estiver em Rec.709 (Gamma 2.4),
-    deixe Rec.709. Outra opcao e colocar um Color Space Transform antes convertendo para Rec.709 /
-    Gamma 2.4.
+    Blackmagic Film Gen 5, Apple Log, DWG...) ou HLG / PQ para video HDR (celulares gravam em HLG). Se a
+    linha do tempo ja estiver em Rec.709 (Gamma 2.4), deixe Rec.709. Outra opcao e colocar um Color Space
+    Transform antes convertendo para Rec.709 / Gamma 2.4.
+  - "Faixa do video" so muda S-Log3, V-Log e N-Log (curvas no codigo de 10 bits): deixe "Video" com o
+    clipe em Data Levels Auto/Video (o padrao do Resolve) e use "Cheia" com o clipe em Full (Clip
+    Attributes) ou com log que a camera mandou reescalado pela saida HDMI "Limited".
   - "Mostrar curva" e so para ver o ajuste: desligue antes de renderizar.
   - Na Textura e no Projetor, escolha a mesma bitola. No Projetor, escolha os quadros por segundo
     da linha do tempo (o tremor e os defeitos seguem o tempo real).
@@ -1895,7 +1950,9 @@ parametric film look, print stock and fading - identical math to the app), then 
 Textura" (grain, halation, bloom, mist, softness, film MTF, aberration, vignette) and "PeliculaConverter
 Projetor" (gate weave, flicker, dust, scratches, hair, stains, light leaks, frame mask). Color page: add
 three serial nodes and drop OpenFX > ResolveFX Color > DCTL on each one. Set "Perfil do video" to the
-camera log (or put a Color Space Transform to Rec.709/Gamma 2.4 before it). The DCTL effect requires
+camera log, or HLG / PQ for HDR video (or put a Color Space Transform to Rec.709/Gamma 2.4 before it).
+"Faixa do video" only affects S-Log3, V-Log and N-Log: keep "Video" for clips at Auto/Video data levels
+and pick "Cheia" for clips set to Full (or HDMI "Limited" log recordings). The DCTL effect requires
 DaVinci Resolve Studio; on the free version use the "PeliculaConverter" OpenFX plugin (install it from
 the app: Settings > DaVinci Resolve plugin > OpenFX plugin, then Color > OpenFX > PeliculaConverter) or
 the .cube LUTs in the LUTs folder. Grain and damage

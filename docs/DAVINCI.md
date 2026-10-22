@@ -44,12 +44,19 @@ do OpenFX. Para desinstalar, apague essa pasta.
 1. Página **Color**: abra **OpenFX** (botão *Effects*), procure **PeliculaConverter** (categoria
    *PeliculaConverter*) e arraste para um nó. Página **Edit**: *Effects › OpenFX › PeliculaConverter*
    sobre o clipe.
-2. Grupo **Look**: escolha um **Preset** (os 44 do app; trocar o preset troca todos os ajustes, num
-   passo só de desfazer) ou **Carregar look do PeliculaConverter (.json)** — um preset exportado pelo app
-   (menu ⋯ dos presets › *Exportar preset (.json)…*) ou um projeto `.plc`. **Recarregar o look** lê o arquivo de novo.
+2. Grupo **Look**: escolha um **Preset** (os 44 do app; trocar o preset troca os ajustes do look, num
+   passo só de desfazer — o *Perfil do vídeo* e a *Faixa do vídeo* são do clipe e ficam, como no app) ou
+   **Carregar look do PeliculaConverter (.json)** — um preset exportado pelo app (menu ⋯ dos presets ›
+   *Exportar preset (.json)…*) ou um projeto `.plc`. **Recarregar o look** lê o arquivo de novo.
 3. **Perfil do vídeo** (grupo *Entrada e exposição*): a curva da câmera (S-Log3, LogC3, LogC4, V-Log,
-   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon) ou *Rec.709* se a linha
-   do tempo já está em Rec.709 / Gamma 2.4 (ou ponha um *Color Space Transform* antes).
+   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon), **HLG** ou **PQ** para
+   vídeo HDR (celulares gravam em HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou
+   ponha um *Color Space Transform* antes). **Faixa do vídeo** só muda S-Log3, V-Log e N-Log, curvas que os
+   fabricantes escrevem no código de 10 bits (o cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
+   legal)** com o clipe em *Data Levels* Auto/Video (o padrão do Resolve para arquivos de câmera, que ele
+   expande de 64–940 para 0–1 — o plugin volta ao código da câmera) e escolha **Cheia** quando o valor já é o
+   código: clipe em *Full* (Clip Attributes, como a Sony recomenda para S-Log) ou log que a câmera mandou
+   reescalado pela saída HDMI *Limited* (Nikon).
 4. Os outros grupos são as seções do app, com os mesmos nomes (com acentos): *Película*, *Entrada e
    exposição*, *Laboratório (negativo e cópia)* — Hue Split, densidades, bleach bypass, curvas neutras,
    luzes da copiadora, revelação —, *Cor da película*, *Grão*, *Halação*, *Bloom e difusão*, *Lente e
@@ -83,9 +90,10 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 ### Igual ao app?
 
 - **Cor**: a mesma conta, gerada a partir do mesmo kernel dos DCTLs. Comparado com `Engine.bake_lut`
-  (GPU): diferença < 0,0001 nos 44 presets e nos 12 perfis de entrada; em todas as combinações de negativo
-  × cópia × processo, mediana 0,000001 e máximo 0,0005 (nos ombros mais íngremes, onde a precisão do float
-  da GPU pesa).
+  (GPU): diferença < 0,0001 nos 44 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
+  (no PQ, que vai até 10000 cd/m², cores HDR muito saturadas chegam a 0,001); em todas as combinações de
+  negativo × cópia × processo, mediana 0,000001 e máximo 0,0005 (nos ombros mais íngremes, onde a precisão
+  do float da GPU pesa).
 - **Quadro inteiro** (comparado com `Engine.render`, saída de 8 bits do app): 99% dos pixels a menos de
   1/255 e média < 0,5/255 para grão, vinheta, maciez, MTF, nitidez, lente, tremor, cintilação, poeira,
   riscos, fio de cabelo, manchas, marcas, emendas, clarões, vazamento de luz, moldura, halação, bloom,
@@ -102,7 +110,8 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 - Os rótulos estão em português (o OpenFX não informa o idioma do editor).
 - Os mipmaps das cadeias de brilho são médias 2×2; o driver do OpenGL do app pode filtrar um pouco
   diferente em tamanhos ímpares.
-- O alfa passa direto; a cor entra como no app (código do vídeo de 0 a 1, no perfil escolhido).
+- O alfa passa direto; a cor entra como no app (código do vídeo de 0 a 1, no perfil escolhido). O plugin
+  não sabe a faixa do arquivo: confira a *Faixa do vídeo* nos clipes S-Log3, V-Log e N-Log.
 - Compilado para Windows x64 e Linux x64 (o macOS está desativado no app).
 - Conferido com um host OpenFX de teste (`tests/ofxhost.py`: descrever, criar, trocar preset, carregar
   `.json`, identidade e render); a instalação de verdade no Resolve é feita pelo usuário, pelo app.
@@ -168,10 +177,12 @@ atualizar, instale de novo pela versão nova do app: a pasta inteira é trocada.
    **ou** o *Cor*, não os dois: o *Cor* já contém o laboratório inteiro (com a chave *Laboratorio negativo
    e copia*) mais o look paramétrico, a cópia 2383/2393/3513 e o envelhecimento.
 3. **Gestão de cor.** No primeiro nó, escolha em **Perfil do video** a curva da câmera (S-Log3, LogC3,
-   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon). Se a
-   linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um *Color Space
-   Transform* antes do primeiro nó convertendo para Rec.709 / Gamma 2.4. A saída dos nós é Rec.709 (como
-   no app).
+   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon) ou HLG / PQ
+   para vídeo HDR. Se a linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um
+   *Color Space Transform* antes do primeiro nó convertendo para Rec.709 / Gamma 2.4. A saída dos nós é
+   Rec.709 (como no app). **Faixa do video**: *Video faixa legal* (padrão) para clipes em *Data Levels*
+   Auto/Video; *Cheia* para clipes em *Full* ou log reescalado pela saída HDMI *Limited* (só muda S-Log3,
+   V-Log e N-Log; veja o plugin OpenFX acima).
 4. Na *Textura* e no *Projetor*, escolha a **mesma bitola** (ela muda o tamanho do grão, a maciez, o
    tremor e a vinheta). No *Projetor*, escolha os **quadros por segundo** da linha do tempo: o tremor, a
    cintilação e os defeitos seguem o tempo real.

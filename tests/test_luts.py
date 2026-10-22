@@ -162,7 +162,13 @@ def test_load_cube_with_utf8_bom_before_title(tmp_path):
     (r"D:\luts\AppleLog_film.cube", "applelog"),
     (r"D:\luts\BMD Film Gen5 to Video.cube", "bmd_gen5"),
     (r"D:\luts\Blackmagic_Film_Gen_5_look.cube", "bmd_gen5"),
+    (r"D:\luts\iPhone HLG to Rec709.cube", "hlg"),
+    (r"D:\luts\HLG_film_look.cube", "hlg"),
+    (r"D:\luts\HDR10 to SDR.cube", "pq"),
+    (r"D:\luts\PQ_1000nits_look.cube", "pq"),
+    (r"D:\luts\ST2084 to 709.cube", "pq"),
     (r"D:\luts\Teal Orange.cube", "rec709"),
+    (r"D:\luts\Equipe Highlight Glow.cube", "rec709"),
     (r"C:\Program Files\Adobe\Adobe Premiere Pro 2025\Lumetri\LUTs\Creative\Fuji F125 Kodak 2393.cube", "rec709"),
 ])
 def test_guess_input(path, expected):

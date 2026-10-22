@@ -250,6 +250,29 @@ BY_ID = {p["id"]: p for p in BUILTIN}
 DEFAULT_ID = "vision3_250d"
 
 
+# Ajustes que descrevem o arquivo, não o look: aplicar um preset (pronto ou do usuário) não muda esses
+# valores. O perfil do vídeo vem da câmera (ou da detecção do HDR ao abrir o arquivo); um preset que o
+# trocasse para Rec.709 desfaria em silêncio a escolha certa.
+SOURCE_KEYS = ("entrada", "log_reescalado")
+
+
+def with_source(preset_values: dict[str, Any], current: dict[str, Any] | None) -> dict[str, Any]:
+    """Valores de um preset com os ajustes do arquivo (`SOURCE_KEYS`) mantidos de `current`."""
+    out = dict(preset_values)
+    for k in SOURCE_KEYS:
+        if current and k in current:
+            out[k] = current[k]
+    return out
+
+
+def same_look(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Os dois conjuntos de valores têm o mesmo look (ignorando os ajustes do arquivo)?"""
+    if a is None or b is None:
+        return False
+    return ({k: v for k, v in a.items() if k not in SOURCE_KEYS}
+            == {k: v for k, v in b.items() if k not in SOURCE_KEYS})
+
+
 def builtin_values(pid: str) -> dict[str, Any]:
     p = BY_ID[pid]
     if p["valores"] is None:
