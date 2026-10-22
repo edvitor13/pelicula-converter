@@ -94,6 +94,8 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
         return None
     from . import timeline
     seq = timeline.Sequence.from_json(data)
+    if not project_path:
+        return seq.to_json()
     folder = os.path.dirname(os.path.abspath(project_path))
     rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "")
             for s in data.get("fontes") or [] if isinstance(s, dict)}
@@ -128,6 +130,15 @@ def load(path: str) -> Project:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ProjectError(str(exc)) from exc
+    return from_json(data, path)
+
+
+def from_json(data: Any, path: str = "") -> Project:
+    """Projeto a partir do JSON já lido (o de `Project.to_json`).
+
+    `path`: onde o .plc está (acha arquivos pelo caminho relativo quando o absoluto sumiu); "" = projeto
+    sem arquivo (a cópia da recuperação automática, que guarda só caminhos absolutos).
+    """
     if not isinstance(data, dict) or data.get("app") != APP_NAME:
         raise ProjectError(_("O arquivo não é um projeto do PeliculaConverter."))
     if int(data.get("formato", 1)) > FORMAT:
@@ -135,7 +146,7 @@ def load(path: str) -> Project:
     midia = data.get("midia") or {}
     media = str(midia.get("caminho") or "")
     rel = str(midia.get("relativo") or "")
-    if media and not os.path.exists(media) and rel:
+    if media and path and not os.path.exists(media) and rel:
         cand = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(path)), rel))
         if os.path.exists(cand):
             media = cand
@@ -163,13 +174,13 @@ def load(path: str) -> Project:
         compare=str(data.get("comparacao") or "split"),
         preview=str(data.get("previa") or "720"),
         export_quality=str(data.get("qualidade_exportacao") or ""),
-        name=str(data.get("nome") or Path(path).stem),
+        name=str(data.get("nome") or (Path(path).stem if path else "")),
         saved_at=saved,
         app_version=str(data.get("versao_app") or ""),
         thumbnail_jpeg=thumb,
         sequence=_relink_sequence(data.get("edicao"), path),
         mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
-        path=str(Path(path).resolve()),
+        path=str(Path(path).resolve()) if path else "",
     )
 
 

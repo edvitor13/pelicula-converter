@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -523,6 +523,30 @@ class ExportJob:
     @property
     def progress(self) -> float:
         return self.done / self.total if self.total else 0.0
+
+    def to_dict(self) -> dict:
+        """O que é preciso para refazer este trabalho depois (fila guardada pela recuperação automática)."""
+        return {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
+                "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
+                "config": self.settings.to_dict(), "midia": asdict(self.info),
+                "edicao": self.sequence.to_json() if self.sequence is not None else None}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ExportJob":
+        """Trabalho novo (aguardando, do começo) a partir de `to_dict()`. ValueError se faltar algo."""
+        names = {f.name for f in fields(media.MediaInfo)}
+        raw = d.get("midia") if isinstance(d, dict) else None
+        if not isinstance(raw, dict) or not names <= set(raw) or not d.get("saida"):
+            raise ValueError(_("Trabalho de exportação incompleto."))
+        seq = None
+        if isinstance(d.get("edicao"), dict):
+            from . import timeline
+            seq = timeline.Sequence.from_json(d["edicao"])
+        from . import params
+        return cls(info=media.MediaInfo(**{k: raw[k] for k in names}), values=params.sanitize(d.get("valores") or {}),
+                   settings=ExportSettings.from_dict(d.get("config") or {}), out_path=str(d["saida"]),
+                   start_frame=int(d.get("inicio") or 0), end_frame=int(d.get("fim", -1)),
+                   name=str(d.get("nome") or ""), sequence=seq)
 
 
 class ExportQueue:
