@@ -256,8 +256,9 @@ def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.
 
 def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w: int, h: int, fps_str: str,
                       depth: int, start_time: float, duration: float, input_path: str = "pipe:0",
-                      audio_path: str | None = None) -> list[str]:
-    """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss."""
+                      audio_path: str | None = None, chapters_path: str | None = None) -> list[str]:
+    """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss.
+    `chapters_path`: arquivo FFMETADATA com os capítulos do trecho (`chapters.export_file`)."""
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
     th = int(s.threads)
@@ -346,6 +347,12 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     args += audio
     if c.get("image"):
         args += ["-frames:v", "1", "-update", "1"]
+    if chapters_path:
+        # Capítulos: o FFMETADATA entra como a última entrada (antes do primeiro -map, que já é saída).
+        n_inputs = args.count("-i")
+        at = args.index("-map")
+        args[at:at] = ["-f", "ffmetadata", "-i", chapters_path]
+        args += ["-map_chapters", str(n_inputs)]
     args += [out_path]
     return args
 
@@ -519,6 +526,7 @@ class ExportJob:
     rendered: int = 0        # quadros processados pela GPU
     encoded: int = 0         # quadros já gravados pelo codificador (progresso do ffmpeg)
     sequence: Any = None     # timeline.Sequence do modo Edição (None = o arquivo de `info`)
+    chapters: list = field(default_factory=list)  # [(quadro, título)] dos capítulos (`chapters.points`)
 
     @property
     def progress(self) -> float:
@@ -596,8 +604,12 @@ def run_job(job: ExportJob, engine: Engine) -> None:
         return
     target = _prepare_output(job.out_path, s)
     mix_path = None
+    chapters_path = None
     keep_partial = False
     try:
+        if job.chapters:
+            from . import chapters
+            chapters_path = chapters.export_file(job.chapters, s.container, start, end + 1, info.fps)
         if seq is not None:
             # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
             from . import audiomix
@@ -620,7 +632,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
         if _encode(job, engine, info, s, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time,
-                   duration, target, seq, mix_path):
+                   duration, target, seq, mix_path, chapters_path):
             try:
                 _commit_output(job.out_path, s)
             except OSError as exc:
@@ -637,16 +649,19 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             _discard_output(job.out_path, s)
         if mix_path:
             system.remove_file(mix_path)
+        if chapters_path:
+            system.remove_file(chapters_path)
 
 
 def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSettings, perf: media.Perf, w: int,
             h: int, fps_str: str, fps_out: str | None, fps_val: float, depth: int, start: int, total: int,
-            start_time: float, duration: float, target: str, seq, mix_path: str | None) -> bool:
+            start_time: float, duration: float, target: str, seq, mix_path: str | None,
+            chapters_path: str | None = None) -> bool:
     """Lê, aplica o look e codifica em `target` (o parcial). True quando todos os quadros foram gravados;
     senão marca o trabalho como cancelado ou com erro e devolve False."""
     pipe = media.NamedPipe(False) if media.use_named_pipes() else None
     cmd = build_encoder_cmd(target, info, s, w, h, fps_str, depth, start_time, duration,
-                            pipe.name if pipe else "pipe:0", audio_path=mix_path)
+                            pipe.name if pipe else "pipe:0", audio_path=mix_path, chapters_path=chapters_path)
     if seq is not None:
         from .sequence import SequenceReader
         reader = SequenceReader(seq, w, h, depth, start, total, hq=True, perf=perf, fps_out=fps_out)

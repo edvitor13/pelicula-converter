@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, audiomix, compositor, deps, editparams, export, i18n, look, luts, media,
-               modules, params, presets, project, sequence, system, testimage, timeline, updater)
+from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look, luts,
+               media, modules, params, presets, project, sequence, system, testimage, timeline, updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
@@ -1133,6 +1133,7 @@ class MainWindow(QMainWindow):
         self._update_label_proc()
         self._update_history()
         self._refresh_source()
+        self._update_mute_tip()
         if edit:
             self.tl_editor.setFocus()
 
@@ -1176,6 +1177,7 @@ class MainWindow(QMainWindow):
             self.hist.set_image(None)
             self.edit_scopes.set_image(None)
             self.timeline.set_media(1, 24.0)
+            self._sync_film_markers()
             self.tl_editor.set_playhead(0)
             self.file_label.setText("")
             self.st_file.setText(_("Nenhum arquivo aberto") if self.mode == "pelicula"
@@ -1195,6 +1197,7 @@ class MainWindow(QMainWindow):
             self.outp = None
         self.timeline.set_media(info.frames, info.fps)
         self.timeline.set_inout(self.inp, self.outp)
+        self._sync_film_markers()
         self.tl_editor.set_inout(self.inp, self.outp)
         if self.src_seq is not None:
             seq = self.src_seq
@@ -1217,7 +1220,8 @@ class MainWindow(QMainWindow):
         if self._loading:
             return
         if kind == "markers":
-            pass  # marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução)
+            # Marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução).
+            self._sync_film_markers()
         elif kind == "values" and self.src_seq is not None and self._use_sequence():
             self.src_seq = self.model.seq.copy()
             if self._compose_current():
@@ -1229,6 +1233,40 @@ class MainWindow(QMainWindow):
             self._refresh_source()
         self._update_title()
         self._update_history()
+
+    # ---------------------------------------------------------------- marcadores e capítulos
+    def _sync_film_markers(self) -> None:
+        """Marcadores da montagem na barra de tempo do modo Película (só para ver e pular até eles)."""
+        seq = self.model.seq
+        items = []
+        if self.info is not None and seq.markers and abs(self.info.fps - seq.fps) < 1e-3:
+            items = [(mk.frame, theme.MARKER_COLORS.get(mk.color, theme.ACCENT), mk.name)
+                     for mk in seq.sorted_markers() if mk.frame < self.info.frames]
+        self.timeline.set_markers(items)
+
+    def goto_marker(self, step: int) -> None:
+        """Shift+↓ / Shift+↑: próximo / anterior marcador (nos dois modos)."""
+        if self.info is None:
+            return
+        seq = self.model.seq
+        mk = seq.next_marker(self.frame_idx) if step > 0 else seq.previous_marker(self.frame_idx)
+        if mk is None or mk.frame >= self.info.frames:
+            return
+        if self.mode == "edicao":
+            self.model.select_marker(mk.id)
+        self.seek(mk.frame)
+
+    def add_marker(self) -> None:
+        """M no modo Edição: marcador no cursor (se já há um ali, só o seleciona)."""
+        if self.info is not None and self.mode == "edicao":
+            self.model.add_marker(self.frame_idx)
+
+    def _export_chapters(self) -> list[tuple[int, str]]:
+        """Capítulos (quadro, título) da montagem, nos quadros do que vai ser exportado."""
+        seq = self.model.seq
+        if self.info is None or not seq.markers or abs(self.info.fps - seq.fps) > 1e-3:
+            return []
+        return chapters.points(seq)
 
     # ---------------------------------------------------------------- som da montagem
     def _set_audio(self, kind: str, path: str) -> None:
@@ -1597,7 +1635,17 @@ class MainWindow(QMainWindow):
             self.audio.setSource(QUrl.fromLocalFile(path) if self._audio_ok else QUrl())
         self.btn_mute.setEnabled(self._audio_ok)
         self.vol.setEnabled(self._audio_ok)
-        self.btn_mute.setToolTip(_("Som da prévia (M liga/desliga)") if self._audio_ok else _("Este arquivo não tem som"))
+        self._update_mute_tip()
+
+    def _update_mute_tip(self) -> None:
+        """No modo Película o M liga/desliga o som; no modo Edição o M põe um marcador e o som fica no Shift+M
+        (que vale nos dois modos)."""
+        if not self._audio_ok:
+            self.btn_mute.setToolTip(_("Este arquivo não tem som"))
+        elif self.mode == "edicao":
+            self.btn_mute.setToolTip(_("Som da prévia (Shift+M liga/desliga)"))
+        else:
+            self.btn_mute.setToolTip(_("Som da prévia (M liga/desliga)"))
 
     def _set_muted(self, on: bool) -> None:
         self.btn_mute.setIcon(icons.icon("mute" if on else "volume", theme.TEXT, 18))
@@ -1974,7 +2022,7 @@ class MainWindow(QMainWindow):
         seq = self.src_seq.copy() if self.src_seq is not None else None
         dlg = ExportDialog(self, self.info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
-                           perf, self.engine.renderer.split("/")[0], sequence=seq)
+                           perf, self.engine.renderer.split("/")[0], sequence=seq, chapters=self._export_chapters())
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2562,6 +2610,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, _("Atalhos do teclado"), _(
             "Espaço — reproduzir / pausar\n← / → — quadro anterior / próximo\nShift + ← / → — 1 segundo\n"
             "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\nL — repetir\n"
+            "M — som da prévia (no modo Edição: Shift+M)\nShift + ↑ / ↓ — marcador anterior / próximo\n"
             "C — trocar o modo de comparação\nF — ajustar à janela\n+ / − — mais / menos zoom (de 10% a 1600%)\n"
             "1 / 2 — zoom 100% / 200%\nF11 — prévia em tela cheia (Esc sai) • Shift+F11 — janela em tela cheia\n"
             "Botão direito no vídeo (segurar) — ver o original\nDuplo clique no slider — volta ao padrão\n"
@@ -2571,6 +2620,7 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer\n\n"
             "Ctrl+1 modo Película • Ctrl+2 modo Edição • Ctrl+I importar para a edição\n"
             "Edição: S divide no cursor • Delete apaga • Shift+Delete apaga e fecha o espaço\n"
+            "M marcador no cursor (dois cliques nele: nome, cor, nota e capítulo)\n"
             "Ctrl+Alt+C / Ctrl+Alt+V copiar / colar os ajustes de cor do clipe\n"
             "B lâmina • V seleção • N ímã • Ctrl + roda do mouse: zoom da linha do tempo"))
 
@@ -2600,6 +2650,12 @@ class MainWindow(QMainWindow):
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.model.delete_selected(ripple=shift)
+            return
+        if self.mode == "edicao" and k == Qt.Key.Key_M and not shift:
+            self.add_marker()  # no modo Edição o M marca; o som da prévia fica no Shift+M
+            return
+        if shift and k in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self.goto_marker(1 if k == Qt.Key.Key_Down else -1)
             return
         if k == Qt.Key.Key_Space:
             self.toggle_play()

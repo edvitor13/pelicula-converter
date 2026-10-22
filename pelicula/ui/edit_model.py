@@ -6,7 +6,8 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
 - "settings": resolução, fps ou fundo da sequência;
-- "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega);
+- "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
+  inclusive ao desfazer/refazer uma mudança só de marcadores;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
@@ -24,6 +25,12 @@ from .. import editparams, timeline
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
+
+
+def _without_markers(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("marcadores", None)
+    return d
 
 
 class TimelineModel(QObject):
@@ -69,9 +76,10 @@ class TimelineModel(QObject):
     def _restore(self, seq: Sequence | None) -> None:
         if seq is None:
             return
+        only_markers = _without_markers(seq) == _without_markers(self.seq)
         self.seq = seq
         self._filter_selection()
-        self.changed.emit("*")
+        self.changed.emit("markers" if only_markers else "*")  # desfazer um marcador não recarrega a prévia
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
