@@ -959,3 +959,55 @@ void main() {
     f_out = vec4(colorPipe(lin), 1.0);
 }
 """
+
+# ------------------------------------------------------------------ encaixe da exportação (fit.py)
+# `Engine.render_fit`: o quadro com o look (`t_img`, já em valores de exibição de 8 ou 16 bits) vai para um
+# quadro maior, sobre bordas pretas ou sobre o fundo desfocado (`t_bg`: a própria imagem desfocada, no espaço
+# dela). A imagem é copiada pixel a pixel (`texelFetch`) e a saída é inteira, arredondada aqui: dentro da
+# caixa o resultado é exatamente o quadro do look. Nada aleatório: o pontilhado do fundo usa o hash do pixel
+# e o número do quadro, como o do passo final.
+COPY = COMMON + """
+uniform sampler2D t_src;
+void main() {
+    f_out = texelFetch(t_src, ivec2(gl_FragCoord.xy), 0);
+}
+"""
+
+FIT = """
+#version 330
+in vec2 v_uv;
+out uvec4 f_out;
+uniform sampler2D t_img;
+uniform sampler2D t_bg;
+uniform ivec4 u_box;      // x, y, largura, altura da imagem no quadro (px, y para baixo)
+uniform int u_bg_mode;    // 0 = preto, 1 = fundo desfocado
+uniform vec4 u_cover;     // uv do fundo = (pixel - u_cover.xy) * u_cover.zw
+uniform float u_dim;
+uniform float u_max;      // 255 ou 65535
+uniform int u_dither;
+uniform int u_frame;
+
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+float rnd(uvec3 p) { return float(pcg(p.x + pcg(p.y + pcg(p.z)))) * (1.0 / 4294967296.0); }
+
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    ivec2 q = p - u_box.xy;
+    vec3 c = vec3(0.0);
+    if (q.x >= 0 && q.y >= 0 && q.x < u_box.z && q.y < u_box.w) {
+        c = texelFetch(t_img, q, 0).rgb;
+    } else if (u_bg_mode == 1) {
+        vec2 uv = (gl_FragCoord.xy - u_cover.xy) * u_cover.zw;
+        c = texture(t_bg, uv).rgb * u_dim;
+        if (u_dither == 1) {
+            uvec2 s = uvec2(p);
+            c += (rnd(uvec3(s, uint(u_frame) * 3u + 7u)) - rnd(uvec3(s, uint(u_frame) * 3u + 8u))) / u_max;
+        }
+    }
+    f_out = uvec4(uvec3(floor(clamp(c, 0.0, 1.0) * u_max + 0.5)), uint(u_max));
+}
+"""

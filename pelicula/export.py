@@ -65,8 +65,13 @@ CODECS: dict[str, dict[str, Any]] = {
 # Os rótulos destas tabelas ficam em português e são traduzidos com _() onde aparecem
 # (ui/export_dialog.py); tools/i18n_extract.py lê as tabelas para montar os catálogos.
 AUDIO = [("copy", "Copiar original (sem recodificar)"), ("aac320", "AAC 320 kb/s"), ("aac192", "AAC 192 kb/s"),
-         ("mp3", "MP3 320 kb/s"), ("opus", "Opus 192 kb/s"), ("pcm24", "PCM 24 bits (sem perdas)"),
-         ("none", "Sem áudio")]
+         ("aac128", "AAC 128 kb/s"), ("mp3", "MP3 320 kb/s"), ("opus", "Opus 192 kb/s"),
+         ("pcm24", "PCM 24 bits (sem perdas)"), ("none", "Sem áudio")]
+AUDIO_ARGS = {"aac320": ["-c:a", "aac", "-b:a", "320k"], "aac192": ["-c:a", "aac", "-b:a", "192k"],
+              "aac128": ["-c:a", "aac", "-b:a", "128k"], "mp3": ["-c:a", "libmp3lame", "-b:a", "320k"],
+              "opus": ["-c:a", "libopus", "-b:a", "192k"], "pcm24": ["-c:a", "pcm_s24le"], "flac": ["-c:a", "flac"]}
+# kb/s de cada modo (estimativa de tamanho e tamanho alvo); FLAC ≈ metade do PCM estéreo de 48 kHz.
+AUDIO_KBPS = {"aac320": 320, "aac192": 192, "aac128": 128, "mp3": 320, "opus": 192, "pcm24": 2304, "flac": 1100}
 
 RESOLUTIONS = [("original", "Original"), ("4320", "8K (4320p)"), ("2160", "4K (2160p)"), ("1440", "1440p"),
                ("1080", "1080p"), ("720", "720p"), ("540", "540p"), ("480", "480p"), ("360", "360p")]
@@ -100,6 +105,16 @@ class ExportSettings:
     hwaccel: str = "none"
     gpu: int = 0
     buffer: int = 4
+    # Exportação por plataforma (1.4). Todos com padrão neutro: um to_dict() antigo, sem estas chaves,
+    # exporta exatamente como antes.
+    platform: str = ""        # id de platforms.PLATFORMS que preencheu as opções ("" = nenhuma); só informativo
+    frame: str = ""           # quadro fixo "LxA" (ex.: "1080x1920"); "" = segue `resolution` e a proporção do vídeo
+    fit: str = "cortar"       # vídeo de outra proporção no quadro fixo: cortar | bordas | desfocado (fit.py)
+    target_mb: float = 0.0    # tamanho alvo em MB (1 MB = 1.000.000 bytes), duas passadas no x264/x265; 0 = não
+    maxrate: float = 0.0      # teto da taxa de bits (Mb/s) na qualidade constante do x264/x265; 0 = sem teto
+    loudness: float = 0.0     # volume alvo em LUFS (−14, −16, −23…); 0 = o som não muda de volume
+    true_peak: float = -1.0   # pico real máximo (dBTP) quando há volume alvo
+    net_grain: bool = False   # "Grão para redes": grão com tamanho mínimo na saída (look.build_plan(net_grain=))
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -205,15 +220,28 @@ def quality_presets(info: media.MediaInfo | None) -> list[tuple[str, str, Export
     return out
 
 
+def parse_frame(text: str) -> tuple[int, int] | None:
+    """Quadro fixo "1080x1920" (também "1080×1920" ou "1080 x 1920") → (1080, 1920); vazio ou inválido → None."""
+    m = re.fullmatch(r"\s*(\d{1,5})\s*[x×X:]\s*(\d{1,5})\s*", str(text or ""))
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    return (w, h) if 2 <= w <= 16384 and 2 <= h <= 16384 else None
+
+
 def output_size(info: media.MediaInfo, s: ExportSettings) -> tuple[int, int]:
     """Largura e altura da saída.
 
     A resolução escolhida ("2160", "1080", "720"…) vale para o **lado menor** do quadro, como no YouTube
     e nos celulares: em 1080p, um vídeo deitado sai 1920 × 1080 e um vertical sai 1080 × 1920 (antes a
     altura mandava e o vertical encolhia para 608 × 1080). Codecs de vídeo recebem dimensões pares.
+    Com quadro fixo (`s.frame`, das plataformas) a saída é esse quadro e o vídeo entra nele conforme `s.fit`.
     """
     w, h = max(1, int(info.width)), max(1, int(info.height))
-    if s.resolution != "original":
+    fixed = parse_frame(s.frame)
+    if fixed:
+        w, h = fixed
+    elif s.resolution != "original":
         short = int(s.resolution)
         if w >= h:
             w, h = round(w * short / h), short
@@ -225,13 +253,34 @@ def output_size(info: media.MediaInfo, s: ExportSettings) -> tuple[int, int]:
     return max(w, 2), max(h, 2)
 
 
-def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> list[str]:
+TWO_PASS_CODECS = ("x264", "x265")
+
+
+def uses_target(s: ExportSettings) -> bool:
+    """Tamanho alvo ligado e possível com este codec (duas passadas do x264/x265)."""
+    return float(s.target_mb or 0) > 0 and s.codec in TWO_PASS_CODECS
+
+
+def wants_loudness(s: ExportSettings) -> bool:
+    """Volume alvo ligado (LUFS negativos; 0 = desligado)."""
+    return float(s.loudness or 0) < 0
+
+
+def _audio_mode(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> str:
+    """Modo de áudio que a exportação usa de fato: "" (sem áudio), "copy", "flac" ou uma chave de `AUDIO_ARGS`.
+
+    Com volume alvo ou tamanho alvo o som nunca é copiado: copiar não deixa mudar o volume nem saber quanto
+    o som ocupa. Nesses casos "Copiar original" vira o formato do recipiente (AAC 128 kb/s no tamanho alvo).
+    """
     if (s.audio == "none" or not info.has_audio or CODECS[s.codec].get("image") or s.codec.endswith("_seq")
             or s.codec == "gif"):
-        return ["-an"]
+        return ""
     mode = s.audio
     ac = info.audio_codec
-    if mode == "copy":
+    fallback = {"webm": "opus", "avi": "mp3", "mov": "pcm24"}.get(s.container, "aac320")
+    if mode == "copy" and (wants_loudness(s) or uses_target(s)):
+        mode = "aac128" if uses_target(s) else fallback
+    elif mode == "copy":
         ok = {"mp4": ("aac", "mp3", "ac3", "eac3", "alac", "opus", "flac"), "webm": ("opus", "vorbis"),
               "avi": ("mp3", "ac3", "pcm_s16le"), "mov": ("aac", "mp3", "ac3", "alac", "pcm_s16le", "pcm_s24le", "pcm_s32le")}
         allowed = ok.get(s.container)
@@ -239,25 +288,103 @@ def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.
         # esconde isso com edit list; MKV, WebM e AVI deslocariam o vídeo. Nesses, recodifica.
         trim = start_time > 0 and s.container in ("mkv", "webm", "avi")
         if (allowed is None or ac in allowed) and not trim:
-            return ["-c:a", "copy"]
+            return "copy"
         if trim and s.container == "mkv":
-            return ["-c:a", "flac"]
-        mode = {"webm": "opus", "avi": "mp3", "mov": "pcm24"}.get(s.container, "aac320")
+            return "flac"
+        mode = fallback
     if s.container == "webm":
         mode = "opus"
     elif s.container == "avi" and mode not in ("mp3", "pcm24"):
         mode = "mp3"
     elif s.container == "mp4" and mode == "pcm24":
         mode = "aac320"
-    return {"aac320": ["-c:a", "aac", "-b:a", "320k"], "aac192": ["-c:a", "aac", "-b:a", "192k"],
-            "mp3": ["-c:a", "libmp3lame", "-b:a", "320k"], "opus": ["-c:a", "libopus", "-b:a", "192k"],
-            "pcm24": ["-c:a", "pcm_s24le"]}[mode]
+    return mode
+
+
+def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> list[str]:
+    mode = _audio_mode(s, info, start_time)
+    if not mode:
+        return ["-an"]
+    if mode == "copy":
+        return ["-c:a", "copy"]
+    return list(AUDIO_ARGS[mode])
+
+
+def audio_reencoded_for_volume(s: ExportSettings, info: media.MediaInfo) -> bool:
+    """A escolha era "Copiar original", mas o volume alvo ou o tamanho alvo obrigam a recodificar (a janela avisa)."""
+    return s.audio == "copy" and _audio_mode(s, info) not in ("", "copy") and (wants_loudness(s) or uses_target(s))
+
+
+def audio_kbps(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> float:
+    """Taxa do som que sai (kb/s), para o tamanho alvo e a estimativa; copiar usa a taxa do vídeo de origem
+    não conhecida (0) e sem som é 0."""
+    return float(AUDIO_KBPS.get(_audio_mode(s, info, start_time), 0))
+
+
+# ------------------------------------------------------------------ tamanho alvo (duas passadas)
+# 1 MB = 1.000.000 bytes (o menor dos dois usos comuns: o limite de quem recebe nunca é ultrapassado).
+# O orçamento desconta o som (5% acima da taxa nominal do AAC), o recipiente (índice do MP4 ≈ 1,5 kB por
+# segundo + 48 kB de cabeçalho) e uma folga de 4% para o erro do controle de taxa do codificador.
+TARGET_MARGIN = 0.04
+TARGET_FIXED_BYTES = 48_000
+TARGET_BYTES_PER_SECOND = 1_500
+MIN_TARGET_RATE = 0.05  # Mb/s de vídeo: abaixo disso não dá para fazer um vídeo que se veja
+
+
+def target_bytes(s: ExportSettings) -> int:
+    return int(float(s.target_mb) * 1_000_000)
+
+
+def target_bitrate(s: ExportSettings, info: media.MediaInfo, duration: float, start_time: float = 0.0) -> float:
+    """Taxa de vídeo (Mb/s) que cabe no tamanho alvo com o som e o recipiente; pode dar ≤ 0 (não cabe)."""
+    dur = max(float(duration), 0.04)
+    budget = target_bytes(s) * (1.0 - TARGET_MARGIN) - TARGET_FIXED_BYTES - TARGET_BYTES_PER_SECOND * dur
+    video_bps = budget * 8.0 / dur - audio_kbps(s, info, start_time) * 1000.0 * 1.05
+    return video_bps / 1e6
+
+
+def fmt_mb(mb: float) -> str:
+    from .i18n import fmt_decimal
+    return fmt_decimal(mb, 0 if float(mb).is_integer() else 1)
+
+
+def target_too_small_message(s: ExportSettings, duration: float) -> str:
+    return _("{mb} MB é pouco para {segundos} s de vídeo com som. Aumente o tamanho alvo, exporte um trecho menor "
+             "ou tire o som.").format(mb=fmt_mb(float(s.target_mb)), segundos=f"{duration:.0f}")
+
+
+def estimate_bytes(s: ExportSettings, info: media.MediaInfo, duration: float,
+                   video_bytes_per_second: float = 0.0) -> int:
+    """Tamanho provável do arquivo (bytes; 0 = não dá para saber).
+
+    Tamanho alvo: o próprio alvo (nunca passa). Taxa de bits fixa: taxa × duração. Qualidade constante: a
+    medida da estimativa de tempo (`measure_speed(stats=...)`, bytes de vídeo por segundo), quando houver.
+    """
+    if uses_target(s):
+        return target_bytes(s)
+    audio = audio_kbps(s, info) * 1000.0 / 8.0 * duration
+    if s.bitrate > 0:
+        return int(s.bitrate * 1e6 / 8.0 * duration + audio)
+    if video_bytes_per_second > 0:
+        return int(video_bytes_per_second * duration + audio)
+    return 0
+
+
+PASSLOG = "pelicula_2passadas"  # nome relativo: o codificador roda com cwd na pasta temporária das passadas
 
 
 def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w: int, h: int, fps_str: str,
                       depth: int, start_time: float, duration: float, input_path: str = "pipe:0",
-                      audio_path: str | None = None) -> list[str]:
-    """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss."""
+                      audio_path: str | None = None, *, two_pass: int = 0,
+                      loudness_measured: dict | None = None) -> list[str]:
+    """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss.
+
+    `two_pass` (1 ou 2): uma das passadas do tamanho alvo (x264/x265, taxa em `s.bitrate`). O registro das
+    passadas tem nome relativo (`PASSLOG`): rode o comando com `cwd` numa pasta temporária (os caminhos do
+    destino e do som viram absolutos). A 1ª passada não grava arquivo nem som (`-f null`).
+    `loudness_measured`: valores medidos por `loudnorm.measure()` (volume alvo em `s.loudness`); o som recebe
+    o `loudnorm` linear da segunda passada do volume. Sem os dois opcionais o comando é o de sempre.
+    """
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
     th = int(s.threads)
@@ -265,10 +392,14 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
             "-f", "rawvideo", "-pix_fmt", in_pix,
             "-s", f"{w}x{h}", "-framerate", fps_str, "-i", input_path]
     audio = _audio_args(s, info, 0.0 if audio_path else start_time)
+    if two_pass == 1:
+        audio = ["-an"]
     if audio != ["-an"]:
         if start_time > 0 and not audio_path:
             args += ["-ss", f"{start_time:.6f}"]
-        args += ["-t", f"{duration:.6f}", "-i", audio_path or info.path, "-map", "0:v:0", "-map", "1:a:0?"]
+        apath = audio_path or info.path
+        args += ["-t", f"{duration:.6f}", "-i", os.path.abspath(apath) if two_pass else apath,
+                 "-map", "0:v:0", "-map", "1:a:0?"]
     else:
         args += ["-map", "0:v:0"]
     rgb_out = s.pix.startswith(("rgb", "gbr", "pal"))
@@ -288,10 +419,17 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
             args += ["-b:v", f"{s.bitrate}M", "-maxrate", f"{s.bitrate * 1.5}M", "-bufsize", f"{s.bitrate * 2}M"]
         else:
             args += ["-crf", f"{s.quality:g}"]
+            if s.maxrate > 0:  # qualidade constante com teto (plataformas que limitam a taxa de bits)
+                args += ["-maxrate", f"{s.maxrate:g}M", "-bufsize", f"{s.maxrate * 2:g}M"]
         if s.tune_grain:
             args += ["-tune", "grain"]
+        if two_pass and s.codec == "x264":
+            args += ["-pass", str(two_pass), "-passlogfile", PASSLOG]
         if s.codec == "x265":
-            args += ["-x265-params", "log-level=error" + (f":pools={th}" if th > 0 else "")]
+            xp = "log-level=error" + (f":pools={th}" if th > 0 else "")
+            if two_pass:
+                xp += f":pass={two_pass}:stats={PASSLOG}.log"
+            args += ["-x265-params", xp]
             if s.container in ("mp4", "mov"):
                 args += ["-tag:v", "hvc1"]
     elif s.codec in ("h264_nvenc", "hevc_nvenc"):
@@ -341,12 +479,17 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
         args += ["-compression_algo", "deflate"]
     if not rgb_out and not s.pix.startswith("yuvj") and s.codec not in ("gif", "webp"):
         args += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
+    if two_pass == 1:  # 1ª passada: só o registro do codificador, nenhum arquivo
+        return args + audio + ["-f", "null", "-"]
     if s.container in ("mp4", "mov"):
         args += ["-movflags", "+faststart"]
     args += audio
+    if loudness_measured and audio not in (["-an"], ["-c:a", "copy"]):
+        from . import loudnorm
+        args += ["-af", loudnorm.filter_for(loudness_measured, float(s.loudness), float(s.true_peak))]
     if c.get("image"):
         args += ["-frames:v", "1", "-update", "1"]
-    args += [out_path]
+    args += [os.path.abspath(out_path) if two_pass else out_path]
     return args
 
 
@@ -494,6 +637,96 @@ def _commit_output(path: str, s: ExportSettings) -> None:
         pass
 
 
+# ------------------------------------------------------------------ quadro a quadro (exportação e prévia)
+@dataclass
+class FramePipeline:
+    """Do quadro decodificado ao quadro gravado: montagem (modo Edição), look e encaixe no quadro (`fit.py`).
+
+    A exportação (`_encode`) e a prévia da janela de exportação (`preview_frame`) usam este mesmo objeto:
+    o quadro N da prévia é o quadro N gravado.
+    """
+    values: dict
+    fit: Any                 # fit.Fit
+    fps: float
+    depth: int
+    dither: bool
+    legal: bool
+    lut: tuple | None = None
+    seq: Any = None
+    net_grain: float = 0.0   # "Grão para redes": px da imagem por px da saída (0 = desligado)
+
+    def render(self, engine: Engine, img, index: int):
+        """`img` é o quadro decodificado (ou `sequence.FrameLayers` no modo Edição); `index`, o número do quadro."""
+        f = self.fit
+        if self.seq is not None:
+            img = engine.compose(img, self.seq, f.dec_w, f.dec_h, self.depth, crop=f.canvas_crop)
+        engine.set_input(img)
+        h, w = img.shape[:2]
+        plan = look.build_plan(self.values, w, h, index, self.fps, self.lut, dither=self.dither, legal=self.legal,
+                               net_grain=self.net_grain)
+        if f.composite:
+            return engine.render_fit(plan, self.depth, f)
+        return engine.render(plan, self.depth)
+
+
+def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=None, scale: float = 1.0,
+                   depth: int | None = None) -> FramePipeline:
+    """O caminho de um quadro desta exportação. `scale` < 1 reduz tudo (prévia): o quadro, o encaixe e o
+    tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura)."""
+    from . import fit as fitmod
+    ow, oh = output_size(info, s)
+    if scale != 1.0:
+        ow = max(2, int(round(ow * scale / 2)) * 2)
+        oh = max(2, int(round(oh * scale / 2)) * 2)
+    mode = ""
+    if parse_frame(s.frame):  # quadro fixo: o vídeo nunca é esticado (modo desconhecido = cortar)
+        mode = s.fit if s.fit in fitmod.MODE_IDS else fitmod.CORTAR
+    geometry = fitmod.plan(info.width, info.height, ow, oh, mode, edit=seq is not None)
+    depth = depth if depth is not None else (16 if high_depth(s) else 8)
+    fps = float(eval_fraction(info.fps_str if s.fps == "original" else s.fps))
+    if seq is not None:
+        from .sequence import legal_range
+        legal = legal_range(seq)
+    else:
+        legal = media.legal_range(info)
+    lut = lut_info(values.get("lut_arquivo", "")) if values.get("lut_on") else None
+    return FramePipeline(values, geometry, fps, depth, bool(s.dither) and depth == 8, legal, lut, seq,
+                         float(scale) if s.net_grain else 0.0)
+
+
+def open_reader(info: media.MediaInfo, frames: FramePipeline, start: int, total: int, fps_out: str | None,
+                perf: media.Perf, seq=None):
+    """Leitor em ordem da exportação no tamanho do encaixe: (leitor, quadros a pular no começo)."""
+    f = frames.fit
+    if seq is not None:
+        from .sequence import SequenceReader
+        return SequenceReader(seq, f.dec_w, f.dec_h, frames.depth, start, total, hq=True, perf=perf,
+                              fps_out=fps_out), 0
+    if fps_out:
+        # Com troca de fps a decodificação começa no tempo e não no quadro.
+        reader = media.FrameReader(info, f.dec_w, f.dec_h, frames.depth, 0, None, fps_out, hq=True, perf=perf,
+                                   crop=f.crop)
+        return reader, round(start / info.fps * frames.fps)
+    return media.FrameReader(info, f.dec_w, f.dec_h, frames.depth, start, total, None, hq=True, perf=perf,
+                             crop=f.crop), 0
+
+
+def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: ExportSettings, frame: int, seq=None,
+                  scale: float = 1.0, depth: int = 8):
+    """Um quadro do resultado da exportação (o mesmo caminho de `_encode`), para a prévia da janela de
+    exportação. Com `scale` = 1 e a profundidade da exportação, é exatamente o quadro gravado."""
+    frames = frame_pipeline(info, values, s, seq, scale, depth)
+    f = frames.fit
+    frame = max(0, min(int(frame), info.frames - 1))
+    if seq is not None:
+        from . import sequence
+        img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True)
+    else:
+        img = media.grab_frame(info, frame, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop)
+    index = round(frame * frames.fps / info.fps) if s.fps != "original" else frame
+    return frames.render(engine, img, index)
+
+
 # ------------------------------------------------------------------ trabalhos
 @dataclass
 class ExportJob:
@@ -519,10 +752,16 @@ class ExportJob:
     rendered: int = 0        # quadros processados pela GPU
     encoded: int = 0         # quadros já gravados pelo codificador (progresso do ffmpeg)
     sequence: Any = None     # timeline.Sequence do modo Edição (None = o arquivo de `info`)
+    passes: int = 1          # passadas da GPU (2 no tamanho alvo; 3 se a 2ª passou do tamanho)
+    pass_index: int = 0      # passada atual (0 = primeira); `done`/`total` contam os quadros dela
+    stage: str = ""          # etapa atual para a fila ("Medindo o volume…", "Passada 1 de 2"); "" = exportando
 
     @property
     def progress(self) -> float:
-        return self.done / self.total if self.total else 0.0
+        if not self.total:
+            return 0.0
+        passes = max(1, self.passes)
+        return min(1.0, (min(self.pass_index, passes - 1) + self.done / self.total) / passes)
 
 
 class ExportQueue:
@@ -619,8 +858,11 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                     mix_path = None
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
-        if _encode(job, engine, info, s, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time,
-                   duration, target, seq, mix_path):
+        run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
+                   seq, mix_path)
+        if wants_loudness(s) and not _measure_loudness(job, run, s):
+            return
+        if _encode_passes(job, engine, run, s):
             try:
                 _commit_output(job.out_path, s)
             except OSError as exc:
@@ -639,27 +881,108 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             system.remove_file(mix_path)
 
 
-def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSettings, perf: media.Perf, w: int,
-            h: int, fps_str: str, fps_out: str | None, fps_val: float, depth: int, start: int, total: int,
-            start_time: float, duration: float, target: str, seq, mix_path: str | None) -> bool:
-    """Lê, aplica o look e codifica em `target` (o parcial). True quando todos os quadros foram gravados;
-    senão marca o trabalho como cancelado ou com erro e devolve False."""
+@dataclass
+class _Run:
+    """O que vale para todas as passadas de um trabalho (calculado uma vez em `run_job`)."""
+    info: media.MediaInfo
+    perf: media.Perf
+    w: int
+    h: int
+    fps_str: str
+    fps_out: str | None
+    fps_val: float
+    depth: int
+    start: int
+    total: int
+    start_time: float
+    duration: float
+    target: str
+    seq: Any
+    mix_path: str | None
+    loud: dict | None = None  # volume medido (loudnorm.measure) para o loudnorm da gravação
+
+
+def _measure_loudness(job: ExportJob, run: _Run, s: ExportSettings) -> bool:
+    """1ª passada do volume alvo: mede o som que vai para o arquivo (o trecho do original ou a mixagem).
+    False quando cancelou ou deu erro (o trabalho já fica marcado)."""
+    from . import loudnorm
+    run.loud = None
+    if _audio_args(s, run.info, 0.0 if run.mix_path else run.start_time) == ["-an"]:
+        return True
+    path = run.mix_path or run.info.path
+    start, dur = (0.0, 0.0) if run.mix_path else (run.start_time, run.duration)
+    job.stage = _("Medindo o volume do som…")
+    try:
+        measured = loudnorm.measure(path, float(s.loudness), float(s.true_peak), start, dur, job.cancel, run.perf)
+    except RuntimeError as exc:
+        job.status = "erro"
+        job.error = str(exc)[-1500:]
+        return False
+    if measured is None or job.cancel.is_set():
+        job.status = "cancelado"
+        return False
+    run.loud = measured if loudnorm.audible(measured) else None  # silêncio: nada a ajustar
+    job.stage = ""
+    return True
+
+
+def _encode_passes(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings) -> bool:
+    """Uma passada; no tamanho alvo, as duas do x264/x265 (a GPU renderiza o vídeo duas vezes). Se a 2ª passa
+    do tamanho (raro: o controle de taxa erra por pouco), refaz só a 2ª com a taxa corrigida."""
+    if not uses_target(s):
+        return _encode(job, engine, run, s)
+    import shutil
+    import tempfile
+    from dataclasses import replace
+    rate = target_bitrate(s, run.info, run.duration, run.start_time if not run.mix_path else 0.0)
+    if rate < MIN_TARGET_RATE:
+        job.status = "erro"
+        job.error = target_too_small_message(s, run.duration)
+        return False
+    limit = target_bytes(s)
+    cur = replace(s, bitrate=round(rate, 4))
+    tmp = tempfile.mkdtemp(prefix="pelicula_passadas_")
+    job.passes = 2
+    try:
+        for p in range(3):
+            n = 1 if p == 0 else 2
+            job.pass_index = p
+            job.stage = _("Passada {n} de {total}").format(n=p + 1, total=job.passes)
+            if not _encode(job, engine, run, cur, two_pass=n, cwd=tmp):
+                return False
+            if n == 1:
+                continue
+            size = os.path.getsize(run.target)
+            if size <= limit:
+                job.stage = ""
+                return True
+            if p == 2:
+                break
+            job.passes = 3
+            cur = replace(cur, bitrate=round(cur.bitrate * limit / size * 0.96, 4))
+        job.status = "erro"
+        job.error = _("O vídeo não coube em {mb} MB. Diminua a resolução ou o trecho, ou aumente o tamanho "
+                      "alvo.").format(mb=fmt_mb(float(s.target_mb)))
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _encode(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings, two_pass: int = 0,
+            cwd: str | None = None) -> bool:
+    """Lê, aplica o look e codifica em `run.target` (o parcial). True quando todos os quadros foram gravados;
+    senão marca o trabalho como cancelado ou com erro e devolve False. `two_pass`: passada do tamanho alvo
+    (o codificador roda em `cwd`, onde fica o registro das passadas)."""
+    info, perf, total, depth = run.info, run.perf, run.total, run.depth
+    job.encoded = job.rendered = job.done = 0
     pipe = media.NamedPipe(False) if media.use_named_pipes() else None
-    cmd = build_encoder_cmd(target, info, s, w, h, fps_str, depth, start_time, duration,
-                            pipe.name if pipe else "pipe:0", audio_path=mix_path)
-    if seq is not None:
-        from .sequence import SequenceReader
-        reader = SequenceReader(seq, w, h, depth, start, total, hq=True, perf=perf, fps_out=fps_out)
-        skip = 0
-    elif fps_out:
-        # Com troca de fps a decodificação começa no tempo e não no quadro.
-        reader = media.FrameReader(info, w, h, depth, 0, None, fps_out, hq=True, perf=perf)
-        skip = round(start_time * fps_val)
-    else:
-        reader = media.FrameReader(info, w, h, depth, start, total, None, hq=True, perf=perf)
-        skip = 0
+    cmd = build_encoder_cmd(run.target, info, s, run.w, run.h, run.fps_str, depth, run.start_time, run.duration,
+                            pipe.name if pipe else "pipe:0", audio_path=run.mix_path, two_pass=two_pass,
+                            loudness_measured=run.loud)
+    frames = frame_pipeline(info, job.values, s, run.seq)
+    reader, skip = open_reader(info, frames, run.start, total, run.fps_out, perf, run.seq)
     enc = subprocess.Popen(cmd, stdin=None if pipe else subprocess.PIPE, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE, **perf.popen_kwargs())
+                           stderr=subprocess.PIPE, cwd=cwd, **perf.popen_kwargs())
     err_buf = bytearray()
     t0 = time.time()
 
@@ -670,7 +993,8 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
             job.t_warm = time.time()
         el = time.time() - t0
         job.fps_rate = d / el if el > 0 else 0.0
-        job.eta = (total - d) / job.fps_rate if job.fps_rate > 0 else 0.0
+        later = max(0, job.passes - job.pass_index - 1) * total  # passadas que ainda vêm depois desta
+        job.eta = (total - d + later) / job.fps_rate if job.fps_rate > 0 else 0.0
 
     progress_keys = (b"fps=", b"stream_", b"bitrate=", b"total_size=", b"out_time", b"dup_frames=",
                      b"drop_frames=", b"speed=", b"progress=")
@@ -740,13 +1064,7 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
     wt = threading.Thread(target=write_loop, daemon=True)
     rt.start()
     wt.start()
-    info_lut = lut_info(job.values.get("lut_arquivo", "")) if job.values.get("lut_on") else None
-    if seq is not None:
-        from .sequence import legal_range
-        legal = legal_range(seq)
-    else:
-        legal = media.legal_range(info)
-    first_index = round(start * fps_val / info.fps) if fps_out else start
+    first_index = round(run.start * run.fps_val / info.fps) if run.fps_out else run.start
     i = 0
     try:
         while True:
@@ -755,12 +1073,7 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
                 break
             if job.cancel.is_set() or write_err:
                 break
-            if seq is not None:
-                img = engine.compose(img, seq, w, h, depth)
-            engine.set_input(img)
-            plan = look.build_plan(job.values, w, h, first_index + i, fps_val, info_lut, dither=s.dither and depth == 8,
-                                   legal=legal)
-            out = engine.render(plan, depth)
+            out = frames.render(engine, img, first_index + i)
             out_q.put(out.tobytes())
             i += 1
             job.rendered = i
@@ -810,16 +1123,20 @@ def job_frames(info: media.MediaInfo, s: ExportSettings, start: int = 0, end: in
 
 
 def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings, cancel: threading.Event,
-                  frames: int = 60, limit: float = 15.0, sequence=None) -> float:
-    """Exporta um trecho num arquivo temporário e devolve a velocidade real (quadros/s).
+                  frames: int = 60, limit: float = 15.0, sequence=None, stats: dict | None = None) -> float:
+    """Exporta um trecho num arquivo temporário e devolve a velocidade real (quadros/s) de uma passada.
 
     Os primeiros quadros (abertura do ffmpeg e do codificador) ficam de fora da conta, e a
-    medição para sozinha depois de `limit` segundos.
+    medição para sozinha depois de `limit` segundos. Com `stats` (um dicionário), grava ali
+    `"video_bytes_per_second"`: quanto o vídeo do trecho ocupou (estimativa do tamanho do arquivo).
+    O tamanho alvo e o volume alvo ficam de fora (a janela conta as duas passadas).
     """
     import shutil
     import tempfile
     s = ExportSettings.from_dict(settings.to_dict())
     s.audio = "none"
+    s.target_mb = 0.0
+    s.loudness = 0.0
     tmp = tempfile.mkdtemp(prefix="pelicula_medida_")
     start = 0 if info.frames <= frames * 2 else info.frames // 3
     out = os.path.join(tmp, "teste." + s.container)
@@ -840,6 +1157,9 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
     t0 = time.time()
     try:
         run_job(job, engine)
+        if stats is not None and job.status == "concluido" and job.done > 0 and os.path.isfile(out):
+            fps = info.fps if s.fps == "original" else eval_fraction(s.fps)
+            stats["video_bytes_per_second"] = os.path.getsize(out) / (job.done / max(fps, 1e-3))
     finally:
         stop.set()
         engine.release()

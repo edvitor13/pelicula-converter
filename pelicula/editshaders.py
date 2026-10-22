@@ -7,7 +7,8 @@ Mesmas convenções de `shaders.py`: coordenadas de imagem com y para baixo (lin
   enquadramento e mistura com a tela anterior (`t_dst`, RGBA f4) segundo o modo de mesclagem.
   Com `u_cc_on = 0`, `u_det_on = 0`, opacidade 1 e enquadramento identidade (`u_exact = 1`), a
   saída é exatamente o pixel de entrada.
-- `OUT`: converte a tela (f4) para inteiros de 8 ou 16 bits (arredondamento exato) lidos de volta.
+- `OUT`: converte a tela (f4) para inteiros de 8 ou 16 bits (arredondamento exato) lidos de volta; com
+  `u_offset` lê só um recorte da tela (exportação num quadro de outra proporção com "cortar", `fit.py`).
 
 Os valores vêm de `compositor.clip_uniforms()`; a interpretação de cada ajuste está lá.
 """
@@ -286,8 +287,9 @@ in vec2 v_uv;
 out uvec4 f_out;
 uniform sampler2D t_canvas;
 uniform float u_max;  // 255 ou 65535: arredonda aqui, sem depender da conversão do driver
+uniform ivec2 u_offset;  // canto do recorte na tela (exportação com "cortar"; 0,0 = a tela inteira)
 void main() {
-    vec3 c = clamp(texelFetch(t_canvas, ivec2(gl_FragCoord.xy), 0).rgb, 0.0, 1.0);
+    vec3 c = clamp(texelFetch(t_canvas, ivec2(gl_FragCoord.xy) + u_offset, 0).rgb, 0.0, 1.0);
     f_out = uvec4(uvec3(floor(c * u_max + 0.5)), uint(u_max));
 }
 """

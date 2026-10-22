@@ -387,11 +387,15 @@ def use_named_pipes() -> bool:
 
 
 class FrameReader:
-    """Decodifica quadros RGB (8 ou 16 bits) já na resolução pedida."""
+    """Decodifica quadros RGB (8 ou 16 bits) já na resolução pedida.
+
+    `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
+    "cortar" da exportação num quadro de outra proporção (`fit.py`).
+    """
 
     def __init__(self, info: MediaInfo, width: int, height: int, depth: int = 8, start_frame: int = 0,
                  max_frames: int | None = None, fps_out: str | None = None, hq: bool = False,
-                 perf: Perf | None = None):
+                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None):
         perf = perf or Perf()
         self.w, self.h, self.depth = width, height, depth
         self.pix = "rgb24" if depth == 8 else "rgb48le"
@@ -407,6 +411,9 @@ class FrameReader:
         args += ["-i", info.path, "-map", "0:v:0", "-an", "-sn", "-dn"]
         flags = "lanczos+accurate_rnd+full_chroma_int" if hq else "bicubic+full_chroma_int"
         vf = []
+        if crop:
+            cx, cy, cw, ch = (int(c) for c in crop)
+            vf.append(f"crop={cw}:{ch}:{cx}:{cy}:exact=1")
         if fps_out:
             vf.append(f"fps={fps_out}")
         vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
@@ -482,13 +489,14 @@ class FrameReader:
                 pass
 
 
-def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False):
-    r = FrameReader(info, width, height, depth, frame, 1, hq=hq)
+def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False,
+               crop: tuple[int, int, int, int] | None = None):
+    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop)
     try:
         img = r.read()
         if img is None and frame > 0:
             r.close()
-            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq)
+            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop)
             img = r.read()
         if img is None:
             raise RuntimeError(r.error or _("Falha ao ler o quadro."))
