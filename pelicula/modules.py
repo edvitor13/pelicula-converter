@@ -182,6 +182,8 @@ def used_by(values: dict | None = None, sequence=None) -> set[str]:
             used.add(module_id)
     if v.get("lut_on") and v.get("lut_arquivo"):
         used.add("luts")
-    if sequence is not None and not getattr(sequence, "is_trivial", lambda: True)():
+    # Montagem vazia ou só "o arquivo inteiro, sem mudanças" não é edição.
+    trivial = getattr(sequence, "is_trivial", lambda: True)
+    if sequence is not None and getattr(sequence, "clips", True) and not trivial():
         used.add("edicao")
     return used

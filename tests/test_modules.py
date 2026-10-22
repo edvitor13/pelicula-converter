@@ -95,6 +95,16 @@ def test_used_by_detects_a_real_edit():
     assert "edicao" not in modules.used_by(None, Seq(True))
 
 
+def test_used_by_ignores_an_empty_or_whole_file_sequence():
+    from pelicula import timeline
+    assert "edicao" not in modules.used_by(None, timeline.Sequence())
+    src = timeline.Source("C:/v/a.mp4", 1920, 1080, 24.0, "24/1", 48, 2.0, has_audio=False)
+    whole = timeline.Sequence.for_source(src)
+    assert whole.is_trivial() and "edicao" not in modules.used_by(None, whole)
+    whole.split(12)
+    assert "edicao" in modules.used_by(None, whole)
+
+
 def test_visible_hides_tests_unless_asked():
     s = FakeSettings()
     shown = {m.id for m in modules.visible(s)}

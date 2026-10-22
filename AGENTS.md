@@ -68,7 +68,9 @@ pelicula/
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
-                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes...)
+                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes...);
+                             profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
+                             recurso desligado em uso)
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
@@ -214,10 +216,12 @@ Atenção: `Engine._run()` ignora em silêncio uniforms que não existem no prog
 — um nome digitado errado não dá erro, só não faz nada. Os testes de `test_look.py` existem para
 pegar isso.
 
-Testes do modo Edição e do plugin:
+Testes do modo Edição, do plugin e dos módulos:
 
 | Arquivo | O que confere |
 |---|---|
+| `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
+| `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
@@ -320,6 +324,29 @@ O plugin é C++ e reaproveita a matemática dos DCTLs:
    usuário só clica em *Instalar o plugin OpenFX* (`ofx.install()`, com UAC/pkexec). Testes instalam só em
    pastas temporárias. O OpenFX em `plugins/ofx/openfx` é a cópia oficial (BSD-3, `SOURCE.txt` com commit
    e SHA-256): não edite.
+
+### Novo módulo (recurso opcional)
+
+Todo recurso que dá para dispensar é um módulo (regra 16). Para criar um:
+
+1. **`modules.py`**: um `Module("id_sem_acento", N_("Nome"), N_("Descrição curta."), "<grupo de GROUPS>",
+   status)` em `MODULES`. Recurso novo em teste usa `BETA` ou `EXPERIMENTAL`: começa desligado e só
+   aparece em Recursos com *Mostrar recursos em teste* (perfis nunca ligam recursos em teste). Recurso
+   estável começa ligado para quem já usa o app; decida em que perfis ele entra (`_SIMPLES`,
+   `_CRIADOR`, `_CINEMA`; *Tudo* pega todo estável). O id fica gravado em `modulos/<id>`: nunca renomeie.
+2. **Esconder na janela**: acrescente as ferramentas (widgets ou `QAction`s) em
+   `MainWindow._module_tools()`; casos especiais (atalhos, trocar de modo, gráfico que depende de outra
+   chave) vão em `apply_modules()`. Desligar **só esconde**: `look`, `compositor`, `engine`, `export` e
+   os comandos de renderização da CLI nunca consultam `modules`.
+3. **Aviso de uso**: se um look ou uma montagem podem usar o recurso, ensine `modules.used_by()` a
+   reconhecê-lo (chave de parâmetro ou propriedade da sequência). A janela avisa e oferece *Ligar* ao
+   abrir um projeto, aplicar um preset ou soltar um LUT (`MainWindow._check_modules()`).
+4. **Textos**: nome e descrição com `N_()` em PT-BR; rode `tools/i18n_extract.py --update` e traduza em
+   `en.json` e `es.json`. A página Recursos, o perfil do 1º acesso e `pelicula-cli modulos` mostram o
+   módulo sozinhos.
+5. **Testes**: `tests/test_modules.py` (padrão, perfis, `used_by`) e um caso em
+   `tests/modules_ui_cases.py` (as ferramentas somem e voltam; o aviso aparece e a renderização recebe
+   os mesmos valores).
 
 ### Adicionar um preset pronto
 

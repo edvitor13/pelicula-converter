@@ -235,6 +235,11 @@ quadros vizinhos:
 - **Fila de exportação** em segundo plano, com progresso, velocidade, tempo restante e cancelamento.
 
 ### Sistema
+- **Só o que você usa**: no primeiro acesso você escolhe um perfil (**Simples**, **Criador**,
+  **Cinema** ou **Tudo**) e, quando quiser, liga ou desliga cada recurso em **Configurações →
+  Recursos…** (modo Edição, Laboratório, defeitos, scan, LUTs, scopes, curva, plugin do DaVinci…).
+  Desligar só esconde a ferramenta: projetos e presets que a usam continuam saindo iguais, e a janela
+  avisa com um botão para religar. Recursos em teste (Beta/Experimental) começam desligados.
 - **Gerenciador de dependências**: se o ffmpeg não existir ou estiver antigo, o app oferece baixar
   a versão oficial, conferida por SHA-256, só para o seu usuário (sem administrador).
 - **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
@@ -742,6 +747,9 @@ qualidade da prévia e uma miniatura.
 - **Idiomas**: português do Brasil, inglês e espanhol. No primeiro acesso o app pergunta, já com o
   idioma do sistema selecionado (ou inglês, se o do sistema não for um dos três). Para trocar:
   **Configurações → Idioma…** (o app reabre no idioma novo). Números seguem o idioma (1,5 / 1.5).
+- **Perfil de recursos**: logo depois do idioma, no primeiro acesso, o app pergunta como você vai
+  usá-lo (Simples, Criador, Cinema ou Tudo). Quem atualiza de uma versão anterior continua com tudo
+  ligado. Para mudar: **Configurações → Recursos…**.
 - **Tela de boas-vindas**: mostra a versão e a data, os **projetos recentes** com miniatura (clique
   abre; botão direito remove da lista) e atalhos para abrir um vídeo, um projeto ou a cena de teste.
   Dá para desligar em *Mostrar esta tela ao abrir o app* e reabrir em **Configurações → Tela de
@@ -769,7 +777,8 @@ Quando há, aparece **Atualizar para X.Y.Z** na barra de status e na tela de boa
 ## Modo Edição: montar, cortar e ajustar antes da película
 
 Clique em **Edição** no topo da janela (ou `Ctrl+2`). O arquivo que estava aberto já aparece na
-linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados.
+linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados. (Sem o seletor no topo? O
+**Modo Edição** está desligado em **Configurações → Recursos…**.)
 
 1. **Importar** (`Ctrl+I`, botão *Importar* ou arrastar arquivos para a linha do tempo): vídeos e
    imagens vão para o fim da faixa de vídeo; músicas entram no começo da primeira faixa de áudio
@@ -865,6 +874,7 @@ tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável 
 | `info` | Mostra resolução, fps, codec e áudio de um arquivo |
 | `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
 | `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--ofx-instalar` (plugin OpenFX, Resolve gratuito), `--ofx-pasta DIR`, `--instalar` (DCTLs e LUTs), `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
+| `modulos` (`modules`) | Lista os recursos opcionais da janela e liga ou desliga: `--perfil simples\|criador\|cinema\|tudo`, `--ligar ID`, `--desligar ID`, `--json` (a exportação pelo terminal não muda) |
 | `versao` (`version`) | Mostra a versão |
 
 Exemplos:
@@ -894,6 +904,9 @@ pelicula-cli resolve --pasta "D:/plugins/PeliculaConverter"
 pelicula-cli presets
 pelicula-cli parametros --secao grao
 pelicula-cli qualidades video.mp4
+
+# o que aparece na janela (recursos opcionais)
+pelicula-cli modulos --perfil criador --ligar laboratorio
 ```
 
 Opções de `exportar`: `-o/--saida`, `--preset`, `--set CHAVE=VALOR` (repetível; cores em `#RRGGBB`,

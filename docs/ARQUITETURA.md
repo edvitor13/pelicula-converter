@@ -21,6 +21,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 13. [Modo Edição](#13-modo-edição)
 14. [Laboratório: emulação por densidade](#14-laboratório-emulação-por-densidade)
 15. [Plugin do DaVinci Resolve (`resolve.py`)](#15-plugin-do-davinci-resolve-resolvepy)
+16. [Módulos (recursos opcionais)](#16-módulos-recursos-opcionais)
 
 ---
 
@@ -102,6 +103,9 @@ Três ideias guiam o projeto:
 | `pelicula/compositor.py` | Ajustes do clipe → uniforms do `CLIP` (`clip_uniforms`), enquadramento (`fit_box`, `transform`), `auto_adjust`. |
 | `pelicula/editshaders.py` | GLSL do modo Edição: `CLIP` (uma camada sobre a tela) e `OUT` (tela → 8/16 bits inteiros). |
 | `pelicula/resolve.py` | Plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor e os de cada preset), os LUTs e o `LEIA-ME`; instala na pasta de LUTs do Resolve. |
+| `pelicula/modules.py` | Módulos (recursos que o usuário liga e desliga): `MODULES`, `GROUPS`, `PROFILES`, `is_enabled()`, `apply_profile()`, `current_profile()`, `used_by()`. Sem Qt (veja a seção 16). |
+| `pelicula/ui/settings_dialog.py` / `ui/pages/` | Janela de Configurações: páginas numa barra lateral (`Page(dialog)` por arquivo); `pages/recursos.py` liga e desliga os módulos. |
+| `pelicula/ui/profile_dialog.py` / `module_notice.py` | Perfil de recursos do primeiro acesso (`ProfileDialog`, cartões `ProfileCard`); faixa de aviso "recursos desligados em uso" (`ModuleNotice`). |
 | `pelicula/ui/edit_model.py` | `TimelineModel`: a sequência da edição, seleção, histórico e as edições que a interface pede (sinal `changed`). |
 | `pelicula/ui/timeline_view.py` | `TimelineEditor`: barra de ferramentas, régua, cabeçalhos das faixas, clipes, forma de onda, arrastar/aparar/lâmina/ímã. |
 | `pelicula/ui/edit_panels.py` | `MediaBin` (Mídia) e `ClipInspector` (ajustes do clipe gerados de `editparams`). |
@@ -470,6 +474,7 @@ PyInstaller as bibliotecas já estão embutidas (`sys.frozen`).
 | O quê | Onde |
 |---|---|
 | Sessão e preferências | `QSettings("PeliculaConverter", "PeliculaConverter")` — registro `HKCU\Software\PeliculaConverter\PeliculaConverter` no Windows, `~/.config/PeliculaConverter/PeliculaConverter.conf` no Linux. Chaves: `session_values` (JSON dos ajustes), `session_preset`, `geometry`, `splitter`, `compare`, `preview_quality`, `advanced`, `last_dir`, `export_dir`, `export_quality`, `export_perf`, `ffmpeg_dir`, `ffmpeg_skip`. A sessão é gravada no `closeEvent` da janela. |
+| Módulos | Nas mesmas preferências: `modulos/<id>` (`"1"`/`"0"`; sem valor vale o padrão), `modulos/perfil` e `modulos/mostrar_testes` (seção 16). |
 | Presets do usuário | `presets.user_dir()` = `$APPDATA/PeliculaConverter/presets` (sem `APPDATA`, a pasta pessoal) — um `.json` por preset, nome derivado do título. |
 | Meus LUTs | `luts.user_dir()` = `$APPDATA/PeliculaConverter/luts`. |
 | ffmpeg baixado | `deps.ffmpeg_dir()` (veja a seção 10). |
@@ -665,3 +670,75 @@ diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um
 - `install()` grava numa pasta temporária e troca a antiga de uma vez; recusa uma pasta
   `PeliculaConverter` que não foi criada por ele. `lut_dirs()` procura a pasta de LUTs do Resolve no
   Windows, Linux e macOS.
+
+## 16. Módulos (recursos opcionais)
+
+Todo recurso que o usuário pode dispensar — inclusive os que já existiam — é um **módulo** que liga e
+desliga em **Configurações › Recursos**. A regra de ouro: desligar um módulo **só esconde a ferramenta**
+na janela. `look`, `compositor`, `engine`, `export` e os comandos de renderização da CLI nunca consultam
+`modules`, então um projeto ou preset que usa um módulo desligado sai idêntico (prévia e exportação).
+
+```mermaid
+flowchart LR
+    REG["modules.py<br/>MODULES · PROFILES"]
+    PREF[("preferências<br/>modulos/id")]
+    PG["Configurações › Recursos<br/>ui/pages/recursos.py"]
+    FR["1º acesso<br/>ui/profile_dialog.py"]
+    CLI["pelicula-cli modulos"]
+    MW["MainWindow.apply_modules()"]
+    AV["_check_modules() → ModuleNotice"]
+    PG -->|set_enabled / apply_profile| PREF
+    FR -->|apply_profile| PREF
+    CLI --> PREF
+    PG -->|"settings_changed('modulos')"| MW
+    PREF --> MW
+    MW --> AV
+```
+
+- **Registro** (`modules.py`, sem Qt): `Module(id, name, description, group, status, requires)`. O `id` é
+  sem acento e nunca muda (fica gravado). `status` é `estavel`, `beta` ou `experimental`.
+- **Estado**: `modulos/<id>` = `"1"`/`"0"` nas preferências (`ui/prefs.settings()`). Sem valor vale o
+  padrão: estável ligado (quem atualiza não perde nada), em teste desligado. `modulos/mostrar_testes`
+  faz a página listar os recursos Beta e Experimentais (um recurso em teste ligado aparece sempre, para
+  poder desligá-lo).
+- **Perfis** (`PROFILES`): Simples ⊂ Criador ⊂ Cinema ⊂ Tudo. `apply_profile()` grava só os módulos
+  estáveis (recursos em teste nunca são ligados por perfil) e `modulos/perfil`; `current_profile()` acha
+  o perfil que bate exatamente com os estáveis ligados (`None` = *Personalizado*).
+- **Primeiro acesso**: `app.choose_profile()` mostra o `ProfileDialog` logo depois do idioma (quatro
+  cartões, *Tudo* marcado). Quem já tinha idioma salvo nunca vê essa escolha.
+- **Página Recursos** (`ui/pages/recursos.py`): cartões dos perfis (`ProfileCard`, os mesmos do primeiro
+  acesso), a lista por grupo (`GROUPS`) com selo de estado e chave, e *Mostrar recursos em teste*. Toda
+  mudança grava com `set_enabled`/`apply_profile` e emite `settings_changed("modulos")`, que chega em
+  `MainWindow.apply_modules()`.
+
+### 16.1 Na janela
+
+`MainWindow.apply_modules()` roda na abertura e a cada mudança. As ferramentas de cada módulo estão
+em `_module_tools()` (widgets e `QAction`s que recebem `setVisible`); os casos especiais ficam no próprio
+`apply_modules()`:
+
+| Módulo | O que some |
+|---|---|
+| `edicao` | O seletor Película/Edição e os atalhos `Ctrl+2` e `Ctrl+I`. Se a janela estava no modo Edição, volta para o Película **sem mexer na montagem** (que continua sendo a entrada do look); `set_mode("edicao")` e `import_paths` ficam no Película. |
+| `laboratorio`, `defeitos`, `scan`, `luts` | As seções `lab`, `desgaste`, `scan` e `lut` do painel de ajustes (`params.SECTIONS`). |
+| `exportar_lut` | *Exportar a cor como LUT .cube* (33 e 65 pontos) e *Exportar todos os presets como LUTs* no menu do preset. |
+| `scopes` | Os medidores (histograma, forma de onda, parada RGB, vetorscópio) dos dois modos. |
+| `curva` | A chave *Curva* e o gráfico (a preferência `show_curve` fica como estava). |
+| `davinci` | *Plugin para o DaVinci Resolve…* no menu de Configurações. |
+| `medidor_som`, `notificacoes`, `recuperacao` | Ainda sem ferramenta na janela: entram em `_module_tools()` quando ganharem uma. |
+
+**Aviso de uso** (`_check_modules()`): depois de abrir um projeto, aplicar um preset, soltar um LUT ou
+mudar os módulos, `modules.used_by(valores, montagem)` diz o que o trabalho usa de fato (`lab_on`,
+`desg_on`, `scan_on`, `lut_on` com arquivo, montagem que não é só o arquivo inteiro). Se algum desses
+módulos está desligado, a faixa `ModuleNotice` (abaixo da barra do topo) mostra os nomes, lembra que a
+imagem e a exportação não mudam e oferece **Ligar** (religa e emite `settings_changed("modulos")`) ou
+fechar. Fechado, o aviso só volta nesta sessão se aparecer um módulo novo na lista ou se o módulo for
+religado e desligado de novo.
+
+**Terminal**: `pelicula-cli modulos` lista os módulos (id, nome, estado, ligado) e aceita
+`--perfil P`, `--ligar ID` e `--desligar ID` (repetíveis) e `--json`. Ele só grava as preferências da
+janela; exportar pelo terminal nunca depende dos módulos.
+
+**Testes**: `tests/test_modules.py` (registro sem Qt) e `tests/test_modules_ui.py` (casos de
+`modules_ui_cases.py` num subprocesso offscreen com um `.ini` próprio: página, perfil do primeiro acesso
+e a janela inteira, que se pula sem OpenGL 3.3).

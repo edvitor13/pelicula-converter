@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import (APP_NAME, __version__, audiomix, compositor, deps, editparams, export, i18n, look, luts, media,
-               params, presets, project, sequence, system, testimage, timeline, updater)
+               modules, params, presets, project, sequence, system, testimage, timeline, updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
@@ -33,6 +33,7 @@ from .viewer import Viewer
 from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
 from .flow import AdaptiveBar, ElideLabel, FlowLayout
 from .labcurve import CurveGraph
+from .module_notice import ModuleNotice, module_names
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .scopes import Scopes
@@ -325,6 +326,7 @@ class MainWindow(QMainWindow):
         self._mix_bridge.done.connect(self._mix_done)
         self._mix_bridge.peaks.connect(lambda path: self.tl_editor.peaks_ready(path))
         self._mix_bridge.thumb.connect(lambda path, img: self.bin.set_thumb(path, img))
+        self._notice_muted: set[str] = set()  # módulos cujo aviso a pessoa fechou nesta sessão
 
         self._build_ui()
         self.store.changed.connect(self._on_param)
@@ -395,6 +397,7 @@ class MainWindow(QMainWindow):
         if st is not None:
             self.center_split.restoreState(st)
         self.center_split.setChildrenCollapsible(False)
+        self.apply_modules()
 
     # ================================================================ interface
     def _build_ui(self) -> None:
@@ -404,6 +407,10 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         self.top_bar = self._top_bar()
         root.addWidget(self.top_bar)
+        self.module_notice = ModuleNotice()
+        self.module_notice.enableRequested.connect(self.enable_modules)
+        self.module_notice.dismissed.connect(lambda ids: self._notice_muted.update(ids))
+        root.addWidget(self.module_notice)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
@@ -519,6 +526,7 @@ class MainWindow(QMainWindow):
         self.btn_settings = self._flat("settings", _("Configurações"))
         menu = QMenu(self)
         menu.addAction(icons.icon("settings", theme.TEXT, 16), _("Configurações…"), lambda: self.show_settings("geral"))
+        menu.addAction(icons.icon("check", theme.TEXT, 16), _("Recursos…"), lambda: self.show_settings("recursos"))
         menu.addSeparator()
         menu.addAction(_("Idioma…"), self.choose_language)
         menu.addAction(_("Verificar atualizações…"), lambda: self.check_updates(manual=True))
@@ -536,8 +544,9 @@ class MainWindow(QMainWindow):
         menu.addAction(_("Pasta do ffmpeg…"), self.choose_ffmpeg)
         menu.addAction(_("Abrir pasta dos meus presets"), lambda: system.open_path(presets.user_dir()))
         menu.addAction(_("Abrir pasta dos meus LUTs"), self.open_lut_dir)
-        menu.addSeparator()
-        menu.addAction(icons.icon("davinci", theme.TEXT, 16), _("Plugin para o DaVinci Resolve…"), self.show_resolve)
+        self.act_resolve_sep = menu.addSeparator()
+        self.act_resolve = menu.addAction(icons.icon("davinci", theme.TEXT, 16), _("Plugin para o DaVinci Resolve…"),
+                                          self.show_resolve)
         menu.addSeparator()
         menu.addAction(_("Atalhos do teclado"), self.show_shortcuts)
         menu.addAction(_("Sobre o {app}").format(app=APP_NAME), self.about)
@@ -725,10 +734,14 @@ class MainWindow(QMainWindow):
         self.more_menu.addSeparator()
         self.more_menu.addAction(_("Importar preset (.json)…"), self.import_preset)
         self.more_menu.addAction(_("Exportar preset (.json)…"), self.export_preset)
-        self.more_menu.addSeparator()
-        self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=33), lambda: self.export_lut(33))
-        self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=65), lambda: self.export_lut(65))
-        self.more_menu.addAction(_("Exportar todos os presets como LUTs (pacote)…"), self.export_all_luts)
+        self.act_lut_sep = self.more_menu.addSeparator()
+        self.act_luts = [
+            self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=33),
+                                     lambda: self.export_lut(33)),
+            self.more_menu.addAction(_("Exportar a cor como LUT .cube ({n} pontos)…").format(n=65),
+                                     lambda: self.export_lut(65)),
+            self.more_menu.addAction(_("Exportar todos os presets como LUTs (pacote)…"), self.export_all_luts),
+        ]
         self.more_menu.aboutToShow.connect(self._menu_state)
         self.btn_more.setMenu(self.more_menu)
         self.btn_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -753,7 +766,7 @@ class MainWindow(QMainWindow):
         self.adv.toggled.connect(self._set_advanced)
         row2.addWidget(self.adv)
         row2.addSpacing(10)
-        lab_c = QLabel(_("Curva"))
+        lab_c = self.curve_label = QLabel(_("Curva"))
         lab_c.setObjectName("Muted")
         lab_c.setToolTip(_("Mostrar a curva do look em R, G e B (como o \"Show Curve\" dos plugins de película)"))
         row2.addWidget(lab_c)
@@ -805,9 +818,10 @@ class MainWindow(QMainWindow):
         return w
 
     def _shortcuts(self) -> None:
-        def sc(seq, fn):
+        def sc(seq, fn) -> QShortcut:
             s = QShortcut(QKeySequence(seq), self)
             s.activated.connect(fn)
+            return s
         sc("Ctrl+O", self.open_dialog)
         sc("Ctrl+E", self.export_dialog)
         sc("Ctrl+S", self.save_project)
@@ -819,9 +833,9 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Z", self.undo)
         sc("Ctrl+Y", self.redo)
         sc("Ctrl+Shift+Z", self.redo)
-        sc("Ctrl+I", self.import_dialog)
+        # Atalhos que levam ao modo Edição (desligados junto com o módulo "edicao").
+        self._edit_shortcuts = [sc("Ctrl+I", self.import_dialog), sc("Ctrl+2", lambda: self.set_mode("edicao"))]
         sc("Ctrl+1", lambda: self.set_mode("pelicula"))
-        sc("Ctrl+2", lambda: self.set_mode("edicao"))
         sc("Ctrl+Alt+C", lambda: self.mode == "edicao" and self.inspector.copy_values())
         sc("Ctrl+Alt+V", lambda: self.mode == "edicao" and self.inspector.paste_values())
         sc("F11", self.toggle_preview_fullscreen)
@@ -852,6 +866,7 @@ class MainWindow(QMainWindow):
         self.preview_fullscreen = entering
         for wdg in (self.top_bar, self.left_stack, self.right_panel, self.statusBar()):
             wdg.setVisible(not entering)
+        self._check_modules()  # o aviso de recurso desligado some na tela cheia e volta ao sair
         self.tl_editor.setVisible(not entering and self.mode == "edicao")
         self.viewer.set_fullscreen(entering)
         self.btn_full.setIcon(icons.icon("fullscreen_exit" if entering else "fullscreen", theme.TEXT, 18))
@@ -917,6 +932,7 @@ class MainWindow(QMainWindow):
             done, _errors = luts.install(paths)
             if done:
                 self.cards_lut_set(done[0])
+        self._check_modules()
 
     def cards_lut_set(self, path: str) -> None:
         self.store.set("lut_arquivo", path, record=False)
@@ -1061,6 +1077,8 @@ class MainWindow(QMainWindow):
         """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes)."""
         if mode not in MODES:
             return
+        if mode == "edicao" and not modules.is_enabled(self.settings, "edicao"):
+            mode = "pelicula"  # módulo desligado: a montagem continua sendo a entrada do look
         self.mode_switch.set_current(mode)
         if mode == self.mode:
             return
@@ -1330,6 +1348,8 @@ class MainWindow(QMainWindow):
             return
         if self.mode != "edicao":
             self.set_mode("edicao")
+            if self.mode != "edicao":
+                return  # modo Edição desligado em Configurações › Recursos
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             srcs = [s for s in (self._probe_source(p) for p in paths) if s is not None]
@@ -1742,6 +1762,7 @@ class MainWindow(QMainWindow):
         self.preset_combo.blockSignals(False)
         self.looks.set_selected(pid)
         self._update_modified()
+        self._check_modules()
 
     def _update_modified(self) -> None:
         base = self.preset_values(self.preset_id)
@@ -2162,6 +2183,7 @@ class MainWindow(QMainWindow):
         welcome.add_recent(self.settings, p.path)
         self.set_mode(p.mode if p.mode in MODES else "pelicula")
         self._update_title()
+        self._check_modules()
 
     def _open_sequence_project(self, p: project.Project) -> None:
         """Projeto com montagem do modo Edição: relocaliza arquivos que sumiram e abre a sequência."""
@@ -2223,6 +2245,7 @@ class MainWindow(QMainWindow):
         self._saved_state = {} if changed else self._state()
         welcome.add_recent(self.settings, p.path)
         self._update_title()
+        self._check_modules()
 
     def _fill_project_menu(self) -> None:
         m = self.project_menu
@@ -2403,6 +2426,67 @@ class MainWindow(QMainWindow):
             self.act_auto_update.blockSignals(True)
             self.act_auto_update.setChecked(self.auto_update_enabled())
             self.act_auto_update.blockSignals(False)
+        elif key == "modulos":
+            self.apply_modules()
+
+    # ================================================================ módulos (Configurações › Recursos)
+    def _module_tools(self) -> dict[str, list]:
+        """Ferramentas de cada módulo na janela (widgets e ações de menu) que somem quando ele é desligado.
+
+        Módulo novo com ferramenta na janela: acrescente-a aqui (casos especiais em `apply_modules`).
+        """
+        cards = {c.section.key: c for c in self.cards}
+        return {
+            "edicao": [self.mode_switch],  # sem Edição sobra um modo só: o seletor inteiro some
+            "laboratorio": [cards["lab"]],
+            "defeitos": [cards["desgaste"]],
+            "scan": [cards["scan"]],
+            "luts": [cards["lut"]],
+            "exportar_lut": [self.act_lut_sep, *self.act_luts],
+            "scopes": [self.hist, self.edit_scopes],
+            "curva": [self.curve_label, self.curve_switch],
+            "davinci": [self.act_resolve_sep, self.act_resolve],
+        }
+
+    def apply_modules(self) -> None:
+        """Mostra ou esconde as ferramentas conforme os módulos ligados (ao abrir e quando Recursos muda).
+
+        Só a interface muda: a renderização nunca consulta `modules`, então um projeto ou preset que
+        use um módulo desligado sai igual (o aviso de `_check_modules` oferece religar).
+        """
+        on = modules.enabled_ids(self.settings)
+        for module_id, tools in self._module_tools().items():
+            for tool in tools:
+                tool.setVisible(module_id in on)
+        edit = "edicao" in on
+        for shortcut in self._edit_shortcuts:
+            shortcut.setEnabled(edit)
+        if not edit and self.mode == "edicao":
+            self.set_mode("pelicula")  # a montagem não muda: continua sendo a entrada do look
+        curve = "curva" in on and self.curve_switch.isChecked()
+        self.curve_graph.setVisible(curve)  # sem gravar "show_curve": religado, volta como estava
+        if curve:
+            self.curve_timer.start()
+        self._notice_muted -= on  # religado e desligado de novo: volta a avisar
+        self._check_modules()
+
+    def _check_modules(self) -> None:
+        """Aviso discreto se o look ou a montagem usam módulos desligados (a imagem não muda)."""
+        seq = self.model.seq
+        edited = bool(seq.clips) and not (self.file_info is not None and seq.is_trivial() == self.file_info.path)
+        off = modules.used_by(self.store.values, seq if edited else None) - modules.enabled_ids(self.settings)
+        new = off - self._notice_muted  # fechado nesta sessão: só volta com um módulo novo na lista
+        self.module_notice.show_modules(sorted(off) if new and not self.preview_fullscreen else [])
+
+    def enable_modules(self, ids) -> None:
+        """Religa módulos (botão "Ligar" do aviso) e atualiza a janela."""
+        ids = [m for m in ids if modules.exists(m)]
+        if not ids:
+            return
+        for module_id in ids:
+            modules.set_enabled(self.settings, module_id, True)
+        self.settings_changed.emit("modulos")
+        self.statusBar().showMessage(_("Recursos ligados: {lista}.").format(lista=module_names(ids)), 6000)
 
     def choose_ffmpeg(self) -> None:
         d = QFileDialog.getExistingDirectory(self, _("Pasta que contém ffmpeg.exe e ffprobe.exe"), media.tool_dir())

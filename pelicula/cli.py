@@ -8,12 +8,16 @@ Exemplos:
     pelicula-cli lut --preset vision3_250d -o 250d.cube
     pelicula-cli resolve --ofx-instalar    (plugin OpenFX: funciona no DaVinci Resolve gratuito)
     pelicula-cli resolve --instalar        (DCTLs do Resolve Studio e LUTs)
+    pelicula-cli modulos --perfil criador --ligar laboratorio   (o que aparece na janela)
     pelicula-cli presets | parametros | qualidades | info video.mp4 | ffmpeg --baixar | versao
 
 Projetos .plc com uma edição (modo Edição) exportam a montagem: cortes, cor dos clipes e som mixado.
 
 Cada comando tem um apelido em inglês (export, project, frame, list-presets, params,
-qualities, version). O idioma das mensagens segue o app (ou a variável PELICULA_LANG).
+qualities, modules, version). O idioma das mensagens segue o app (ou a variável PELICULA_LANG).
+
+Os módulos (recursos opcionais) só mostram ou escondem ferramentas na janela: o modo terminal
+nunca os consulta e exporta tudo do mesmo jeito.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ COMMANDS = {
     "info": "info",
     "ffmpeg": "ffmpeg",
     "resolve": "resolve", "davinci": "resolve",
+    "modulos": "modules", "modules": "modules",
     "versao": "version", "version": "version", "--version": "version",
 }
 
@@ -555,6 +560,46 @@ def cmd_resolve(a) -> int:
     return 0
 
 
+def cmd_modules(a) -> int:
+    """Lista os módulos (recursos opcionais da janela) e liga, desliga ou aplica um perfil."""
+    from . import modules
+    from .ui import prefs
+    settings = prefs.settings()
+    for module_id in (a.ligar or []) + (a.desligar or []):
+        if not modules.exists(module_id):
+            raise CliError(_("Módulo desconhecido: {id}. Veja a lista com \"modulos\".").format(id=module_id))
+    changed = bool(a.perfil or a.ligar or a.desligar)
+    if a.perfil:
+        modules.apply_profile(settings, a.perfil)
+    for module_id in a.ligar or []:
+        modules.set_enabled(settings, module_id, True)
+    for module_id in a.desligar or []:
+        modules.set_enabled(settings, module_id, False)
+    if changed:
+        settings.sync()
+    profile = modules.current_profile(settings)
+    profiles = {pid: name for pid, name, _desc, _ids in modules.PROFILES}
+    rows = [{"id": m.id, "nome": _(m.name), "descricao": _(m.description), "grupo": m.group, "estado": m.status,
+             "ligado": modules.is_enabled(settings, m.id)} for m in modules.MODULES]
+    if a.json:
+        print(json.dumps({"perfil": profile, "modulos": rows}, ensure_ascii=False, indent=2))
+        return 0
+    if changed:
+        print(_("Módulos atualizados. A janela aplica a mudança ao abrir."))
+    print(_("Perfil: {perfil}").format(perfil=_(profiles[profile]) if profile else _("Personalizado")))
+    for gid, gname in modules.GROUPS:
+        items = [r for r in rows if r["grupo"] == gid]
+        if not items:
+            continue
+        print(f"\n{_(gname).upper()}")
+        for r in items:
+            status = _(modules.STATUS_LABELS[r["estado"]])
+            state = _("ligado") if r["ligado"] else _("desligado")
+            print(f"  {r['id']:<14} {r['nome']:<30} {status:<13} {state}")
+    print("\n" + _("Desligar um módulo só esconde a ferramenta na janela; a exportação e o modo terminal não mudam."))
+    return 0
+
+
 def cmd_ffmpeg(a) -> int:
     from . import deps, media
     ok = media.configure()
@@ -674,6 +719,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ofx-pasta", help=_("copia o plugin OpenFX (.ofx.bundle) para esta pasta"))
     p.add_argument("--ofx-fonte", help=_("gera o código C++ do plugin OpenFX nesta pasta (desenvolvimento)"))
     p.set_defaults(func=cmd_resolve)
+
+    from . import modules
+    p = sub.add_parser("modulos", aliases=["modules"],
+                       help=_("lista, liga e desliga os recursos opcionais da janela (módulos)"))
+    p.add_argument("--ligar", action="append", metavar="ID", help=_("liga um módulo (pode repetir)"))
+    p.add_argument("--desligar", action="append", metavar="ID", help=_("desliga um módulo (pode repetir)"))
+    p.add_argument("--perfil", choices=[pid for pid, *_rest in modules.PROFILES],
+                   help=_("aplica um perfil antes de --ligar/--desligar"))
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_modules)
 
     p = sub.add_parser("versao", aliases=["version"], help=_("mostra a versão"))
     p.set_defaults(func=lambda a: (print(f"{APP_NAME} {__version__}"), 0)[1])

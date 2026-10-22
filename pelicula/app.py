@@ -26,6 +26,22 @@ def choose_language(settings: QSettings) -> tuple[str, bool]:
     return dlg.selected, True
 
 
+def choose_profile(settings: QSettings, first_run: bool) -> str | None:
+    """Perfil de recursos (Simples, Criador, Cinema ou Tudo), só no primeiro acesso.
+
+    Instalações que já tinham idioma salvo nunca veem esta escolha: sem perfil gravado, todo
+    recurso estável fica ligado (`modules.is_enabled`). Devolve o perfil aplicado, ou None.
+    """
+    if not first_run:
+        return None
+    from . import modules
+    from .ui.profile_dialog import ProfileDialog
+    dlg = ProfileDialog(None)
+    dlg.exec()
+    modules.apply_profile(settings, dlg.selected)
+    return dlg.selected
+
+
 def main() -> int:
     if sys.platform == "win32":
         try:
@@ -53,6 +69,7 @@ def main() -> int:
     if sys.platform == "darwin" and not os.environ.get("PELICULA_MACOS"):
         QMessageBox.information(None, APP_NAME, _("O suporte ao macOS está preparado, mas ainda desativado nesta versão."))
         return 0
+    choose_profile(settings, first_run)
     missing = deps.missing_python_modules()
     if missing:
         r = QMessageBox.question(None, APP_NAME, _("Faltam bibliotecas para o app funcionar: {lista}.\n\n"
