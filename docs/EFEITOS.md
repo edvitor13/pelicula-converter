@@ -80,7 +80,8 @@ As três cópias, resumidas:
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Perfil do vídeo** | veja abaixo | Rec.709 / sRGB (vídeo comum) | Como o vídeo foi gravado. O app desfaz a curva e o gamut da câmera para trabalhar em luz linear. Use o perfil log da câmera se gravou em log. |
+| **Perfil do vídeo** | veja abaixo | Rec.709 / sRGB (vídeo comum) | Como o vídeo foi gravado. O app desfaz a curva e o gamut da câmera para trabalhar em luz linear. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR. Vídeo HDR é reconhecido sozinho ao abrir o arquivo (veja abaixo). **Trocar de preset não muda este ajuste.** |
+| **Log reescalado (HDMI "Limited")** (avançado) | liga/desliga | desligado | Só S-Log3, V-Log e N-Log. Ligue em gravações externas em que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em *Limited*, comum na Nikon); o app deixa de voltar ao código da câmera. Presets não mudam. Chave `log_reescalado`. |
 | **Exposição** | −3 a +3 EV | 0 EV | Mais ou menos luz, antes de qualquer curva (como abrir ou fechar o diafragma). |
 | **Temperatura** | −100 a +100 | 0 | Negativo esfria, positivo esquenta. Em +100: vermelho +0,28 EV e azul −0,38 EV. |
 | **Tonalidade** | −100 a +100 | 0 | Negativo puxa para verde, positivo para magenta. Em +100: verde −0,22 EV, vermelho e azul +0,08 EV. |
@@ -101,6 +102,35 @@ Perfis disponíveis:
 | Blackmagic Film Gen 5 (Blackmagic Wide Gamut) | Blackmagic Film Gen 5 | Blackmagic Wide Gamut | Câmeras Blackmagic (BRAW e ProRes em *Film*, geração 5). |
 | ARRI LogC4 (ARRI Wide Gamut 4) | LogC4 | ARRI Wide Gamut 4 | ARRI Alexa 35 (LogC4). |
 | Apple Log (Rec.2020) — iPhone | Apple Log | Rec.2020 | iPhone 15 Pro e mais novos gravando em Apple Log. |
+| HLG (HDR de celular, Rec.2100) | HLG (ITU-R BT.2100) | Rec.2020 | Vídeo HDR de celular (iPhone, Android) e de câmeras em HLG. |
+| PQ / HDR10 (Rec.2100) | PQ (SMPTE ST 2084) | Rec.2020 | Vídeo HDR10 / PQ (algumas câmeras e celulares, masters HDR). |
+
+**Vídeo HDR (HLG e PQ).** O app leva o HDR para a luz da cena e deixa o cinza médio no mesmo lugar dos
+outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
+
+- **HLG**: desfaz a OETF da BT.2100; o cartão cinza 18% (38% do sinal) vira o cinza médio do app (0,18) e o
+  branco de referência (75%) fica em ≈ 0,99; o pico do sinal (100%) chega a ≈ 3,7 (4,4 stops acima do cinza).
+- **PQ**: o sinal vira luz da tela em cd/m² e, como na conversão PQ → HLG da BT.2408 (pico nominal de
+  1000 cd/m², gama 1,2 pela luminância), volta para luz da cena: 26 cd/m² ≈ cinza médio, 203 cd/m² ≈ branco de
+  referência. Acima de 1000 cd/m² a luz continua subindo, sem corte (4000 cd/m² ≈ 6,0 stops acima do cinza;
+  10000 cd/m² ≈ 7,1 stops); a curva da película comprime as altas luzes.
+- **Detecção**: ao **abrir um vídeo** no modo Película (ou pôr o **primeiro clipe** numa montagem vazia do
+  modo Edição), o app lê a transferência do arquivo (`color_transfer` do ffprobe): `arib-std-b67` → HLG,
+  `smpte2084` → PQ (o vídeo HDR do iPhone, Dolby Vision 8.4, é marcado como HLG). Se o *Perfil do vídeo* está
+  no padrão (Rec.709), ele passa para HLG/PQ e a barra de status avisa; se está em HLG/PQ e o arquivo novo não é
+  HDR, volta para Rec.709. Um perfil log escolhido à mão nunca muda, e reabrir um projeto salvo não muda nada.
+  A troca entra no desfazer (Ctrl+Z).
+
+**Faixa do vídeo e curvas em código de 10 bits.** Vídeo comum (YUV) usa a *faixa legal*: o preto é o código
+64 e o branco o 940 (em 10 bits). O app expande essa faixa ao decodificar (64 → 0, 940 → 1), como o DaVinci
+Resolve faz com um clipe em *Video levels*. A maioria das curvas é definida sobre esse sinal (LogC3, LogC4,
+Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709). Já a **Sony (S-Log3), a
+Panasonic (V-Log) e a Nikon (N-Log)** escrevem a curva no **código de 10 bits** e gravam esse código como está:
+o cinza 18% do S-Log3 é o código 420 (41% IRE) e o branco 90% é o 598 (61%). Nesses três perfis o app volta ao
+código da câmera antes da curva, CV = (v·876 + 64)/1023, sempre que o arquivo veio em faixa legal; imagens e
+vídeo de faixa cheia já trazem o código. Na montagem do modo Edição vale a faixa da maioria dos clipes de
+vídeo. Exceção: gravações externas em que a câmera reescalou o log para a faixa legal (saída HDMI em
+*Limited*, comum na Nikon) — ligue **Log reescalado**.
 
 ---
 
@@ -254,7 +284,7 @@ Laranja 0,55/0,38/0,07 · Amarelo 0,40/0,52/0,08 · Verde 0,18/0,72/0,10 · Azul
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Arquivo .cube** | lista + *Procurar arquivo .cube…* | (nenhum) | LUTs encontrados no computador (Premiere Pro, DaVinci Resolve e *Meus LUTs*) ou qualquer arquivo. **Instalar LUTs…** copia `.cube` para a pasta do app; **Pasta** abre essa pasta. Escolher um LUT liga a seção e adivinha a entrada. |
-| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. |
+| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear, HLG (Rec.2100), PQ / HDR10 (Rec.2100) | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. Em S-Log3, V-Log e N-Log o LUT recebe o **código de 10 bits** da câmera (a convenção dos LUTs dos fabricantes, "Full range"), qualquer que seja a faixa do arquivo. |
 | **Aplicar** | Depois do look de película, No lugar do look | Depois | *Depois*: o LUT entra sobre o resultado da cor da película e da cópia. *No lugar*: só o LUT (a cor da película e a cópia são ignoradas; o envelhecimento continua valendo se a *Cor da película* estiver ligada). |
 | **Intensidade do LUT** | 0–100% | 100% | Mistura com a imagem sem o LUT. |
 
@@ -453,3 +483,8 @@ tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e pr
 cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
 dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura e scan.
+
+A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o
+**código de 10 bits** da câmera, como nos LUTs oficiais da Sony, da Panasonic e da Nikon ("Full range"): no
+DaVinci Resolve, ponha esses clipes em *Data Levels → Full* (Clip Attributes), como os fabricantes recomendam.
+Nos outros perfis a entrada é o próprio sinal (o clipe pode ficar em *Auto/Video*).

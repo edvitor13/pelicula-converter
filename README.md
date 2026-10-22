@@ -55,7 +55,7 @@ fotos digitais a aparência de película cinematográfica. Ele não é um filtro
 quadro passa por uma cadeia parecida com a da película real.
 
 1. O vídeo é convertido para **luz da cena** (linear), respeitando o perfil em que foi gravado
-   (Rec.709, N-Log, S-Log3, LogC3, V-Log, Log3G10, DaVinci Intermediate, Cineon…).
+   (Rec.709, N-Log, S-Log3, LogC3, V-Log, Log3G10, DaVinci Intermediate, Cineon, HLG/PQ do HDR…).
 2. A luz atravessa a **lente** (maciez, aberração cromática, distorção, vinheta) e a **emulsão**
    (halação nas luzes fortes, bloom, névoa de filtro difusor).
 3. A **curva do negativo** é aplicada canal por canal, com densidade de cor, tons de sombra e luz,
@@ -168,7 +168,11 @@ quadros vizinhos:
 - **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
   ARRI LogC3 (EI 800), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
   Nikon N-RAW convertidos), Blackmagic Film Gen 5 (Blackmagic Wide Gamut), Apple Log (iPhone),
-  DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa.
+  DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa e a faixa do
+  arquivo levada em conta (S-Log3, V-Log e N-Log são lidos no código de 10 bits da câmera).
+- **Vídeo HDR**: **HLG** (o HDR dos celulares, inclusive o do iPhone) e **PQ / HDR10** (Rec.2100), com o
+  cinza de referência da BT.2408 no cinza médio do app. Ao abrir um vídeo HDR o perfil é escolhido sozinho.
+- Os presets mudam o look, **não** o perfil do vídeo.
 - **Exposição** (±3 EV), **temperatura** e **tonalidade** aplicadas em luz linear.
 
 ### Luz e lente
@@ -565,7 +569,7 @@ A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
 - *Procurar arquivo .cube…* usa um arquivo de qualquer lugar sem copiar.
 - **O LUT espera**: o espaço de cor de entrada do LUT. LUTs de cópia do Resolve (Kodak 2383 etc.)
   esperam **Cineon**; LUTs criativos do Premiere esperam **Rec.709**. O app adivinha pelo nome e
-  pela pasta (Cineon, LogC, S-Log3, N-Log, V-Log) e você pode trocar.
+  pela pasta (Cineon, LogC, S-Log3, N-Log, V-Log, HLG, PQ) e você pode trocar.
 - **Aplicar**: *Depois do look de película* ou *No lugar do look* (só o LUT, sem a curva da
   película e sem a cópia). **Intensidade do LUT** mistura com o resultado.
 - Só LUTs 3D são aceitos (LUT 1D é recusado com aviso). `DOMAIN_MIN`/`DOMAIN_MAX` e
@@ -573,7 +577,8 @@ A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
 
 **Exportar LUTs do próprio app**: *⋯ → Exportar a cor como LUT .cube* grava a parte de cor do look
 atual (curva, cópia, tons, saturação, LUT externo e exposição/balanço) com entrada no mesmo perfil
-escolhido em *Perfil do vídeo*. *Exportar todos os presets como LUTs (pacote)* gera um `.cube` de
+escolhido em *Perfil do vídeo* (em S-Log3, V-Log e N-Log, o código de 10 bits da câmera, como os LUTs dos
+fabricantes: no Resolve, clipe em *Data Levels → Full*). *Exportar todos os presets como LUTs (pacote)* gera um `.cube` de
 33 pontos para cada preset, com entrada Rec.709 — um pacote de LUTs gratuito que funciona no
 Premiere, Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite `.cube`. Grão, halação,
 bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
@@ -978,7 +983,8 @@ prévia (o grão fino aparece de verdade na prévia *Máxima* com zoom 100%).
 
 **Por que o meu vídeo log ficou lavado (ou estourado)?**
 Escolha o perfil certo em *Entrada e exposição → Perfil do vídeo*. Vídeo log aberto como Rec.709
-fica sem contraste; Rec.709 aberto como log fica estourado.
+fica sem contraste; Rec.709 aberto como log fica estourado. Vídeo HDR de celular (HLG) e HDR10 (PQ) são
+reconhecidos sozinhos ao abrir o arquivo; trocar de preset não muda o perfil.
 
 **Posso usar os LUTs do Premiere e do Resolve?**
 Sim, desde que esses programas estejam instalados: o app só lê os arquivos onde eles já estão.

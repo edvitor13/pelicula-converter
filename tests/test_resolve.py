@@ -172,12 +172,29 @@ def test_laboratorio_node_has_the_lab_and_no_parametric_look():
 
 def test_new_inputs_and_mtf_are_in_the_plugin():
     src = SOURCES["cor"]
-    for fn in ("pc_bmd5_dec", "pc_logc4_dec", "pc_apple_dec"):
+    for fn in ("pc_bmd5_dec", "pc_logc4_dec", "pc_apple_dec", "pc_hlg_dec", "pc_pq_dec"):
         assert fn in src
     assert "Blackmagic Film Gen 5" in src and "ARRI LogC4" in src and "Apple Log" in src
+    assert "HLG HDR de celular Rec.2100" in src and "PQ - HDR10 Rec.2100" in src
     m = re.search(r"PC_MTF\[(\d+)\] = \{([^}]*)\}", SOURCES["textura"])
     vals = [float(x.strip().rstrip("f")) for x in m.group(2).split(",")]
     assert vals == pytest.approx([look.MTF_SIGMA[k] for k, _l in params.MTFS])
+
+
+def test_color_nodes_have_the_video_range_control():
+    """Faixa do vídeo logo depois do perfil, com Vídeo (faixa legal) como padrão: o Resolve expande os clipes
+    de câmera; a tabela PC_IN_CV marca as curvas em código de 10 bits (look.INPUT_DOMAIN)."""
+    entradas = [c[0] for c in params.PARAMS["entrada"].choices]
+    for kind in resolve.COLOR_KINDS:
+        names = [c.name for c in resolve.spec(kind).controls]
+        assert names[names.index("ui_entrada") + 1] == "ui_faixa_video"
+        src = SOURCES[kind]
+        assert "DEFINE_UI_PARAMS(ui_faixa_video, Faixa do video, DCTLUI_COMBO_BOX, 0," in src
+        m = re.search(r"PC_IN_CV\[(\d+)\] = \{([^}]*)\}", src)
+        assert [int(x) for x in m.group(2).split(",")] == [int(look.code_value_curve(e)) for e in entradas]
+    assert [k for k, _l in resolve.RANGE_CHOICES] == ["legal", "cheia"]
+    for kind in ("textura", "projetor"):
+        assert "ui_faixa_video" not in SOURCES[kind]
 
 
 # ------------------------------------------------------------------ pacote e instalação
@@ -312,8 +329,9 @@ def _grid(n: int) -> np.ndarray:
 
 
 def _cor_diff(harness, gl_engine, values: dict, n: int = 17) -> float:
+    """Nó Cor com os controles padrão (Faixa do vídeo = Vídeo: clipe em faixa legal expandido) × o app."""
     vals = dict(values, proj_on=False, lut_on=False)
-    want = np.clip(gl_engine.bake_lut(vals, n), 0.0, 1.0)
+    want = np.clip(gl_engine.bake_lut(vals, n, legal=True), 0.0, 1.0)
     got = harness.run("cor", vals, _grid(n)).reshape(-1, 3)
     return float(np.abs(want - got).max())
 
@@ -338,6 +356,24 @@ def test_cor_node_matches_the_app_for_every_input_profile(harness, gl_engine, en
     assert _cor_diff(harness, gl_engine, v) < 2e-3
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("kind", resolve.COLOR_KINDS)
+@pytest.mark.parametrize("entrada", ["slog3", "vlog", "nlog", "logc3", "applelog", "hlg", "pq"])
+def test_video_range_control_matches_the_app(harness, gl_engine, kind, entrada):
+    """Faixa do vídeo = Cheia é o app com um arquivo de faixa cheia (bake_lut(legal=False)); Vídeo, o padrão,
+    é o domínio canônico (legal=True). Só as curvas em código de 10 bits mudam entre os dois."""
+    v = dict(presets.builtin_values("vision3_500t"), entrada=entrada, proj_on=False, lut_on=False)
+    if kind == "laboratorio":
+        v = dict(_lab_app_values(v), proj_on=False, lut_on=False)
+    n = 13
+    full = [k for k, _l in resolve.RANGE_CHOICES].index("cheia")
+    got_full = harness.run(kind, v, _grid(n), ui_faixa_video=full).reshape(-1, 3)
+    got_video = harness.run(kind, v, _grid(n)).reshape(-1, 3)
+    assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=False), 0, 1) - got_full).max() < 2e-3
+    assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1) - got_video).max() < 2e-3
+    assert (np.abs(got_full - got_video).max() > 0.01) == look.code_value_curve(entrada)
+
+
 def _lab_app_values(values: dict) -> dict:
     """O que o nó Laboratório faz, nos ajustes do app: só o laboratório (sem look, cópia nem envelhecimento)."""
     return dict(values, lab_on=True, cor_on=False, copia="nenhuma", envelhecimento=0.0)
@@ -345,7 +381,7 @@ def _lab_app_values(values: dict) -> dict:
 
 def _lab_diff(harness, gl_engine, values: dict, n: int = 17) -> float:
     vals = dict(_lab_app_values(values), proj_on=False, lut_on=False)
-    want = np.clip(gl_engine.bake_lut(vals, n), 0.0, 1.0)
+    want = np.clip(gl_engine.bake_lut(vals, n, legal=True), 0.0, 1.0)
     got = harness.run("laboratorio", vals, _grid(n)).reshape(-1, 3)
     return float(np.abs(want - got).max())
 

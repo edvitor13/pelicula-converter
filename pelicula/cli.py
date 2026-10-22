@@ -129,6 +129,8 @@ def build_values(base: dict | None, preset: str | None, sets: list[str]) -> tupl
                 raise CliError(_("Preset desconhecido: {nome}. Veja a lista com \"presets\".").format(nome=preset))
             values = dict(match[0]["valores"])
             pid = match[0]["id"]
+        if base:
+            values = presets.with_source(values, base)  # o preset troca o look; o perfil do projeto fica
     if values is None:
         values = presets.builtin_values(presets.DEFAULT_ID)
         pid = presets.DEFAULT_ID
@@ -138,6 +140,30 @@ def build_values(base: dict | None, preset: str | None, sets: list[str]) -> tupl
         k, v = item.split("=", 1)
         values[k.strip()] = parse_value(k.strip(), v)
     return params.sanitize(values), pid
+
+
+def auto_input_profile(values: dict, sets: list[str] | None, info) -> str | None:
+    """Perfil de entrada pelos metadados do vídeo (HLG/PQ), como o app faz ao abrir um arquivo.
+
+    Só quando o perfil não veio de `--set entrada=…` (veja `media.auto_profile`: perfis log nunca mudam).
+    Muda `values` e devolve o perfil novo (None = nada mudou).
+    """
+    from . import media
+    if any(item.split("=", 1)[0].strip() == "entrada" for item in sets or [] if "=" in item):
+        return None
+    prof = media.auto_profile(values.get("entrada", "rec709"), info)
+    if prof:
+        values["entrada"] = prof
+    return prof
+
+
+def _report_auto_profile(prof: str | None) -> None:
+    if not prof:
+        return
+    from . import params
+    name = dict(params.PARAMS["entrada"].choices).get(prof, prof)
+    print(_("Perfil do vídeo pelos metadados do arquivo: {perfil} ({nome}). Para escolher outro, use "
+            "--set entrada=…").format(perfil=prof, nome=_(name)), file=sys.stderr)
 
 
 def parse_time(text: str, fps: float) -> int:
@@ -218,6 +244,8 @@ def cmd_export(a) -> int:
         info = sequence.media_info(seq)
     else:
         info = media.probe(src)
+        if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
+            _report_auto_profile(auto_input_profile(values, a.set, info))
     presets_q = {k: s for k, _l, s in export.quality_presets(info)}
     qkey = a.qualidade or (proj.export_quality if proj and proj.export_quality in presets_q else None)
     qkey = qkey or ("img_png" if info.is_image else "mp4")
@@ -352,8 +380,12 @@ def cmd_frame(a) -> int:
     if seq is not None:
         from . import sequence
         info = sequence.media_info(seq)
+        legal = sequence.legal_range(seq)
     else:
         info = media.probe(src)
+        legal = media.legal_range(info)
+        if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
+            _report_auto_profile(auto_input_profile(values, a.set, info))
     frame = parse_time(a.tempo, info.fps) if a.tempo else (proj.frame if proj else 0)
     frame = max(0, min(frame, info.frames - 1))
     if values.get("scan_on"):
@@ -366,7 +398,7 @@ def cmd_frame(a) -> int:
         img = media.grab_frame(info, frame, w, h, 16, hq=True)
     engine.set_input(img)
     li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
-    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False), 16)
+    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False, legal=legal), 16)
     engine.release()
     path = a.saida or str(Path(src).with_name(f"{Path(src).stem}_quadro{frame}.png"))
     ext = Path(path).suffix.lower()
@@ -476,7 +508,8 @@ def cmd_info(a) -> int:
     data = {"arquivo": info.path, "largura": info.width, "altura": info.height, "fps": round(info.fps, 3),
             "quadros": info.frames, "duracao_s": round(info.duration, 3), "codec": info.codec,
             "pix_fmt": info.pix_fmt, "bits": info.bit_depth, "audio": info.audio_codec or None,
-            "imagem": info.is_image}
+            "imagem": info.is_image, "faixa": "legal" if media.legal_range(info) else "cheia",
+            "transferencia": info.color_transfer or None, "perfil_hdr": media.detect_profile(info)}
     if a.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:

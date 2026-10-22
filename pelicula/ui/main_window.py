@@ -893,7 +893,7 @@ class MainWindow(QMainWindow):
                     self.import_paths([q for q in paths if Path(q).suffix.lower() not in (".cube", ".json")])
                     break
                 if self.confirm_discard():
-                    self.load_media(p)
+                    self.load_media(p, detect=True)
                     self.project_path = None
                     self._saved_state = self._state()
                     self._update_title()
@@ -924,16 +924,22 @@ class MainWindow(QMainWindow):
         img = testimage.make(1920, 1080)
         path = os.path.join(tempfile.gettempdir(), "pelicula_cena_de_teste.png")
         qimage_from(img).save(path)
-        self.load_media(path, label=_("Cena de teste"))
+        self.load_media(path, label=_("Cena de teste"), detect=True)
 
-    def load_media(self, path: str, label: str | None = None) -> None:
-        """Abre um arquivo no modo Película. A edição recomeça com ele inteiro na linha do tempo."""
+    def load_media(self, path: str, label: str | None = None, detect: bool = False) -> None:
+        """Abre um arquivo no modo Película. A edição recomeça com ele inteiro na linha do tempo.
+
+        `detect`: o usuário abriu um arquivo novo (não um projeto salvo): um vídeo HDR (HLG/PQ) escolhe
+        sozinho o perfil de entrada, se ele ainda é o padrão (`_detect_profile`).
+        """
         try:
             info = media.probe(path)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
+        if detect:
+            self._detect_profile(info)
         self.file_info = info
         self.cur = None
         self._media_label = label or Path(path).name
@@ -949,6 +955,34 @@ class MainWindow(QMainWindow):
         finally:
             self._loading = False
         self._refresh_source(reset=True)
+
+    def _detect_profile(self, info) -> None:
+        """Perfil de entrada pelos metadados do arquivo (`media.auto_profile`): vídeo HDR (HLG/PQ) com o
+        perfil no padrão Rec.709 passa para HLG/PQ; um arquivo sem HDR com o perfil em HLG/PQ volta para
+        Rec.709. Perfis log escolhidos à mão nunca mudam.
+
+        Só ao abrir um arquivo novo ou pôr o primeiro clipe numa montagem vazia (nunca ao reabrir um
+        projeto salvo nem ao aplicar um preset). A troca entra no desfazer.
+        """
+        prof = media.auto_profile(self.store.get("entrada"), info)
+        if prof is None:
+            return
+        self.store.set("entrada", prof)
+        self.store.commit()
+        self.statusBar().showMessage(self._profile_message(prof), 8000)
+
+    @staticmethod
+    def _profile_message(prof: str) -> str:
+        name = _(dict(params.PARAMS["entrada"].choices).get(prof, prof))
+        if prof in media.HDR_TRANSFERS.values():
+            return _("Vídeo HDR detectado: Perfil do vídeo ajustado para {perfil}.").format(perfil=name)
+        return _("Arquivo sem HDR: Perfil do vídeo de volta para {perfil}.").format(perfil=name)
+
+    def _source_legal(self) -> bool:
+        """A fonte da prévia chega ao look em faixa legal expandida? (`build_plan(..., legal=...)`)"""
+        if self.src_seq is not None:
+            return sequence.legal_range(self.src_seq)
+        return media.legal_range(self.info) if self.info is not None else True
 
     def _set_media_enabled(self, on: bool) -> None:
         video = on and self.info is not None and not self.info.is_image
@@ -1299,11 +1333,14 @@ class MainWindow(QMainWindow):
         threading.Thread(target=run, daemon=True, name="miniatura-midia").start()
 
     def _adopt_format(self, src: timeline.Source) -> None:
-        """Primeiro arquivo numa montagem vazia: a sequência fica com a resolução e o fps dele."""
+        """Primeiro arquivo numa montagem vazia: a sequência fica com a resolução e o fps dele (e, se for
+        vídeo HDR, o look passa a usar o perfil HLG/PQ, como ao abrir o arquivo no modo Película)."""
         if self.model.seq.clips or not src.has_video:
             return
         ref = timeline.Sequence.for_source(src, with_media=False)
         self.model.set_settings(ref.width, ref.height, ref.fps_str)
+        if not src.is_image:
+            self._detect_profile(src)
 
     def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0):
         seq = self.model.seq
@@ -1333,9 +1370,14 @@ class MainWindow(QMainWindow):
         if not srcs:
             return
         self.settings.setValue("last_dir", str(Path(paths[0]).parent))
+        before = self.store.get("entrada")
         for src in srcs:
             self._insert(src)
-        self.statusBar().showMessage(_("{n} arquivo(s) na linha do tempo.").format(n=len(srcs)), 5000)
+        msg = _("{n} arquivo(s) na linha do tempo.").format(n=len(srcs))
+        detected = self.store.get("entrada") != before  # primeiro clipe HDR numa montagem vazia
+        if detected:
+            msg += " " + self._profile_message(self.store.get("entrada"))
+        self.statusBar().showMessage(msg, 8000 if detected else 5000)
 
     def add_to_timeline(self, path: str) -> None:
         src = self._probe_source(path)
@@ -1430,7 +1472,8 @@ class MainWindow(QMainWindow):
         info = lut_info(v["lut_arquivo"]) if v["lut_on"] and v["lut_arquivo"] else None
         t0 = time.perf_counter()
         try:
-            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info)
+            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info,
+                                   legal=self._source_legal())
             out = self.engine.render(plan, 8)
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
@@ -1456,12 +1499,17 @@ class MainWindow(QMainWindow):
         else:
             src = testimage.make(tw, th)
         self.thumb_engine.set_input(src)
+        # Cada miniatura é o preset aplicado ao quadro atual: com o perfil do arquivo (aplicar um preset não
+        # muda o perfil, veja presets.SOURCE_KEYS) e a faixa da fonte; sem quadro, a cena de teste é Rec.709.
+        current = self.store.values if self.cur_q is not None else None
+        legal = self._source_legal() if self.cur_q is not None else False
+        self._thumb_entrada = self.store.get("entrada")
         images = {}
         for item in self._all_presets():
-            v = item["valores"]
+            v = presets.with_source(item["valores"], current)
             info = lut_info(v["lut_arquivo"]) if v.get("lut_on") and v.get("lut_arquivo") else None
             try:
-                out = self.thumb_engine.render(look.build_plan(v, tw, th, 3, 24.0, info, dither=False), 8)
+                out = self.thumb_engine.render(look.build_plan(v, tw, th, 3, 24.0, info, dither=False, legal=legal), 8)
             except Exception:  # noqa: BLE001
                 continue
             images[item["id"]] = qimage_from(out)
@@ -1472,6 +1520,9 @@ class MainWindow(QMainWindow):
             if key == "*" or key in c.keys():
                 c.refresh(key)
         self.schedule_render()
+        timer = getattr(self, "thumb_timer", None)
+        if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
+            timer.start()  # as miniaturas dos presets usam o perfil do arquivo
         self._update_modified()
         self._update_title()
         if self.curve_graph.isVisible():
@@ -1487,7 +1538,7 @@ class MainWindow(QMainWindow):
         """Curva do look atual: o eixo dos cinzas de um LUT assado na GPU (mesmo caminho de cor do app)."""
         if not self.curve_graph.isVisible():
             return
-        self.curve_graph.update_from(self.engine, self.store.values)
+        self.curve_graph.update_from(self.engine, self.store.values, legal=self._source_legal())
 
     # ================================================================ reprodução
     def toggle_play(self) -> None:
@@ -1726,12 +1777,14 @@ class MainWindow(QMainWindow):
         if pid:
             self.apply_preset(pid)
 
-    def apply_preset(self, pid: str) -> None:
+    def apply_preset(self, pid: str, keep_source: bool = True) -> None:
         vals = self.preset_values(pid)
         if vals is None:
             return
         self.preset_id = pid
-        self.store.set_all(vals)
+        # O preset muda o look; o perfil do vídeo é do arquivo e fica (presets.SOURCE_KEYS), menos num
+        # projeto novo, que volta tudo ao padrão.
+        self.store.set_all(presets.with_source(vals, self.store.values if keep_source else None))
         self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(pid)))
         self.preset_combo.blockSignals(False)
@@ -1740,7 +1793,7 @@ class MainWindow(QMainWindow):
 
     def _update_modified(self) -> None:
         base = self.preset_values(self.preset_id)
-        modified = base is None or base != self.store.values
+        modified = not presets.same_look(base, self.store.values)
         self.mod_label.setVisible(modified)
 
     def _update_history(self) -> None:
@@ -1960,7 +2013,8 @@ class MainWindow(QMainWindow):
             else:
                 self.engine.set_input(img)
                 info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
-                out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False), 16)
+                out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False,
+                                                         legal=self._source_legal()), 16)
             ext = Path(path).suffix.lower()
             pix = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
                    ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}.get(ext, [])
@@ -2100,7 +2154,7 @@ class MainWindow(QMainWindow):
         finally:
             self._loading = False
         self._refresh_source(reset=True)
-        self.apply_preset(presets.DEFAULT_ID)
+        self.apply_preset(presets.DEFAULT_ID, keep_source=False)
         self._saved_state = self._state()
         self._update_title()
 

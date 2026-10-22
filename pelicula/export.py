@@ -579,6 +579,11 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
     rt.start()
     wt.start()
     info_lut = lut_info(job.values.get("lut_arquivo", "")) if job.values.get("lut_on") else None
+    if seq is not None:
+        from .sequence import legal_range
+        legal = legal_range(seq)
+    else:
+        legal = media.legal_range(info)
     first_index = round(start * fps_val / info.fps) if fps_out else start
     i = 0
     try:
@@ -591,7 +596,8 @@ def _encode(job: ExportJob, engine: Engine, info: media.MediaInfo, s: ExportSett
             if seq is not None:
                 img = engine.compose(img, seq, w, h, depth)
             engine.set_input(img)
-            plan = look.build_plan(job.values, w, h, first_index + i, fps_val, info_lut, dither=s.dither and depth == 8)
+            plan = look.build_plan(job.values, w, h, first_index + i, fps_val, info_lut, dither=s.dither and depth == 8,
+                                   legal=legal)
             out = engine.render(plan, depth)
             out_q.put(out.tobytes())
             i += 1

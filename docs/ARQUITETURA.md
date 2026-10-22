@@ -176,8 +176,10 @@ Todos os passos desenham um quadrilátero de tela cheia (`VERT`) num *framebuffe
 1. **Tremor**: `weave()` aplica zoom, rotação e deslocamento em pixels.
 2. **Lente**: `lens()` aplica a distorção radial normalizada (o canto continua no canto) e, com
    aberração cromática, amostra R, G e B com escalas `1 + ca`, `1` e `1 − ca`.
-3. **Entrada**: `toLinear(código, perfil)` desfaz a curva (Rec.709 neutra, N-Log, S-Log3, LogC3,
-   V-Log, Cineon, DaVinci Intermediate, Log3G10) e `u_gamut` converte o gamut para Rec.709.
+3. **Entrada**: `toLinear(código, perfil, cv)` desfaz a curva (Rec.709 neutra, N-Log, S-Log3, LogC3,
+   V-Log, Cineon, DaVinci Intermediate, Log3G10, Blackmagic Gen 5, LogC4, Apple Log, HLG, PQ) e `u_gamut`
+   converte o gamut para Rec.709. Com `cv` (curva em código de 10 bits e fonte em faixa legal expandida,
+   seção 5.1) o valor volta ao código da câmera antes da curva.
 4. **Exposição e balanço**: `× exp2(u_gain)` por canal.
 5. **Vinheta** (bitola + lente) em EV.
 6. **Scan** (se ligado): converte o pixel para milímetros na tira (`u_scan_view`), calcula em qual
@@ -245,9 +247,12 @@ Em ordem:
 
 ### 4.6 Exportar LUT (`BAKE`)
 
-`Engine.bake_lut(values, n)` desenha uma grade `n² × n` (R varia mais rápido, depois G, depois B —
+`Engine.bake_lut(values, n, legal=False)` desenha uma grade `n² × n` (R varia mais rápido, depois G, depois B —
 a ordem do `.cube`) e roda só `toLinear → gamut → ganho → colorPipe`, com o projetor desligado e sem
-pontilhado. O resultado vai para `luts.save_cube()` (domínio 0–1, valores limitados a 0–1).
+pontilhado. O resultado vai para `luts.save_cube()` (domínio 0–1, valores limitados a 0–1). A grade está no
+domínio da própria curva (`legal=False`: código de 10 bits no S-Log3/V-Log/N-Log, como os LUTs dos
+fabricantes); `legal=True` é o clipe de faixa legal expandido (o gráfico *Curva* de um vídeo comum e a
+referência do plugin do Resolve com *Faixa do vídeo = Vídeo*).
 
 ### 4.7 Coordenadas
 
@@ -260,11 +265,16 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
 
 - **Espaço de trabalho**: luz linear de cena com primárias Rec.709/D65; cinza médio = 0,18.
 - **Gamut**: matrizes calculadas em `look.py` a partir das primárias xy (Rec.709, Rec.2020,
-  S-Gamut3.Cine, ARRI Wide Gamut 3, V-Gamut, DaVinci Wide Gamut, REDWideGamutRGB), todas com
-  branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
+  S-Gamut3.Cine, ARRI Wide Gamut 3/4, V-Gamut, DaVinci Wide Gamut, REDWideGamutRGB, Blackmagic Wide
+  Gamut), todas com branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
 - **Curvas de câmera** em GLSL: N-Log, S-Log3, LogC3 (EI 800), V-Log, Cineon (685/300 com preto
-  offset), DaVinci Intermediate e Log3G10 — decodificação e codificação (a codificação serve para
-  alimentar LUTs que esperam log).
+  offset), DaVinci Intermediate, Log3G10, Blackmagic Film Gen 5, LogC4, Apple Log, HLG e PQ —
+  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log).
+- **HLG e PQ** (BT.2100): HLG é a OETF inversa × `HLG_SCALE` (o cinza da BT.2408, 38% do sinal, vira
+  0,18); PQ é a EOTF da ST 2084 (cd/m²) seguida da OOTF inversa do HLG a 1000 cd/m² (γ = 1,2 pela
+  luminância BT.2100, como a conversão PQ → HLG da BT.2408) e da mesma escala. Acima de 1000 cd/m² não há
+  corte; valores negativos (pé da faixa legal) não geram NaN. Constantes em `look.HLG_*`/`PQ_*`, repetidas
+  no GLSL e no plugin (`tests/test_entrada.py` confere).
 - **Curva neutra de exibição** (`D_SLOPE = 0,155` por stop, `D_MID = 0,45`, `D_P = 4`): uma
   sigmoide de *soft clip* em stops, **inversível**. Ela é usada para levar Rec.709 até a luz linear
   e de volta, então com todos os efeitos desligados o vídeo sai igual ao que entrou (a menos do
@@ -276,6 +286,46 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
 - **Saída**: valores de exibição BT.709. O codificador recebe RGB e o ffmpeg converte para YUV com
   matriz BT.709 em faixa limitada (BT.601 em faixa cheia para JPEG/WebP), gravando as tags
   `bt709` de primárias, transferência e matriz.
+
+### 5.1 Faixa do arquivo e domínio das curvas
+
+O `FrameReader` expande o vídeo YUV de faixa legal (`in_range=limited`): em 10 bits o shader recebe
+v = (código − 64)/876, a fração de "IRE" — o mesmo valor que o DaVinci Resolve tem de um clipe em *Video
+levels*. Vídeo de faixa cheia (`pc`, `yuvj`) e imagens RGB chegam como v = código/1023. Cada curva declara em
+`look.INPUT_DOMAIN` em que escala o fabricante escreveu a fórmula (fontes no comentário do código):
+
+| Domínio | Perfis | O que o shader faz |
+|---|---|---|
+| `"cv"`: código de 10 bits, gravado como está | S-Log3 (Sony), V-Log (Panasonic), N-Log (Nikon) | com `u_legal = 1`: CV = (v·876 + 64)/1023 antes da curva; com faixa cheia, CV = v |
+| `"sinal"`: o próprio sinal E′ (quantização padrão 64 + 876·E′) | LogC3, LogC4, Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709, linear | usa v como está |
+
+O fluxo da faixa:
+
+```
+arquivo ──ffprobe──► MediaInfo ──media.legal_range()──┐
+montagem (Edição) ──sequence.legal_range()─────────────┤  (faixa da maioria dos clipes de vídeo)
+                                                       ▼
+build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → u_input_cv
+                                                       ▼
+          BASE / BAKE: toLinear(código, u_input, u_input_cv == 1 && u_legal == 1)
+```
+
+- **Quem passa a faixa**: prévia, miniaturas, gráfico *Curva* e "Salvar quadro" (`MainWindow._source_legal`),
+  exportação (`export._encode`, também na estimativa) e o terminal (`quadro`, `exportar`).
+- **Modo Edição**: cada clipe é decodificado com a sua faixa e a tela montada guarda esses valores; o look
+  usa a faixa da maioria dos clipes de vídeo (empate: o primeiro; imagens só contam sem vídeo). Clipes log de
+  faixas diferentes na mesma montagem ficam com uma faixa só (perfil por clipe fica para depois).
+- **`log_reescalado`** (avançado, fora dos presets): gravação externa em que a câmera mandou o log já
+  reescalado para 64–940 (saída HDMI *Limited*, comum na Nikon) — desliga a volta ao código.
+- **LUTs**: o LUT externo (`lutEncode`) e os `.cube` exportados (`Engine.bake_lut`, padrão `legal=False`)
+  usam o domínio da própria curva — o código de 10 bits nas curvas `"cv"`, a convenção dos LUTs "Full" dos
+  fabricantes e das IDTs do ACES (que aplicam a fórmula direto na entrada). Assim um LUT oficial da Sony
+  recebe 420/1023 no cinza, venha o arquivo em faixa legal ou cheia.
+- **Plugin do Resolve**: o nó recebe o valor que o Resolve tem do clipe, sem saber a faixa do arquivo; o
+  controle *Faixa do vídeo* (padrão *Vídeo* = `bake_lut(legal=True)`, *Cheia* = `legal=False`) faz o papel de
+  `u_legal` (seção 15).
+- **Limite conhecido**: a saída RGB inteira do decodificador corta em 1,0 o que passa do código 940 (super
+  brancos). No S-Log3, que usa códigos até ~1000, isso corta as luzes mais de ~6,7 stops acima do cinza.
 
 ## 6. Determinismo e independência de resolução
 
@@ -377,7 +427,10 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
 
 - A busca usa `-ss` antes do `-i` meio quadro antes do alvo (rápido e preciso).
 - A matriz de entrada vem dos metadados (`bt709`, `bt601`, `bt2020`, `smpte240m`; sem metadado,
-  BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj`.
+  BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj` (`_in_range`). `media.legal_range(info)`
+  diz se o leitor expandiu a faixa legal — é o `legal` do `build_plan` (seção 5.1).
+- `MediaInfo.color_transfer` (`arib-std-b67` = HLG, `smpte2084` = PQ) sugere o perfil de entrada
+  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso.
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
@@ -587,7 +640,8 @@ de onda (com cache por arquivo).
   `engine.compose()` antes de `build_plan`/`render`. O número do quadro do look é o quadro da sequência,
   como na prévia — a exportação FFV1 16 bits de uma edição é conferida bit a bit (`tests/test_sequence.py`).
 - `sequence.media_info(seq)`: `MediaInfo` virtual (tamanho, fps, duração, som, formato do 1º vídeo) usado
-  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal.
+  pela janela de exportação, pela estimativa (`measure_speed(..., sequence=seq)`) e pelo terminal. A faixa
+  da tela para o look vem de `sequence.legal_range(seq)` (a dos clipes de vídeo), nunca desse `MediaInfo`.
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
   como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
   continuam `1` e abrem nas versões antigas.
@@ -656,6 +710,11 @@ diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um
   com o moderngl e compara com o app: a cor bate com `Engine.bake_lut` (≤ 8e-7 nos 44 presets e em todos os controles novos, < 1,3e-4
   na varredura das 180 combinações do Laboratório); textura e projetor ficam a 1/255 de
   `Engine.render`, exceto halação/bloom/névoa (aproximação de passo único por amostragem esparsa).
+- **Faixa do vídeo**: o nó não sabe a faixa do arquivo; o controle *Faixa do vídeo* (só do plugin, logo
+  depois do *Perfil do video*) diz se o valor chegou expandido (*Vídeo*, padrão: clipe em Data Levels
+  Auto/Video) ou já é o código (*Cheia*). A tabela `PC_IN_CV` (de `look.INPUT_DOMAIN`) marca as curvas em
+  código de 10 bits; `B_INPUT` volta ao código como o `toLinear` do app. No OpenFX, presets e looks `.json`
+  não mudam o perfil nem a faixa (`ofx.KEEP_ON_PRESET`, campo `keep` de `pc_param_def`).
 - **Laboratório no DCTL**: a calibração das luzes da copiadora é resolvida no próprio kernel, em forma
   fechada (a curva da cópia tem pé zero e se inverte exatamente; as densidades das camadas saem de um
   sistema 3×3), então qualquer push, diafonia, chave e força funciona sem tabelas enormes.

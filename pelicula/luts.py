@@ -91,6 +91,10 @@ def guess_input(path: str) -> str:
         return "nlog"
     if "v-log" in name or "vlog" in name:
         return "vlog"
+    if "hlg" in compact:
+        return "hlg"
+    if words & {"pq", "hdr10"} or "st2084" in compact:
+        return "pq"
     return "rec709"
 
 
