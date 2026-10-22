@@ -46,7 +46,10 @@ pelicula/
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, build_encoder_cmd(), ExportQueue, run_job(), measure_speed()
-  deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), pip_install()
+  deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), extract_archive(), pip_install()
+  tools.py                   componentes externos (sem Qt): registro TOOLS (versão e SHA-256 fixos), download e
+                             instalação atômica, remover, espaço em disco, detecção de programas do sistema
+  jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
   system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
@@ -61,14 +64,15 @@ pelicula/
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
                              instalação (pasta do OpenFX, com administrador)
-  ui/                        main_window, export_dialog, queue_dialog, deps_dialog, viewer, looks,
+  ui/                        main_window, export_dialog, queue_dialog, job_bridge (fila → sinais do Qt), viewer, looks,
                              widgets, store (desfazer/refazer), theme, icons, prefs (QSettings),
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
-                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes...)
+                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
+                             ferramentas e programas do sistema, placa de vídeo e bibliotecas...)
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
@@ -131,7 +135,9 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    (`editparams.VIDEO`/`AUDIO`, gravados nos projetos): padrão neutro = clipe idêntico ao arquivo.
 10. **Dependências mínimas.** Em tempo de execução só PySide6, moderngl (+glcontext) e numpy; o resto
     é biblioteca padrão. Nada de Pillow, OpenCV, SciPy, requests. O ffmpeg é externo e só é baixado
-    de fontes confiáveis com conferência de SHA-256 (`deps.py`).
+    de fontes confiáveis com conferência de SHA-256 (`deps.py`). Outras ferramentas externas (IA etc.)
+    são **componentes baixados à parte**, nunca dentro do pacote, com versão e SHA-256 fixos no código
+    (`tools.py`, receita "Nova ferramenta externa").
 11. **Multiplataforma.** Use `system.open_path()`/`system.reveal()` em vez de `os.startfile`/`explorer`,
     `Perf.popen_kwargs()` para prioridade de processos e `media.NO_WINDOW` só no Windows. Caminhos
     do Windows ficam atrás de `sys.platform == "win32"`. O macOS fica desativado
@@ -227,6 +233,15 @@ Testes do modo Edição e do plugin:
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
+
+Componentes e fila de tarefas (sem rede: pacotes locais, `file://` e um servidor em 127.0.0.1; a pasta
+do app vai para uma pasta temporária via `LOCALAPPDATA`/`XDG_DATA_HOME`):
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_tools.py` | registro consistente (ids, https, SHA-256, módulos), instalação atômica e relatada, SHA-256 ou tamanho errado não instala nada, caminhos suspeitos em zip/tar, cancelar, atualizar/manter versões, remover, espaço em disco, ffmpeg pelo fluxo de `deps.py`, detecção do Resolve |
+| `tests/test_jobs.py` | fila: ordem dos eventos, erros, cancelar (na espera e rodando), um trabalho de GPU por vez, 200 trabalhos de 8 threads |
+| `tests/test_componentes_ui.py` | página Componentes e ponte do Qt em subprocesso *offscreen*: baixar/remover pela fila, progresso e cancelar, erro de SHA-256, licença com aceite, `show_deps`, sinais na thread principal |
 
 Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFORM=offscreen` e
 `QApplication` própria (a sessão do pytest já tem uma `QGuiApplication`).
@@ -367,7 +382,59 @@ e `luts.guess_input()`. Documente em `docs/EFEITOS.md` e no README.
 - Procura: `media.configure()` (pasta escolhida → `deps.ffmpeg_dir()` → `PATH` → pastas comuns).
   Depois de trocar o ffmpeg chame `media.configure()` (que limpa o cache de codificadores).
 - Download: `deps.SOURCES` (URL do pacote + URL do hash). Toda fonte nova precisa de hash publicado e
-  conferido antes de instalar; nada de executar instaladores, nada de pedir administrador.
+  conferido antes de instalar; nada de executar instaladores, nada de pedir administrador. A extração
+  passa por `deps.extract_archive()` (recusa caminhos que saem da pasta).
+- Interface: Configurações › Componentes (`ui/pages/componentes.py`, cartão do ffmpeg). O ffmpeg é a
+  exceção do registro de componentes: baixa o build mais recente e confere com o checksum publicado pelo
+  autor do build, sem versão fixa. `MainWindow.show_deps(reason, auto_download)` abre essa página com o
+  aviso e, se pedido, já baixando.
+
+### Nova ferramenta externa (componente)
+
+Ferramentas externas (IA, conversores, modelos...) **nunca** vão dentro do pacote do app: são
+downloads separados, com um cartão em Configurações › Componentes.
+
+1. **Fonte oficial.** Use o binário publicado pelo próprio autor **só se ele publicar checksums**.
+   Sem binário oficial verificável, compile a partir do código-fonte oficial **no CI do
+   PeliculaConverter** (workflow próprio, versão da fonte fixa) e publique o pacote numa release do
+   projeto com `SHA256SUMS.txt`; o `Artifact` aponta para essa release (`origin=tools.CI`) e o `Tool`
+   leva o `source_url` do código.
+2. **Tudo fixo no código** (`tools.TOOLS`): para cada sistema, um `tools.Artifact` com versão (vira o
+   nome da pasta), URL `https`, SHA-256 (64 dígitos hexadecimais minúsculos), tamanho em bytes, tipo de
+   pacote (`zip`, `tar.gz`, `tar.xz` ou `arquivo`) e caminhos dos executáveis. Confira o SHA-256 baixando
+   e comparando com o publicado; nunca leia o hash do mesmo servidor na hora do download. Versão nova =
+   mudança de código (versão + URL + SHA-256 + tamanho).
+3. **Licença**: confira a do programa **e a dos pesos/modelos** — nada de licença não comercial
+   (CC-BY-NC e afins) nem "só para pesquisa". Preencha `license`/`license_url`. Licença com condições
+   (atribuição, avisos, uso aceitável) → texto em `consent` (PT-BR, `N_()`): a página pede o aceite do
+   usuário antes de baixar.
+4. **Pasta**: sempre `deps.app_data_dir()/ferramentas/<id>/<versão>/`, montada por `tools.download()`
+   (SHA-256 conferido antes de extrair, troca atômica, `pelicula-origem.json`), só para o usuário, sem
+   administrador e sem rodar instaladores. O `id` é ASCII sem acento e **nunca muda** (é o nome da pasta).
+5. **Quem usa**: o id do módulo em `Tool.modules` e/ou o id da ferramenta em `Module.requires`. O módulo
+   acha o executável com `tools.executable(tools.get("<id>"))` (`None` = não instalado: ofereça abrir
+   `show_settings("componentes")`) e roda trabalhos longos pela fila de tarefas
+   (`ui/job_bridge.bridge().submit(...)`; GPU no máximo um por vez, com `Engine` próprio).
+6. **Ícone**: um desenho simples em `ui/icons.py` (sem logotipo de marca).
+7. **Testes**: `tests/test_tools.py::test_registry_is_consistent` confere o registro sozinho. Teste o
+   código que usa a ferramenta com uma instalação falsa em pasta temporária (`root=` ou
+   `LOCALAPPDATA`/`XDG_DATA_HOME` temporários) — nunca a rede nem a pasta real do usuário.
+8. Textos novos em PT-BR + `tools/i18n_extract.py --update` + en/es; README (componentes e
+   privacidade) e `CHANGELOG.md`.
+
+Programa do sistema (instalado pelo usuário, como o DaVinci Resolve): `kind=tools.SISTEMA`, sem
+`artifacts`, e uma função em `tools.DETECTORS` que só lê (pastas padrão, lista de desinstalação do
+Windows) — o app não instala nem baixa nada. O ffmpeg (`backend="ffmpeg"`) é a exceção documentada
+ao modelo de versão fixa: não copie o fluxo dele para ferramentas novas.
+
+### Trabalho em segundo plano (fila de tarefas)
+
+Tudo que demora (downloads, análises, IA) vai para `jobs.py` pela ponte do Qt:
+`bridge().submit(fn, título, kind=jobs.CPU|GPU|REDE, key="...", on_finished=f)`. A função recebe o job,
+chama `job.report(etapa, feito, total)` e `job.check_cancel()` e devolve o resultado (`job.result`);
+`f(job)` roda na thread principal (é ali que se mexe em widgets, preferências ou no projeto). A
+interface acompanha pelos sinais `changed`/`finished` de `bridge()`, filtrando por `job.key`. Detalhes
+em `docs/ARQUITETURA.md` (seção 17).
 
 ## Empacotamento e release
 

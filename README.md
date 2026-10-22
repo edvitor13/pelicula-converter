@@ -28,7 +28,7 @@
   - [Jeito fácil: instalador ou versão portátil](#jeito-fácil-instalador-ou-versão-portátil)
   - [Pelo código-fonte](#pelo-código-fonte)
   - [Requisitos](#requisitos)
-  - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
+  - [O ffmpeg e os componentes](#o-ffmpeg-e-os-componentes)
   - [Dependências e por que cada uma existe](#dependências-e-por-que-cada-uma-existe)
 - [Guia de uso](#guia-de-uso)
 - [Modo Edição: montar, cortar e ajustar antes da película](#modo-edição-montar-cortar-e-ajustar-antes-da-película)
@@ -109,8 +109,8 @@ quadros vizinhos:
   <tr>
     <td width="54%"><b>Exportar</b> — qualidades prontas, ajustes do arquivo, desempenho e tempo estimado medido na sua máquina<br><br>
       <img src="docs/img/exportar.png" alt="Janela de exportação"></td>
-    <td width="46%"><b>Dependências e atualizações</b> — ffmpeg, placa de vídeo e bibliotecas<br><br>
-      <img src="docs/img/dependencias.png" alt="Janela de dependências e atualizações"></td>
+    <td width="46%"><b>Componentes</b> — ffmpeg, programas do sistema, placa de vídeo e bibliotecas<br><br>
+      <img src="docs/img/componentes.png" alt="Página Componentes das Configurações"></td>
   </tr>
 </table>
 
@@ -235,8 +235,11 @@ quadros vizinhos:
 - **Fila de exportação** em segundo plano, com progresso, velocidade, tempo restante e cancelamento.
 
 ### Sistema
-- **Gerenciador de dependências**: se o ffmpeg não existir ou estiver antigo, o app oferece baixar
-  a versão oficial, conferida por SHA-256, só para o seu usuário (sem administrador).
+- **Componentes** (Configurações › Componentes): o ffmpeg e os outros programas externos, cada um com
+  versão, espaço em disco, local, fonte oficial, licença e o selo *verificado (SHA-256)*; baixar,
+  atualizar e remover em segundo plano, com progresso e cancelamento. Se o ffmpeg não existir ou estiver
+  antigo, o app oferece baixar a versão oficial, conferida por SHA-256, só para o seu usuário (sem
+  administrador). Programas instalados no computador (DaVinci Resolve) aparecem como *no sistema*.
 - **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
   enquanto.
 
@@ -321,7 +324,7 @@ Instalação silenciosa, para administradores e scripts:
 1. Extraia o `.zip` numa pasta qualquer (por exemplo `C:\Programas\PeliculaConverter`).
 2. Abra `PeliculaConverter.exe` (o mesmo aviso do SmartScreen pode aparecer).
 
-Nos dois casos, se o ffmpeg não for encontrado, a janela **Dependências e atualizações** abre
+Nos dois casos, se o ffmpeg não for encontrado, a página **Componentes** das Configurações abre
 sozinha: clique em **Baixar ffmpeg** e pronto.
 
 **Linux — pacote `.deb` (Debian/Ubuntu)**
@@ -405,24 +408,27 @@ instalar com o `pip`.
 | Python (só pelo código-fonte) | 3.12 | Recomendado **3.15**; o executável já traz o Python |
 | Memória | 8 GB | 16 GB ou mais para 4K com buffer grande |
 
-### O ffmpeg e o gerenciador de dependências
+### O ffmpeg e os componentes
 
 O ffmpeg lê e grava todos os formatos de vídeo. O PeliculaConverter procura o `ffmpeg` e o
 `ffprobe`, nesta ordem:
 
-1. a pasta escolhida em **Configurações → Pasta do ffmpeg…** (ou *Usar outra pasta…* na janela de
-   dependências);
+1. a pasta escolhida em **Configurações → Pasta do ffmpeg…** (ou *Usar outra pasta…* no cartão do
+   ffmpeg, em Componentes);
 2. a pasta onde o próprio app instala o ffmpeg que baixou;
 3. o `PATH` do sistema;
 4. pastas comuns — Windows: `C:\FFMPEG\ffmpeg\bin`, `C:\FFMPEG\bin`, `C:\ffmpeg\bin`,
    `%ProgramFiles%\ffmpeg\bin`, os atalhos do WinGet e a pasta do ShareX; Linux: `/usr/local/bin`,
    `/usr/bin`, `/snap/bin`.
 
-**Configurações → Dependências e atualizações…** mostra a versão do ffmpeg, a placa de vídeo e a
-versão do OpenGL, o processador, a memória e as versões das bibliotecas Python. Na abertura o app
-confere tudo em segundo plano:
+**Configurações → Componentes…** mostra cada componente (ffmpeg, DaVinci Resolve…) com versão, espaço
+em disco, local (*Abrir pasta*), fonte oficial, licença, o selo *verificado (SHA-256)* e os botões
+*Baixar*, *Atualizar* e *Remover*; o espaço total usado; e, na seção *Sistema*, a placa de vídeo e a
+versão do OpenGL, o processador, a memória e as versões das bibliotecas Python. Downloads rodam em
+segundo plano: dá para fechar a janela e voltar depois para ver o progresso. Na abertura o app confere
+tudo em segundo plano:
 
-- **ffmpeg ausente** → a janela de dependências abre com o botão **Baixar ffmpeg**.
+- **ffmpeg ausente** → a página Componentes abre com o aviso e o botão **Baixar ffmpeg**.
 - **ffmpeg antigo** (versão menor que 7.0, ou build de desenvolvimento com mais de ~18 meses) →
   o app pergunta se quer atualizar (*Atualizar*, *Agora não* ou *Não perguntar de novo*). No
   Windows ele também confere a última versão publicada no gyan.dev e avisa quando a sua é mais
@@ -443,6 +449,15 @@ conferir, nada é instalado. Prefere instalar por conta própria?
 winget install Gyan.FFmpeg      # Windows
 sudo apt install ffmpeg         # Debian/Ubuntu
 ```
+
+Ferramentas externas novas (por exemplo, de IA, nas próximas versões) são sempre **downloads
+separados**, nunca dentro do pacote do app. Vêm só da fonte oficial — o binário do próprio autor quando
+ele publica checksums; senão, compilado pelo CI do PeliculaConverter a partir do código oficial e
+publicado nas Releases deste repositório —, com versão e SHA-256 fixos no app, conferidos antes de
+extrair, e ficam em `%LOCALAPPDATA%\PeliculaConverter\ferramentas` (Linux:
+`~/.local/share/PeliculaConverter/ferramentas`). Licenças com condições pedem o seu aceite antes do
+download. O ffmpeg é a exceção: como os builds mudam o tempo todo, o app baixa o mais recente e confere
+com o SHA-256 publicado pelo autor do build.
 
 ### Dependências e por que cada uma existe
 
@@ -1010,10 +1025,10 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Sintoma | O que fazer |
 |---|---|
 | *"Não foi possível iniciar o processamento na placa de vídeo (é preciso OpenGL 3.3)"* | Atualize o driver da GPU (NVIDIA, AMD ou Intel). Em máquinas virtuais e áreas de trabalho remotas o OpenGL 3.3 pode não existir. No Linux, confira `glxinfo \| grep "OpenGL core"` e instale os drivers Mesa. |
-| *"Não encontrei o ffmpeg neste computador"* | **Configurações → Dependências e atualizações → Baixar ffmpeg**, ou instale (`winget install Gyan.FFmpeg` / `sudo apt install ffmpeg`), ou aponte a pasta em *Pasta do ffmpeg…*. |
+| *"Não encontrei o ffmpeg neste computador"* | **Configurações → Componentes → Baixar ffmpeg**, ou instale (`winget install Gyan.FFmpeg` / `sudo apt install ffmpeg`), ou aponte a pasta em *Pasta do ffmpeg…*. |
 | O app avisa que o ffmpeg está desatualizado | Clique em *Atualizar*. O app baixa a versão oficial para a pasta dele, sem mexer no ffmpeg do sistema. |
 | *"Não foi possível abrir o arquivo"* com `.NEV`, `.R3D` ou `.braw` | O ffmpeg não lê esses RAW. Veja [Arquivos RAW](#arquivos-raw-n-raw-r3d-braw-prores-raw). |
-| Um codec não aparece na lista | Codecs só aparecem se o seu ffmpeg tiver o codificador. NVENC/QSV/AMF são testados de verdade e somem se a placa ou o driver não suportarem. Atualize o ffmpeg pela janela de dependências. |
+| Um codec não aparece na lista | Codecs só aparecem se o seu ffmpeg tiver o codificador. NVENC/QSV/AMF são testados de verdade e somem se a placa ou o driver não suportarem. Atualize o ffmpeg em **Configurações → Componentes**. |
 | Exportação falha com erro do ffmpeg | A fila mostra a mensagem do ffmpeg. Combinações comuns: H.264/H.265 exigem dimensões pares (o app já ajusta), MP4 não aceita PCM (o app troca por AAC), NVENC exige driver recente. Tente a qualidade *MP4 H.264*. |
 | Efeitos lentos / prévia travando | Use a prévia *Rápida (540p)* ou *Normal (720p)*. Em notebooks, force a GPU dedicada (*Alto desempenho*). Halação, bloom e névoa com raios grandes custam mais. |
 | Exportação deixa o computador lento | Prioridade *Baixa* e menos núcleos na seção *Desempenho*. |
@@ -1158,7 +1173,8 @@ internet nestes casos:
 |---|---|---|
 | Ao abrir, no máximo uma vez por dia: procurar versão nova do app | `api.github.com` | Um pedido de página comum (o endereço IP, como em qualquer site, e `User-Agent: PeliculaConverter/<versão>`) |
 | Ao abrir, no Windows: ver qual é a versão mais nova do ffmpeg | `www.gyan.dev` | O mesmo tipo de pedido |
-| Quando você pede: baixar ou atualizar o ffmpeg | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo |
+| Quando você pede: baixar ou atualizar o ffmpeg, ou *Procurar versão nova* em Componentes | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo (ou o pedido de versão) |
+| Quando você pede: baixar um componente em Configurações › Componentes | A fonte oficial mostrada no cartão (o site do autor ou as Releases deste repositório) | Download do arquivo |
 | Quando você aceita uma atualização do app | `github.com` (Releases deste repositório) | Download do arquivo |
 
 - As duas consultas feitas ao abrir podem ser desligadas em **Configurações → Procurar atualizações
@@ -1169,8 +1185,9 @@ internet nestes casos:
 *English:* PeliculaConverter does not collect personal data: no accounts, telemetry, usage
 statistics or ads, and your videos, projects and presets never leave your computer. It only goes
 online to (1) check GitHub for a new app version at startup, at most once a day; (2) on Windows,
-check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg when you ask; and
-(4) download an app update when you accept it. These requests carry no personal data besides the
+check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg or another component
+(Settings › Components) from its official source when you ask; and (4) download an app update when
+you accept it. These requests carry no personal data besides the
 IP address inherent to any connection and a `PeliculaConverter/<version>` user agent. The two
 startup checks can be turned off in **Settings → Check for updates automatically**; with them off,
 the program will not transfer any information to other networked systems unless specifically

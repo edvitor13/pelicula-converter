@@ -4,6 +4,10 @@ Windows: build "release essentials" do gyan.dev (o build para Windows indicado p
 conferido com o SHA-256 publicado pelo próprio site.
 Linux: build estático GPL do BtbN (GitHub), conferido com o checksums.sha256 da release.
 macOS: preparado, mas desativado por enquanto.
+
+O ffmpeg é a exceção do registro de componentes (`tools.py`): em vez de versão e SHA-256 fixos no
+código, baixa sempre o build mais recente e confere com o arquivo de checksum publicado pelo autor
+do build. `extract_archive()` e `safe_member()` são usados pelos dois.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -26,6 +31,7 @@ from typing import Callable
 
 from . import APP_NAME, __version__
 from .i18n import N_, _
+from .jobs import Cancelled
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 MIN_VERSION = (7, 0)
@@ -34,6 +40,7 @@ UA = {"User-Agent": f"{APP_NAME}/{__version__}"}
 SOURCES = {
     "win32": dict(
         name=N_("gyan.dev (build oficial para Windows indicado pelo ffmpeg.org)"),
+        page="https://www.gyan.dev/ffmpeg/builds/",
         version_url="https://www.gyan.dev/ffmpeg/builds/release-version",
         url="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
         sha_url="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256",
@@ -41,6 +48,7 @@ SOURCES = {
     ),
     "linux": dict(
         name=N_("BtbN FFmpeg-Builds (GitHub, build estático)"),
+        page="https://github.com/BtbN/FFmpeg-Builds",
         version_url="",
         url="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz",
         sha_url="https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/checksums.sha256",
@@ -135,16 +143,37 @@ def inspect(ffmpeg_path: str) -> FFmpegInfo | None:
     return FFmpegInfo(ffmpeg_path, raw, version, d)
 
 
+_latest_seen: dict[str, object] = {"value": "", "t": None}
+LATEST_MAX_AGE = 6 * 3600.0
+
+
 def latest_version(timeout: float = 10.0) -> str:
+    """Versão mais nova publicada pela fonte do ffmpeg (consulta a rede; "" se não der ou não houver)."""
     src = SOURCES.get(platform_key())
     if not src or not src["version_url"]:
         return ""
     try:
         req = urllib.request.Request(src["version_url"], headers=UA)
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read(64).decode("utf-8", "replace").strip()
+            ver = r.read(64).decode("utf-8", "replace").strip()
     except OSError:
         return ""
+    remember_latest_version(ver)
+    return ver
+
+
+def remember_latest_version(ver: str) -> None:
+    """Guarda a versão consultada (a página Componentes mostra sem consultar a rede de novo)."""
+    if parse_version(ver):
+        _latest_seen.update(value=ver, t=time.monotonic())
+
+
+def cached_latest_version(max_age: float = LATEST_MAX_AGE) -> str:
+    """A última versão publicada já consultada nesta sessão, sem rede ("" se ainda não ou se ficou velha)."""
+    t = _latest_seen["t"]
+    if t is None or time.monotonic() - float(t) > max_age:
+        return ""
+    return str(_latest_seen["value"] or "")
 
 
 def parse_version(txt: str) -> tuple | None:
@@ -178,8 +207,8 @@ def pip_install(packages: list[str]) -> tuple[bool, str]:
     return res.returncode == 0, (res.stdout + res.stderr).decode("utf-8", "replace")[-3000:]
 
 
-class DownloadCancelled(Exception):
-    pass
+class DownloadCancelled(Cancelled):
+    """Download cancelado (é um `jobs.Cancelled`: a fila de tarefas marca o trabalho como cancelado)."""
 
 
 def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
@@ -234,16 +263,7 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
             raise RuntimeError(_("O arquivo baixado não confere com o SHA-256 oficial. Nada foi instalado."))
         report(_("Extraindo…"))
         out = tmp / "x"
-        out.mkdir()
-        if src["kind"] == "zip":
-            with zipfile.ZipFile(archive) as z:
-                for member in z.namelist():
-                    if not _safe_member(member):
-                        raise RuntimeError(_("Caminho suspeito dentro do arquivo: {caminho}").format(caminho=member))
-                z.extractall(out)
-        else:
-            with tarfile.open(archive, "r:xz") as t:
-                t.extractall(out, filter="data")
+        extract_archive(archive, out, src["kind"])
         exe = ".exe" if sys.platform == "win32" else ""
         found = {}
         for name in ("ffmpeg", "ffprobe"):
@@ -272,6 +292,63 @@ def download_ffmpeg(progress: Callable[[str, int, int], None] | None = None,
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _safe_member(name: str) -> bool:
-    p = Path(name)
-    return not p.is_absolute() and ".." not in p.parts
+def safe_member(name: str) -> bool:
+    """Se um caminho de dentro de um .zip/.tar pode ser extraído sem sair da pasta de destino.
+
+    Recusa caminhos absolutos (/x, \\x, C:/x), letra de unidade ou ":" (fluxos alternativos do
+    NTFS), ".." e caracteres nulos — com "/" ou "\\" como separador, em qualquer sistema.
+    """
+    if not name or "\x00" in name:
+        return False
+    norm = name.replace("\\", "/")
+    if norm.startswith("/") or ":" in norm:
+        return False
+    return ".." not in norm.split("/")
+
+
+_safe_member = safe_member  # nome antigo
+
+
+def _inside(root: Path, name: str) -> bool:
+    try:
+        return (root / name).resolve().is_relative_to(root)
+    except (OSError, ValueError):
+        return False
+
+
+def extract_archive(archive: str | Path, dest: str | Path, kind: str) -> Path:
+    """Extrai um .zip ou .tar(.gz/.xz) em `dest`, recusando qualquer caminho que saia da pasta.
+
+    Confira o SHA-256 ANTES de chamar: isto é só a segunda barreira. No tar vale também o filtro
+    "data" do Python (sem links para fora, sem dispositivos, sem permissões especiais).
+    Levanta RuntimeError com a mensagem para o usuário.
+    """
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    root = dest.resolve()
+
+    def suspicious(name: str) -> RuntimeError:
+        return RuntimeError(_("Caminho suspeito dentro do arquivo: {caminho}").format(caminho=name))
+
+    if kind == "zip":
+        with zipfile.ZipFile(archive) as z:
+            for member in z.namelist():
+                if not safe_member(member) or not _inside(root, member):
+                    raise suspicious(member)
+            z.extractall(dest)
+    elif kind in ("tar", "tar.gz", "tar.xz", "tar.bz2"):
+        with tarfile.open(archive, "r:*") as t:
+            members = t.getmembers()
+            for m in members:
+                if not safe_member(m.name) or not _inside(root, m.name):
+                    raise suspicious(m.name)
+            try:
+                # Links que apontam para fora da pasta (ou absolutos) são barrados pelo filtro "data".
+                t.extractall(dest, members=members, filter="data")
+            except tarfile.FilterError as exc:
+                info = getattr(exc, "tarinfo", None)
+                raise suspicious(f"{info.name} -> {info.linkname}" if info is not None and info.linkname
+                                 else getattr(info, "name", "") or str(exc)) from exc
+    else:
+        raise ValueError(f"tipo de pacote desconhecido: {kind!r}")
+    return dest

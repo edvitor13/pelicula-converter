@@ -21,6 +21,8 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 13. [Modo Edição](#13-modo-edição)
 14. [Laboratório: emulação por densidade](#14-laboratório-emulação-por-densidade)
 15. [Plugin do DaVinci Resolve (`resolve.py`)](#15-plugin-do-davinci-resolve-resolvepy)
+16. [Componentes externos (`tools.py`)](#16-componentes-externos-toolspy)
+17. [Fila de tarefas (`jobs.py`)](#17-fila-de-tarefas-jobspy)
 
 ---
 
@@ -33,7 +35,7 @@ flowchart TB
         ST["ParamStore<br/>ui/store.py"]
         WG["SectionCard / sliders<br/>ui/widgets.py"]
         VW["Viewer · Looks · Histograma"]
-        ED["ExportDialog · QueueDialog · DepsDialog"]
+        ED["ExportDialog · QueueDialog · Configurações"]
     end
     subgraph CORE["Núcleo (sem Qt de interface)"]
         PR["params.py<br/>esquema"]
@@ -43,7 +45,7 @@ flowchart TB
         PS["presets.py · luts.py"]
         MD["media.py<br/>ffprobe / FrameReader"]
         EX["export.py<br/>ExportQueue / run_job"]
-        DP["deps.py · system.py"]
+        DP["deps.py · tools.py · jobs.py · system.py"]
     end
     FF[("ffmpeg / ffprobe")]
     GPU[("GPU — OpenGL 3.3")]
@@ -72,8 +74,8 @@ Três ideias guiam o projeto:
    dither)` e `Engine.render(plan, depth)`.
 2. **Esquema declarativo.** `params.SECTIONS` descreve todos os ajustes (tipo, faixa, padrão,
    rótulo, dica). A interface é gerada a partir dele e o motor lê os valores pelas chaves.
-3. **O núcleo não depende da interface.** `look`, `engine`, `media`, `export`, `presets`, `luts` e
-   `deps` funcionam sem janela (são usados assim pelos testes). A exceção é `edgetext`, que usa
+3. **O núcleo não depende da interface.** `look`, `engine`, `media`, `export`, `presets`, `luts`,
+   `deps`, `tools` e `jobs` funcionam sem janela (são usados assim pelos testes). A exceção é `edgetext`, que usa
    `QPainter` sobre `QImage` e precisa de uma `QGuiApplication` existente (sem ela, o texto de
    borda simplesmente não é desenhado).
 
@@ -93,7 +95,9 @@ Três ideias guiam o projeto:
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()`, `measure_speed()`. |
-| `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), pasta do app, pacotes Python, `pip_install()`. |
+| `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
+| `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 16). |
+| `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 17). |
 | `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema. |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
@@ -116,7 +120,8 @@ Três ideias guiam o projeto:
 | `pelicula/ui/looks.py` | Painel de miniaturas dos presets com busca. |
 | `pelicula/ui/export_dialog.py` | Janela de exportação, desempenho e estimativa. |
 | `pelicula/ui/queue_dialog.py` | Janela da fila. |
-| `pelicula/ui/deps_dialog.py` | Janela *Dependências e atualizações*. |
+| `pelicula/ui/settings_dialog.py` / `pages/` | Configurações em páginas; `pages/componentes.py` mostra os componentes (ffmpeg, ferramentas, programas do sistema), o espaço em disco e o sistema (placa de vídeo, bibliotecas). |
+| `pelicula/ui/job_bridge.py` | `JobBridge`/`bridge()`: eventos da fila de tarefas como sinais do Qt na thread principal; `on_finished`. |
 | `pelicula/ui/theme.py` / `icons.py` | Cores, fontes, folha de estilo; ícones vetoriais e ícone do app (usa `assets/logo-*.png` quando existem). |
 
 ## 3. Dos ajustes aos uniforms
@@ -323,7 +328,9 @@ flowchart LR
     end
     subgraph T5["Dependências"]
         DC["_check_deps()<br/>versão do ffmpeg / última versão"]
-        DL["download_ffmpeg()"]
+    end
+    subgraph T6["Fila de tarefas — threads 'tarefa-N-tipo'"]
+        DL["tools.download() / remove()<br/>download_ffmpeg()"]
     end
     FF1[["ffmpeg (decodificar)"]]
     FF2[["ffmpeg (codificar)"]]
@@ -347,7 +354,8 @@ flowchart LR
 | `exportacao` | `export.ExportQueue` | Executa os trabalhos um de cada vez. O `Engine` é criado **dentro** dessa thread (contexto OpenGL próprio, atual nela). | `QTimer` de 500 ms na janela e de 250 ms na fila leem o estado do `ExportJob`. |
 | leitura / gravação / dreno | `export.run_job` | Leitura: `FrameReader` → `frames_q`. GPU: laço na thread `exportacao`. Gravação: `out_q` → pipe do codificador. Dreno: lê o `stderr` do ffmpeg, interpreta `frame=` do `-progress` e guarda as mensagens de erro. As filas têm o tamanho do *buffer* escolhido (mínimo 2). | Campos do `ExportJob` (`done`, `fps_rate`, `eta`, `status`, `error`). |
 | estimativa | `export_dialog._start_estimate` | `measure_speed()` cria **outro** `Engine`, exporta até 60 quadros num arquivo temporário (sem áudio), descarta os 8 primeiros (aquecimento) e para sozinho depois de 15 s (thread vigia). | `_Bridge.done` (sinal). Uma nova mudança cancela a medição anterior (`threading.Event`). |
-| dependências | `MainWindow._check_deps`, `DepsDialog` | Confere ffmpeg e a última versão publicada; baixa e instala o ffmpeg. | `_DepsBridge.result`, `_Bridge.progress/finished/latest`. |
+| dependências | `MainWindow._check_deps` | Confere o ffmpeg e a última versão publicada (guardada em `deps.cached_latest_version()`). | `_DepsBridge.result`. |
+| fila de tarefas | `jobs.JobQueue` (`jobs.shared()`) | Um thread por trabalho rodando: downloads e remoções de componentes (página Componentes), depois análises e IA. No máximo 1 trabalho de GPU. | `ui/job_bridge.JobBridge`: sinais `added`/`changed`/`finished` e `on_finished` na thread principal. |
 
 Regras que decorrem disso:
 
@@ -465,6 +473,13 @@ imagens e sequências não têm áudio.
 `missing_python_modules()` e `pip_install()` só valem rodando pelo código-fonte; no executável do
 PyInstaller as bibliotecas já estão embutidas (`sys.frozen`).
 
+O ffmpeg é a **exceção** do registro de componentes (seção 16): como os builds mudam o tempo todo e
+os antigos saem do ar, ele não tem versão nem SHA-256 fixos no código — vale sempre o build mais
+recente, conferido com o checksum publicado pelo autor do build. A interface é o cartão do ffmpeg em
+Configurações › Componentes; o download roda na fila de tarefas (seção 17). `latest_version()` guarda
+a versão consultada (`cached_latest_version()`), e a página mostra essa versão sem consultar a rede de
+novo.
+
 ## 11. Persistência e arquivos
 
 | O quê | Onde |
@@ -473,6 +488,7 @@ PyInstaller as bibliotecas já estão embutidas (`sys.frozen`).
 | Presets do usuário | `presets.user_dir()` = `$APPDATA/PeliculaConverter/presets` (sem `APPDATA`, a pasta pessoal) — um `.json` por preset, nome derivado do título. |
 | Meus LUTs | `luts.user_dir()` = `$APPDATA/PeliculaConverter/luts`. |
 | ffmpeg baixado | `deps.ffmpeg_dir()` (veja a seção 10). |
+| Ferramentas baixadas | `tools.tools_dir()` = `<pasta do app>/ferramentas/<id>/<versão>/`, cada versão com `pelicula-origem.json` (URL, SHA-256, data). Pastas `.novo-*` (instalação em andamento) e `.removendo-*` (remoção) são temporárias. |
 | Temporários | `pelicula_seta.png` (seta das listas), `pelicula_cena_de_teste.png` (cena de teste), `pelicula_medida_*` (estimativa, apagada no fim), `pelicula_ffmpeg_*` (download, apagada no fim). |
 
 Formato do preset: `{"nome", "desc", "app": "PeliculaConverter", "versao": 1, "valores": {…}}`.
@@ -487,7 +503,10 @@ A suíte fica em `tests/` (configuração em `pytest.ini`, que já põe a raiz n
 - `@pytest.mark.gpu` usa a fixture `gl_engine` e é pulado sem OpenGL 3.3 (CI, máquinas virtuais);
 - `@pytest.mark.ffmpeg` usa `ffmpeg_ok` e é pulado sem ffmpeg/ffprobe;
 - `APPDATA` é redirecionado para uma pasta temporária em todos os testes, então presets e LUTs do
-  usuário nunca são tocados.
+  usuário nunca são tocados;
+- os testes de componentes (`test_tools.py`, `componentes_ui_cases.py`) redirecionam também
+  `LOCALAPPDATA`/`XDG_DATA_HOME` (a pasta do app, onde ficam o ffmpeg e as ferramentas baixadas) e não
+  usam a rede: pacotes locais, `file://` e um servidor HTTP em 127.0.0.1.
 
 ```bash
 .venv\Scripts\python -m pytest -q      # Windows
@@ -665,3 +684,104 @@ diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um
 - `install()` grava numa pasta temporária e troca a antiga de uma vez; recusa uma pasta
   `PeliculaConverter` que não foi criada por ele. `lut_dirs()` procura a pasta de LUTs do Resolve no
   Windows, Linux e macOS.
+
+## 16. Componentes externos (`tools.py`)
+
+Registro dos programas externos que o app usa, mostrado em **Configurações › Componentes**
+(`ui/pages/componentes.py`). Sem Qt.
+
+| Tipo | O que o app faz | Exemplos |
+|---|---|---|
+| `BAIXADO` | baixa da fonte oficial, confere o SHA-256 fixo no código e instala na pasta do app | ffmpeg (exceção, veja abaixo); ferramentas de IA nas próximas versões |
+| `SISTEMA` | só detecta (`DETECTORS`, leitura), nunca baixa nem instala | DaVinci Resolve (agora), Blender (depois) |
+
+`Tool`: id ASCII (é o nome da pasta; nunca muda), nome, descrição, ícone de `ui/icons.py`, site
+oficial, licença e URL da licença, módulos que usam (`modules.MODULES`), `core` (núcleo do app),
+`consent` (condições da licença que o usuário aceita antes de baixar), `backend` e `source_url`.
+`Artifact` (um por sistema): versão, URL `https`, SHA-256, tamanho, pacote (`zip`, `tar.gz`, `tar.xz`
+ou `arquivo`), executáveis dentro da pasta, tamanho extraído e origem.
+
+**De onde vêm os arquivos** (o teste `test_registry_is_consistent` confere o registro):
+
+- versão, URL, SHA-256 e tamanho **fixos no código** — o hash nunca é lido do mesmo servidor na hora do
+  download;
+- binário oficial do autor quando ele publica checksums (`origin=OFICIAL`); sem isso, compilado no CI do
+  PeliculaConverter a partir do código-fonte oficial (`source_url`) e publicado numa release do projeto
+  com `SHA256SUMS.txt` (`origin=CI`);
+- só `https`; nada de instaladores nem de administrador;
+- licença com condições → `consent` (a página pede o aceite); pesos e modelos com licença não comercial
+  não entram.
+
+**Exceção: o ffmpeg** (`backend="ffmpeg"`) segue o fluxo de `deps.py` (seção 10). No registro ele
+aparece para a página mostrar versão, local e espaço, atualizar, remover e escolher outra pasta.
+
+`download(tool, progress, cancel, root=None, keep_old=False)`:
+
+1. confere o esquema da URL (`https`; `file://` e `http://127.0.0.1` só servem aos testes) e o espaço
+   livre;
+2. cria `ferramentas/<id>/.novo-XXXX` (no mesmo disco do destino) e baixa calculando o SHA-256 em
+   *streaming*, parando se passar do tamanho fixado ou se pedirem para cancelar;
+3. confere o SHA-256 **antes** de extrair — não conferiu, nada é instalado;
+4. extrai com `deps.extract_archive()` (recusa caminhos absolutos, `..`, letra de unidade e `:`; no tar,
+   o filtro `data` barra links para fora), confere os executáveis e os marca como executáveis no Linux;
+5. grava `pelicula-origem.json` e troca de uma vez: `rename` da pasta nova para
+   `ferramentas/<id>/<versão>` (uma instalação anterior da mesma versão sai antes e volta se a troca
+   falhar);
+6. sem `keep_old`, remove as outras versões; apaga a pasta temporária em qualquer caso.
+
+Uma trava por ferramenta impede dois downloads simultâneos da mesma ferramenta. Sobras `.removendo-*`
+somem no próximo download ou remoção; `.novo-*`, só depois de 12 h (podem ser o download de outra
+janela do app).
+
+Outras funções: `installed()` (versões com marcador válido, a mais nova primeiro), `current()`,
+`executable(tool, nome)` (o caminho que um módulo usa para rodar a ferramenta), `status()` (estado para
+a página: `AUSENTE`, `INSTALADO`, `DESATUALIZADO` ou `INDISPONIVEL`, versão, espaço, selo `verified`,
+fonte), `remove()` (`rename` para `.removendo-*` e depois apaga; com arquivo em uso, erro e nada muda),
+`disk_usage()` (ferramentas + ffmpeg do app) e `used_by()` (módulos de `Tool.modules` e de
+`Module.requires`).
+
+**Página Componentes**: um cartão por componente — ícone, para que serve, versão, espaço em disco, local
+com "Abrir pasta", site oficial, licença, fonte do download, selo "verificado (SHA-256)", módulos que usam
+e os botões Baixar/Atualizar/Remover —, o espaço total e a seção Sistema (placa de vídeo e OpenGL,
+processador, memória, bibliotecas Python). Downloads e remoções rodam na fila de tarefas (seção 17) com a
+chave `componente:<id>`: continuam com a janela fechada e reaparecem com o progresso ao reabrir. O fim de
+um download do ffmpeg (tirar a pasta escolhida das preferências e chamar `media.configure()`) roda em
+`on_finished`, na thread principal, mesmo com a página fechada. A página nunca consulta a rede sozinha:
+a versão mais nova do ffmpeg vem da checagem ao abrir o app ou do botão "Procurar versão nova".
+`MainWindow.show_deps(reason, auto_download)` abre a página com o aviso e, se pedido, já baixando o
+ffmpeg (ffmpeg ausente ou antigo ao abrir o app).
+
+## 17. Fila de tarefas (`jobs.py`)
+
+Base dos trabalhos longos em segundo plano: downloads de componentes agora; análises e IA nas próximas
+versões. O núcleo não usa Qt; `ui/job_bridge.py` faz a ponte com a interface.
+
+```python
+def analisar(job):
+    for i in range(total):
+        job.check_cancel()                      # levanta jobs.Cancelled se pediram para cancelar
+        job.report(_("Analisando…"), i, total)  # etapa e progresso (total 0 = sem porcentagem)
+    return resultado                            # vira job.result
+
+job = bridge().submit(analisar, _("Analisar cenas"), kind=jobs.GPU, key="analise:cenas",
+                      on_finished=self._guardar_no_projeto)  # chamado na thread principal
+```
+
+| Peça | O que faz |
+|---|---|
+| `Job` | título, tipo (`CPU`, `GPU`, `REDE`), `key` (a interface acha o trabalho por ela), `data`, estado (`ESPERANDO`, `RODANDO`, `CONCLUIDO`, `ERRO`, `CANCELADO`), etapa, `done`/`total`, `progress`, `result`, `error`, `cancel_event` |
+| `JobQueue` | limite de simultâneos por tipo (`CPU` 2, `REDE` 3, **`GPU` sempre 1**), ordem de chegada dentro de cada tipo, uma thread por trabalho rodando (`tarefa-N-tipo`), `cancel`/`cancel_all`, `find(key)`, `active()`, `wait_all()`, `shutdown()`; ouvintes recebem `ADDED`, `STARTED`, `PROGRESS` e `FINISHED` na thread do evento |
+| `jobs.shared()` | a fila do app inteiro; ao fechar o Python (`atexit`) cancela o que estiver rodando e espera até 2 s para as pastas temporárias serem limpas |
+| `ui/job_bridge.JobBridge`, `bridge()` | leva os eventos para a thread principal (sinais `added`, `changed` e `finished`; progresso no máximo a cada 50 ms por trabalho) e chama `on_finished(job)` lá |
+
+- **Cancelamento cooperativo**: na espera, o trabalho sai da fila na hora; rodando, a função confere
+  `job.check_cancel()` ou `job.cancelled`. Uma exceção depois do pedido de cancelar conta como
+  `CANCELADO` (`deps.DownloadCancelled` é um `jobs.Cancelled`).
+- **Erros** viram `ERRO`, com a mensagem em `job.error`; a fila continua.
+- **GPU**: o trabalho cria o seu próprio `Engine` dentro da função (um contexto OpenGL por thread) e nunca
+  usa o da janela; a fila garante um de cada vez.
+- **Resultado no projeto** (análises e IA): quem pediu guarda `job.result` em `on_finished`, na thread
+  principal. Nada da fila entra no caminho de renderização (determinismo por quadro).
+- Ligue os sinais a métodos de widgets (o Qt desliga sozinho quando o widget some) e use `on_finished`
+  para o que precisa acontecer mesmo com a janela fechada. Outros recursos (as notificações do sistema,
+  por exemplo) podem ouvir `bridge().finished` para avisar quando um trabalho termina.

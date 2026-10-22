@@ -443,6 +443,68 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         path.lineTo(4.5, 19.5)
         path.closeSubpath()
         p.drawPath(path)
+    else:
+        _draw_components(name, p, c)
+
+
+def _draw_components(name: str, p: QPainter, c: QColor) -> None:
+    """Ícones da página Componentes (mesma grade de 24 unidades)."""
+    if name == "video":
+        # Arquivo de vídeo (ffmpeg): quadro com o triângulo de reproduzir.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5.5, 17, 13), 2.5, 2.5)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        path = QPainterPath()
+        path.moveTo(10, 8.8)
+        path.lineTo(15.6, 12)
+        path.lineTo(10, 15.2)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "download":
+        _pen(p, c)
+        p.drawLine(QPointF(12, 3.5), QPointF(12, 14.5))
+        p.drawPolyline([QPointF(7.5, 10), QPointF(12, 14.5), QPointF(16.5, 10)])
+        path = QPainterPath()
+        path.moveTo(4, 13)
+        path.lineTo(4, 19.5)
+        path.lineTo(20, 19.5)
+        path.lineTo(20, 13)
+        p.drawPath(path)
+    elif name == "shield":
+        # Escudo com visto: conferido com SHA-256.
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(12, 3.5)
+        path.lineTo(19, 6)
+        path.lineTo(19, 11.5)
+        path.quadTo(19, 17.5, 12, 20.5)
+        path.quadTo(5, 17.5, 5, 11.5)
+        path.lineTo(5, 6)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawPolyline([QPointF(8.8, 12), QPointF(11, 14.3), QPointF(15.4, 9.6)])
+    elif name == "chip":
+        # Processador / placa de vídeo.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(6.5, 6.5, 11, 11), 1.8, 1.8)
+        p.drawRoundedRect(QRectF(9.5, 9.5, 5, 5), 0.8, 0.8)
+        for t in (9.5, 12, 14.5):
+            p.drawLine(QPointF(t, 6.5), QPointF(t, 3.8))
+            p.drawLine(QPointF(t, 17.5), QPointF(t, 20.2))
+            p.drawLine(QPointF(6.5, t), QPointF(3.8, t))
+            p.drawLine(QPointF(17.5, t), QPointF(20.2, t))
+    elif name == "box":
+        # Caixa: componente genérico.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5, 17, 4), 1.2, 1.2)
+        path = QPainterPath()
+        path.moveTo(5, 9)
+        path.lineTo(5, 19.5)
+        path.lineTo(19, 19.5)
+        path.lineTo(19, 9)
+        p.drawPath(path)
+        p.drawLine(QPointF(10, 12.5), QPointF(14, 12.5))
 
 
 @lru_cache(maxsize=256)

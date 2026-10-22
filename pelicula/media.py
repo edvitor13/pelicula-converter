@@ -76,7 +76,7 @@ def ffmpeg() -> str:
     if not _tools["ffmpeg"]:
         configure()
     if not _tools["ffmpeg"]:
-        raise RuntimeError(_("ffmpeg não encontrado. Use Configurações > Dependências e atualizações para baixar."))
+        raise RuntimeError(_("ffmpeg não encontrado. Use Configurações > Componentes para baixar."))
     return _tools["ffmpeg"]
 
 
