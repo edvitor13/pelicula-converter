@@ -1216,7 +1216,9 @@ class MainWindow(QMainWindow):
         """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
         if self._loading:
             return
-        if kind == "values" and self.src_seq is not None and self._use_sequence():
+        if kind == "markers":
+            pass  # marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução)
+        elif kind == "values" and self.src_seq is not None and self._use_sequence():
             self.src_seq = self.model.seq.copy()
             if self._compose_current():
                 self.render_now()
@@ -2053,9 +2055,12 @@ class MainWindow(QMainWindow):
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:
-        """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1)."""
+        """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1).
+
+        Marcadores contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
-        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path):
+        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
+                             and not seq.markers):
             return None
         return seq.to_json()
 

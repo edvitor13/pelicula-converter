@@ -6,7 +6,11 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
 - "settings": resolução, fps ou fundo da sequência;
+- "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega);
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
+
+A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
+outro, e "Excluir" apaga o que estiver selecionado.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ class TimelineModel(QObject):
         self.seq: Sequence = seq if seq is not None else Sequence()
         self.history = timeline.History(self.seq)
         self.selection: list[str] = []
+        self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -87,8 +92,10 @@ class TimelineModel(QObject):
     def _filter_selection(self, emit: bool = False) -> None:
         ids = {c.id for c in self.seq.clips}
         new = [i for i in self.selection if i in ids]
-        if new != self.selection:
+        marker = self.marker_sel if self.marker_sel and self.seq.marker(self.marker_sel) else None
+        if new != self.selection or marker != self.marker_sel:
             self.selection = new
+            self.marker_sel = marker
             if emit:
                 self.selectionChanged.emit()
 
@@ -98,9 +105,10 @@ class TimelineModel(QObject):
         for i in ids:
             if i in known and i not in new:
                 new.append(i)
-        if new != self.selection:
+        if new != self.selection or self.marker_sel is not None:
             self.commit()
             self.selection = new
+            self.marker_sel = None
             self.selectionChanged.emit()
 
     def select_group(self, cid: str, add: bool = False, toggle: bool = False) -> None:
@@ -153,6 +161,9 @@ class TimelineModel(QObject):
         return made
 
     def delete_selected(self, ripple: bool = False) -> None:
+        if self.marker_sel is not None:
+            self.remove_marker(self.marker_sel)
+            return
         if not self.selection:
             return
         self.seq.delete(list(self.selection), ripple=ripple)
@@ -304,7 +315,54 @@ class TimelineModel(QObject):
                 c.dur = max(1, int(round(c.dur * ratio)))
             for c in seq.clips:
                 c.dur = max(1, min(c.dur, seq.max_dur(c)))
+            for mk in seq.markers:
+                mk.frame = int(round(mk.frame * ratio))
         self._done("settings")
+
+    # ------------------------------------------------------------ marcadores
+    def select_marker(self, mid: str | None) -> None:
+        """Seleciona um marcador (tira a seleção de clipes); None tira a seleção do marcador."""
+        mid = mid if mid and self.seq.marker(mid) is not None else None
+        if mid == self.marker_sel and (mid is None or not self.selection):
+            return
+        self.commit()
+        self.marker_sel = mid
+        if mid is not None:
+            self.selection = []
+        self.selectionChanged.emit()
+
+    def selected_marker(self):
+        return self.seq.marker(self.marker_sel) if self.marker_sel else None
+
+    def add_marker(self, frame: int, **fields):
+        """Marcador no quadro (ou o que já existe ali), já selecionado."""
+        n = len(self.seq.markers)
+        mk = self.seq.add_marker(int(frame), **fields)
+        self.select_marker(mk.id)
+        if len(self.seq.markers) != n:
+            self._done("markers")
+        return mk
+
+    def update_marker(self, mid: str, **fields) -> None:
+        if self.seq.update_marker(mid, **fields):
+            self._done("markers")
+
+    def move_marker(self, mid: str, frame: int) -> None:
+        self.update_marker(mid, frame=int(frame))
+
+    def remove_marker(self, mid: str) -> None:
+        if self.seq.remove_marker(mid):
+            if self.marker_sel == mid:
+                self.marker_sel = None
+                self.selectionChanged.emit()
+            self._done("markers")
+
+    def clear_markers(self) -> None:
+        if self.seq.markers:
+            self.seq.markers = []
+            self.marker_sel = None
+            self.selectionChanged.emit()
+            self._done("markers")
 
     # ------------------------------------------------------------ copiar ajustes
     def copy_values(self, cid: str) -> bool:

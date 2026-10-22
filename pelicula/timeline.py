@@ -7,6 +7,10 @@
 - Clipes de vídeo e áudio do mesmo arquivo nascem **ligados** (`Clip.link`): mover, aparar,
   dividir, mudar a velocidade ou apagar um afeta o outro do mesmo jeito.
 - Colocar um clipe por cima de outro **sobrescreve** a parte coberta (como nos editores comuns).
+- **Marcadores** (`Marker`) ficam no tempo da sequência, não presos a clipes: mover, aparar e dividir
+  clipes não os mexe; "excluir e fechar o espaço" da sequência inteira puxa os que vêm depois do
+  trecho apagado (os de dentro vão para o ponto do corte); mudar o fps mantém o tempo deles. Os
+  marcados como capítulo viram os capítulos do YouTube e do arquivo exportado (`chapters.py`).
 
 Tudo aqui é determinístico e puro: o mesmo JSON gera sempre a mesma montagem, e a prévia e a
 exportação usam as mesmas funções (`src_frame`, `clips_at`, `layers_at`).
@@ -24,6 +28,7 @@ from fractions import Fraction
 from typing import Any, Iterable
 
 from . import editparams
+from .i18n import N_
 
 VIDEO = "video"
 AUDIO = "audio"
@@ -33,6 +38,15 @@ IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
 EPS = 1e-6
 FPS_CHOICES = ["24000/1001", "24/1", "25/1", "30000/1001", "30/1", "50/1", "60000/1001", "60/1"]
+
+# Cores dos marcadores: chave ASCII gravada no projeto (nunca renomear) e rótulo. O tom de cada uma
+# na tela fica em `ui/theme.MARKER_COLORS`.
+MARKER_COLORS: list[tuple[str, str]] = [
+    ("laranja", N_("Laranja")), ("vermelho", N_("Vermelho")), ("amarelo", N_("Amarelo")), ("verde", N_("Verde")),
+    ("ciano", N_("Ciano")), ("azul", N_("Azul")), ("roxo", N_("Roxo")), ("rosa", N_("Rosa")),
+]
+MARKER_COLOR_KEYS = tuple(k for k, _label in MARKER_COLORS)
+MARKER_TEXT_MAX = 500   # nome e nota de um marcador (caracteres)
 
 
 def new_id() -> str:
@@ -226,6 +240,48 @@ class Layer:
     extension: bool = False   # True = cauda do clipe anterior mostrada por baixo de um "dissolver"
 
 
+# ------------------------------------------------------------------ marcadores
+def _clean_text(v: Any) -> str:
+    return str(v if v is not None else "")[:MARKER_TEXT_MAX]
+
+
+@dataclass
+class Marker:
+    """Marcador na régua da sequência (quadro da sequência; não pertence a nenhum clipe).
+
+    `chapter` é uma escolha explícita (padrão desligado): marcadores também servem de lembrete
+    ("corrigir a cor aqui") e não devem virar capítulo do vídeo sem a pessoa pedir.
+    """
+
+    id: str
+    frame: int
+    color: str = MARKER_COLOR_KEYS[0]
+    name: str = ""
+    note: str = ""
+    chapter: bool = False
+
+    def __post_init__(self) -> None:
+        self.frame = max(0, int(self.frame))
+        if self.color not in MARKER_COLOR_KEYS:
+            self.color = MARKER_COLOR_KEYS[0]
+        self.name = _clean_text(self.name)
+        self.note = _clean_text(self.note)
+        self.chapter = bool(self.chapter)
+
+    def to_json(self) -> dict[str, Any]:
+        return {"id": self.id, "quadro": self.frame, "cor": self.color, "nome": self.name, "nota": self.note,
+                "capitulo": self.chapter}
+
+    @classmethod
+    def from_json(cls, d: dict[str, Any]) -> "Marker | None":
+        try:
+            frame = int(d.get("quadro", 0))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return cls(id=str(d.get("id") or new_id()), frame=frame, color=str(d.get("cor") or ""),
+                   name=d.get("nome") or "", note=d.get("nota") or "", chapter=d.get("capitulo") is True)
+
+
 # ------------------------------------------------------------------ sequência
 @dataclass
 class Sequence:
@@ -237,6 +293,7 @@ class Sequence:
     tracks: list[Track] = field(default_factory=list)
     clips: list[Clip] = field(default_factory=list)
     sources: dict[str, Source] = field(default_factory=dict)
+    markers: list[Marker] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -628,6 +685,14 @@ class Sequence:
                 continue
             if free_everywhere or (c.kind, c.track) in tracks:
                 c.start -= (b - a)
+        if free_everywhere:
+            # O tempo da sequência encolheu: os marcadores depois do trecho andam junto e os de dentro
+            # ficam no ponto do corte (nada some sem a pessoa pedir).
+            for mk in self.markers:
+                if mk.frame >= b:
+                    mk.frame -= (b - a)
+                elif mk.frame > a:
+                    mk.frame = a
 
     def unlink(self, cid: str) -> None:
         c = self.find(cid)
@@ -644,6 +709,58 @@ class Sequence:
         lid = new_id()
         for c in clips:
             c.link = lid
+
+    # -------------------------------------------------------- marcadores
+    def marker(self, mid: str) -> Marker | None:
+        return next((m for m in self.markers if m.id == mid), None)
+
+    def sorted_markers(self) -> list[Marker]:
+        return sorted(self.markers, key=lambda m: (m.frame, m.id))
+
+    def chapters(self) -> list[Marker]:
+        """Marcadores marcados como capítulo, em ordem de tempo."""
+        return [m for m in self.sorted_markers() if m.chapter]
+
+    def add_marker(self, frame: int, name: str = "", color: str | None = None, note: str = "",
+                   chapter: bool = False) -> Marker:
+        """Marcador no quadro; se já existe um ali, devolve o que existe (não duplica)."""
+        frame = max(0, int(frame))
+        old = next((m for m in self.markers if m.frame == frame), None)
+        if old is not None:
+            return old
+        mk = Marker(new_id(), frame, color or MARKER_COLOR_KEYS[0], name, note, chapter)
+        self.markers.append(mk)
+        return mk
+
+    def update_marker(self, mid: str, **fields: Any) -> bool:
+        """Muda campos de um marcador (frame, color, name, note, chapter). True se mudou algo."""
+        mk = self.marker(mid)
+        if mk is None:
+            return False
+        before = mk.to_json()
+        for k, v in fields.items():
+            if k not in ("frame", "color", "name", "note", "chapter"):
+                raise KeyError(k)
+            setattr(mk, k, v)
+        mk.__post_init__()
+        return mk.to_json() != before
+
+    def move_marker(self, mid: str, frame: int) -> bool:
+        return self.update_marker(mid, frame=frame)
+
+    def remove_marker(self, mid: str) -> bool:
+        n = len(self.markers)
+        self.markers = [m for m in self.markers if m.id != mid]
+        return len(self.markers) != n
+
+    def next_marker(self, frame: int) -> Marker | None:
+        """Primeiro marcador depois do quadro."""
+        return next((m for m in self.sorted_markers() if m.frame > frame), None)
+
+    def previous_marker(self, frame: int) -> Marker | None:
+        """Último marcador antes do quadro."""
+        before = [m for m in self.sorted_markers() if m.frame < frame]
+        return before[-1] if before else None
 
     def close_gaps(self, kind: str, track: int) -> None:
         """Junta os clipes da faixa, sem espaços entre eles."""
@@ -692,7 +809,7 @@ class Sequence:
 
     def to_json(self) -> dict[str, Any]:
         used = {c.src for c in self.clips}
-        return {
+        out = {
             "formato": FORMAT,
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
@@ -700,6 +817,11 @@ class Sequence:
             "fontes": [s.to_json() for p, s in self.sources.items() if p in used],
             "clipes": [c.to_json() for c in sorted(self.clips, key=lambda c: (c.kind, c.track, c.start))],
         }
+        # Campos opcionais: só aparecem quando usados (o JSON de uma montagem antiga não muda, e versões
+        # antigas do app ignoram chaves que não conhecem).
+        if self.markers:
+            out["marcadores"] = [m.to_json() for m in self.sorted_markers()]
+        return out
 
     @classmethod
     def from_json(cls, d: dict[str, Any] | None) -> "Sequence":
@@ -729,6 +851,14 @@ class Sequence:
                 continue
             seq.ensure_track(c.kind, c.track)
             seq.clips.append(c)
+        seen: set[str] = set()
+        raw = d.get("marcadores")
+        for md in raw if isinstance(raw, list) else []:
+            mk = Marker.from_json(md) if isinstance(md, dict) else None
+            if mk is None or mk.id in seen:
+                continue
+            seen.add(mk.id)
+            seq.markers.append(mk)
         return seq
 
     def relink(self, old: str, new: str) -> None:

@@ -201,6 +201,44 @@ def test_model_settings_keep_time_when_fps_changes():
     assert vclip(m).dur == 480 and s.duration == 480
 
 
+def test_model_markers_selection_delete_and_undo():
+    m = model_with(src())
+    kinds = []
+    m.changed.connect(kinds.append)
+    v = vclip(m)
+    m.select_group(v.id)
+    mk = m.add_marker(24, name="Abertura")
+    assert kinds[-1] == "markers" and m.marker_sel == mk.id and m.selection == []  # um ou outro
+    assert m.add_marker(24) is mk and len(m.seq.markers) == 1
+    m.update_marker(mk.id, chapter=True, color="azul")
+    assert m.seq.marker(mk.id).chapter and m.seq.marker(mk.id).color == "azul"
+    m.move_marker(mk.id, 30)
+    assert m.seq.marker(mk.id).frame == 30
+    m.delete_selected()  # Delete com um marcador selecionado apaga só o marcador
+    assert m.seq.markers == [] and m.marker_sel is None and len(m.seq.clips) == 2
+    m.undo()
+    assert m.seq.marker(mk.id).frame == 30 and m.seq.marker(mk.id).chapter
+    m.undo()
+    assert m.seq.marker(mk.id).frame == 24
+    m.select_marker(mk.id)
+    m.select([v.id])
+    assert m.marker_sel is None and m.selection == [v.id]
+    m.select_marker(mk.id)
+    m.undo()  # desfazer até antes do marcador: a seleção dele some junto
+    m.undo()
+    m.undo()
+    assert m.seq.markers == [] and m.marker_sel is None
+
+
+def test_model_markers_follow_fps_change():
+    m = model_with(src())
+    mk = m.add_marker(48)
+    m.set_settings(1920, 1080, "48/1")
+    assert m.seq.marker(mk.id).frame == 96
+    m.clear_markers()
+    assert m.seq.markers == []
+
+
 # ------------------------------------------------------------------ linha do tempo
 def test_editor_frame_x_mapping_and_zoom():
     m = model_with(src())
