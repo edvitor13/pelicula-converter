@@ -32,6 +32,7 @@ pelicula/
   app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, MainWindow, boas-vindas
   cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
   i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
+  modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
@@ -66,13 +67,15 @@ pelicula/
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
-                             sequence_dialog; resolve_dialog (plugin do DaVinci)
+                             sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes...)
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
 tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
-                             (host OpenFX mínimo em ctypes para tests/test_ofx.py)
+                             (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
+                             <nome>_ui_cases.py de widgets num subprocesso offscreen)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
 docs/                        ARQUITETURA.md, EFEITOS.md, ASSINATURA.md, img/ (capturas de tela)
 PeliculaConverter.spec       PyInstaller (onedir com PeliculaConverter + pelicula-cli, BUNDLE para macOS)
@@ -155,6 +158,13 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     O plugin OpenFX usa o mesmo kernel (dialeto `cpp`): `plugins/ofx/generated` é gerado e tem que estar
     em dia (`tests/test_ofx.py`); nunca instale em `Common Files\OFX\Plugins` ou `/usr/OFX/Plugins` em
     testes nem copie código de exemplo da Blackmagic para o repositório.
+16. **Recurso opcional é módulo.** Todo recurso que o usuário pode dispensar entra em
+    `modules.MODULES` (id sem acento, nunca renomear; recurso novo em teste com `status` `beta` ou
+    `experimental`, que começa desligado). Desligar um módulo **só esconde** a ferramenta na
+    interface: a renderização (`look`, `compositor`, `engine`, `export`, CLI) nunca consulta
+    `modules`, e um projeto ou preset que usa um módulo desligado sai igual — a janela avisa e
+    oferece religar (`modules.used_by`). Preferências do usuário ficam em páginas de
+    Configurações (`ui/settings_dialog.py`, uma classe `Page` por arquivo em `ui/pages/`).
 
 ## Rodar
 

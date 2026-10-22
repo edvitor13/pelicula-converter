@@ -252,6 +252,8 @@ class _DepsBridge(QObject):
 
 
 class MainWindow(QMainWindow):
+    settings_changed = Signal(str)  # uma página de Configurações mudou algo ("modulos", "auto_update"...)
+
     def __init__(self):
         super().__init__()
         self.settings = prefs.settings()
@@ -516,6 +518,8 @@ class MainWindow(QMainWindow):
         hl.addWidget(self.btn_export)
         self.btn_settings = self._flat("settings", _("Configurações"))
         menu = QMenu(self)
+        menu.addAction(icons.icon("settings", theme.TEXT, 16), _("Configurações…"), lambda: self.show_settings("geral"))
+        menu.addSeparator()
         menu.addAction(_("Idioma…"), self.choose_language)
         menu.addAction(_("Verificar atualizações…"), lambda: self.check_updates(manual=True))
         self.act_auto_update = menu.addAction(_("Procurar atualizações automaticamente"))
@@ -524,6 +528,7 @@ class MainWindow(QMainWindow):
         self.act_auto_update.setToolTip(_("Consulta o GitHub (app) e a fonte do ffmpeg ao abrir; nada é enviado "
                                           "além do pedido de versão"))
         self.act_auto_update.toggled.connect(lambda on: self.settings.setValue("auto_update", "true" if on else "false"))
+        self.settings_changed.connect(self._on_settings_changed)
         menu.addAction(_("Novidades desta versão"), lambda: welcome.WhatsNewDialog(self).exec())
         menu.addAction(_("Tela de boas-vindas"), self.show_welcome)
         menu.addSeparator()
@@ -2386,6 +2391,19 @@ class MainWindow(QMainWindow):
         self.render_now()
 
     # ================================================================ configurações
+    def show_settings(self, page: str = "geral") -> None:
+        """Janela de Configurações; as mudanças chegam em `settings_changed`."""
+        from .settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self, self.settings, page, main=self)
+        dlg.settings_changed.connect(self.settings_changed)
+        dlg.exec()
+
+    def _on_settings_changed(self, key: str) -> None:
+        if key == "auto_update":
+            self.act_auto_update.blockSignals(True)
+            self.act_auto_update.setChecked(self.auto_update_enabled())
+            self.act_auto_update.blockSignals(False)
+
     def choose_ffmpeg(self) -> None:
         d = QFileDialog.getExistingDirectory(self, _("Pasta que contém ffmpeg.exe e ffprobe.exe"), media.tool_dir())
         if not d:
