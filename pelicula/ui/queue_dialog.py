@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
                                QVBoxLayout, QWidget)
 
-from ..export import ExportJob, ExportQueue
+from ..export import ExportJob, ExportQueue, output_target
 from ..i18n import N_, _
 from . import icons, theme
 
@@ -63,7 +63,8 @@ class JobRow(QFrame):
         bottom.addWidget(self.cancel)
         self.open = QPushButton(_("Abrir pasta"))
         self.open.setIcon(icons.icon("folder", theme.TEXT, 16))
-        self.open.clicked.connect(lambda: open_folder(job.out_path))
+        # Sequências de imagens: abre a pasta dos quadros.
+        self.open.clicked.connect(lambda: open_folder(output_target(job.out_path, job.settings)))
         bottom.addWidget(self.open)
         lay.addLayout(bottom)
         self.refresh()

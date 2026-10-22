@@ -284,6 +284,24 @@ def first_video_source(seq: timeline.Sequence) -> timeline.Source | None:
     return seq.sources.get(vids[0].src) if vids else None
 
 
+def legal_range(seq: timeline.Sequence) -> bool:
+    """Faixa da tela montada para o look (`build_plan(..., legal=...)`): a dos clipes de vídeo.
+
+    Cada clipe é decodificado com a sua faixa (vídeo YUV de faixa legal chega expandido; imagens e vídeo
+    de faixa cheia, como estão) e a tela guarda esses valores; o look lê a tela com um perfil só. Vale a
+    faixa da maioria dos clipes de vídeo (empate: a do primeiro na linha do tempo); imagens paradas só
+    contam numa montagem sem vídeo. Limitação conhecida: clipes log de faixas diferentes na mesma
+    montagem usam uma faixa só (perfil de entrada por clipe fica para depois).
+    """
+    clips = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track))
+    srcs = [seq.sources[c.src] for c in clips if c.src in seq.sources and seq.sources[c.src].has_video]
+    flags = [media.legal_range(s) for s in srcs if not s.is_image] or [media.legal_range(s) for s in srcs]
+    if not flags:
+        return True
+    legal = sum(flags)
+    return flags[0] if legal * 2 == len(flags) else legal * 2 > len(flags)
+
+
 def media_info(seq: timeline.Sequence) -> media.MediaInfo:
     """`MediaInfo` da sequência para a exportação (tamanho, fps, duração, som e formato do 1º vídeo)."""
     first = first_video_source(seq)

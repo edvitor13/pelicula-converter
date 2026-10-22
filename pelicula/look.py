@@ -21,7 +21,7 @@ D_P = 4.0
 
 INPUT_IDS = {"rec709": 0, "linear": 1, "nlog": 2, "slog3": 3, "logc3": 4, "vlog": 5, "cineon": 6, "dwg": 7,
              "log3g10": 8, "bmd_gen5": 9, "logc4": 10,
-             "applelog": 11}
+             "applelog": 11, "hlg": 12, "pq": 13}
 
 GAUGES: dict[str, dict[str, Any]] = {
     "nenhuma": dict(grain_size=1.00, grain_amt=1.00, blur=0.0, weave=1.0, vignette=0.00, hal=1.00, aspect=None),
@@ -143,7 +143,72 @@ _PRIMARIES = {
 _D65 = (0.3127, 0.3290)
 INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020",
                "slog3": "sgamut3cine", "logc3": "awg3", "vlog": "vgamut", "dwg": "dwg", "log3g10": "rwg",
-               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020"}
+               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020", "hlg": "2020", "pq": "2020"}
+
+# Domínio de cada curva de entrada: em que escala o fabricante escreveu a fórmula.
+#
+# O decodificador (media.FrameReader, `in_range=limited`) expande o vídeo YUV de faixa legal para a
+# faixa cheia: o shader recebe v = (código − 64)/876 em 10 bits (a fração de "IRE", o mesmo valor que
+# o DaVinci Resolve mostra para um clipe "Video levels"). Imagens RGB e vídeo de faixa cheia chegam
+# como v = código/1023.
+#
+# - "cv": a fórmula usa o código de 10 bits normalizado CV = código/1023, que a câmera grava como está,
+#   mesmo num arquivo marcado como faixa legal (o código 420 do S-Log3 é 420 no arquivo). Com a fonte
+#   em faixa legal o shader volta ao código, CV = (v·876 + 64)/1023, antes da fórmula; em faixa cheia,
+#   CV = v. Fontes (do próprio fabricante):
+#     Sony S-Log3, "Technical Summary for S-Gamut3.Cine/S-Log3 and S-Gamut3/S-Log3": "in = S-Log3 10bit
+#       Code / 1023.0"; preto 95 (3,5% IRE), cinza 18% = 420 (41%), branco 90% = 598 (61%); e "S-Log3 is
+#       recorded as Full range in XAVC, MPEG and HDCAM SR File ... There is no option to select Legal range".
+#     Panasonic V-Log, "V-Log/V-Gamut Reference Manual": "in = IN10BIT/1023"; preto 128 (7,3%), cinza 18% =
+#       433 (42%), branco 90% = 602 (61%).
+#     Nikon N-Log, "N-Log Specification Document": "x is the N-Log 10-bit code value"; cinza 18% = 372
+#       (35%, calculado pela fórmula). Exceção: gravação externa por HDMI com a saída em "Limited" chega já
+#       reescalada para 64–940 (guia de edição da Nikon) — `log_reescalado` desliga a volta ao código.
+# - "sinal": a fórmula usa o próprio sinal E′ (0 = preto, 1 = branco nominal), gravado com a quantização
+#   padrão (faixa legal: código = 64 + 876·E′; cheia: 1023·E′); o valor expandido v já é E′. Fontes:
+#     ARRI LogC3, "ALEXA Log C Curve – Usage in VFX": o cinza 18% é o valor 0,391 = 400/1023 num código
+#       "linearmente normalizado" (DPX, faixa cheia); "An ALEXA always records ProRes and DNxHD clips using
+#       legal range encoding" (ALEXA Pocket Guide) e as tabelas da "ARRI LogC False Color Specification"
+#       batem com 64 + 876·t (cinza ≈ 406,5 no ProRes).
+#     ARRI LogC4, "ARRI LogC4 Logarithmic Color Space Specification", apêndice C: 18% → E′ = 0,2784 = código
+#       308 em 10 bits legal / 285 em cheia; E′ = 1 → 940 legal / 1023 cheia (legal = 64 + 876·E′).
+#     Blackmagic Film Gen 5, "Blackmagic Generation 5 Color Science": coluna "10-bit Video Levels" com
+#       0 → 145, 18% → 400, 1,0 → 529 (= 64 + 876·y).
+#     DaVinci Intermediate ("DaVinci Resolve 17 Wide Gamut Intermediate") e RED Log3G10 ("White Paper on
+#       REDWideGamutRGB and Log3G10"): curvas em ponto flutuante (18% → 0,336 e 1/3), sem código de 10 bits;
+#       num vídeo YUV viajam escaladas na faixa legal, como as gravações ProRes da RED e da Blackmagic.
+#     Cineon (Kodak, "Conversion of 10-bit Log Film Data to 8-bit Linear or Video Data"): código do DPX RGB
+#       de faixa cheia (branco 685, Dmin 95, 0,002 D por código); num vídeo YUV viaja escalado.
+#     Apple Log ("Apple Log Profile White Paper", 2023): P em [0, 1] gravado em buffers "video range" de 10
+#       bits (não conferido no documento original: está atrás do login de desenvolvedor da Apple).
+#     Rec.709 (curva neutra do app), linear e HLG/PQ (ITU-R BT.2100: E′ com D = 876·E′ + 64 em 10 bits).
+# Os LUTs externos e os .cube exportados usam o domínio da própria curva (código de 10 bits nas curvas
+# "cv"): é a convenção dos LUTs dos fabricantes ("N-Log-Full", LUTs "Full range" da Sony) e das IDTs do
+# ACES, que aplicam a fórmula direto no valor de entrada.
+INPUT_DOMAIN = {"rec709": "sinal", "linear": "sinal", "nlog": "cv", "slog3": "cv", "logc3": "sinal",
+                "vlog": "cv", "cineon": "sinal", "dwg": "sinal", "log3g10": "sinal", "bmd_gen5": "sinal",
+                "logc4": "sinal", "applelog": "sinal", "hlg": "sinal", "pq": "sinal"}
+
+# HLG e PQ: luz de cena normalizada E (0..1 no HLG) → luz linear do app (cinza médio = 0,18). O cinza
+# de referência da ITU-R BT.2408 (cartão 18% em 38% do sinal HLG: E = 0,38²/3) vira 0,18; o branco de
+# referência (75% HLG = 203 cd/m² em PQ) fica em ≈ 0,99. As constantes se repetem em shaders.COMMON e
+# no plugin do Resolve (tests/test_entrada.py confere).
+HLG_GRAY_SIGNAL = 0.38
+HLG_SCALE = 0.18 / (HLG_GRAY_SIGNAL ** 2 / 3.0)  # ≈ 3,7396
+HLG_A = 0.17883277                               # ITU-R BT.2100, tabela 5 (HLG)
+HLG_B = 1.0 - 4.0 * HLG_A                        # 0,28466892
+HLG_C = 0.5 - HLG_A * math.log(4.0 * HLG_A)      # 0,55991073
+PQ_M1 = 2610 / 16384                             # SMPTE ST 2084 / BT.2100, tabela 4 (PQ)
+PQ_M2 = 2523 / 4096 * 128
+PQ_C1 = 3424 / 4096
+PQ_C2 = 2413 / 4096 * 32
+PQ_C3 = 2392 / 4096 * 32
+PQ_NOMINAL_PEAK = 1000.0  # cd/m²: pico nominal do HLG na conversão PQ → luz de cena (BT.2408, γ = 1,2)
+
+
+def code_value_curve(entrada: str) -> bool:
+    """A curva do perfil é escrita no código de 10 bits (código/1023)? (veja INPUT_DOMAIN)"""
+    return INPUT_DOMAIN.get(entrada) == "cv"
 
 
 def _npm(prim, white=_D65) -> np.ndarray:
@@ -724,8 +789,14 @@ def aspect_target(v: dict, gauge: dict) -> float:
 
 
 def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: float,
-               lut_info: tuple | None = None, dither: bool = True) -> Plan:
-    """Monta todos os valores do quadro `frame` para uma imagem width x height."""
+               lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True) -> Plan:
+    """Monta todos os valores do quadro `frame` para uma imagem width x height.
+
+    `legal`: a imagem de entrada veio de vídeo em faixa legal que o decodificador expandiu para 0–1
+    (`media.legal_range`); imagens RGB e vídeo de faixa cheia passam `False`. Só muda as curvas de
+    câmera escritas no código de 10 bits (`INPUT_DOMAIN`), que então voltam ao código da câmera (a menos
+    que `log_reescalado` diga que o arquivo já veio reescalado). O padrão `True` é o vídeo comum.
+    """
     scale = height / 1080.0
     fps = fps or 24.0
     t = frame / fps
@@ -739,6 +810,10 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_res"] = (float(width), float(height))
     U["u_scale"] = scale
     U["u_input"] = INPUT_IDS.get(v["entrada"], 0)
+    # Curva em código de 10 bits: volta ao código quando a fonte veio expandida (u_legal), menos quando o
+    # arquivo já traz o log reescalado para a faixa legal (saída HDMI "Limited" da câmera).
+    U["u_input_cv"] = 1 if (code_value_curve(v["entrada"]) and not v.get("log_reescalado")) else 0
+    U["u_legal"] = 1 if legal else 0
     U["u_gamut"] = mat3_uniform(gamut_to_709(INPUT_GAMUT.get(v["entrada"], "709")))
     temp = v["temperatura"] / 100.0
     tint = v["tint"] / 100.0
@@ -909,7 +984,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_lut_on"] = 1
         U["u_lut_amt"] = v["lut_forca"]
         U["u_lut_pos"] = 1 if v["lut_posicao"] == "lugar" else 0
-        U["u_lut_in"] = INPUT_IDS.get(v["lut_entrada"], 0)
+        U["u_lut_in"] = INPUT_IDS.get(v["lut_entrada"], 0)  # o LUT recebe o domínio da própria curva
         U["u_lut_size"] = float(size)
         U["u_lut_dmin"] = tuple(dmin)
         U["u_lut_dmax"] = tuple(dmax)

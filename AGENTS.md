@@ -44,9 +44,11 @@ pelicula/
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
-  export.py                  CODECS, qualidades prontas, build_encoder_cmd(), ExportQueue, run_job(), measure_speed()
+  export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
+                             run_job() (grava num parcial e troca no fim), measure_speed(), save_still()
   deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), pip_install()
-  system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema
+  system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema, gravação segura
+                             (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Sequence (montagem, sem Qt), History
@@ -155,6 +157,11 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     O plugin OpenFX usa o mesmo kernel (dialeto `cpp`): `plugins/ofx/generated` é gerado e tem que estar
     em dia (`tests/test_ofx.py`); nunca instale em `Common Files\OFX\Plugins` ou `/usr/OFX/Plugins` em
     testes nem copie código de exemplo da Blackmagic para o repositório.
+16. **Curvas de câmera declaram o domínio; a faixa vem da fonte.** Toda curva de entrada está em
+    `look.INPUT_DOMAIN` (`"cv"` = código de 10 bits da câmera, `"sinal"` = sinal de vídeo), com o documento
+    do fabricante citado. Todo `build_plan` de uma imagem decodificada recebe `legal=` da fonte
+    (`media.legal_range`, `sequence.legal_range`); LUTs ficam no domínio da curva. Veja *Adicionar um perfil
+    de entrada* abaixo e `docs/ARQUITETURA.md` (seção 5.1).
 
 ## Rodar
 
@@ -214,6 +221,7 @@ Testes do modo Edição e do plugin:
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
+| `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
@@ -334,17 +342,65 @@ O plugin é C++ e reaproveita a matemática dos DCTLs:
 5. Áudio: confira a tabela de recipientes em `_audio_args()` (ao copiar áudio a partir do meio do
    arquivo, MKV/WebM/AVI recodificam para não deslocar o vídeo; MKV usa FLAC, sem perdas).
    Profundidade: `high_depth()` decide 8 ou 16 bits com `media.pix_depth()` (`nv12` é 8 bits,
-   `p010le` 10, `rgb48le` 16). Dimensões pares: `output_size()`.
+   `p010le` 10, `rgb48le` 16). Tamanho: `output_size()` — a resolução (`"1080"`…) é o **lado menor**
+   (vertical 1080 × 1920) e codecs de vídeo recebem dimensões pares; um codec que aceita tamanho ímpar
+   entra na lista de exceções de lá.
 6. Codificadores de hardware: `available()` já testa NVENC/QSV/AMF de verdade via
    `media.encoder_works()`; mantenha esse padrão para qualquer codificador que "aparece mas não
    funciona".
 7. Teste em `tests/test_export_cmd.py` (estrutura do comando) e documente no README.
 
+### Gravar arquivos do usuário
+
+Nada é gravado direto no destino escolhido pela pessoa: grave num parcial ao lado e troque no fim, para
+que cancelar, uma falha ou o app fechar no meio nunca deixem um arquivo quebrado com o nome final nem
+apaguem o antigo antes da hora.
+
+- Vídeo, imagem e sequência: `export.run_job()` já faz isso (`video.parcial-pelicula.mp4`, pasta
+  `quadros.parcial-pelicula/`; a extensão real fica no fim para o ffmpeg escolher o mesmo formato). Não
+  passe o destino final para `build_encoder_cmd()` fora desse caminho. A marca `parcial-pelicula`
+  (`system.PARTIAL`) é reservada: o parcial que sobrou de uma exportação interrompida é apagado na
+  próxima para o mesmo destino, e uma entrada com esse nome faz a exportação ser recusada
+  (`export.partial_clash`).
+- Um quadro: `export.save_still()`. Texto ou binário pequeno (LUT, preset): `with system.atomic_write(path)`.
+- Teste o caminho de erro: o arquivo antigo continua igual e nenhum `*.parcial-pelicula*` sobra
+  (`tests/test_export_e2e.py`, `tests/test_misc.py`).
+
 ### Adicionar um perfil de entrada (câmera)
 
-`shaders.py` (`toLinear` e `lutEncode` com um novo id), `look.INPUT_IDS`, `look.INPUT_GAMUT` (e
-`_PRIMARIES` se o gamut for novo), `params.ENTRADAS` e, se servir para LUTs, `params.LUT_ENTRADAS`
-e `luts.guess_input()`. Documente em `docs/EFEITOS.md` e no README.
+`shaders.py` (`toLinear` e `lutEncode` com um novo id), `look.INPUT_IDS` (id novo depois do maior; nunca
+renumere), `look.INPUT_GAMUT` (e `_PRIMARIES` se o gamut for novo), **`look.INPUT_DOMAIN`**, `params.ENTRADAS`
+(no fim da lista) e, se servir para LUTs, `params.LUT_ENTRADAS` e `luts.guess_input()`. No plugin do Resolve:
+a curva em `resolve.K_DECODE` (`pc_to_linear`), depois `python tools/gerar_ofx.py`. Pontos de referência do
+fabricante em `tests/test_entrada.py`. Documente em `docs/EFEITOS.md` e no README.
+
+**Toda curva declara o seu domínio** em `look.INPUT_DOMAIN`, com a fonte (documento do fabricante) num
+comentário:
+
+- `"cv"`: a fórmula usa o código de 10 bits normalizado, CV = código/1023, gravado pela câmera como está mesmo
+  no arquivo marcado como faixa legal (Sony S-Log3, Panasonic V-Log, Nikon N-Log: o cinza 18% do S-Log3 é o
+  código 420);
+- `"sinal"`: a fórmula usa o próprio sinal de vídeo E′ (0 = preto, 1 = branco nominal), que a câmera grava com
+  a quantização padrão (faixa legal 64 + 876·E′); o valor expandido pelo decodificador já é E′ (ARRI LogC3/LogC4,
+  Blackmagic Gen 5, DaVinci Intermediate, RED Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709, linear).
+
+Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem passar por aqui):
+
+- `media.legal_range(info)`: o `FrameReader` expandiu a faixa legal (vídeo YUV comum: v = (código − 64)/876)?
+  Imagens RGB e vídeo de faixa cheia: não (v = código/1023).
+- `look.build_plan(..., legal=...)` → `u_legal`; `u_input_cv` vem de `INPUT_DOMAIN` (e do ajuste
+  `log_reescalado`, para log que a câmera já mandou reescalado pela saída HDMI "Limited"). O shader volta ao
+  código, CV = (v·876 + 64)/1023, só quando os dois são 1 (`toLinear(..., cv)`).
+- Quem chama passa a faixa da fonte: prévia, miniaturas, curva, "Salvar quadro" e exportação de arquivo
+  (`media.legal_range`), montagem do modo Edição (`sequence.legal_range`: a faixa da maioria dos clipes de
+  vídeo), terminal (`quadro`, `exportar`).
+- LUTs ficam no domínio da própria curva (código de 10 bits nas curvas `"cv"`, a convenção dos LUTs "Full" dos
+  fabricantes e das IDTs do ACES): o LUT externo (`lutEncode`) e os `.cube` exportados (`Engine.bake_lut`,
+  padrão `legal=False`). O plugin do Resolve recebe o valor que o Resolve tem do clipe: controle *Faixa do
+  vídeo* (padrão *Vídeo*, clipe em Data Levels Auto/Video = `bake_lut(legal=True)`; *Cheia* = `legal=False`).
+- HLG e PQ são `"sinal"` (BT.2100). Presets não mudam o perfil nem `log_reescalado` (`presets.SOURCE_KEYS`);
+  ao abrir um arquivo, `media.auto_profile` escolhe HLG/PQ pelos metadados (`color_transfer`), volta para
+  Rec.709 num arquivo sem HDR e nunca troca um perfil log.
 
 ### Adicionar uma bitola
 

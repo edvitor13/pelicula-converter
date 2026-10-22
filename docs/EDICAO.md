@@ -149,7 +149,8 @@ Acima dos ajustes há um monitor com quatro vistas:
 
 - Vá para o modo **Película** (Ctrl+1) para escolher o look; a prévia já mostra a montagem.
 - **Exportar** (Ctrl+E) grava a montagem inteira ou o trecho entre a entrada (I) e a saída (O), com o som
-  mixado de todas as faixas.
+  mixado de todas as faixas. A resolução das qualidades (1080p, 720p, 4K…) vale para o lado menor: uma
+  sequência vertical 1080 × 1920 exportada em *Redes sociais 1080p* continua 1080 × 1920.
 - **Projeto → Salvar** (Ctrl+S) guarda a edição no arquivo `.plc` junto com o look. Se um arquivo usado na
   edição mudar de lugar, o app pergunta onde ele está ao abrir o projeto.
 

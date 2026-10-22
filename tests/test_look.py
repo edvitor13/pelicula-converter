@@ -28,7 +28,8 @@ DECLARED = _declared()
 # Uniforms que o próprio Engine preenche em cada passo (não vêm do plano).
 ENGINE_SET = {"u_dir", "u_sigma", "u_lod", "u_thr", "u_limit", "u_lum_only", "u_use_alpha", "u_seed"}
 
-ALWAYS = ["u_res", "u_scale", "u_input", "u_gamut", "u_shift", "u_rot", "u_zoom", "u_gain", "u_dist", "u_ca",
+ALWAYS = ["u_res", "u_scale", "u_input", "u_input_cv", "u_legal", "u_gamut", "u_shift", "u_rot", "u_zoom", "u_gain",
+          "u_dist", "u_ca",
           "u_vig", "u_soft_on", "u_soft_mix", "u_sharp", "u_hal_on", "u_bloom_on", "u_mist_on", "u_leak_on",
           "u_film_on", "u_film_mix", "u_slope", "u_mid", "u_black", "u_white", "u_ps", "u_pt", "u_sat", "u_density",
           "u_ch_gamma", "u_ch_offset", "u_shadow_tint", "u_high_tint", "u_balance", "u_hue", "u_bw", "u_bw_w",

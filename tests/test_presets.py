@@ -186,6 +186,14 @@ def test_user_preset_save_list_import_export_delete_roundtrip(tmp_appdata, tmp_p
     assert list(presets.user_dir().glob("*.json")) == []
 
 
+def test_export_file_replaces_the_old_file_without_leaving_partials(tmp_path):
+    exp = tmp_path / "look.json"
+    exp.write_text("preset antigo", encoding="utf-8")
+    presets.export_file(str(exp), "Novo", params.defaults())
+    assert json.loads(exp.read_text(encoding="utf-8"))["nome"] == "Novo"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["look.json"]
+
+
 def test_save_user_overwrites_same_name(tmp_appdata):
     a = params.defaults()
     b = params.defaults()

@@ -138,6 +138,8 @@ class ExportDialog(QDialog):
         self.res = compact(QComboBox())
         for key, lab in export.RESOLUTIONS:
             self.res.addItem(_(lab), key)
+        self.res.setToolTip(_("O número vale para o lado menor do quadro, como no YouTube e nos celulares: em 1080p, "
+                              "um vídeo deitado sai 1920 × 1080 e um vídeo em pé sai 1080 × 1920."))
         self.fps = compact(QComboBox())
         for key, lab in export.FPS:
             self.fps.addItem(_(lab), key)
@@ -377,6 +379,15 @@ class ExportDialog(QDialog):
         self.grain.setVisible(bool(c.get("grain")))
         if hasattr(self, "gpu"):
             self.gpu.setEnabled(bool(c.get("gpu")))
+        self._res_labels(key)
+
+    def _res_labels(self, codec: str) -> None:
+        """Cada resolução mostra o tamanho que sai deste arquivo (o número vale para o lado menor)."""
+        names = dict(export.RESOLUTIONS)
+        for i in range(self.res.count()):
+            key = self.res.itemData(i)
+            w, h = export.output_size(self.info, export.ExportSettings(codec=codec, resolution=key))
+            self.res.setItemText(i, f"{_(names[key])} — {w} × {h}")
 
     def _apply(self, s: export.ExportSettings) -> None:
         self._building = True
@@ -563,9 +574,19 @@ class ExportDialog(QDialog):
         if os.path.abspath(path) == os.path.abspath(self.info.path):
             QMessageBox.warning(self, _("Exportar"), _("Escolha um nome diferente do arquivo original."))
             return
-        if os.path.exists(path):
-            r = QMessageBox.question(self, _("Exportar"),
-                                     _("O arquivo já existe:\n{caminho}\n\nSubstituir?").format(caminho=path))
+        s = self.settings()
+        clash = export.partial_clash(path, s, export.job_inputs(self.info, self.sequence))
+        if clash:
+            QMessageBox.warning(self, _("Exportar"), export.partial_clash_message(clash))
+            return
+        if export.output_exists(path, s):
+            if export.is_sequence(s):
+                text = _("A pasta já tem uma sequência de quadros com este nome:\n{caminho}\n\nSubstituir? Os "
+                         "quadros antigos só são trocados quando a exportação terminar.")
+            else:
+                text = _("O arquivo já existe:\n{caminho}\n\nSubstituir? O arquivo antigo só é trocado quando a "
+                         "exportação terminar.")
+            r = QMessageBox.question(self, _("Exportar"), text.format(caminho=export.output_target(path, s)))
             if r != QMessageBox.StandardButton.Yes:
                 return
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -593,7 +614,8 @@ def _describe(key: str) -> str:
         "yt4k_hevc": _("Envie em 4K mesmo que o vídeo seja menor: o YouTube dá mais qualidade e preserva melhor o grão."),
         "yt4k_h264": _("Compatível com tudo. Envie em 4K para o YouTube preservar o grão."),
         "fhd": _("Boa qualidade para guardar ou enviar."),
-        "social": _("Equilíbrio entre tamanho e qualidade para redes sociais e mensageiros."),
+        "social": _("Equilíbrio entre tamanho e qualidade para redes sociais e mensageiros. O 1080p vale para o lado "
+                    "menor: um vídeo vertical sai 1080 × 1920."),
         "leve": _("Arquivo pequeno para prévias e envio rápido."),
         "webm": _("Formato aberto, ideal para colocar em sites. Abre em todos os navegadores."),
         "avi": _("Para aparelhos de DVD, TVs e players antigos."),

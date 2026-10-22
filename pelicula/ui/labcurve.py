@@ -41,10 +41,10 @@ class CurveGraph(QWidget):
         self.curves = None if curves is None else np.clip(np.asarray(curves, dtype=np.float32), 0.0, 1.0)
         self.update()
 
-    def update_from(self, engine, values: dict) -> None:
-        """Assa o look atual (GPU, thread principal) e mostra o eixo dos cinzas."""
+    def update_from(self, engine, values: dict, legal: bool = True) -> None:
+        """Assa o look atual (GPU, thread principal) e mostra o eixo dos cinzas (`legal`: faixa da fonte)."""
         try:
-            self.set_curves(gray_axis(engine.bake_lut(values, SIZE)))
+            self.set_curves(gray_axis(engine.bake_lut(values, SIZE, legal=legal)))
         except Exception:  # noqa: BLE001
             self.set_curves(None)
 
