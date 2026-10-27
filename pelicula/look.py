@@ -756,6 +756,14 @@ def _lab_uniforms(U: dict, prefix: str, p: LabPath, lights: tuple) -> None:
     U[prefix + "scan"] = 1 if p.scan else 0
 
 
+# "Grão para redes" (exportação): as plataformas recomprimem o vídeo e apagam o grão fino. Com a opção
+# ligada, o grão não fica menor que NET_GRAIN_MIN_PX pixels da SAÍDA e fica NET_GRAIN_BOOST vezes mais forte;
+# a cor do grão cai para NET_GRAIN_CHROMA (o croma 4:2:0 e a recompressão borram o grão colorido).
+NET_GRAIN_MIN_PX = 2.0
+NET_GRAIN_BOOST = 1.2
+NET_GRAIN_CHROMA = 0.6
+
+
 @dataclass
 class Chain:
     name: str
@@ -789,13 +797,18 @@ def aspect_target(v: dict, gauge: dict) -> float:
 
 
 def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: float,
-               lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True) -> Plan:
+               lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True,
+               net_grain: float = 0.0) -> Plan:
     """Monta todos os valores do quadro `frame` para uma imagem width x height.
 
     `legal`: a imagem de entrada veio de vídeo em faixa legal que o decodificador expandiu para 0–1
     (`media.legal_range`); imagens RGB e vídeo de faixa cheia passam `False`. Só muda as curvas de
     câmera escritas no código de 10 bits (`INPUT_DOMAIN`), que então voltam ao código da câmera (a menos
     que `log_reescalado` diga que o arquivo já veio reescalado). O padrão `True` é o vídeo comum.
+
+    `net_grain`: "Grão para redes" da exportação. 0 (padrão) = desligado, o plano é o de sempre. Maior que 0
+    = quantos pixels desta imagem valem um pixel do arquivo exportado (1 na exportação; menos na prévia
+    reduzida): o grão fica com pelo menos `NET_GRAIN_MIN_PX` pixels da saída e um pouco mais forte.
     """
     scale = height / 1080.0
     fps = fps or 24.0
@@ -995,15 +1008,19 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_grain_on"] = 0
     if v["grao_on"] and v["grao_forca"] > 0:
         size = 0.8 * v["grao_tamanho"] * gauge["grain_size"] * iso_size * scale
+        net = 1.0
+        if net_grain > 0:  # "Grão para redes": tamanho mínimo em pixels da saída, um pouco mais forte
+            size = max(size, NET_GRAIN_MIN_PX * float(net_grain))
+            net = NET_GRAIN_BOOST
         plan.grain_size = max(size, 1.0)
         plan.grain_seed = int(v["grao_semente"]) * 7919 + (frame if v["grao_animado"] else 0)
         U["u_grain_on"] = 1
         # Grão menor que 1 px some na prévia reduzida; compensa um pouco a intensidade.
         comp = min(1.0, size) ** 0.5
         push = 1.15 ** float(v["lab_revelacao"]) if v["lab_on"] else 1.0  # revelação forçada aumenta o grão
-        U["u_grain_amt"] = 0.011 * v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push
+        U["u_grain_amt"] = 0.011 * v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net
         U["u_grain_rough"] = v["grao_aspereza"]
-        U["u_grain_chroma"] = v["grao_cor"]
+        U["u_grain_chroma"] = v["grao_cor"] * (NET_GRAIN_CHROMA if net_grain > 0 else 1.0)
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
 
     # ---- Defeitos desenhados por cima

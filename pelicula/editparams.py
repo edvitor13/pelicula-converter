@@ -146,6 +146,9 @@ AUDIO_SECTIONS: list[Section] = [
         _pct("balanco", "Balanço", tip="Negativo puxa para a esquerda; positivo para a direita."),
         F("fade_in", "Aumentar no início", 0.0, 0, 10, 0.1, 1, " s"),
         F("fade_out", "Diminuir no fim", 0.0, 0, 10, 0.1, 1, " s"),
+        F("transicao", "Transição com o anterior", 0.0, 0, 5, 0.1, 1, " s",
+          "Transição de som (potência constante) com o clipe colado antes deste na faixa, centrada no corte. "
+          "Usa o som do arquivo além do corte; sem sobra, fica mais curta."),
     ], "Volume, balanço e fades"),
 
     Section("eq", "Equalizar e limpar", None, [

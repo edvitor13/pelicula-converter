@@ -178,3 +178,17 @@ def test_spec_sets_windows_version_info():
     for field in ("ProductName", "ProductVersion", "FileVersion", "FileDescription", "OriginalFilename"):
         assert f'StringStruct("{field}"' in spec
     assert '"CFBundleShortVersionString": VERSION' in spec
+
+
+def test_spec_bundles_the_settings_pages():
+    """ui/settings_dialog.py carrega as páginas com importlib (pelo nome): o spec precisa pô-las em
+    hiddenimports, senão o executável abre Configurações (e o aviso de ffmpeg ausente) sem elas."""
+    spec = (ROOT / "PeliculaConverter.spec").read_text(encoding="utf-8")
+    assert re.search(r"hiddenimports=\[[^\]]*\*SETTINGS_PAGES", spec)
+    assert '"pelicula.ui.pages."' in spec and '"pelicula", "ui", "pages"' in spec
+    pages = ROOT / "pelicula" / "ui" / "pages"
+    listed = re.findall(r'"pelicula\.ui\.pages\.(\w+)"', (ROOT / "pelicula/ui/settings_dialog.py").read_text(
+        encoding="utf-8"))
+    assert "componentes" in listed
+    for name in listed:
+        assert (pages / f"{name}.py").is_file() and not name.startswith("_")

@@ -23,6 +23,8 @@ modo Edição em [docs/EDICAO.md](docs/EDICAO.md); plugin do DaVinci Resolve em 
 - **Um `Engine` (contexto OpenGL) por thread**; Qt de interface só na thread principal.
 - **Nunca incluir LUTs proprietários** (Adobe, Blackmagic): só ler onde já estão instalados.
 - **Todo texto para o usuário em PT-BR com acentos**; chaves de parâmetros sem acento.
+- **Recurso opcional é módulo** (`modules.MODULES`; Beta/Experimental começa desligado): desligar só esconde a
+  ferramenta, a renderização nunca consulta `modules` e um projeto salvo sai igual.
 - **Parâmetros novos com padrão neutro**; não renomear chaves nem IDs de presets (vale para os ajustes de
   clipe de `editparams.py`).
 - **Plugin do DaVinci acompanha a cor do app**: mudou `colorPipe` (shaders.py)? Atualize o kernel em

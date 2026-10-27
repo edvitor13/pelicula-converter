@@ -28,7 +28,7 @@
   - [Jeito fácil: instalador ou versão portátil](#jeito-fácil-instalador-ou-versão-portátil)
   - [Pelo código-fonte](#pelo-código-fonte)
   - [Requisitos](#requisitos)
-  - [O ffmpeg e o gerenciador de dependências](#o-ffmpeg-e-o-gerenciador-de-dependências)
+  - [O ffmpeg e os componentes](#o-ffmpeg-e-os-componentes)
   - [Dependências e por que cada uma existe](#dependências-e-por-que-cada-uma-existe)
 - [Guia de uso](#guia-de-uso)
 - [Modo Edição: montar, cortar e ajustar antes da película](#modo-edição-montar-cortar-e-ajustar-antes-da-película)
@@ -109,8 +109,8 @@ quadros vizinhos:
   <tr>
     <td width="54%"><b>Exportar</b> — qualidades prontas, ajustes do arquivo, desempenho e tempo estimado medido na sua máquina<br><br>
       <img src="docs/img/exportar.png" alt="Janela de exportação"></td>
-    <td width="46%"><b>Dependências e atualizações</b> — ffmpeg, placa de vídeo e bibliotecas<br><br>
-      <img src="docs/img/dependencias.png" alt="Janela de dependências e atualizações"></td>
+    <td width="46%"><b>Componentes</b> — ffmpeg, programas do sistema, placa de vídeo e bibliotecas<br><br>
+      <img src="docs/img/componentes.png" alt="Página Componentes das Configurações"></td>
   </tr>
 </table>
 
@@ -162,7 +162,12 @@ quadros vizinhos:
   e copiar/colar ajustes entre clipes.
 - **Som por clipe**: volume, mudo, balanço, fades, graves, médios, agudos, realçar voz, redução de
   ruído e normalizar; faixas com mudo, solo, trava e volume; forma de onda na linha do tempo.
-- **Medidores**: histograma, forma de onda, parada RGB e vetorscópio.
+  **Transição de som** de potência constante no corte e **fades curtos automáticos** nas emendas (sem
+  estalo).
+- **Marcadores e capítulos**: marcadores coloridos com nome e nota (`M`); os marcados como capítulo
+  viram o texto de capítulos do YouTube (com as regras conferidas) e capítulos no MP4, MOV e MKV.
+- **Medidores**: histograma, forma de onda, parada RGB e vetorscópio; **medidor de som** ao lado da
+  prévia (picos L/R e loudness EBU R128: momentânea, curto prazo, integrada e true peak).
 
 ### Entrada
 - **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
@@ -229,6 +234,12 @@ quadros vizinhos:
   H.264), Full HD, redes sociais, leve 720p, WebM, AVI, GIF, masters ProRes/DNxHR, FFV1 e
   sequência PNG. A resolução (1080p, 720p, 4K…) vale para o **lado menor**: vídeo vertical continua
   vertical (1080 × 1920 em 1080p).
+- **Por plataforma**: YouTube (1080p, 1440p, 4K, Shorts), Instagram (Reels, Stories, Feed 4:5 e 1:1),
+  Facebook, TikTok, Kwai, X, LinkedIn, Pinterest, Snapchat, Threads, Bluesky, WhatsApp, Telegram,
+  Discord, Vimeo, Spotify, *Compatível com tudo*, Apple (HEVC), Festival (ProRes 422 HQ) e Arquivo (FFV1)
+  — com quadro, encaixe (cortar, bordas ou fundo desfocado), **tamanho alvo** em duas passadas (Discord,
+  WhatsApp), **volume alvo** (−14/−16/−23 LUFS) e **Grão para redes**. Nada é enviado: o arquivo fica no
+  computador.
 - **Gravação segura**: o vídeo é gravado num arquivo parcial ao lado do destino e só ganha o nome final
   quando termina; cancelar, dar erro ou o computador desligar no meio nunca deixa um arquivo quebrado
   com o nome final nem apaga antes da hora o antigo com o mesmo nome.
@@ -243,8 +254,30 @@ quadros vizinhos:
 - **Fila de exportação** em segundo plano, com progresso, velocidade, tempo restante e cancelamento.
 
 ### Sistema
-- **Gerenciador de dependências**: se o ffmpeg não existir ou estiver antigo, o app oferece baixar
-  a versão oficial, conferida por SHA-256, só para o seu usuário (sem administrador).
+- **Só o que você usa**: no primeiro acesso você escolhe um perfil (**Simples**, **Criador**,
+  **Cinema** ou **Tudo**) e, quando quiser, liga ou desliga cada recurso em **Configurações →
+  Recursos…** (modo Edição, Laboratório, defeitos, scan, LUTs, scopes, curva, plugin do DaVinci…).
+  Desligar só esconde a ferramenta: projetos e presets que a usam continuam saindo iguais, e a janela
+  avisa com um botão para religar. Recursos em teste (Beta/Experimental) começam desligados.
+- **Componentes** (Configurações › Componentes): o ffmpeg e os outros programas externos, cada um com
+  versão, espaço em disco, local, fonte oficial, licença e o selo *verificado (SHA-256)*; baixar,
+  atualizar e remover em segundo plano, com progresso e cancelamento. Se o ffmpeg não existir ou estiver
+  antigo, o app oferece baixar a versão oficial, conferida por SHA-256, só para o seu usuário (sem
+  administrador). Programas instalados no computador (DaVinci Resolve) aparecem como *no sistema*.
+- **Notificações do sistema**: avisam quando uma exportação termina ou dá erro, quando a fila inteira
+  acaba, quando um componente termina de baixar e quando há versão nova — por padrão só com o app em
+  segundo plano. Clicar mostra o vídeo na pasta. Tipos, som e piscar o ícone em **Configurações →
+  Notificações**.
+- **Recuperação depois de um travamento**: com mudanças não salvas, o app guarda uma cópia de segurança a
+  cada minuto (e antes de exportar ou importar) numa pasta própria — o seu `.plc` só muda quando você
+  salva. Se ele fechar de repente, na próxima abertura oferece **Recuperar**, **Abrir o salvo** ou
+  **Descartar** e pôr de volta na fila as exportações interrompidas. Erros inesperados geram um relatório
+  local (*Copiar relatório*, *Abrir pasta*). Ajustes em **Configurações → Recuperação**.
+- **Recorte por IA (CorridorKey, Beta)**: tira o fundo verde ou azul de um vídeo com o
+  [CorridorKey](https://github.com/nikopueringer/CorridorKey2.0), da Corridor Digital, e grava o recorte
+  com transparência (ProRes 4444 com alfa) e a máscara, ou EXR. Ligue em **Recursos** e baixe em
+  **Componentes** (download à parte de cerca de 7,6 GB, direto das fontes oficiais); precisa de uma
+  placa **NVIDIA RTX série 30 ou mais nova**. Roda num processo separado, pela fila de tarefas.
 - **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
   enquanto.
 
@@ -329,7 +362,7 @@ Instalação silenciosa, para administradores e scripts:
 1. Extraia o `.zip` numa pasta qualquer (por exemplo `C:\Programas\PeliculaConverter`).
 2. Abra `PeliculaConverter.exe` (o mesmo aviso do SmartScreen pode aparecer).
 
-Nos dois casos, se o ffmpeg não for encontrado, a janela **Dependências e atualizações** abre
+Nos dois casos, se o ffmpeg não for encontrado, a página **Componentes** das Configurações abre
 sozinha: clique em **Baixar ffmpeg** e pronto.
 
 **Linux — pacote `.deb` (Debian/Ubuntu)**
@@ -413,24 +446,27 @@ instalar com o `pip`.
 | Python (só pelo código-fonte) | 3.12 | Recomendado **3.15**; o executável já traz o Python |
 | Memória | 8 GB | 16 GB ou mais para 4K com buffer grande |
 
-### O ffmpeg e o gerenciador de dependências
+### O ffmpeg e os componentes
 
 O ffmpeg lê e grava todos os formatos de vídeo. O PeliculaConverter procura o `ffmpeg` e o
 `ffprobe`, nesta ordem:
 
-1. a pasta escolhida em **Configurações → Pasta do ffmpeg…** (ou *Usar outra pasta…* na janela de
-   dependências);
+1. a pasta escolhida em **Configurações → Pasta do ffmpeg…** (ou *Usar outra pasta…* no cartão do
+   ffmpeg, em Componentes);
 2. a pasta onde o próprio app instala o ffmpeg que baixou;
 3. o `PATH` do sistema;
 4. pastas comuns — Windows: `C:\FFMPEG\ffmpeg\bin`, `C:\FFMPEG\bin`, `C:\ffmpeg\bin`,
    `%ProgramFiles%\ffmpeg\bin`, os atalhos do WinGet e a pasta do ShareX; Linux: `/usr/local/bin`,
    `/usr/bin`, `/snap/bin`.
 
-**Configurações → Dependências e atualizações…** mostra a versão do ffmpeg, a placa de vídeo e a
-versão do OpenGL, o processador, a memória e as versões das bibliotecas Python. Na abertura o app
-confere tudo em segundo plano:
+**Configurações → Componentes…** mostra cada componente (ffmpeg, DaVinci Resolve…) com versão, espaço
+em disco, local (*Abrir pasta*), fonte oficial, licença, o selo *verificado (SHA-256)* e os botões
+*Baixar*, *Atualizar* e *Remover*; o espaço total usado; e, na seção *Sistema*, a placa de vídeo e a
+versão do OpenGL, o processador, a memória e as versões das bibliotecas Python. Downloads rodam em
+segundo plano: dá para fechar a janela e voltar depois para ver o progresso. Na abertura o app confere
+tudo em segundo plano:
 
-- **ffmpeg ausente** → a janela de dependências abre com o botão **Baixar ffmpeg**.
+- **ffmpeg ausente** → a página Componentes abre com o aviso e o botão **Baixar ffmpeg**.
 - **ffmpeg antigo** (versão menor que 7.0, ou build de desenvolvimento com mais de ~18 meses) →
   o app pergunta se quer atualizar (*Atualizar*, *Agora não* ou *Não perguntar de novo*). No
   Windows ele também confere a última versão publicada no gyan.dev e avisa quando a sua é mais
@@ -451,6 +487,21 @@ conferir, nada é instalado. Prefere instalar por conta própria?
 winget install Gyan.FFmpeg      # Windows
 sudo apt install ffmpeg         # Debian/Ubuntu
 ```
+
+Ferramentas externas novas (por exemplo, de IA, nas próximas versões) são sempre **downloads
+separados**, nunca dentro do pacote do app. Vêm só da fonte oficial — o binário do próprio autor quando
+ele publica checksums; senão, compilado pelo CI do PeliculaConverter a partir do código oficial e
+publicado nas Releases deste repositório —, com versão e SHA-256 fixos no app, conferidos antes de
+extrair, e ficam em `%LOCALAPPDATA%\PeliculaConverter\ferramentas` (Linux:
+`~/.local/share/PeliculaConverter/ferramentas`). Licenças com condições pedem o seu aceite antes do
+download. O ffmpeg é a exceção: como os builds mudam o tempo todo, o app baixa o mais recente e confere
+com o SHA-256 publicado pelo autor do build.
+
+Ferramentas de IA em Python (o CorridorKey) ganham um **ambiente Python próprio**, montado pelo
+[uv](https://github.com/astral-sh/uv) (também baixado e conferido por SHA-256) numa pasta do componente,
+sem mexer no Python do computador: Python e bibliotecas de uma lista travada com o hash de cada arquivo,
+código de um commit fixo conferido arquivo por arquivo e modelos com SHA-256 fixo. Um download
+interrompido continua de onde parou; antes de valer, a instalação passa por um teste sem internet.
 
 ### Dependências e por que cada uma existe
 
@@ -619,6 +670,49 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 
 **Exportar** (`Ctrl+E`) abre a janela de exportação com o look atual.
 
+**Plataforma** (vídeo): escolha onde o vídeo vai ser postado e a janela preenche tudo — quadro, codec,
+taxa, som, volume e os limites da plataforma (duração e tamanho máximos), com uma nota e uma **prévia do
+resultado** feita pelo mesmo caminho da exportação. Depois dá para mudar qualquer opção; escolher uma
+qualidade pronta volta para *Nenhuma*. O app não envia nada: ele só grava o arquivo.
+
+| Plataforma | Quadro | Limites | Volume |
+|---|---|---|---|
+| YouTube 1080p / 1440p / 4K | lado menor 1080 / 1440 / 2160 (aumenta vídeos menores no 1440p/4K) | até 12 h, 256 GB | −14 LUFS |
+| YouTube Shorts | 1080 × 1920 | até 3 min | −14 LUFS |
+| Instagram Reels / Stories | 1080 × 1920, teto 25 Mb/s | 15 min / 60 s, 4 GB | −14 LUFS |
+| Instagram Feed 4:5 / 1:1 | 1080 × 1350 / 1080 × 1080 | 1 s a 60 min, 4 GB | −14 LUFS |
+| Facebook, LinkedIn, Telegram, Bluesky | mantém a orientação, 1080p | conforme a plataforma | −14 LUFS |
+| TikTok, Kwai, Pinterest, Snapchat, Threads | 1080 × 1920 | conforme a plataforma | −14 LUFS |
+| X (Twitter) | lado menor 720 | 2 min 20 s, 512 MB | −14 LUFS |
+| WhatsApp (status / conversa) | 720 × 1280 / lado menor 720, 30 quadros/s | 60 s / tamanho alvo 16 MB | −14 LUFS |
+| Discord | lado menor 720, 30 quadros/s | tamanho alvo 20 MB (mude para 50 MB ou mais com Nitro) | −14 LUFS |
+| Vimeo | lado menor 1080, até 20 Mb/s | — | −14 LUFS |
+| Spotify (videocast) | 1920 × 1080 | até 12 h | −16 LUFS, pico −2 dBTP |
+| Compatível com tudo | até 1080p e 30 quadros/s, H.264 8 bits | — | original |
+| Apple (HEVC) | resolução do vídeo, H.265 10 bits | — | original |
+| Festival (ProRes 422 HQ) | resolução do vídeo, PCM 24 bits | — | −23 LUFS (EBU R 128) |
+| Arquivo (preservação) | FFV1 16 bits sem perdas, som original | — | original |
+
+Os números vêm das páginas oficiais de cada plataforma (conferidas em outubro de 2026; a fonte de cada
+uma está em `pelicula/platforms.py`). Kwai e o status do WhatsApp não publicam especificação: os valores
+são conservadores e a janela avisa. O DCP de cinema não é gerado: o master *Festival* serve de entrada
+para um programa de DCP (ex.: DCP-o-matic).
+
+- **Quadro** e **Encaixe**: com um quadro fixo (1080 × 1920, 1080 × 1350…), um vídeo de outra proporção
+  é **cortado para preencher**, ganha **bordas pretas** ou fica sobre um **fundo desfocado** feito dele
+  mesmo. O look de película (vinheta, bordas do scan, halação, grão) é desenhado no quadro final.
+- **Tamanho alvo**: o arquivo sai com no máximo esse tamanho (Discord, WhatsApp, e-mail), em duas
+  passadas do x264/x265 — leva cerca do dobro do tempo, e a estimativa já conta isso.
+- **Volume alvo** e **Pico real**: o som é medido e acertado em duas passadas (EBU R 128): −14 LUFS nas
+  redes, −16 em podcast, −23 na TV e no festival; pico −1 dBTP. Com *Copiar original*, o som passa a ser
+  recodificado (a janela avisa).
+- **Grão para redes**: grão com tamanho mínimo no quadro de saída e um pouco mais forte, para sobreviver
+  à recompressão das redes (desligado por padrão; a prévia do resultado mostra o efeito).
+- **Avisos**: vídeo mais longo que o limite (com *Exportar só os primeiros N s*), tamanho estimado acima
+  do máximo, duas passadas e som recodificado.
+- **Área segura**: o botão de área segura na barra da prévia mostra onde a interface do TikTok, do Reels
+  ou do Shorts cobre o vídeo vertical (ou o título e a ação da TV). Só aparece na tela, nunca no arquivo.
+
 **Qualidades prontas** (vídeo):
 
 | Qualidade | Codec e ajustes |
@@ -714,7 +808,9 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | Botão direito (segurar) no vídeo | Ver o original |
 | Duplo clique no slider | Voltar ao padrão |
 | `Shift` + arrastar slider | Ajuste fino |
-| `M` | Som da prévia: mudo / com som |
+| `M` | Som da prévia: mudo / com som (no modo Edição, `M` põe um marcador e o som fica no `Shift+M`) |
+| `Shift+M` | Som da prévia: mudo / com som (nos dois modos) |
+| `Shift+↑` / `Shift+↓` | Marcador anterior / próximo |
 | `Ctrl+N` | Novo projeto |
 | `Ctrl+Shift+O` | Abrir projeto (.plc) |
 | `Ctrl+S` / `Ctrl+Shift+S` | Salvar projeto / salvar projeto como |
@@ -762,6 +858,9 @@ qualidade da prévia e uma miniatura.
 - **Idiomas**: português do Brasil, inglês e espanhol. No primeiro acesso o app pergunta, já com o
   idioma do sistema selecionado (ou inglês, se o do sistema não for um dos três). Para trocar:
   **Configurações → Idioma…** (o app reabre no idioma novo). Números seguem o idioma (1,5 / 1.5).
+- **Perfil de recursos**: logo depois do idioma, no primeiro acesso, o app pergunta como você vai
+  usá-lo (Simples, Criador, Cinema ou Tudo). Quem atualiza de uma versão anterior continua com tudo
+  ligado. Para mudar: **Configurações → Recursos…**.
 - **Tela de boas-vindas**: mostra a versão e a data, os **projetos recentes** com miniatura (clique
   abre; botão direito remove da lista) e atalhos para abrir um vídeo, um projeto ou a cena de teste.
   Dá para desligar em *Mostrar esta tela ao abrir o app* e reabrir em **Configurações → Tela de
@@ -789,7 +888,8 @@ Quando há, aparece **Atualizar para X.Y.Z** na barra de status e na tela de boa
 ## Modo Edição: montar, cortar e ajustar antes da película
 
 Clique em **Edição** no topo da janela (ou `Ctrl+2`). O arquivo que estava aberto já aparece na
-linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados.
+linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados. (Sem o seletor no topo? O
+**Modo Edição** está desligado em **Configurações → Recursos…**.)
 
 1. **Importar** (`Ctrl+I`, botão *Importar* ou arrastar arquivos para a linha do tempo): vídeos e
    imagens vão para o fim da faixa de vídeo; músicas entram no começo da primeira faixa de áudio
@@ -804,11 +904,15 @@ linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados.
    cor da montagem. Os medidores (forma de onda, parada RGB, vetorscópio) ficam acima do painel.
 4. **Som**: em clipes de áudio (ou *Som*, num clipe ligado), volume, fades, balanço, graves, médios,
    agudos, *Realçar voz*, *Redução de ruído* e *Normalizar volume*. Cada faixa tem mudo, solo,
-   trava e volume.
-5. **Velocidade e transições**: *Velocidade* (câmera lenta ou acelerado, a duração acompanha),
+   trava e volume. Botão direito no corte entre dois clipes de som: *Transição de som (potência
+   constante)*. O **medidor de som** ao lado da prévia mostra os picos e o loudness enquanto toca.
+5. **Marcadores**: `M` põe um marcador no cursor; dois cliques nele dão nome, nota, cor e *Capítulo*.
+   Os capítulos vão para o arquivo exportado (MP4, MOV, MKV) e para o texto do YouTube (*Copiar
+   capítulos para o YouTube…*).
+6. **Velocidade e transições**: *Velocidade* (câmera lenta ou acelerado, a duração acompanha),
    *Congelar quadro*, e em *Transições* dissolver, surgir do preto/branco e sumir.
-6. **Sequência** (barra da prévia): resolução, quadros por segundo e cor de fundo. A primeira mídia
-   importada define o formato.
+7. **Sequência** (barra da prévia): resolução, quadros por segundo, cor de fundo e fades curtos nas
+   emendas de som. A primeira mídia importada define o formato.
 
 Ligue **Com película** na barra da prévia para ver a montagem já com o look; o que aparece é o que
 sai na exportação. Ao voltar para o modo **Película**, o look é aplicado na montagem (exportar,
@@ -882,9 +986,11 @@ tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável 
 | `presets` (`list-presets`) | Lista os presets prontos e os seus |
 | `parametros` (`params`) | Lista todos os parâmetros: chave, nome, faixa e padrão |
 | `qualidades` (`qualities`) | Lista as qualidades de exportação (para um arquivo, se informado) |
+| `plataformas` (`platforms`) | Lista as plataformas de exportação com os limites de cada uma (`--json` para scripts) |
 | `info` | Mostra resolução, fps, codec e áudio de um arquivo |
 | `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
 | `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--ofx-instalar` (plugin OpenFX, Resolve gratuito), `--ofx-pasta DIR`, `--instalar` (DCTLs e LUTs), `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
+| `modulos` (`modules`) | Lista os recursos opcionais da janela e liga ou desliga: `--perfil simples\|criador\|cinema\|tudo`, `--ligar ID`, `--desligar ID`, `--json` (a exportação pelo terminal não muda) |
 | `versao` (`version`) | Mostra a versão |
 
 Exemplos:
@@ -901,6 +1007,10 @@ pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --trecho
 pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
 pelicula-cli lut --preset vision3_250d -o vision3_250d.cube
 
+# exportar para uma plataforma (veja a lista com "plataformas")
+pelicula-cli exportar video.mp4 --plataforma instagram_reels --encaixe desfocado --grao-redes
+pelicula-cli exportar video.mp4 --plataforma discord --tamanho-alvo 50     # Nitro Basic
+
 # exportar a montagem do modo Edição (projeto salvo pela janela)
 pelicula-cli exportar edicao.plc -o montagem.mp4 --preset lab_technicolor3
 
@@ -914,6 +1024,9 @@ pelicula-cli resolve --pasta "D:/plugins/PeliculaConverter"
 pelicula-cli presets
 pelicula-cli parametros --secao grao
 pelicula-cli qualidades video.mp4
+
+# o que aparece na janela (recursos opcionais)
+pelicula-cli modulos --perfil criador --ligar laboratorio
 ```
 
 Opções de `exportar`: `-o/--saida`, `--preset`, `--set CHAVE=VALOR` (repetível; cores em `#RRGGBB`,
@@ -922,7 +1035,11 @@ porcentagens como `45%`, booleanos `true/false`), `--qualidade` (chaves de `qual
 (`original` ou o lado menor em pixels, `1080` ou `1080p`: vertical em 1080 sai 1080 × 1920),
 `--fps`, `--audio`, `--inicio`/`--fim` (segundos, `00:01:02.5` ou `#quadro`), `--trecho` (usa a
 entrada/saída do projeto), `--threads`, `--prioridade`, `--hwaccel`, `--buffer`, `-y` (substituir),
-`--json` (progresso em JSON, uma linha por segundo) e `-q` (sem barra de progresso). `Ctrl+C`
+`--json` (progresso em JSON, uma linha por segundo, com a etapa e o progresso das duas passadas) e `-q`
+(sem barra de progresso). Exportação por plataforma: `--plataforma ID` (no lugar de `--qualidade`),
+`--quadro LxA` (ex.: `1080x1920`; `auto` segue a resolução), `--encaixe cortar|bordas|desfocado`,
+`--tamanho-alvo MB` (duas passadas; 0 desliga), `--volume LUFS` (ex.: `-14`; 0 desliga), `--pico dBTP`
+e `--grao-redes` — todas também valem sem `--plataforma`. `Ctrl+C`
 cancela e apaga o arquivo parcial; um arquivo antigo com o mesmo nome continua intacto (com `-y`, ele
 só é trocado quando a exportação termina). Códigos de saída: 0 sucesso, 1 erro, 2 uso incorreto,
 130 cancelado.
@@ -1033,14 +1150,15 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Sintoma | O que fazer |
 |---|---|
 | *"Não foi possível iniciar o processamento na placa de vídeo (é preciso OpenGL 3.3)"* | Atualize o driver da GPU (NVIDIA, AMD ou Intel). Em máquinas virtuais e áreas de trabalho remotas o OpenGL 3.3 pode não existir. No Linux, confira `glxinfo \| grep "OpenGL core"` e instale os drivers Mesa. |
-| *"Não encontrei o ffmpeg neste computador"* | **Configurações → Dependências e atualizações → Baixar ffmpeg**, ou instale (`winget install Gyan.FFmpeg` / `sudo apt install ffmpeg`), ou aponte a pasta em *Pasta do ffmpeg…*. |
+| *"Não encontrei o ffmpeg neste computador"* | **Configurações → Componentes → Baixar ffmpeg**, ou instale (`winget install Gyan.FFmpeg` / `sudo apt install ffmpeg`), ou aponte a pasta em *Pasta do ffmpeg…*. |
 | O app avisa que o ffmpeg está desatualizado | Clique em *Atualizar*. O app baixa a versão oficial para a pasta dele, sem mexer no ffmpeg do sistema. |
 | *"Não foi possível abrir o arquivo"* com `.NEV`, `.R3D` ou `.braw` | O ffmpeg não lê esses RAW. Veja [Arquivos RAW](#arquivos-raw-n-raw-r3d-braw-prores-raw). |
-| Um codec não aparece na lista | Codecs só aparecem se o seu ffmpeg tiver o codificador. NVENC/QSV/AMF são testados de verdade e somem se a placa ou o driver não suportarem. Atualize o ffmpeg pela janela de dependências. |
+| Um codec não aparece na lista | Codecs só aparecem se o seu ffmpeg tiver o codificador. NVENC/QSV/AMF são testados de verdade e somem se a placa ou o driver não suportarem. Atualize o ffmpeg em **Configurações → Componentes**. |
 | Exportação falha com erro do ffmpeg | A fila mostra a mensagem do ffmpeg. Combinações comuns: H.264/H.265 exigem dimensões pares (o app já ajusta), MP4 não aceita PCM (o app troca por AAC), NVENC exige driver recente. Tente a qualidade *MP4 H.264*. |
 | Efeitos lentos / prévia travando | Use a prévia *Rápida (540p)* ou *Normal (720p)*. Em notebooks, force a GPU dedicada (*Alto desempenho*). Halação, bloom e névoa com raios grandes custam mais. |
 | Exportação deixa o computador lento | Prioridade *Baixa* e menos núcleos na seção *Desempenho*. |
 | Ficou um `nome.parcial-pelicula.mp4` (ou uma pasta `nome.parcial-pelicula`) ao lado do vídeo | Sobra de uma exportação interrompida (o app fechou ou o computador desligou no meio). O arquivo final e o antigo não foram tocados. Pode apagar; a próxima exportação com o mesmo nome também apaga. |
+| O app fechou de repente | Abra de novo: se havia mudanças não salvas, ele oferece **Recuperar** a cópia de segurança (ou abrir o projeto salvo). O relatório do travamento fica em **Configurações → Recuperação** (*Copiar relatório*); anexe-o ao relatar o problema. |
 | *"A exportação terminou, mas não foi possível substituir…"* | O arquivo antigo estava aberto em outro programa (um player, por exemplo). O vídeo novo está completo no `nome.parcial-pelicula.mp4` indicado: feche o programa e renomeie, ou exporte de novo. |
 | Vídeo vertical saiu pequeno (608 × 1080 em 1080p) | Versões antigas usavam a resolução como altura. Agora ela vale para o lado menor (1080p vertical = 1080 × 1920); confira o tamanho em *Resolução* e na linha *Saída* da janela de exportação. |
 | Faixas (*banding*) em degradês | Mantenha o *Pontilhado (dither)* ligado em 8 bits ou exporte em 10 bits (MKV H.265, YouTube 4K H.265). |
@@ -1184,19 +1302,23 @@ internet nestes casos:
 |---|---|---|
 | Ao abrir, no máximo uma vez por dia: procurar versão nova do app | `api.github.com` | Um pedido de página comum (o endereço IP, como em qualquer site, e `User-Agent: PeliculaConverter/<versão>`) |
 | Ao abrir, no Windows: ver qual é a versão mais nova do ffmpeg | `www.gyan.dev` | O mesmo tipo de pedido |
-| Quando você pede: baixar ou atualizar o ffmpeg | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo |
+| Quando você pede: baixar ou atualizar o ffmpeg, ou *Procurar versão nova* em Componentes | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo (ou o pedido de versão) |
+| Quando você pede: baixar um componente em Configurações › Componentes | A fonte oficial mostrada no cartão (o site do autor ou as Releases deste repositório) | Download do arquivo |
 | Quando você aceita uma atualização do app | `github.com` (Releases deste repositório) | Download do arquivo |
 
 - As duas consultas feitas ao abrir podem ser desligadas em **Configurações → Procurar atualizações
   automaticamente**. Desligadas, o app só se conecta quando você pede.
+- As notificações do sistema, as cópias da recuperação automática e os relatórios de erro ficam só neste
+  computador: nada é enviado.
 - Esses serviços têm as próprias políticas: [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)
   e [gyan.dev](https://www.gyan.dev/).
 
 *English:* PeliculaConverter does not collect personal data: no accounts, telemetry, usage
 statistics or ads, and your videos, projects and presets never leave your computer. It only goes
 online to (1) check GitHub for a new app version at startup, at most once a day; (2) on Windows,
-check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg when you ask; and
-(4) download an app update when you accept it. These requests carry no personal data besides the
+check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg or another component
+(Settings › Components) from its official source when you ask; and (4) download an app update when
+you accept it. These requests carry no personal data besides the
 IP address inherent to any connection and a `PeliculaConverter/<version>` user agent. The two
 startup checks can be turned off in **Settings → Check for updates automatically**; with them off,
 the program will not transfer any information to other networked systems unless specifically
@@ -1208,6 +1330,27 @@ requested by the user.
 
 O ffmpeg baixado pelo app não faz parte deste repositório e segue a licença do próprio ffmpeg
 (os builds *essentials* do gyan.dev e os builds do BtbN são GPL).
+
+### Créditos e licenças de terceiros (componentes baixados à parte)
+
+Nada disto vem no repositório, no pacote ou nas releases do PeliculaConverter: cada componente é
+baixado, quando você pede, das fontes oficiais direto para o seu computador.
+
+- **CorridorKey**, da **Corridor Digital** ([código](https://github.com/nikopueringer/CorridorKey2.0),
+  [pesos](https://huggingface.co/nikopueringer/CorridorKey2.0)) —
+  [Corridor Key Licence](https://github.com/nikopueringer/CorridorKey2.0/blob/485f5e9ab759ead6138cc990776184b59d6ea971/LICENSE)
+  (CC BY-NC-SA 4.0 com termos adicionais, que valem primeiro). Você pode usar o CorridorKey em
+  qualquer trabalho legal, inclusive comercial, e **o que você recortar é seu**. Não é permitido
+  revender, redistribuir nem cobrar pelo acesso ao CorridorKey ou aos pesos, nem oferecer o recorte como
+  serviço pago. **Empresas com faturamento anual acima de US$ 20 milhões** precisam comprar uma licença
+  por pessoa em corridorkey.com. O PeliculaConverter continua gratuito e MIT.
+- Modelos de terceiros que o CorridorKey usa: **C-RADIOv4** (NVIDIA,
+  [NVIDIA Open Model License](https://developer.download.nvidia.com/licenses/nvidia-open-model-license-agreement-june-2024.pdf)),
+  **MoGe-2** (Microsoft, [MIT](https://github.com/microsoft/MoGe/blob/main/LICENSE)) e **RVM**
+  (Google DeepMind, [representations4d](https://github.com/google-deepmind/representations4d): código
+  Apache-2.0, pesos CC-BY 4.0).
+- **uv**, da Astral ([MIT / Apache-2.0](https://github.com/astral-sh/uv)), monta o ambiente Python;
+  o PyTorch e as outras bibliotecas seguem as próprias licenças.
 
 ## Aviso legal
 

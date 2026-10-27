@@ -5,8 +5,13 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
-- "settings": resolução, fps ou fundo da sequência;
+- "settings": resolução, fps, fundo ou fades curtos nas emendas de som da sequência;
+- "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
+  inclusive ao desfazer/refazer uma mudança só de marcadores;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
+
+A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
+outro, e "Excluir" apaga o que estiver selecionado.
 """
 
 from __future__ import annotations
@@ -20,6 +25,13 @@ from .. import editparams, timeline
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
+AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
+
+
+def _without_markers(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("marcadores", None)
+    return d
 
 
 class TimelineModel(QObject):
@@ -32,6 +44,7 @@ class TimelineModel(QObject):
         self.seq: Sequence = seq if seq is not None else Sequence()
         self.history = timeline.History(self.seq)
         self.selection: list[str] = []
+        self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -64,9 +77,10 @@ class TimelineModel(QObject):
     def _restore(self, seq: Sequence | None) -> None:
         if seq is None:
             return
+        only_markers = _without_markers(seq) == _without_markers(self.seq)
         self.seq = seq
         self._filter_selection()
-        self.changed.emit("*")
+        self.changed.emit("markers" if only_markers else "*")  # desfazer um marcador não recarrega a prévia
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -87,8 +101,10 @@ class TimelineModel(QObject):
     def _filter_selection(self, emit: bool = False) -> None:
         ids = {c.id for c in self.seq.clips}
         new = [i for i in self.selection if i in ids]
-        if new != self.selection:
+        marker = self.marker_sel if self.marker_sel and self.seq.marker(self.marker_sel) else None
+        if new != self.selection or marker != self.marker_sel:
             self.selection = new
+            self.marker_sel = marker
             if emit:
                 self.selectionChanged.emit()
 
@@ -98,9 +114,10 @@ class TimelineModel(QObject):
         for i in ids:
             if i in known and i not in new:
                 new.append(i)
-        if new != self.selection:
+        if new != self.selection or self.marker_sel is not None:
             self.commit()
             self.selection = new
+            self.marker_sel = None
             self.selectionChanged.emit()
 
     def select_group(self, cid: str, add: bool = False, toggle: bool = False) -> None:
@@ -153,6 +170,9 @@ class TimelineModel(QObject):
         return made
 
     def delete_selected(self, ripple: bool = False) -> None:
+        if self.marker_sel is not None:
+            self.remove_marker(self.marker_sel)
+            return
         if not self.selection:
             return
         self.seq.delete(list(self.selection), ripple=ripple)
@@ -286,9 +306,13 @@ class TimelineModel(QObject):
             self._done("structure")
 
     # ------------------------------------------------------------ sequência
-    def set_settings(self, width: int, height: int, fps_str: str, background=None) -> None:
-        """Resolução, fps e fundo. Ao mudar o fps, os clipes mantêm o tempo (em segundos)."""
+    def set_settings(self, width: int, height: int, fps_str: str, background=None,
+                     micro_fade: bool | None = None) -> None:
+        """Resolução, fps, fundo e fades curtos nas emendas de som. Ao mudar o fps, os clipes mantêm o
+        tempo (em segundos)."""
         seq = self.seq
+        if micro_fade is not None:
+            seq.micro_fade = bool(micro_fade)
         old_fps = seq.fps
         fr = timeline.parse_fps(fps_str)
         seq.width = max(16, int(width))
@@ -304,7 +328,75 @@ class TimelineModel(QObject):
                 c.dur = max(1, int(round(c.dur * ratio)))
             for c in seq.clips:
                 c.dur = max(1, min(c.dur, seq.max_dur(c)))
+            for mk in seq.markers:
+                mk.frame = int(round(mk.frame * ratio))
         self._done("settings")
+
+    # ------------------------------------------------------------ transição de som
+    def set_audio_transition(self, cid: str, seconds: float) -> float:
+        """Transição de som (potência constante) entre o clipe anterior da faixa e `cid`; 0 tira. Os fades
+        dos dois clipes nesse corte são zerados (a transição toma o lugar deles), num passo só do
+        desfazer. Devolve a duração que cabe com o arquivo que sobra além do corte (pode ser menor)."""
+        c = self.seq.find(cid)
+        if c is None or c.kind != AUDIO or self.seq.locked(c):
+            return 0.0
+        seconds = max(0.0, float(seconds))
+        vals = dict(c.values)
+        vals["transicao"] = seconds
+        if seconds > 0:
+            vals["fade_in"] = 0.0
+            prev = self.seq.previous_on_track(c)
+            if prev is not None and float(prev.values.get("fade_out", 0.0)) > 0:
+                self.seq.set_values(prev.id, {**prev.values, "fade_out": 0.0})
+        self.seq.set_values(cid, vals)
+        self._done("values")
+        _prev, before, after = self.seq.audio_crossfade(c)
+        return before + after
+
+    # ------------------------------------------------------------ marcadores
+    def select_marker(self, mid: str | None) -> None:
+        """Seleciona um marcador (tira a seleção de clipes); None tira a seleção do marcador."""
+        mid = mid if mid and self.seq.marker(mid) is not None else None
+        if mid == self.marker_sel and (mid is None or not self.selection):
+            return
+        self.commit()
+        self.marker_sel = mid
+        if mid is not None:
+            self.selection = []
+        self.selectionChanged.emit()
+
+    def selected_marker(self):
+        return self.seq.marker(self.marker_sel) if self.marker_sel else None
+
+    def add_marker(self, frame: int, **fields):
+        """Marcador no quadro (ou o que já existe ali), já selecionado."""
+        n = len(self.seq.markers)
+        mk = self.seq.add_marker(int(frame), **fields)
+        self.select_marker(mk.id)
+        if len(self.seq.markers) != n:
+            self._done("markers")
+        return mk
+
+    def update_marker(self, mid: str, **fields) -> None:
+        if self.seq.update_marker(mid, **fields):
+            self._done("markers")
+
+    def move_marker(self, mid: str, frame: int) -> None:
+        self.update_marker(mid, frame=int(frame))
+
+    def remove_marker(self, mid: str) -> None:
+        if self.seq.remove_marker(mid):
+            if self.marker_sel == mid:
+                self.marker_sel = None
+                self.selectionChanged.emit()
+            self._done("markers")
+
+    def clear_markers(self) -> None:
+        if self.seq.markers:
+            self.seq.markers = []
+            self.marker_sel = None
+            self.selectionChanged.emit()
+            self._done("markers")
 
     # ------------------------------------------------------------ copiar ajustes
     def copy_values(self, cid: str) -> bool:

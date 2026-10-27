@@ -44,6 +44,7 @@ class UpdateDialog(QDialog):
         self.settings = settings
         self._cancel = threading.Event()
         self._busy = False
+        self._package = ""  # pacote já baixado e conferido: um segundo clique não baixa de novo
         self.setWindowTitle(_("Atualização disponível"))
         self.resize(620, 520)
         lay = QVBoxLayout(self)
@@ -109,6 +110,9 @@ class UpdateDialog(QDialog):
         self.reject()
 
     def _start(self) -> None:
+        if self._package:
+            self._done(self._package, "")
+            return
         self._busy = True
         self.go.setEnabled(False)
         self.bar.setVisible(True)
@@ -139,6 +143,7 @@ class UpdateDialog(QDialog):
             self.go.setEnabled(True)
             self.status.setText(error_text(err))
             return
+        self._package = path
         self.status.setText(_("Arquivo conferido. O app vai fechar para instalar a versão nova e abrir de novo sozinho."))
         r = QMessageBox.question(self, _("Instalar atualização"),
                                  _("Tudo pronto. Fechar o PeliculaConverter agora para instalar a versão {versao}?")
@@ -146,16 +151,24 @@ class UpdateDialog(QDialog):
         if r != QMessageBox.StandardButton.Yes:
             self.go.setEnabled(True)
             return
+        # Fecha a janela antes de preparar a instalação: se o usuário cancelar o fechamento (projeto não
+        # salvo, exportações em andamento), nada é instalado e o app continua aberto, com as cópias de
+        # recuperação intactas.
+        win = self.parent()
+        if win is not None and not win.close():
+            self.status.setText(_("A instalação ficou para depois e o app continua aberto. Clique em "
+                                  "\"Atualizar agora\" quando quiser instalar."))
+            self.go.setEnabled(True)
+            return
         try:
             updater.install(path, self.kind)
         except updater.UpdateError as exc:
+            if win is not None:
+                win.show()
             self.status.setText(error_text(str(exc)))
             self.go.setEnabled(True)
             return
         self.accept()
-        win = self.parent()
-        if win is not None:
-            win.close()
         QApplication.instance().exit(0)
 
     def reject(self) -> None:

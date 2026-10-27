@@ -362,3 +362,34 @@ def test_resolve_command_without_module(capsys, monkeypatch):
     monkeypatch.delattr(pelicula, "resolve", raising=False)
     assert cli.main(["resolve", "--listar"]) == 1
     assert "DaVinci" in capsys.readouterr().err
+
+
+def test_modules_command(tmp_path, capsys, monkeypatch):
+    """`modulos` lista, liga e desliga os recursos da janela (preferências num .ini temporário)."""
+    from pelicula import modules
+    from pelicula.ui import prefs
+    monkeypatch.setenv("PELICULA_SETTINGS_DIR", str(tmp_path))
+    monkeypatch.setenv("PELICULA_LANG", "pt_BR")
+    assert cli.COMMANDS["modulos"] == "modules" and cli.COMMANDS["modules"] == "modules"
+    assert cli.main(["modulos", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["perfil"] == "tudo"
+    assert [r["id"] for r in data["modulos"]] == [m.id for m in modules.MODULES]
+    assert all(r["ligado"] == (r["estado"] == modules.ESTAVEL) for r in data["modulos"])
+
+    assert cli.main(["modulos", "--perfil", "simples", "--ligar", "scopes", "--desligar", "edicao"]) == 0
+    out = capsys.readouterr().out
+    assert "Personalizado" in out and "scopes" in out and "desligado" in out
+    s = prefs.settings()
+    assert modules.is_enabled(s, "scopes") and not modules.is_enabled(s, "edicao")
+    assert not modules.is_enabled(s, "laboratorio") and modules.is_enabled(s, "recuperacao")
+
+    assert cli.main(["modules", "--perfil", "criador"]) == 0
+    assert "Perfil: Criador" in capsys.readouterr().out
+    assert modules.current_profile(prefs.settings()) == "criador"
+
+    assert cli.main(["modulos", "--ligar", "nao_existe", "--desligar", "scopes"]) == 1
+    assert "nao_existe" in capsys.readouterr().err
+    assert modules.is_enabled(prefs.settings(), "scopes")  # id errado: nada muda
+    with pytest.raises(SystemExit):
+        cli.main(["modulos", "--perfil", "nao_existe"])

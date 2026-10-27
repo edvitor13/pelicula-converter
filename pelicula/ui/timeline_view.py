@@ -4,6 +4,10 @@ Desenhada à mão com QPainter (sem QGraphicsView): a faixa V1 fica logo acima d
 faixas de vídeo maiores sobem; as de áudio (A1, A2…) ficam embaixo. Toda edição passa pelo
 `TimelineModel` (que grava o desfazer); durante o arraste só um "fantasma" é desenhado e a
 mudança é aplicada ao soltar o mouse.
+
+Marcadores ficam na régua, na cor de cada um (ponto branco = capítulo): clique seleciona e leva o
+cursor até ele, arrastar move, dois cliques editam, Delete apaga, M põe um no cursor e Shift+↑/↓
+vão ao anterior/próximo.
 """
 
 from __future__ import annotations
@@ -15,12 +19,14 @@ import numpy as np
 from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QInputDialog, QMenu, QScrollBar, QSizePolicy,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QToolButton, QToolTip, QVBoxLayout, QWidget)
 
-from ..i18n import _, decimal_sep
+from .. import timeline
+from ..i18n import _, decimal_sep, fmt_decimal
 from ..timeline import AUDIO, VIDEO, Clip
 from . import icons, theme
 from .edit_model import TimelineModel
+from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
 from .widgets import FilmSlider, timecode
 
@@ -35,6 +41,8 @@ SNAP_PX = 9
 MIN_PPF, MAX_PPF = 0.01, 40.0  # pixels por quadro
 MIME_SOURCE = "application/x-pelicula-source"
 BTN = 20                     # botões do cabeçalho das faixas
+MARKER_W = 10                # largura do marcador na régua
+MARKER_HIT = 6               # distância (px) que ainda pega um marcador
 
 # Passos da régua em segundos (o menor que deixa ~90 px entre rótulos é usado).
 _RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
@@ -268,6 +276,7 @@ class TimelineCanvas(QWidget):
             if r is None or r.right() < x_min or r.left() > x_max:
                 continue
             self._paint_clip(p, c, r, fm, dim=c.id in moving)
+        self._paint_audio_transitions(p, x_min, x_max)
         self._paint_ghosts(p)
         if not self.seq.clips:
             p.setPen(QColor(theme.FAINT))
@@ -284,6 +293,12 @@ class TimelineCanvas(QWidget):
         if self._snap_x is not None:
             p.setPen(QPen(QColor(theme.ACCENT_HI), 1))
             p.drawLine(QPointF(self._snap_x, RULER_H), QPointF(self._snap_x, h))
+        for mk, frame in self._marker_frames():
+            col = marker_color(mk.color)
+            col.setAlpha(150 if mk.id == self.model.marker_sel else 70)
+            x = self.frame_to_x(frame)
+            p.setPen(QPen(col, 1, Qt.PenStyle.DotLine))
+            p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
         xp = self.frame_to_x(self.playhead)
         p.setPen(QPen(QColor(theme.PLAYHEAD), 1.5))
         p.drawLine(QPointF(xp, RULER_H), QPointF(xp, h))
@@ -371,6 +386,51 @@ class TimelineCanvas(QWidget):
             col = QColor(255, 255, 255, 60) if v["saida_tipo"] in ("branco", "transparente") else QColor(0, 0, 0, 90)
             p.setBrush(col)
             p.drawPath(path)
+
+    def audio_transition_span(self, c: Clip) -> tuple[float, float] | None:
+        """(x inicial, x final) da transição de som que entra em `c`, na largura que de fato cabe."""
+        if c.kind != AUDIO or not c.values.get("transicao"):
+            return None
+        prev, before, after = self.seq.audio_crossfade(c)
+        if prev is None:
+            return None
+        fps = self.seq.fps
+        return self.frame_to_x(c.start - before * fps), self.frame_to_x(c.start + after * fps)
+
+    def _paint_audio_transitions(self, p: QPainter, x_min: float, x_max: float) -> None:
+        """Transição de som: as curvas seno (entra) e cosseno (sai) cruzando sobre o corte. Sem sobra de
+        arquivo para ela, só um traço vermelho no corte."""
+        for c in self.seq.clips:
+            span = self.audio_transition_span(c)
+            r = self.clip_rect(c) if span else None
+            if r is None or span[1] < x_min or span[0] > x_max:
+                continue
+            x0, x1 = span
+            top, bot = r.top() + 3, r.bottom() - 3
+            if x1 - x0 < 2:
+                p.setPen(QPen(QColor(theme.DANGER), 2))
+                p.drawLine(QPointF(r.left(), top), QPointF(r.left(), bot))
+                continue
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(255, 255, 255, 30))
+            p.drawRoundedRect(QRectF(x0, top, x1 - x0, bot - top), 3, 3)
+            n = max(8, int((x1 - x0) / 3))
+            rise, fall = QPainterPath(), QPainterPath()
+            for i in range(n + 1):
+                k = i / n
+                x = x0 + k * (x1 - x0)
+                y_in = bot - (bot - top) * math.sin(k * math.pi / 2)
+                y_out = bot - (bot - top) * math.cos(k * math.pi / 2)
+                if i == 0:
+                    rise.moveTo(x, y_in)
+                    fall.moveTo(x, y_out)
+                else:
+                    rise.lineTo(x, y_in)
+                    fall.lineTo(x, y_out)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(theme.ACCENT_HI), 1.4))
+            p.drawPath(rise)
+            p.drawPath(fall)
 
     def _paint_wave(self, p: QPainter, c: Clip, r: QRectF) -> None:
         peaks = self.peaks_provider(c.src) if self.peaks_provider else None
@@ -509,6 +569,7 @@ class TimelineCanvas(QWidget):
                 p.setPen(QColor(theme.MUTED))
                 p.drawText(QPointF(x + 4, 13), _elide(fm, txt, label_frames * self.ppf - 6))
             k += 1
+        self._paint_markers(p, w)
         xp = self.frame_to_x(self.playhead)
         if xp >= HEADER_W - 6:
             path = QPainterPath()
@@ -528,6 +589,80 @@ class TimelineCanvas(QWidget):
         p.drawText(QRectF(10, 0, HEADER_W - 12, RULER_H), Qt.AlignmentFlag.AlignVCenter,
                    timecode(self.playhead, fps))
         p.fillRect(QRectF(HEADER_W - 1, 0, 1, self.height()), QColor(theme.BORDER))
+
+    # ------------------------------------------------------------ marcadores
+    def _marker_frames(self) -> list[tuple["timeline.Marker", int]]:
+        """(marcador, quadro na tela): o que está sendo arrastado aparece onde vai ficar."""
+        d = self._drag or {}
+        moving = d.get("id") if d.get("mode") == "marker" and d.get("active") else None
+        return [(mk, d["frame"] if mk.id == moving else mk.frame) for mk in self.seq.sorted_markers()]
+
+    def _paint_markers(self, p: QPainter, w: float) -> None:
+        top, bottom = RULER_H - 15.0, RULER_H - 1.0
+        half = MARKER_W / 2
+        for mk, frame in self._marker_frames():
+            x = self.frame_to_x(frame)
+            if x < HEADER_W - half or x > w + half:
+                continue
+            path = QPainterPath()
+            path.moveTo(x - half, top)
+            path.lineTo(x + half, top)
+            path.lineTo(x + half, bottom - 5)
+            path.lineTo(x, bottom)
+            path.lineTo(x - half, bottom - 5)
+            path.closeSubpath()
+            col = marker_color(mk.color)
+            selected = mk.id == self.model.marker_sel
+            p.setPen(QPen(QColor(theme.TEXT), 1.6) if selected else QPen(col.darker(170), 1))
+            p.setBrush(col)
+            p.drawPath(path)
+            if mk.chapter:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor("#ffffff"))
+                p.drawEllipse(QPointF(x, top + 4.5), 1.8, 1.8)
+
+    def marker_at(self, pos: QPointF):
+        """Marcador sob o ponto da régua (o mais perto), ou None."""
+        if pos.y() >= RULER_H or pos.x() < HEADER_W - MARKER_HIT:
+            return None
+        best, dist = None, MARKER_HIT + 0.5
+        for mk, frame in self._marker_frames():
+            dx = abs(self.frame_to_x(frame) - pos.x())
+            if dx <= dist:
+                best, dist = mk, dx
+        return best
+
+    def add_marker_at(self, frame: int | None = None):
+        """Marcador no quadro (padrão: no cursor); se já há um ali, só o seleciona."""
+        return self.model.add_marker(self.playhead if frame is None else max(0, int(frame)))
+
+    def goto_marker(self, step: int) -> None:
+        """Leva o cursor ao próximo (step > 0) ou ao anterior marcador."""
+        mk = self.seq.next_marker(self.playhead) if step > 0 else self.seq.previous_marker(self.playhead)
+        if mk is not None:
+            self.model.select_marker(mk.id)
+            self.seekRequested.emit(mk.frame)
+
+    def edit_marker(self, mid: str) -> None:
+        mk = self.seq.marker(mid)
+        if mk is None:
+            return
+        self.model.select_marker(mid)
+        dlg = MarkerDialog(self, mk, self.seq.fps)
+        if not dlg.exec():
+            return
+        if dlg.removed:
+            self.model.remove_marker(mid)
+        else:
+            self.model.update_marker(mid, **dlg.values())
+
+    def copy_chapters(self) -> None:
+        """Capítulos para o YouTube (contados da entrada, se há um trecho marcado, como na exportação)."""
+        start = int(self.inp or 0)
+        end = int(self.outp) + 1 if self.outp is not None else self.seq.duration
+        text, problems = youtube_chapters(self.seq, start, end)
+        note = _("Tempos contados a partir da entrada (I), como na exportação do trecho.") if start else ""
+        ChaptersDialog(self, text, problems, note).exec()
 
     def header_buttons(self, kind: str, idx: int, y: float, h: float) -> dict[str, QRectF]:
         """Retângulos dos botões do cabeçalho de uma faixa."""
@@ -608,6 +743,12 @@ class TimelineCanvas(QWidget):
             return
         if e.button() != Qt.MouseButton.LeftButton:
             return
+        mk = self.marker_at(pos)
+        if mk is not None:
+            self.model.select_marker(mk.id)
+            self._drag = {"mode": "marker", "id": mk.id, "press_x": pos.x(), "orig": mk.frame, "frame": mk.frame,
+                          "active": False}
+            return
         if pos.y() < RULER_H and pos.x() >= HEADER_W:
             self._drag = {"mode": "scrub"}
             self.scrubbing.emit(True)
@@ -677,6 +818,16 @@ class TimelineCanvas(QWidget):
         if mode == "volume":
             self._set_volume_from(pos.x())
             return
+        if mode == "marker":
+            if not d["active"] and abs(pos.x() - d["press_x"]) < 3:
+                return
+            d["active"] = True
+            snap_on = self.snap != bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            f, s = self.snap_frame(d["orig"] + (pos.x() - d["press_x"]) / self.ppf, set(), snap_on)
+            d["frame"] = max(0, f)
+            self._snap_x = self.frame_to_x(s) if s is not None else None
+            self.update()
+            return
         clip = self.seq.find(d["clip"])
         if clip is None:
             self._drag = None
@@ -736,6 +887,14 @@ class TimelineCanvas(QWidget):
         if mode == "volume":
             self.model.commit()
             return
+        if mode == "marker":
+            if d["active"]:
+                if d["frame"] != d["orig"]:
+                    self.model.move_marker(d["id"], d["frame"])
+            else:
+                self.seekRequested.emit(d["orig"])  # clique simples: o cursor vai até o marcador
+            self.update()
+            return
         if not d.get("active"):
             self.update()
             return
@@ -754,6 +913,11 @@ class TimelineCanvas(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         pos = e.position()
+        mk = self.marker_at(pos)
+        if mk is not None:
+            self._drag = None
+            self.edit_marker(mk.id)
+            return
         hh = self._header_hit(pos)
         if hh is not None and hh[2] == "volume":
             self.model.set_track(hh[0], hh[1], volume=0.0)
@@ -773,6 +937,8 @@ class TimelineCanvas(QWidget):
             return
         if pos.y() < RULER_H:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
+            mk = self.marker_at(pos)
+            self.setToolTip(marker_tooltip(mk, self.seq.fps) if mk is not None else "")
             return
         clip, zone = self.hit(pos)
         if clip is not None and zone in ("left", "right"):
@@ -813,9 +979,43 @@ class TimelineCanvas(QWidget):
         e.accept()
 
     # ------------------------------------------------------------ menu
+    def marker_menu(self, menu: QMenu, mk) -> None:
+        m = self.model
+        menu.addAction(_("Editar marcador…"), lambda: self.edit_marker(mk.id))
+        act = menu.addAction(_("Capítulo (YouTube e arquivo exportado)"))
+        act.setCheckable(True)
+        act.setChecked(mk.chapter)
+        act.toggled.connect(lambda on: m.update_marker(mk.id, chapter=on))
+        colors = menu.addMenu(_("Cor"))
+        for key, label in timeline.MARKER_COLORS:
+            a = colors.addAction(icons.icon("dot", theme.MARKER_COLORS[key], 16), _(label))
+            a.setCheckable(True)
+            a.setChecked(key == mk.color)
+            a.triggered.connect(lambda _on=False, k=key: m.update_marker(mk.id, color=k))
+        menu.addSeparator()
+        menu.addAction(_("Remover marcador"), lambda: m.remove_marker(mk.id))
+
+    def ruler_menu(self, menu: QMenu, frame: int) -> None:
+        menu.addAction(_("Adicionar marcador aqui"), lambda: self.add_marker_at(frame))
+        menu.addAction(_("Adicionar marcador no cursor (M)"), lambda: self.add_marker_at())
+        menu.addSeparator()
+        menu.addAction(_("Copiar capítulos para o YouTube…"), self.copy_chapters)
+        act = menu.addAction(_("Remover todos os marcadores"), self.model.clear_markers)
+        act.setEnabled(bool(self.seq.markers))
+
     def _context_menu(self, e) -> None:
         pos = e.position()
         menu = QMenu(self)
+        mk = self.marker_at(pos)
+        if mk is not None:
+            self.model.select_marker(mk.id)
+            self.marker_menu(menu, mk)
+            menu.exec(e.globalPosition().toPoint())
+            return
+        if pos.y() < RULER_H and pos.x() >= HEADER_W:
+            self.ruler_menu(menu, max(0, int(round(self.x_to_frame(pos.x())))))
+            menu.exec(e.globalPosition().toPoint())
+            return
         clip, _zone = self.hit(pos)
         m = self.model
         if clip is not None:
@@ -835,6 +1035,8 @@ class TimelineCanvas(QWidget):
                 act.setEnabled(m.has_clipboard())
             menu.addAction(_("Velocidade…"), lambda: self.ask_speed(clip.id))
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
+            if clip.kind == AUDIO:
+                self.audio_transition_action(menu, clip, pos.x())
             menu.addSeparator()
             menu.addAction(_("Remover espaços da faixa"), lambda: self._close_gaps(clip.kind, clip.track))
         else:
@@ -847,7 +1049,50 @@ class TimelineCanvas(QWidget):
                 menu.addSeparator()
             menu.addAction(_("Adicionar faixa de vídeo"), lambda: m.add_track(VIDEO))
             menu.addAction(_("Adicionar faixa de áudio"), lambda: m.add_track(AUDIO))
+        menu.addSeparator()
+        menu.addAction(_("Adicionar marcador no cursor (M)"), lambda: self.add_marker_at())
         menu.exec(e.globalPosition().toPoint())
+
+    def audio_cut_near(self, clip: Clip, x: float) -> Clip | None:
+        """O clipe que entra no corte de som mais perto do clique (`x`) dentro de `clip`: o próprio clipe
+        se o clique foi na metade da esquerda e há um clipe colado antes; o próximo, se foi na da direita
+        e há um colado depois. None se o clipe não encosta em nenhum outro na faixa."""
+        seq = self.seq
+        prev, nxt = seq.previous_on_track(clip), seq.next_on_track(clip)
+        r = self.clip_rect(clip)
+        left = r is None or x < r.center().x()
+        if prev is not None and (left or nxt is None):
+            return clip
+        return nxt
+
+    def audio_transition_action(self, menu: QMenu, clip: Clip, x: float):
+        """"Transição de som (potência constante)" no corte mais perto do clique: liga com a duração padrão
+        ou tira (a duração se ajusta no inspetor do clipe que entra)."""
+        incoming = self.audio_cut_near(clip, x)
+        act = menu.addAction(_("Transição de som (potência constante)"))
+        act.setCheckable(True)
+        if incoming is None or self.seq.locked(incoming):
+            act.setEnabled(False)
+            return act
+        act.setChecked(float(incoming.values.get("transicao", 0.0)) > 0)
+        act.triggered.connect(lambda on: self.set_audio_transition(incoming.id, on))
+        return act
+
+    def set_audio_transition(self, cid: str, on: bool) -> None:
+        from .edit_model import AUDIO_TRANSITION_S
+        got = self.model.set_audio_transition(cid, AUDIO_TRANSITION_S if on else 0.0)
+        if not on:
+            return
+        c = self.seq.find(cid)
+        r = self.clip_rect(c) if c is not None else None
+        where = self.mapToGlobal(r.topLeft().toPoint()) if r is not None else self.mapToGlobal(self.rect().center())
+        if got <= 1e-6:
+            QToolTip.showText(where, _("Sem sobra de som além do corte: a transição precisa de um pedaço do "
+                                       "arquivo depois do fim do clipe da esquerda ou antes do começo do da "
+                                       "direita."), self)
+        elif got < AUDIO_TRANSITION_S - 1e-3:
+            QToolTip.showText(where, _("Transição de {s} s: é o que sobra do arquivo além do corte.").format(
+                s=fmt_decimal(got, 2)), self)
 
     def _close_gaps(self, kind: str, idx: int) -> None:
         self.model.close_gaps(kind, idx)
@@ -872,7 +1117,12 @@ class TimelineCanvas(QWidget):
             e.ignore()
             return
         m = self.model
-        if k == Qt.Key.Key_S:
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        if k == Qt.Key.Key_M and not shift:
+            self.add_marker_at()
+        elif k in (Qt.Key.Key_Up, Qt.Key.Key_Down) and shift:
+            self.goto_marker(1 if k == Qt.Key.Key_Down else -1)
+        elif k == Qt.Key.Key_S:
             m.split_at(self.playhead)
         elif k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             m.delete_selected(ripple=bool(mods & Qt.KeyboardModifier.ShiftModifier))
@@ -1025,6 +1275,22 @@ class TimelineEditor(QWidget):
         for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap):
             hl.addWidget(b)
         hl.add_spacing(8)
+        self.btn_marker = self._btn("marker", _("Adicionar marcador no cursor (M)"), _("Marcador"))
+        self.btn_marker.clicked.connect(lambda: c.add_marker_at())
+        self.btn_markers = self._btn("chapters", _("Marcadores e capítulos"))
+        self.btn_markers.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        mm = QMenu(self.btn_markers)
+        self.act_prev_marker = mm.addAction(_("Marcador anterior (Shift+↑)"), lambda: c.goto_marker(-1))
+        self.act_next_marker = mm.addAction(_("Próximo marcador (Shift+↓)"), lambda: c.goto_marker(1))
+        self.act_edit_marker = mm.addAction(_("Editar o marcador selecionado…"), self._edit_selected_marker)
+        mm.addSeparator()
+        mm.addAction(_("Copiar capítulos para o YouTube…"), c.copy_chapters)
+        mm.addSeparator()
+        self.act_clear_markers = mm.addAction(_("Remover todos os marcadores"), m.clear_markers)
+        self.btn_markers.setMenu(mm)
+        hl.addWidget(self.btn_marker)
+        hl.addWidget(self.btn_markers)
+        hl.add_spacing(8)
         self.btn_add_v = self._btn("track_add", _("Nova faixa de vídeo"), _("Vídeo"))
         self.btn_add_v.clicked.connect(lambda: m.add_track(VIDEO))
         self.btn_add_a = self._btn("track_add", _("Nova faixa de áudio"), _("Áudio"))
@@ -1045,8 +1311,13 @@ class TimelineEditor(QWidget):
         for b in (zo, self.zoom, zi, fit):
             hl.addWidget(b)
         # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
-        bar.set_adaptive(compact=[self.btn_split, self.btn_add_v, self.btn_add_a, fit], optional=[self.zoom])
+        bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit],
+                         optional=[self.zoom])
         return bar
+
+    def _edit_selected_marker(self) -> None:
+        if self.model.marker_sel:
+            self.canvas.edit_marker(self.model.marker_sel)
 
     @staticmethod
     def _ppf_to_t(ppf: float) -> float:
@@ -1076,8 +1347,12 @@ class TimelineEditor(QWidget):
     def _sync_actions(self) -> None:
         m = self.model
         sel = bool(m.selection)
-        self.btn_delete.setEnabled(sel)
+        self.btn_delete.setEnabled(sel or m.marker_sel is not None)
         self.btn_ripple.setEnabled(sel)
+        has_markers = bool(m.seq.markers)
+        for a in (self.act_prev_marker, self.act_next_marker, self.act_clear_markers):
+            a.setEnabled(has_markers)
+        self.act_edit_marker.setEnabled(m.marker_sel is not None)
         linked = m.selection_linked()
         self.btn_link.setEnabled(linked or len(m.selection) >= 2)
         self.btn_link.setIcon(icons.icon("unlink" if linked or not sel else "link", theme.TEXT, 18))

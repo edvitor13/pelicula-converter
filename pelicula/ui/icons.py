@@ -443,6 +443,120 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         path.lineTo(4.5, 19.5)
         path.closeSubpath()
         p.drawPath(path)
+    elif name == "marker":
+        # Marcador da régua: etiqueta com ponta para baixo.
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(6.5, 3.5)
+        path.lineTo(17.5, 3.5)
+        path.lineTo(17.5, 13.5)
+        path.lineTo(12, 19)
+        path.lineTo(6.5, 13.5)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(QPointF(12, 19), QPointF(12, 21.5))
+    elif name == "chapters":
+        # Lista de capítulos: marcas e linhas.
+        _pen(p, c)
+        for y in (6, 12, 18):
+            p.drawLine(QPointF(9.5, y), QPointF(20, y))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        for y in (6, 12, 18):
+            p.drawRect(QRectF(4, y - 1.7, 3.4, 3.4))
+    elif name == "dot":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(12, 12), 6, 6)
+    elif name == "meter":
+        # Medidor de som: duas barras com níveis diferentes.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(5.5, 3.5, 5, 17), 1.2, 1.2)
+        p.drawRoundedRect(QRectF(13.5, 3.5, 5, 17), 1.2, 1.2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawRect(QRectF(7, 10, 2, 9))
+        p.drawRect(QRectF(15, 7, 2, 12))
+    else:
+        _draw_components(name, p, c)
+
+
+def _draw_components(name: str, p: QPainter, c: QColor) -> None:
+    """Ícones da página Componentes (mesma grade de 24 unidades)."""
+    if name == "video":
+        # Arquivo de vídeo (ffmpeg): quadro com o triângulo de reproduzir.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5.5, 17, 13), 2.5, 2.5)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        path = QPainterPath()
+        path.moveTo(10, 8.8)
+        path.lineTo(15.6, 12)
+        path.lineTo(10, 15.2)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "download":
+        _pen(p, c)
+        p.drawLine(QPointF(12, 3.5), QPointF(12, 14.5))
+        p.drawPolyline([QPointF(7.5, 10), QPointF(12, 14.5), QPointF(16.5, 10)])
+        path = QPainterPath()
+        path.moveTo(4, 13)
+        path.lineTo(4, 19.5)
+        path.lineTo(20, 19.5)
+        path.lineTo(20, 13)
+        p.drawPath(path)
+    elif name == "shield":
+        # Escudo com visto: conferido com SHA-256.
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(12, 3.5)
+        path.lineTo(19, 6)
+        path.lineTo(19, 11.5)
+        path.quadTo(19, 17.5, 12, 20.5)
+        path.quadTo(5, 17.5, 5, 11.5)
+        path.lineTo(5, 6)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawPolyline([QPointF(8.8, 12), QPointF(11, 14.3), QPointF(15.4, 9.6)])
+    elif name == "chip":
+        # Processador / placa de vídeo.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(6.5, 6.5, 11, 11), 1.8, 1.8)
+        p.drawRoundedRect(QRectF(9.5, 9.5, 5, 5), 0.8, 0.8)
+        for t in (9.5, 12, 14.5):
+            p.drawLine(QPointF(t, 6.5), QPointF(t, 3.8))
+            p.drawLine(QPointF(t, 17.5), QPointF(t, 20.2))
+            p.drawLine(QPointF(6.5, t), QPointF(3.8, t))
+            p.drawLine(QPointF(17.5, t), QPointF(20.2, t))
+    elif name == "box":
+        # Caixa: componente genérico.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5, 17, 4), 1.2, 1.2)
+        path = QPainterPath()
+        path.moveTo(5, 9)
+        path.lineTo(5, 19.5)
+        path.lineTo(19, 19.5)
+        path.lineTo(19, 9)
+        p.drawPath(path)
+        p.drawLine(QPointF(10, 12.5), QPointF(14, 12.5))
+    elif name == "matte":
+        # Recorte com transparência (CorridorKey): xadrez de fundo e uma pessoa recortada na frente.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 4.5, 17, 15), 2.2, 2.2)
+        p.setPen(Qt.PenStyle.NoPen)
+        faded = QColor(c)
+        faded.setAlphaF(c.alphaF() * 0.35)
+        p.setBrush(QBrush(faded))
+        for x, y in ((3.5, 4.5), (11.5, 4.5), (7.5, 8.5), (15.5, 8.5), (3.5, 12.5), (11.5, 12.5)):
+            p.drawRect(QRectF(x, y, 4, 4))
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(12, 10), 2.6, 2.6)
+        body = QPainterPath()
+        body.moveTo(6.5, 19.5)
+        body.quadTo(6.8, 13.6, 12, 13.6)
+        body.quadTo(17.2, 13.6, 17.5, 19.5)
+        body.closeSubpath()
+        p.drawPath(body)
 
 
 @lru_cache(maxsize=256)

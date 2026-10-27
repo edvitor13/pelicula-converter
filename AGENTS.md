@@ -29,9 +29,11 @@ PeliculaConverter.pyw        entrada sem console (pythonw); python -m pelicula t
 pelicula/
   __init__.py                __version__, __date__, APP_NAME
   __main__.py                python -m pelicula: sem comando abre a janela; com comando usa o modo terminal
-  app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, MainWindow, boas-vindas
+  app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, sessão da recuperação,
+                             MainWindow, aviso de recuperação, boas-vindas
   cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
   i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
+  modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
@@ -45,36 +47,71 @@ pelicula/
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
-                             run_job() (grava num parcial e troca no fim), measure_speed(), save_still()
-  deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), pip_install()
+                             run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
+                             alvo), FramePipeline/preview_frame() (o mesmo caminho na exportação e na prévia dela),
+                             measure_speed(), save_still()
+  platforms.py               exportação por plataforma (sem Qt): PLATFORMS (YouTube, Instagram, TikTok, WhatsApp,
+                             Discord… com fonte oficial), settings_for() → ExportSettings, limites, avisos, SAFE_AREAS
+  fit.py                     encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): plan() → Fit
+  loudnorm.py                volume alvo da exportação: loudnorm do ffmpeg em duas passadas (measure, filter_for)
+  deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), extract_archive(), pip_install()
+  tools.py                   componentes externos (sem Qt): registro TOOLS (versão e SHA-256 fixos), download e
+                             instalação atômica, remover, espaço em disco, detecção de programas do sistema;
+                             receitas de IA (Recipe: código por manifesto + ambiente Python pelo uv com lista
+                             travada + modelos retomáveis), build_env(), fetch_file(), run_process()
+  corridorkey.py             CorridorKey (módulo Beta recorte_ia, sem Qt): placa NVIDIA 8.0+ (nvidia-smi),
+                             linha de comando e progresso do infer.py, run() num processo separado
+  data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/)
+  jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
+  notify.py                  notificações do sistema (sem Qt): tipos KINDS, preferências notificacoes/…, decide(),
+                             textos (Notice), resumo da fila
+  recovery.py                recuperação depois de um travamento (sem Qt): marcador da sessão (pid + início), cópias
+                             automáticas com rodízio, fila de exportação guardada, scan() das sessões que travaram
+  crashlog.py                relatórios de erro e de travamento em <pasta do app>/logs (faulthandler, excepthooks)
   system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema, gravação segura
                              (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
-  timeline.py                modo Edição: Source, Clip, Track, Layer, Sequence (montagem, sem Qt), History
+  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
+                             de som: micro_fade, audio_crossfade; sem Qt), History
+  chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
+  loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela) e a saída da tela
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
-  audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação), forma de onda
+  audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
+                             emendas, transição de potência constante; forma de onda; decode_wav/WavReader
+                             (som do arquivo para o medidor)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
                              instalação (pasta do OpenFX, com administrador)
-  ui/                        main_window, export_dialog, queue_dialog, deps_dialog, viewer, looks,
+  ui/                        main_window, export_dialog, queue_dialog, job_bridge (fila → sinais do Qt), viewer, looks,
                              widgets, store (desfazer/refazer), theme, icons, prefs (QSettings),
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
-                             sequence_dialog; resolve_dialog (plugin do DaVinci)
+                             sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             corridorkey_dialog (Recorte por IA, Beta);
+                             settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
+                             ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
+                             profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
+                             recurso desligado em uso)
+                             notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
+                             recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
+                             crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
-tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated)
+tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated),
+                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
-                             (host OpenFX mínimo em ctypes para tests/test_ofx.py)
+                             (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
+                             <nome>_ui_cases.py de widgets num subprocesso offscreen)
 assets/                      logo.svg, logo-256/512.png, logo.ico, banner.svg/png
 docs/                        ARQUITETURA.md, EFEITOS.md, ASSINATURA.md, img/ (capturas de tela)
 PeliculaConverter.spec       PyInstaller (onedir com PeliculaConverter + pelicula-cli, BUNDLE para macOS)
@@ -130,7 +167,11 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    (`editparams.VIDEO`/`AUDIO`, gravados nos projetos): padrão neutro = clipe idêntico ao arquivo.
 10. **Dependências mínimas.** Em tempo de execução só PySide6, moderngl (+glcontext) e numpy; o resto
     é biblioteca padrão. Nada de Pillow, OpenCV, SciPy, requests. O ffmpeg é externo e só é baixado
-    de fontes confiáveis com conferência de SHA-256 (`deps.py`).
+    de fontes confiáveis com conferência de SHA-256 (`deps.py`). Outras ferramentas externas (IA etc.)
+    são **componentes baixados à parte**, nunca dentro do pacote, com versão e SHA-256 fixos no código
+    (`tools.py`, receita "Nova ferramenta externa"); as de Python (PyTorch etc.) rodam num ambiente
+    próprio montado pelo uv e **sempre num processo separado**, nunca no processo do app (receita
+    "Novo ambiente Python (uv)").
 11. **Multiplataforma.** Use `system.open_path()`/`system.reveal()` em vez de `os.startfile`/`explorer`,
     `Perf.popen_kwargs()` para prioridade de processos e `media.NO_WINDOW` só no Windows. Caminhos
     do Windows ficam atrás de `sys.platform == "win32"`. O macOS fica desativado
@@ -162,6 +203,13 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     do fabricante citado. Todo `build_plan` de uma imagem decodificada recebe `legal=` da fonte
     (`media.legal_range`, `sequence.legal_range`); LUTs ficam no domínio da curva. Veja *Adicionar um perfil
     de entrada* abaixo e `docs/ARQUITETURA.md` (seção 5.1).
+17. **Recurso opcional é módulo.** Todo recurso que o usuário pode dispensar entra em
+    `modules.MODULES` (id sem acento, nunca renomear; recurso novo em teste com `status` `beta` ou
+    `experimental`, que começa desligado). Desligar um módulo **só esconde** a ferramenta na
+    interface: a renderização (`look`, `compositor`, `engine`, `export`, CLI) nunca consulta
+    `modules`, e um projeto ou preset que usa um módulo desligado sai igual — a janela avisa e
+    oferece religar (`modules.used_by`). Preferências do usuário ficam em páginas de
+    Configurações (`ui/settings_dialog.py`, uma classe `Page` por arquivo em `ui/pages/`).
 
 ## Rodar
 
@@ -211,20 +259,50 @@ Atenção: `Engine._run()` ignora em silêncio uniforms que não existem no prog
 — um nome digitado errado não dá erro, só não faz nada. Os testes de `test_look.py` existem para
 pegar isso.
 
-Testes do modo Edição e do plugin:
+Testes do modo Edição, do plugin e dos módulos:
 
 | Arquivo | O que confere |
 |---|---|
+| `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
+| `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
+| `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
+| `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
+| `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
+| `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
+
+Componentes e fila de tarefas (sem rede: pacotes locais, `file://` e um servidor em 127.0.0.1; a pasta
+do app vai para uma pasta temporária via `LOCALAPPDATA`/`XDG_DATA_HOME`):
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_tools.py` | registro consistente (ids, https, SHA-256, módulos), instalação atômica e relatada, SHA-256 ou tamanho errado não instala nada, caminhos suspeitos em zip/tar, cancelar, atualizar/manter versões, remover, espaço em disco, ffmpeg pelo fluxo de `deps.py`, detecção do Resolve |
+| `tests/test_jobs.py` | fila: ordem dos eventos, erros, cancelar (na espera e rodando), um trabalho de GPU por vez, 200 trabalhos de 8 threads |
+| `tests/test_componentes_ui.py` | página Componentes e ponte do Qt em subprocesso *offscreen*: baixar/remover pela fila, progresso e cancelar, erro de SHA-256, licença com aceite, `show_deps`, sinais na thread principal; receitas: requisitos, download incompleto, Testar, créditos e licenças do CorridorKey |
+| `tests/test_ambiente.py` | receita de ambiente Python com o uv falso (`tests/uv_falso.py`): dois ambientes que não se tocam, retomada depois de cair, download com `Range`, SHA-256 errado, cancelar, código conferido por manifesto, instalação inteira e troca de pasta |
+| `tests/test_corridorkey.py` / `test_corridorkey_ui.py` | requisitos pelo `nvidia-smi` falso, instalação falsa no formato do CorridorKey, recorte com `infer.py` falso num processo de verdade (PATH, pasta parcial, cancelar, erros), janela do recorte |
+| `tests/test_corridorkey_real.py` | **manual**: `PELICULA_TESTE_CORRIDORKEY=1` (e `PELICULA_TEST_TIMEOUT=0`) baixa ~7,6 GB das fontes oficiais em `PELICULA_TESTE_CORRIDORKEY_DIR` e recorta um clipe 1080p na placa NVIDIA |
+
+Notificações e recuperação (a pasta do app vai para uma pasta temporária; nenhuma notificação de verdade
+aparece: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos):
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_notify.py` | tipos e preferências, `decide()` (foco, tipo, módulo desligado só pisca nas exportações, botão de teste), textos e traduções, resumo da fila |
+| `tests/test_notify_ui.py` | casos de `notify_ui_cases.py`: notificador (som, piscar, clique abre arquivo, pasta ou janela), backend com defeito, D-Bus com a chamada tipada (servidor falso), bandeja, downloads de componentes pela fila de tarefas, página Notificações |
+| `tests/test_recovery.py` | marcador da sessão, rodízio das cópias, pid vivo ou reaproveitado, `scan()`, fila guardada, `ExportJob.to_dict/from_dict`, travamentos de verdade em subprocessos (`os._exit`, `faulthandler._sigsegv`) |
+| `tests/test_crashlog.py` | relatório legível, `sys.excepthook`/`threading.excepthook`, limites da pasta, `faulthandler` num subprocesso |
+| `tests/test_recovery_ui.py` | casos de `recovery_ui_cases.py`: cópias só com mudanças não salvas (e nenhuma depois de salvar), recuperar (Película e Edição) marcado como modificado, fila de volta, parciais, aviso, erro inesperado, página Recuperação (a janela se pula sem OpenGL 3.3) |
+| `tests/test_recovery_app.py` | o `app.main()` inteiro depois de um travamento simulado: pergunta antes das boas-vindas, recupera e fecha sem deixar nada |
 
 Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFORM=offscreen` e
 `QApplication` própria (a sessão do pytest já tem uma `QGuiApplication`).
@@ -319,6 +397,29 @@ O plugin é C++ e reaproveita a matemática dos DCTLs:
    pastas temporárias. O OpenFX em `plugins/ofx/openfx` é a cópia oficial (BSD-3, `SOURCE.txt` com commit
    e SHA-256): não edite.
 
+### Novo módulo (recurso opcional)
+
+Todo recurso que dá para dispensar é um módulo (regra 17). Para criar um:
+
+1. **`modules.py`**: um `Module("id_sem_acento", N_("Nome"), N_("Descrição curta."), "<grupo de GROUPS>",
+   status)` em `MODULES`. Recurso novo em teste usa `BETA` ou `EXPERIMENTAL`: começa desligado e só
+   aparece em Recursos com *Mostrar recursos em teste* (perfis nunca ligam recursos em teste). Recurso
+   estável começa ligado para quem já usa o app; decida em que perfis ele entra (`_SIMPLES`,
+   `_CRIADOR`, `_CINEMA`; *Tudo* pega todo estável). O id fica gravado em `modulos/<id>`: nunca renomeie.
+2. **Esconder na janela**: acrescente as ferramentas (widgets ou `QAction`s) em
+   `MainWindow._module_tools()`; casos especiais (atalhos, trocar de modo, gráfico que depende de outra
+   chave) vão em `apply_modules()`. Desligar **só esconde**: `look`, `compositor`, `engine`, `export` e
+   os comandos de renderização da CLI nunca consultam `modules`.
+3. **Aviso de uso**: se um look ou uma montagem podem usar o recurso, ensine `modules.used_by()` a
+   reconhecê-lo (chave de parâmetro ou propriedade da sequência). A janela avisa e oferece *Ligar* ao
+   abrir um projeto, aplicar um preset ou soltar um LUT (`MainWindow._check_modules()`).
+4. **Textos**: nome e descrição com `N_()` em PT-BR; rode `tools/i18n_extract.py --update` e traduza em
+   `en.json` e `es.json`. A página Recursos, o perfil do 1º acesso e `pelicula-cli modulos` mostram o
+   módulo sozinhos.
+5. **Testes**: `tests/test_modules.py` (padrão, perfis, `used_by`) e um caso em
+   `tests/modules_ui_cases.py` (as ferramentas somem e voltam; o aviso aparece e a renderização recebe
+   os mesmos valores).
+
 ### Adicionar um preset pronto
 
 1. Em `presets.BUILTIN`, acrescente `dict(id="snake_case_unico", nome="…", grupo="<um de GROUPS>",
@@ -349,6 +450,29 @@ O plugin é C++ e reaproveita a matemática dos DCTLs:
    `media.encoder_works()`; mantenha esse padrão para qualquer codificador que "aparece mas não
    funciona".
 7. Teste em `tests/test_export_cmd.py` (estrutura do comando) e documente no README.
+
+### Nova plataforma de exportação
+
+1. **`platforms.PLATFORMS`**: um `Platform(...)` no grupo certo (`GROUPS`), com **id ASCII novo** (nunca
+   renomeie um id: ele fica nas preferências `export_platform` e nos scripts com `--plataforma`). Nome da
+   marca como está; partes em português com `N_()`, e a `note` com `N_()`.
+2. Valores da página oficial de envio da plataforma, com a URL e "conferido em AAAA-MM" num comentário logo
+   acima. Sem especificação publicada: valores conservadores (H.264 + AAC em MP4, 30 quadros/s),
+   `official=False` e a nota dizendo isso.
+3. Quadro: `frame="1080x1920"` para formato fixo (vertical, 4:5, 1:1) ou `resolution="1080"` para manter a
+   orientação do vídeo. Tamanhos pares; `upscale=True` só quando a plataforma dá mais qualidade a um envio
+   maior. Limite de taxa: `maxrate` (Mb/s) com o CRF de sempre; limite de arquivo pequeno (mensageiros):
+   `target_mb` (duas passadas).
+4. Som: `audio` (chave de `export.AUDIO`), `loudness` (−14 redes/streaming, −16 podcast, −23 TV/festival) e
+   `true_peak` (−1; −2 só se a plataforma pedir). `loudness=0` deixa o volume como está.
+5. Vídeo vertical com interface por cima: uma `SafeArea` em `SAFE_AREAS` medida no modelo oficial
+   (frações do quadro, y para baixo, `aspect=9 / 16`) e `safe=` na plataforma.
+6. `tools/i18n_extract.py --update` e traduza em `locales/en.json` e `es.json`.
+7. `tests/test_platforms.py` confere ids, tamanhos pares, limites e textos de toda a tabela; rode-o e o
+   `tests/test_cli_platforms.py`. Nada no comando do codificador muda para quem não usa a plataforma.
+
+A exportação por plataforma é núcleo, não módulo: exportar está sempre visível e a lista só preenche
+opções que já existiam. Nenhuma plataforma envia arquivo (só grava no computador).
 
 ### Gravar arquivos do usuário
 
@@ -413,7 +537,124 @@ Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem 
 - Procura: `media.configure()` (pasta escolhida → `deps.ffmpeg_dir()` → `PATH` → pastas comuns).
   Depois de trocar o ffmpeg chame `media.configure()` (que limpa o cache de codificadores).
 - Download: `deps.SOURCES` (URL do pacote + URL do hash). Toda fonte nova precisa de hash publicado e
-  conferido antes de instalar; nada de executar instaladores, nada de pedir administrador.
+  conferido antes de instalar; nada de executar instaladores, nada de pedir administrador. A extração
+  passa por `deps.extract_archive()` (recusa caminhos que saem da pasta).
+- Interface: Configurações › Componentes (`ui/pages/componentes.py`, cartão do ffmpeg). O ffmpeg é a
+  exceção do registro de componentes: baixa o build mais recente e confere com o checksum publicado pelo
+  autor do build, sem versão fixa. `MainWindow.show_deps(reason, auto_download)` abre essa página com o
+  aviso e, se pedido, já baixando.
+
+### Nova ferramenta externa (componente)
+
+Ferramentas externas (IA, conversores, modelos...) **nunca** vão dentro do pacote do app: são
+downloads separados, com um cartão em Configurações › Componentes.
+
+1. **Fonte oficial.** Use o binário publicado pelo próprio autor **só se ele publicar checksums**.
+   Sem binário oficial verificável, compile a partir do código-fonte oficial **no CI do
+   PeliculaConverter** (workflow próprio, versão da fonte fixa) e publique o pacote numa release do
+   projeto com `SHA256SUMS.txt`; o `Artifact` aponta para essa release (`origin=tools.CI`) e o `Tool`
+   leva o `source_url` do código.
+2. **Tudo fixo no código** (`tools.TOOLS`): para cada sistema, um `tools.Artifact` com versão (vira o
+   nome da pasta), URL `https`, SHA-256 (64 dígitos hexadecimais minúsculos), tamanho em bytes, tipo de
+   pacote (`zip`, `tar.gz`, `tar.xz` ou `arquivo`) e caminhos dos executáveis. Confira o SHA-256 baixando
+   e comparando com o publicado; nunca leia o hash do mesmo servidor na hora do download. Versão nova =
+   mudança de código (versão + URL + SHA-256 + tamanho).
+3. **Licença**: confira a do programa **e a dos pesos/modelos** — nada de licença não comercial
+   (CC-BY-NC e afins) nem "só para pesquisa". Preencha `license`/`license_url`. Licença com condições
+   (atribuição, avisos, uso aceitável) → texto em `consent` (PT-BR, `N_()`): a página pede o aceite do
+   usuário antes de baixar. Modelos de terceiros que o componente baixa vão em `Tool.licenses`
+   (o quê, licença, link `https`).
+   **Exceção aprovada (27/10/2026): o CorridorKey** (Corridor Key Licence, CC BY-NC-SA 4.0 com termos
+   adicionais que permitem uso comercial). Ele é baixado **à parte, das fontes oficiais** (GitHub da
+   Corridor e Hugging Face, commits e revisões fixos), **direto no computador do usuário** — nunca
+   redistribuído nem espelhado (nada no repositório, no pacote ou numa release do projeto); o app
+   continua gratuito e MIT; o que o usuário recorta é dele; o cartão e a janela mostram o nome
+   "CorridorKey", os créditos da Corridor Digital e a regra das empresas acima de US$ 20 milhões. Outra
+   exceção precisa de decisão do dono do projeto.
+4. **Pasta**: sempre `deps.app_data_dir()/ferramentas/<id>/<versão>/`, montada por `tools.download()`
+   (SHA-256 conferido antes de extrair, troca atômica, `pelicula-origem.json`), só para o usuário, sem
+   administrador e sem rodar instaladores. O `id` é ASCII sem acento e **nunca muda** (é o nome da pasta).
+5. **Quem usa**: o id do módulo em `Tool.modules` e/ou o id da ferramenta em `Module.requires`. O módulo
+   acha o executável com `tools.executable(tools.get("<id>"))` (`None` = não instalado: ofereça abrir
+   `show_settings("componentes")`) e roda trabalhos longos pela fila de tarefas
+   (`ui/job_bridge.bridge().submit(...)`; GPU no máximo um por vez, com `Engine` próprio).
+6. **Ícone**: um desenho simples em `ui/icons.py` (sem logotipo de marca).
+7. **Testes**: `tests/test_tools.py::test_registry_is_consistent` confere o registro sozinho. Teste o
+   código que usa a ferramenta com uma instalação falsa em pasta temporária (`root=` ou
+   `LOCALAPPDATA`/`XDG_DATA_HOME` temporários) — nunca a rede nem a pasta real do usuário.
+8. Textos novos em PT-BR + `tools/i18n_extract.py --update` + en/es; README (componentes e
+   privacidade) e `CHANGELOG.md`.
+
+Programa do sistema (instalado pelo usuário, como o DaVinci Resolve): `kind=tools.SISTEMA`, sem
+`artifacts`, e uma função em `tools.DETECTORS` que só lê (pastas padrão, lista de desinstalação do
+Windows) — o app não instala nem baixa nada. O ffmpeg (`backend="ffmpeg"`) é a exceção documentada
+ao modelo de versão fixa: não copie o fluxo dele para ferramentas novas.
+
+### Novo ambiente Python (uv)
+
+Para ferramentas de IA em Python (PyTorch, CUDA, modelos), use uma **receita** em vez de um `Artifact`
+(`Tool(backend="receita", recipe=tools.Recipe(...))`; exemplo completo: `tools.CORRIDORKEY_RECIPE`;
+detalhes em `docs/ARQUITETURA.md`, seção 21):
+
+1. **Lista travada com hash** em `pelicula/data/<id>/`: escreva `requirements.in` (versões exatas onde
+   importa) e gere, para cada sistema, com o uv fixado (`tools.UV_VERSION`):
+   `uv pip compile requirements.in --generate-hashes --torch-backend cu128 --python-version 3.12
+   --python-platform x86_64-pc-windows-msvc|x86_64-manylinux_2_28 --system-certs --no-header -o
+   requirements-<sistema>.txt` e ponha o comando no topo do arquivo. Só wheels (`--only-binary :all:` na
+   instalação), nada de `git+` nem `http://`.
+2. **`PythonEnv`**: versão exata do Python (uma que o uv fixado ofereça), índice do PyTorch (`cu128`,
+   outro CUDA ou `cpu`), as listas por sistema e o tamanho baixado (`size`, para o progresso).
+3. **Código**: zip do commit em `codeload.github.com` (`SourceZip`) + manifesto de
+   `tools/gerar_manifesto.py <repo> <commit> pelicula/data/<id>/codigo-<commit>.sha256 --pular "*.bat"`
+   (confere cada arquivo contra o blob do git). Pacote Python sem wheel: `SourceZip(package=True)`.
+4. **Modelos**: `Piece(url com revisão fixa, sha256, tamanho, destino)` — o SHA-256 do LFS publicado pelo
+   Hugging Face (ou conferido com o hash publicado pelo autor), nunca lido na hora do download.
+5. **Teste da receita** (`check` + `check_env`): um script deles que carrega o modelo **sem rede**; ele
+   roda antes de a instalação valer e no botão Testar.
+6. **Requisitos** que não dependem de espaço (placa, sistema): uma função em `tools.REQUIREMENTS[id]`
+   que devolve os motivos (PT-BR); o cartão os mostra no lugar do download.
+7. **Rodar**: sempre `tools.run_process([python, script, ...], cwd=..., env=tools.runtime_environ(...),
+   cancel=job.cancel_event, on_line=...)` num trabalho da fila (GPU) — nunca importe torch no app.
+   Arquivos do usuário: pasta parcial e troca no fim ("Gravar arquivos do usuário"). Teste caminhos
+   com acentos: no Windows o `cv2.imread` não abre (veja `corridorkey._ascii_copy`).
+8. **Tamanhos** (`download_size`, `disk_size`, `env.size`): meça numa instalação de verdade.
+9. **Testes** com o uv falso (`tests/uv_falso.py`) e uma receita falsa (`test_ambiente.fake_recipe`);
+   um teste manual de ponta a ponta atrás de uma variável de ambiente (como `test_corridorkey_real.py`).
+
+Pastas: `ferramentas/<id>/python` (Python base, fora da pasta trocada: o venv `--relocatable` aponta para
+ele), `ferramentas/<id>/<versão>/venv` e `ferramentas/<id>/cache` (downloads retomáveis; a limpeza de
+12 h não mexe; apagado depois da instalação).
+
+### Trabalho em segundo plano (fila de tarefas)
+
+Tudo que demora (downloads, análises, IA) vai para `jobs.py` pela ponte do Qt:
+`bridge().submit(fn, título, kind=jobs.CPU|GPU|REDE, key="...", on_finished=f)`. A função recebe o job,
+chama `job.report(etapa, feito, total)` e `job.check_cancel()` e devolve o resultado (`job.result`);
+`f(job)` roda na thread principal (é ali que se mexe em widgets, preferências ou no projeto). A
+interface acompanha pelos sinais `changed`/`finished` de `bridge()`, filtrando por `job.key`. Detalhes
+em `docs/ARQUITETURA.md` (seção 18).
+
+### Nova notificação
+
+1. **`notify.py`**: um `Kind("id_sem_acento", N_("Rótulo"), N_("Quando avisa."))` em `KINDS` (o id vira
+   `notificacoes/<id>` nas preferências: nunca renomeie) e uma função que monta o `Notice` (título, texto
+   e o destino do clique: `target` = arquivo ou pasta, ou `action` = um `ACTION_*`). Destino novo na
+   janela = uma constante `ACTION_*` e a entrada em `ui/notifier.for_window()`.
+2. **Onde o evento é visto**, na thread principal: `window.notifier.notify(notify.meu_aviso(...))` — na
+   `MainWindow`, num `on_finished` da fila de tarefas ou num ouvinte como `Notifier.watch_jobs`. Nunca
+   chame o backend direto: `notify()` aplica o módulo, o tipo, o foco, o som e o piscar.
+3. A página Configurações › Notificações mostra o tipo sozinha. Textos com `_()`/`N_()` +
+   `tools/i18n_extract.py --update` + en/es; teste o texto e o destino em `tests/test_notify.py` e o
+   gancho num caso de `tests/notify_ui_cases.py` (backend falso: nada aparece na tela).
+
+### Recuperação automática
+
+Tudo o que entra no `.plc` (`project.Project`) já entra na cópia automática. Estado da tela que vale a
+pena voltar depois de um travamento e não vai no projeto entra em `recovery_ui.ui_state()` e
+`restore_ui_state()`. As cópias ficam só em `recovery.recovery_dir()` (nunca no `.plc` da pessoa) e os
+relatórios em `crashlog.logs_dir()`; nos testes, `LOCALAPPDATA`/`XDG_DATA_HOME` temporários. Um
+`ExportJob` com campo novo que importa para refazer a exportação precisa dele em `to_dict()`/`from_dict()`.
+Detalhes em `docs/ARQUITETURA.md` (seção 20).
 
 ## Empacotamento e release
 

@@ -17,6 +17,46 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   limitada.
 - Terminal: `pelicula-cli info` mostra a faixa, a transferência e o perfil HDR do arquivo;
   `--resolucao` aceita `1080` ou `1080p`.
+- **Exportação por plataforma**: 27 destinos (YouTube, Shorts, Instagram Reels, Stories e Feed, TikTok,
+  Kwai, WhatsApp, Discord, X, Facebook, LinkedIn, Vimeo, Spotify, Festival, Arquivo e outros). Cada um
+  preenche quadro, codec, som e limites (tudo continua editável) e a janela mostra uma prévia do
+  resultado. Nada é enviado: o app só grava o arquivo.
+- Na exportação: **Quadro** e **Encaixe** (cortar, bordas pretas ou fundo desfocado, com o look já no
+  quadro final), **Tamanho alvo** (duas passadas no H.264 e no H.265), **Volume alvo** em LUFS com
+  **pico real**, **Grão para redes** e avisos de duração e tamanho acima do limite da plataforma (com
+  *Exportar só os primeiros N s*). A fila mostra a etapa (medindo o volume, passada 1 de 2).
+- **Área segura** na prévia (TikTok, Reels, Shorts, título e ação da TV): só na tela, nunca no arquivo.
+- Terminal: comando `plataformas` e as opções `--plataforma`, `--quadro`, `--encaixe`, `--tamanho-alvo`,
+  `--volume`, `--pico` e `--grao-redes`.
+- **Marcadores** no modo Edição (8 cores, nome e nota; aparecem também na barra do modo Película) e
+  **capítulos**: *Copiar capítulos para o YouTube…* confere as regras do YouTube, e as exportações em
+  MP4, MOV e MKV ganham *Incluir capítulos*.
+- **Medidor de som** ao lado da prévia (módulo *Medidor de som*): picos dos canais com retenção e as
+  leituras momentânea, curta e integrada (LUFS, EBU R 128) e o pico real.
+- **Transição de som** de potência constante entre clipes vizinhos (até 5 s) e **fades curtos** (5 ms)
+  nas emendas de som, para não estalar. Os fades vêm ligados nas sequências novas; projetos antigos
+  continuam saindo iguais.
+- **Notificações do sistema** (módulo *Notificações do sistema*): exportação concluída ou com erro, fila
+  concluída, download de componente e versão nova. Clicar abre a pasta do arquivo. A página em
+  Configurações escolhe os tipos, se avisa só com a janela em segundo plano, o som e o piscar do ícone.
+- **Recuperação automática** (módulo *Recuperação automática*): cópias de segurança do projeto aberto a
+  cada minuto (as 5 últimas), separadas do seu `.plc`. Se o app fechar inesperadamente, ao abrir de
+  novo ele oferece *Recuperar*, *Abrir o salvo* ou *Descartar*, e as exportações que estavam na fila
+  podem voltar (recomeçam do início). Relatório de erro só no computador (nada é enviado), com *Copiar
+  relatório* e *Abrir pasta*.
+- **Recorte por IA (CorridorKey, Beta)**: tira o fundo verde ou azul de um vídeo com o
+  [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0), da Corridor Digital, e grava o
+  recorte com transparência (ProRes 4444 com alfa) e a máscara, ou EXR. Começa desligado (ligue em
+  **Recursos**). O CorridorKey é um **download à parte de cerca de 7,6 GB** (uns 10,7 GB no disco) em
+  **Componentes**, direto das fontes oficiais, com versões e SHA-256 fixos, e precisa de placa **NVIDIA
+  RTX série 30 ou mais nova**. Roda num processo separado, pela fila de tarefas. O que você recorta é seu
+  e pode ser usado comercialmente; empresas com faturamento anual acima de US$ 20 milhões precisam de
+  licença da Corridor (corridorkey.com).
+
+### Alterado
+- Atalhos: no modo Edição, **M** agora põe um marcador, e o som da prévia passa para **Shift+M**, que vale
+  nos dois modos. No modo Película, **M** continua ligando e desligando o som. **Shift+↑/↓** pulam entre
+  os marcadores.
 
 ### Corrigido
 - **S-Log3, V-Log e N-Log** eram lidos na escala errada em vídeos de faixa limitada (o normal das
@@ -28,6 +68,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   destino no fim. Cancelar, um erro ou o app fechar no meio não deixam arquivo quebrado e não apagam o
   arquivo antigo. O mesmo vale para quadros salvos, LUTs, presets e sequências de imagens.
 - Aplicar um preset não troca mais o perfil de entrada (ele descreve o vídeo, não o look).
+- **Otimizar para grão** (*tune grain*) ficava sempre desligado nas exportações feitas pela janela;
+  agora vale quando o codec tem essa opção.
+- A janela de atualização fechava o app mesmo quando o fechamento era cancelado (projeto não salvo ou
+  exportações em andamento). Agora nada é instalado e o app continua aberto.
 
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas

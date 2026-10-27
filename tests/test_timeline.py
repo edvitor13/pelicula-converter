@@ -362,3 +362,91 @@ def test_history_limit():
     while h.undo() is not None:
         n += 1
     assert n == 4
+
+
+# ------------------------------------------------------------------ marcadores
+def test_markers_add_update_and_navigate():
+    seq = tl.Sequence.for_source(src())
+    a = seq.add_marker(48, "Abertura", chapter=True)
+    assert seq.add_marker(48) is a and len(seq.markers) == 1  # mesmo quadro: não duplica
+    b = seq.add_marker(10, color="verde", note="cor estourada")
+    c = seq.add_marker(200)
+    assert [m.id for m in seq.sorted_markers()] == [b.id, a.id, c.id]
+    assert [m.id for m in seq.chapters()] == [a.id]
+    assert seq.next_marker(10) is a and seq.next_marker(9) is b and seq.next_marker(200) is None
+    assert seq.previous_marker(48) is b and seq.previous_marker(201) is c and seq.previous_marker(10) is None
+    assert seq.update_marker(c.id, name="Fim", chapter=True, color="inventada", frame=-5)
+    assert (c.name, c.chapter, c.color, c.frame) == ("Fim", True, tl.MARKER_COLOR_KEYS[0], 0)
+    assert not seq.update_marker(c.id, name="Fim")  # nada mudou
+    assert seq.update_marker(c.id, name="x" * 5000) and len(c.name) == tl.MARKER_TEXT_MAX
+    with pytest.raises(KeyError):
+        seq.update_marker(c.id, inventado=1)
+    assert seq.remove_marker(b.id) and not seq.remove_marker(b.id) and seq.marker(b.id) is None
+
+
+def test_markers_json_is_optional_and_roundtrips():
+    seq = tl.Sequence.for_source(src())
+    plain = seq.to_json()
+    assert "marcadores" not in plain  # montagem sem marcadores: o JSON é o de sempre
+    assert tl.Sequence.from_json(plain).markers == []
+    seq.add_marker(30, "Abertura", "azul", "nota", chapter=True)
+    seq.add_marker(5)
+    data = json.loads(json.dumps(seq.to_json()))
+    assert [m["quadro"] for m in data["marcadores"]] == [5, 30]
+    assert data["marcadores"][1] == {"id": seq.markers[0].id, "quadro": 30, "cor": "azul", "nome": "Abertura",
+                                     "nota": "nota", "capitulo": True}
+    again = tl.Sequence.from_json(data)
+    assert again.to_json() == data and again.copy().to_json() == data
+    # Lixo: entradas inválidas somem, ids repetidos ficam uma vez, campos estranhos viram o padrão.
+    data["marcadores"] += [{"quadro": "x"}, "lixo", {"id": seq.markers[0].id, "quadro": 99},
+                           {"quadro": 7.9, "cor": 3, "nome": None, "capitulo": "sim"}]
+    bad = tl.Sequence.from_json(data)
+    assert len(bad.markers) == 3
+    odd = [m for m in bad.markers if m.frame == 7][0]
+    assert (odd.color, odd.name, odd.chapter) == (tl.MARKER_COLOR_KEYS[0], "", False)
+    for junk in ("nada", 5, {"a": 1}):
+        assert tl.Sequence.from_json({**data, "marcadores": junk}).markers == []
+
+
+def test_markers_stay_put_when_clips_change():
+    seq = tl.Sequence.for_source(src())
+    mk = seq.add_marker(100)
+    v = video(seq)[0]
+    seq.split(50)
+    seq.move(video(seq)[1].id, 60)
+    seq.trim_end(v.id, 40)
+    seq.delete([video(seq)[0].id])
+    assert mk.frame == 100
+
+
+def test_ripple_delete_pulls_markers_after_the_cut():
+    seq = tl.Sequence()
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        seq.insert_media(src(name, frames=24))  # 0–24, 24–48, 48–72
+    before, inside, at_cut, after = (seq.add_marker(f) for f in (10, 30, 24, 60))
+    b = [c for c in video(seq) if c.src == "b.mp4"][0]
+    seq.delete([b.id], ripple=True)
+    assert (before.frame, inside.frame, at_cut.frame, after.frame) == (10, 24, 24, 36)
+
+
+def test_ripple_on_one_track_only_keeps_markers():
+    seq = tl.Sequence()
+    seq.insert_media(src("a.mp4", frames=24, audio=False))
+    seq.insert_media(src("b.mp4", frames=24, audio=False))
+    music = tl.Source("m.mp3", fps=24.0, duration=3.0, has_video=False, has_audio=True)
+    seq.insert_media(music, at=0)  # som por baixo de tudo
+    mk = seq.add_marker(40)
+    seq.delete([video(seq)[0].id], ripple=True)
+    assert spans(video(seq)) == [(0, 24)] and mk.frame == 40  # o som segura o tempo: só a faixa andou
+
+
+def test_history_undoes_markers():
+    seq = tl.Sequence.for_source(src())
+    h = tl.History(seq)
+    mk = seq.add_marker(12, "A")
+    assert h.push(seq)
+    seq.update_marker(mk.id, name="B")
+    h.push(seq)
+    assert h.undo().marker(mk.id).name == "A"
+    assert h.undo().markers == []
+    assert h.redo().marker(mk.id).name == "A"
