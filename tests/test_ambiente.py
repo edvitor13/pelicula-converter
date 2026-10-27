@@ -419,6 +419,26 @@ def test_cancel_during_the_models_installs_nothing(tmp_path):
     assert not (base / "1.0-abc").exists() and not list(base.glob(".novo-*")) and (base / "cache").is_dir()
 
 
+def test_leftovers_of_a_closed_app_are_removed_right_away(tmp_path):
+    root = tmp_path / "ferramentas"
+    base = root / "falso"
+    done = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True)
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        for name, pid in ((".novo-morto", done.stdout.strip()), (".novo-vivo", str(sleeper.pid)), (".novo-sem-dono", None)):
+            (base / name / "conteudo" / "venv").mkdir(parents=True)
+            (base / name / "conteudo" / "venv" / "grande.bin").write_bytes(b"x" * 1000)
+            if pid:
+                (base / name / tools.OWNER).write_text(pid, encoding="ascii")
+        assert not tools._process_alive(int(done.stdout)) and tools._process_alive(sleeper.pid)
+        tools.download(fake_recipe(tmp_path), root=root)
+        left = sorted(p.name for p in base.iterdir() if p.name.startswith("."))
+        assert left == [".novo-sem-dono", ".novo-vivo"], "só a do app que não existe mais sai na hora"
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
 def test_reinstall_and_update_replace_the_old_version(tmp_path):
     root = tmp_path / "ferramentas"
     tools.download(fake_recipe(tmp_path), root=root)

@@ -205,8 +205,7 @@ def test_progress_parser_reads_their_output():
         "      window 3/7 [32:56]", "algo que não interessa", "[clipe] wrote 2 output video(s)")]
     assert seen[0][0] == "Carregando o modelo…" and seen[1][0] == "Lendo o vídeo (120 quadros)…" and p.frames == 120
     assert seen[5] == ("Recortando…", 3, 7) and seen[6] is None and seen[7] == ("Terminando…", 1, 1)
-    low = corridorkey.ProgressParser(low_vram=True)
-    assert low.feed("      window 7/7 [96:120]")[0] == "Gravando os arquivos…"
+    assert p.feed("      window 7/7 [96:120]") == ("Gravando os arquivos…", 0, 0), "depois da última janela"
 
 
 def test_source_warning_for_log_hdr_and_raw():
@@ -258,7 +257,8 @@ def test_run_keys_in_a_separate_process_and_moves_the_files(installed_ck, ffmpeg
     assert sorted(p.name for p in out.iterdir()) == ["tela verde_alpha.mp4", "tela verde_cutout.mov",
                                                      "tela verde_fg.mp4", "tela verde_settings.txt"]
     assert corridorkey.main_output(res) == out / "tela verde_cutout.mov" and res.folder == out
-    assert ("Recortando…", 3, 3) in stages and stages[-1][0] == "Pronto."
+    assert ("Recortando…", 2, 3) in stages and ("Gravando os arquivos…", 0, 0) in stages
+    assert stages[-1][0] == "Pronto."
     assert stages[0][0] == "Iniciando o CorridorKey…" and any(s[0] == "Carregando o modelo…" for s in stages)
     assert not list(corridorkey.temp_dir().iterdir()), "a pasta temporária é apagada"
     # de novo, em EXR, por cima: os arquivos e as pastas antigas são trocados

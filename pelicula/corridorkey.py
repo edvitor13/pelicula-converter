@@ -242,10 +242,13 @@ _WROTE = re.compile(r"wrote\s+\d+\s+output")
 
 
 class ProgressParser:
-    """Lê a saída do `infer.py` e devolve (etapa, feito, total) para a fila de tarefas."""
+    """Lê a saída do `infer.py` e devolve (etapa, feito, total) para a fila de tarefas.
 
-    def __init__(self, low_vram: bool = False):
-        self.low_vram = low_vram
+    Depois da última janela eles juntam e gravam os vídeos sem imprimir nada (uns 40 s para 48 quadros
+    1080p numa RTX 3060): essa etapa aparece como "Gravando os arquivos…".
+    """
+
+    def __init__(self):
         self.frames = 0
 
     def feed(self, line: str) -> tuple[str, int, int] | None:
@@ -264,7 +267,7 @@ class ProgressParser:
         m = _WINDOW.search(line)
         if m:
             i, n = int(m.group(1)), max(1, int(m.group(2)))
-            if self.low_vram and i >= n:
+            if i >= n:
                 return _("Gravando os arquivos…"), 0, 0
             return _("Recortando…"), i, n
         if _WROTE.search(line):
@@ -372,7 +375,7 @@ def run(opts: Options, progress: Progress | None = None, cancel: threading.Event
     work = partial_dir(opts)
     shutil.rmtree(work, ignore_errors=True)  # sobra de um recorte interrompido para o mesmo destino
     temp = temp_dir() / secrets.token_hex(4)
-    parser = ProgressParser(opts.low_vram)
+    parser = ProgressParser()
 
     def on_line(line: str) -> None:
         step = parser.feed(line)
@@ -395,7 +398,6 @@ def run(opts: Options, progress: Progress | None = None, cancel: threading.Event
             raise CorridorKeyError(_("O CorridorKey terminou sem gravar nenhum arquivo.") + "\n\n" + res.tail(8))
         if cancel.is_set():
             raise tools.Cancelled()
-        report(_("Gravando os arquivos…"))
         result = Result(out)
         for item in produced:
             target = out / item.name

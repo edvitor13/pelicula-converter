@@ -307,7 +307,9 @@ CORRIDORKEY_RECIPE = Recipe(
     env=PythonEnv(python="3.12.15", torch="cu128",
                   requirements={"win32": "corridorkey/requirements-windows.txt",
                                 "linux": "corridorkey/requirements-linux.txt"},
-                  size={"win32": 5_400_000_000, "linux": 7_600_000_000}),
+                  # cache do uv depois das bibliotecas (≈ o venv: o uv liga os arquivos do cache).
+                  # Windows medido em 27/10/2026 (venv de 5.030.953.716 bytes); Linux estimado.
+                  size={"win32": 5_100_000_000, "linux": 7_600_000_000}),
     code=(SourceZip(f"https://codeload.github.com/nikopueringer/CorridorKey2.0/zip/{_CK_COMMIT}",
                     "corridorkey/codigo-485f5e9.sha256", dest="codigo"),
           SourceZip("https://codeload.github.com/EasternJournalist/utils3d/zip/83bfa5bda008803f6521ce9547f94023b8afeddd",
@@ -319,8 +321,10 @@ CORRIDORKEY_RECIPE = Recipe(
     # bibliotecas (Windows 3,0 GB; Linux 4,2 GB com os pacotes nvidia-*) + modelos + Python, uv e código
     download_size={"win32": 3_004_591_508 + _CK_MODELS + 60_000_000,
                    "linux": 4_226_884_434 + _CK_MODELS + 60_000_000},
-    disk_size={"win32": 5_400_000_000 + _CK_MODELS + 200_000_000,
-               "linux": 7_600_000_000 + _CK_MODELS + 200_000_000},
+    # instalado no Windows (27/10/2026): versão 10.108.686.092 + Python base 130.726.865 bytes, 25 mil
+    # arquivos; com folga para o cache durante a instalação. Linux estimado (não medido).
+    disk_size={"win32": 10_700_000_000,
+               "linux": 7_600_000_000 + _CK_MODELS + 400_000_000},
 )
 
 CORRIDORKEY = Tool(
@@ -1598,6 +1602,48 @@ def test_installed(tool: Tool, progress: Progress | None = None, cancel: threadi
     return run_check(tool, inst.path, cancel).tail(6)
 
 
+OWNER = ".dono"  # dentro da pasta temporária de uma receita: o PID do processo do app que a montou
+
+
+def _process_alive(pid: int) -> bool:
+    """Se o processo `pid` ainda existe (na dúvida, sim: a pasta dele fica para a limpeza de 12 h)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # acesso negado: o processo existe
+        try:
+            code = ctypes.c_ulong()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _clean_orphans(base: Path) -> None:
+    """Apaga já as pastas temporárias de receitas cujo app não existe mais (fechado ou travado no meio).
+
+    Uma receita deixa gigabytes numa pasta `.novo-*`; esperar as 12 h de `_clean_stale` ocuparia esse
+    espaço à toa. Com a trava da ferramenta na mão, uma pasta deste mesmo processo também é sobra.
+    """
+    for p in base.glob(STAGING_PREFIX + "*"):
+        try:
+            pid = int((p / OWNER).read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            continue  # sem dono conhecido: fica para a limpeza de 12 h
+        if pid == os.getpid() or not _process_alive(pid):
+            shutil.rmtree(p, ignore_errors=True)
+
+
 def recipe_fingerprint(tool: Tool) -> str:
     """SHA-256 do que a receita fixa (listas travadas, manifestos, arquivos): o "selo" da instalação."""
     rec = tool.recipe
@@ -1643,11 +1689,13 @@ def install_recipe(tool: Tool, progress: Progress | None = None, cancel: threadi
         except OSError as exc:
             raise ToolError(_("Não foi possível instalar em {pasta}:\n{erro}").format(pasta=base, erro=exc)) from exc
         _clean_stale(base)
+        _clean_orphans(base)
         uv = uv_command(progress, cancel, root)
         cache = base / CACHE_DIR
         staging = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=base))
         moved: list[tuple[Path, Path]] = []
         try:
+            (staging / OWNER).write_text(str(os.getpid()), encoding="ascii")
             content = staging / "conteudo"
             content.mkdir()
             packages = []
