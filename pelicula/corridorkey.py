@@ -315,7 +315,7 @@ def _promote(src: Path, dst: Path) -> None:
             aside = dst.with_name(f"{dst.name}.{system.PARTIAL}-antigo-{secrets.token_hex(3)}")
             dst.rename(aside)
         try:
-            src.rename(dst)
+            system.replace_file(src, dst, wait=10.0)
         except OSError:
             if aside is not None:
                 aside.rename(dst)

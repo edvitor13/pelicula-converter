@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import APP_NAME, __version__, deps
+from . import APP_NAME, __version__, deps, system
 from .i18n import N_, _, fmt_decimal
 
 BAIXADO = "baixado"
@@ -961,7 +961,9 @@ def download(tool: Tool, progress: Progress | None = None, cancel: threading.Eve
             try:
                 if final.exists():
                     aside = _move_aside(final, staging)  # a mesma versão de novo: a antiga sai inteira
-                content.rename(final)
+                # O antivírus do Windows examina por instantes os programas recém-criados: a troca de
+                # pasta tenta de novo por alguns segundos antes de desistir.
+                system.replace_file(content, final, wait=30.0)
             except OSError as exc:
                 if aside is not None and not final.exists():
                     try:
@@ -1677,7 +1679,9 @@ def install_recipe(tool: Tool, progress: Progress | None = None, cancel: threadi
             try:
                 if final.exists():
                     aside = _move_aside(final, staging)  # a mesma versão de novo: a antiga sai inteira
-                content.rename(final)
+                # O antivírus do Windows examina por instantes os programas recém-criados: a troca de
+                # pasta tenta de novo por alguns segundos antes de desistir.
+                system.replace_file(content, final, wait=30.0)
             except OSError as exc:
                 if aside is not None and not final.exists():
                     try:

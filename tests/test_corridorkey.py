@@ -173,3 +173,142 @@ def test_installation_needs_python_and_infer(installed_ck):
     inst = corridorkey.installation()
     (inst.code / "infer.py").unlink()
     assert corridorkey.installation() is None
+
+
+# ------------------------------------------------------------------ linha de comando, progresso e aviso de entrada
+def test_command_maps_every_option():
+    o = corridorkey.Options(input="C:/v/clipe.mp4", output_dir="C:/saida")
+    cmd = corridorkey.command("py", o, "C:/parcial", "C:/tmp")
+    assert cmd[:2] == ["py", "infer.py"] and cmd[cmd.index("--input") + 1] == "C:/v/clipe.mp4"
+    assert cmd[cmd.index("--output_dir") + 1] == "C:/parcial" and cmd[cmd.index("--temp_dir") + 1] == "C:/tmp"
+    outs = cmd[cmd.index("--outputs") + 1:cmd.index("--despill_strength")]
+    assert outs == ["cutout", "alpha"] and cmd[cmd.index("--despill_strength") + 1] == "0.50"
+    assert not {"--output_format", "--hint_first_frame", "--hint_video", "--hint_quality", "--low_vram"} & set(cmd)
+    o = corridorkey.Options(input="a.mov", output_dir="s", hint="mascara", hint_path="m.png", hint_quality=0.8,
+                            extras=("checker", "fg"), exr=True, despill=1.7, low_vram=True)
+    cmd = corridorkey.command("py", o, "p", "t")
+    assert cmd[cmd.index("--outputs") + 1:cmd.index("--despill_strength")] == ["cutout", "alpha", "fg", "checker"]
+    assert cmd[cmd.index("--despill_strength") + 1] == "1.00" and cmd[cmd.index("--output_format") + 1] == "exr"
+    assert cmd[cmd.index("--hint_first_frame") + 1] == "m.png" and cmd[cmd.index("--hint_quality") + 1] == "0.80"
+    assert "--low_vram" in cmd and "--hint_video" not in cmd
+    o.hint, o.hint_path = "video", "dica.mp4"
+    cmd = corridorkey.command("py", o, "p", "t")
+    assert cmd[cmd.index("--hint_video") + 1] == "dica.mp4" and "--hint_first_frame" not in cmd
+    assert corridorkey.clip_name("C:/v/meu clipe.final.mov") == "meu clipe.final"
+
+
+def test_progress_parser_reads_their_output():
+    p = corridorkey.ProgressParser()
+    seen = [p.feed(line) for line in (
+        "Loading CorridorKey v2 runtime weights", "[clipe] probed 120 frames @ 1920x1080",
+        "[clipe] RVM continuous prepass", "[clipe] frozen VFM prepass", "[clipe] Hann stage1: chunk=24 windows=7",
+        "      window 3/7 [32:56]", "algo que não interessa", "[clipe] wrote 2 output video(s)")]
+    assert seen[0][0] == "Carregando o modelo…" and seen[1][0] == "Lendo o vídeo (120 quadros)…" and p.frames == 120
+    assert seen[5] == ("Recortando…", 3, 7) and seen[6] is None and seen[7] == ("Terminando…", 1, 1)
+    low = corridorkey.ProgressParser(low_vram=True)
+    assert low.feed("      window 7/7 [96:120]")[0] == "Gravando os arquivos…"
+
+
+def test_source_warning_for_log_hdr_and_raw():
+    from pelicula import timeline as tl
+    plain = tl.Source("clipe.mp4", 1920, 1080, color_transfer="bt709")
+    assert corridorkey.source_warning(plain, "rec709") == ""
+    assert "HDR (PQ)" in corridorkey.source_warning(tl.Source("a.mov", color_transfer="smpte2084"), "pq")
+    assert "HDR (HLG)" in corridorkey.source_warning(tl.Source("a.mp4", color_transfer="arib-std-b67"), "rec709")
+    assert "RAW" in corridorkey.source_warning(tl.Source("a.braw", codec="braw"), "rec709")
+    assert "RAW" in corridorkey.source_warning(None, "rec709", "C:/cartao/A001.R3D")
+    warn = corridorkey.source_warning(plain, "slog3")
+    assert "Sony S-Log3" in warn and "log" in warn and "Rec.709" in warn
+
+
+# ------------------------------------------------------------------ o recorte (infer.py falso, processo de verdade)
+@pytest.fixture
+def ffmpeg_dir(monkeypatch, tmp_path):
+    folder = tmp_path / "ffmpeg-do-app"
+    folder.mkdir()
+    exe = folder / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    exe.write_bytes(b"")
+    monkeypatch.setattr(media, "ffmpeg", lambda: str(exe))
+    return folder
+
+
+@pytest.fixture
+def clip(tmp_path):
+    src = tmp_path / "filmagem" / "tela verde.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"video")
+    return src
+
+
+def key(clip, out, monkeypatch, tmp_path, **kw):
+    args = tmp_path / "args.txt"
+    monkeypatch.setenv("PCTEST_ARGS", str(args))
+    stages = []
+    res = corridorkey.run(corridorkey.Options(input=str(clip), output_dir=str(out), **kw),
+                          lambda s, d, t: stages.append((s, d, t)))
+    return res, stages, args.read_text(encoding="utf-8")
+
+
+def test_run_keys_in_a_separate_process_and_moves_the_files(installed_ck, ffmpeg_dir, clip, monkeypatch, tmp_path):
+    out = tmp_path / "saida"
+    res, stages, seen = key(clip, out, monkeypatch, tmp_path, extras=("fg",))
+    argv, path = seen.split("\n", 1)
+    assert path.split(os.pathsep)[0] == str(ffmpeg_dir), "o ffmpeg do app vem primeiro no PATH"
+    assert "--temp_dir" in argv and str(corridorkey.temp_dir()) in argv.replace("\\\\", "\\")
+    assert sorted(p.name for p in out.iterdir()) == ["tela verde_alpha.mp4", "tela verde_cutout.mov",
+                                                     "tela verde_fg.mp4", "tela verde_settings.txt"]
+    assert corridorkey.main_output(res) == out / "tela verde_cutout.mov" and res.folder == out
+    assert ("Recortando…", 3, 3) in stages and stages[-1][0] == "Pronto."
+    assert stages[0][0] == "Iniciando o CorridorKey…" and any(s[0] == "Carregando o modelo…" for s in stages)
+    assert not list(corridorkey.temp_dir().iterdir()), "a pasta temporária é apagada"
+    # de novo, em EXR, por cima: os arquivos e as pastas antigas são trocados
+    (out / "tela verde_cutout_exr").mkdir()
+    (out / "tela verde_cutout_exr" / "velho.exr").write_bytes(b"velho")
+    res, stages, _seen = key(clip, out, monkeypatch, tmp_path, exr=True)
+    exr = out / "tela verde_cutout_exr"
+    assert [p.name for p in exr.iterdir()] == ["tela verde_cutout_00000.exr"]
+    assert corridorkey.main_output(res) == exr
+    assert not [p for p in out.iterdir() if system.PARTIAL in p.name]
+
+
+def test_failure_explains_and_leaves_the_old_files(installed_ck, ffmpeg_dir, clip, monkeypatch, tmp_path):
+    out = tmp_path / "saida"
+    out.mkdir()
+    (out / "tela verde_cutout.mov").write_bytes(b"recorte antigo")
+    monkeypatch.setenv("PCTEST_FALHAR", "1")
+    with pytest.raises(corridorkey.CorridorKeyError) as err:
+        key(clip, out, monkeypatch, tmp_path)
+    assert "Pouca memória" in str(err.value) and "out of memory" in str(err.value)
+    assert [p.name for p in out.iterdir()] == ["tela verde_cutout.mov"]
+    assert (out / "tela verde_cutout.mov").read_bytes() == b"recorte antigo"
+
+
+def test_cancel_kills_the_process_and_writes_nothing(installed_ck, ffmpeg_dir, clip, monkeypatch, tmp_path):
+    out = tmp_path / "saida"
+    monkeypatch.setenv("PCTEST_ARGS", str(tmp_path / "args.txt"))
+    monkeypatch.setenv("PCTEST_DEMORAR", "60")
+    cancel = threading.Event()
+
+    def progress(stage, done, total):
+        if stage == "Recortando…" and done:
+            cancel.set()
+
+    t0 = time.monotonic()
+    with pytest.raises(tools.Cancelled):
+        corridorkey.run(corridorkey.Options(input=str(clip), output_dir=str(out)), progress, cancel)
+    assert time.monotonic() - t0 < 30, "cancelar encerra o processo na hora"
+    assert list(out.iterdir()) == [] and not list(corridorkey.temp_dir().iterdir())
+
+
+def test_run_needs_the_component(ffmpeg_dir, clip, tmp_path):
+    with pytest.raises(corridorkey.CorridorKeyError) as err:
+        corridorkey.run(corridorkey.Options(input=str(clip), output_dir=str(tmp_path / "s")))
+    assert "não está instalado" in str(err.value)
+
+
+def test_run_checks_input_and_hint(installed_ck, ffmpeg_dir, clip, tmp_path):
+    with pytest.raises(corridorkey.CorridorKeyError, match="não existe"):
+        corridorkey.run(corridorkey.Options(input=str(tmp_path / "nada.mp4"), output_dir=str(tmp_path / "s")))
+    with pytest.raises(corridorkey.CorridorKeyError, match="dica não existe"):
+        corridorkey.run(corridorkey.Options(input=str(clip), output_dir=str(tmp_path / "s"), hint="mascara",
+                                            hint_path=str(tmp_path / "nada.png")))
