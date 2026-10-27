@@ -443,6 +443,40 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         path.lineTo(4.5, 19.5)
         path.closeSubpath()
         p.drawPath(path)
+    elif name == "marker":
+        # Marcador da régua: etiqueta com ponta para baixo.
+        _pen(p, c)
+        path = QPainterPath()
+        path.moveTo(6.5, 3.5)
+        path.lineTo(17.5, 3.5)
+        path.lineTo(17.5, 13.5)
+        path.lineTo(12, 19)
+        path.lineTo(6.5, 13.5)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(QPointF(12, 19), QPointF(12, 21.5))
+    elif name == "chapters":
+        # Lista de capítulos: marcas e linhas.
+        _pen(p, c)
+        for y in (6, 12, 18):
+            p.drawLine(QPointF(9.5, y), QPointF(20, y))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        for y in (6, 12, 18):
+            p.drawRect(QRectF(4, y - 1.7, 3.4, 3.4))
+    elif name == "dot":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(12, 12), 6, 6)
+    elif name == "meter":
+        # Medidor de som: duas barras com níveis diferentes.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(5.5, 3.5, 5, 17), 1.2, 1.2)
+        p.drawRoundedRect(QRectF(13.5, 3.5, 5, 17), 1.2, 1.2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawRect(QRectF(7, 10, 2, 9))
+        p.drawRect(QRectF(15, 7, 2, 12))
     else:
         _draw_components(name, p, c)
 

@@ -977,11 +977,26 @@ class Timeline(QWidget):
         self.pos = 0
         self.inp = None
         self.out = None
+        self.markers: list[tuple[int, str, str]] = []  # (quadro, cor, nome): marcadores da montagem, só para ver
         self._hover_x = None
         self._drag = False
         self.setMinimumHeight(34)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_markers(self, items) -> None:
+        """Marcadores mostrados na barra (editar é no modo Edição): [(quadro, cor "#rrggbb", nome)]."""
+        self.markers = [(int(f), str(col), str(name)) for f, col, name in items]
+        self.update()
+
+    def marker_near(self, x: float, tol: float = 5.0) -> tuple[int, str] | None:
+        """(quadro, nome) do marcador mais perto de x, se estiver a até `tol` pixels."""
+        best = None
+        for f, _col, name in self.markers:
+            d = abs(self._x(f) - x)
+            if d <= tol and (best is None or d < best[0]):
+                best = (d, f, name)
+        return (best[1], best[2]) if best else None
 
     def set_media(self, total: int, fps: float) -> None:
         self.total = max(1, total)
@@ -1023,11 +1038,22 @@ class Timeline(QWidget):
         xp = self._x(self.pos)
         p.setBrush(QColor(theme.ACCENT_DIM))
         p.drawRoundedRect(QRectF(x0, cy - 3, max(xp - x0, 0), 6), 3, 3)
+        for f, col, _name in self.markers:
+            if 0 <= f < self.total:
+                xm = self._x(f)
+                tri = QPainterPath()
+                tri.moveTo(xm - 3.5, cy - 11)
+                tri.lineTo(xm + 3.5, cy - 11)
+                tri.lineTo(xm, cy - 5)
+                tri.closeSubpath()
+                p.setBrush(QColor(col))
+                p.drawPath(tri)
         if self._hover_x is not None and not self._drag:
-            f = self._f(self._hover_x)
+            near = self.marker_near(self._hover_x)
+            f = near[0] if near else self._f(self._hover_x)
             p.setBrush(QColor(255, 255, 255, 40))
             p.drawRect(QRectF(self._x(f) - 0.5, cy - 8, 1, 16))
-            txt = timecode(f, self.fps)
+            txt = timecode(f, self.fps) + (f"  •  {near[1]}" if near and near[1] else "")
             fm = QFontMetrics(theme.font(8))
             tw = fm.horizontalAdvance(txt) + 12
             bx = min(max(self._x(f) - tw / 2, 0), self.width() - tw)
@@ -1046,7 +1072,8 @@ class Timeline(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = True
             self.scrubbing.emit(True)
-            self.seek.emit(self._f(e.position().x()))
+            near = self.marker_near(e.position().x())
+            self.seek.emit(near[0] if near else self._f(e.position().x()))  # clique num marcador: vai até ele
 
     def mouseMoveEvent(self, e):
         self._hover_x = e.position().x()
@@ -1058,7 +1085,8 @@ class Timeline(QWidget):
         if self._drag:
             self._drag = False
             self.scrubbing.emit(False)
-            self.seek.emit(self._f(e.position().x()))
+            near = self.marker_near(e.position().x())
+            self.seek.emit(near[0] if near else self._f(e.position().x()))
 
     def leaveEvent(self, _event):
         self._hover_x = None

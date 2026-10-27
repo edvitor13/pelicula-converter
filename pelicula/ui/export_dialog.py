@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDou
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import export, media, platforms, system
+from .. import chapters as chapters_mod, export, media, platforms, system
 from .. import fit as fitmod
 from ..i18n import N_, _, fmt_decimal, fmt_int
 from . import icons, theme
@@ -108,10 +108,11 @@ class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
-                 last_platform: str = ""):
+                 last_platform: str = "", chapters=None):
         super().__init__(parent)
         self.info = info
         self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
+        self.chapters = list(chapters or [])  # [(quadro, título)] dos capítulos da montagem (`chapters.points`)
         self.values = values
         self.preset_name = preset_name
         self.in_out = in_out
@@ -260,6 +261,8 @@ class ExportDialog(QDialog):
                 self.r_sel.setToolTip(_("Marque entrada (I) e saída (O) na linha do tempo."))
             lay.addLayout(rr)
             self.r_sel.toggled.connect(self._summary)
+        self.chapters_box = self._chapters_box()
+        lay.addWidget(self.chapters_box)
         lay.addStretch(1)
 
         foot = QWidget()
@@ -313,6 +316,7 @@ class ExportDialog(QDialog):
         for w in (self.container, self.pix, self.speed, self.profile, self.res, self.fps, self.audio):
             w.currentIndexChanged.connect(self._custom)
         self.container.currentIndexChanged.connect(self._fix_ext)
+        self.container.currentIndexChanged.connect(self._sync_chapters)
         for w in (self.qval, self.bitrate):
             w.valueChanged.connect(self._custom)
         for w in (self.grain, self.dither):
@@ -333,6 +337,7 @@ class ExportDialog(QDialog):
         if platforms.get(last_platform) is not None and not info.is_image:
             self._set_combo(self.platform, last_platform)  # a última plataforma usada preenche tudo de novo
         self._update_mem()
+        self._sync_chapters()
 
     # ------------------------------------------------------------ plataforma
     def _platform_group(self) -> QGroupBox:
@@ -988,7 +993,29 @@ class ExportDialog(QDialog):
         return export.ExportJob(info=self.info, values=dict(self.values), settings=self.settings(),
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
-                                sequence=self.sequence)
+                                sequence=self.sequence, chapters=self.chapter_points())
+
+    # ---------------------------------------------------------------- capítulos
+    def _chapters_box(self) -> QCheckBox:
+        """Incluir capítulos: aparece só quando a montagem tem capítulos; ligado por padrão."""
+        box = QCheckBox(_("Incluir capítulos ({n}) — dos marcadores marcados como capítulo").format(
+            n=len(self.chapters)))
+        box.setChecked(True)
+        box.setVisible(bool(self.chapters) and not self.info.is_image)
+        return box
+
+    def _sync_chapters(self, *_args) -> None:
+        ok = self.container.currentData() in chapters_mod.CONTAINERS
+        self.chapters_box.setEnabled(ok)
+        self.chapters_box.setToolTip("" if ok else _("Só MP4, MOV e MKV guardam capítulos."))
+
+    def chapter_points(self) -> list[tuple[int, str]]:
+        """Capítulos que vão para o arquivo (vazio se a opção está desligada ou o recipiente não guarda)."""
+        if not self.chapters or self.chapters_box.isHidden() or not self.chapters_box.isChecked():
+            return []
+        if self.container.currentData() not in chapters_mod.CONTAINERS:
+            return []
+        return list(self.chapters)
 
 
 def _describe(key: str) -> str:

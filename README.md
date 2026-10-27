@@ -162,7 +162,12 @@ quadros vizinhos:
   e copiar/colar ajustes entre clipes.
 - **Som por clipe**: volume, mudo, balanço, fades, graves, médios, agudos, realçar voz, redução de
   ruído e normalizar; faixas com mudo, solo, trava e volume; forma de onda na linha do tempo.
-- **Medidores**: histograma, forma de onda, parada RGB e vetorscópio.
+  **Transição de som** de potência constante no corte e **fades curtos automáticos** nas emendas (sem
+  estalo).
+- **Marcadores e capítulos**: marcadores coloridos com nome e nota (`M`); os marcados como capítulo
+  viram o texto de capítulos do YouTube (com as regras conferidas) e capítulos no MP4, MOV e MKV.
+- **Medidores**: histograma, forma de onda, parada RGB e vetorscópio; **medidor de som** ao lado da
+  prévia (picos L/R e loudness EBU R128: momentânea, curto prazo, integrada e true peak).
 
 ### Entrada
 - **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
@@ -792,7 +797,9 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | Botão direito (segurar) no vídeo | Ver o original |
 | Duplo clique no slider | Voltar ao padrão |
 | `Shift` + arrastar slider | Ajuste fino |
-| `M` | Som da prévia: mudo / com som |
+| `M` | Som da prévia: mudo / com som (no modo Edição, `M` põe um marcador e o som fica no `Shift+M`) |
+| `Shift+M` | Som da prévia: mudo / com som (nos dois modos) |
+| `Shift+↑` / `Shift+↓` | Marcador anterior / próximo |
 | `Ctrl+N` | Novo projeto |
 | `Ctrl+Shift+O` | Abrir projeto (.plc) |
 | `Ctrl+S` / `Ctrl+Shift+S` | Salvar projeto / salvar projeto como |
@@ -886,11 +893,15 @@ linha do tempo, com a imagem na faixa **V1** e o som na **A1**, ligados. (Sem o 
    cor da montagem. Os medidores (forma de onda, parada RGB, vetorscópio) ficam acima do painel.
 4. **Som**: em clipes de áudio (ou *Som*, num clipe ligado), volume, fades, balanço, graves, médios,
    agudos, *Realçar voz*, *Redução de ruído* e *Normalizar volume*. Cada faixa tem mudo, solo,
-   trava e volume.
-5. **Velocidade e transições**: *Velocidade* (câmera lenta ou acelerado, a duração acompanha),
+   trava e volume. Botão direito no corte entre dois clipes de som: *Transição de som (potência
+   constante)*. O **medidor de som** ao lado da prévia mostra os picos e o loudness enquanto toca.
+5. **Marcadores**: `M` põe um marcador no cursor; dois cliques nele dão nome, nota, cor e *Capítulo*.
+   Os capítulos vão para o arquivo exportado (MP4, MOV, MKV) e para o texto do YouTube (*Copiar
+   capítulos para o YouTube…*).
+6. **Velocidade e transições**: *Velocidade* (câmera lenta ou acelerado, a duração acompanha),
    *Congelar quadro*, e em *Transições* dissolver, surgir do preto/branco e sumir.
-6. **Sequência** (barra da prévia): resolução, quadros por segundo e cor de fundo. A primeira mídia
-   importada define o formato.
+7. **Sequência** (barra da prévia): resolução, quadros por segundo, cor de fundo e fades curtos nas
+   emendas de som. A primeira mídia importada define o formato.
 
 Ligue **Com película** na barra da prévia para ver a montagem já com o look; o que aparece é o que
 sai na exportação. Ao voltar para o modo **Película**, o look é aplicado na montagem (exportar,

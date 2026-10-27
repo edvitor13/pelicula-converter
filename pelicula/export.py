@@ -375,15 +375,17 @@ PASSLOG = "pelicula_2passadas"  # nome relativo: o codificador roda com cwd na p
 
 def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w: int, h: int, fps_str: str,
                       depth: int, start_time: float, duration: float, input_path: str = "pipe:0",
-                      audio_path: str | None = None, *, two_pass: int = 0,
+                      audio_path: str | None = None, chapters_path: str | None = None, *, two_pass: int = 0,
                       loudness_measured: dict | None = None) -> list[str]:
     """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss.
 
+    `chapters_path`: arquivo FFMETADATA com os capítulos do trecho (`chapters.export_file`); fica de fora da
+    1ª passada do tamanho alvo, que não grava arquivo.
     `two_pass` (1 ou 2): uma das passadas do tamanho alvo (x264/x265, taxa em `s.bitrate`). O registro das
     passadas tem nome relativo (`PASSLOG`): rode o comando com `cwd` numa pasta temporária (os caminhos do
-    destino e do som viram absolutos). A 1ª passada não grava arquivo nem som (`-f null`).
+    destino, do som e dos capítulos viram absolutos). A 1ª passada não grava arquivo nem som (`-f null`).
     `loudness_measured`: valores medidos por `loudnorm.measure()` (volume alvo em `s.loudness`); o som recebe
-    o `loudnorm` linear da segunda passada do volume. Sem os dois opcionais o comando é o de sempre.
+    o `loudnorm` linear da segunda passada do volume. Sem os opcionais o comando é o de sempre.
     """
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
@@ -489,6 +491,12 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
         args += ["-af", loudnorm.filter_for(loudness_measured, float(s.loudness), float(s.true_peak))]
     if c.get("image"):
         args += ["-frames:v", "1", "-update", "1"]
+    if chapters_path and two_pass != 1:
+        # Capítulos: o FFMETADATA entra como a última entrada (antes do primeiro -map, que já é saída).
+        n_inputs = args.count("-i")
+        at = args.index("-map")
+        args[at:at] = ["-f", "ffmetadata", "-i", os.path.abspath(chapters_path) if two_pass else chapters_path]
+        args += ["-map_chapters", str(n_inputs)]
     args += [os.path.abspath(out_path) if two_pass else out_path]
     return args
 
@@ -755,6 +763,7 @@ class ExportJob:
     passes: int = 1          # passadas da GPU (2 no tamanho alvo; 3 se a 2ª passou do tamanho)
     pass_index: int = 0      # passada atual (0 = primeira); `done`/`total` contam os quadros dela
     stage: str = ""          # etapa atual para a fila ("Medindo o volume…", "Passada 1 de 2"); "" = exportando
+    chapters: list = field(default_factory=list)  # [(quadro, título)] dos capítulos (`chapters.points`)
 
     @property
     def progress(self) -> float:
@@ -768,7 +777,8 @@ class ExportJob:
         return {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
                 "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
                 "config": self.settings.to_dict(), "midia": asdict(self.info),
-                "edicao": self.sequence.to_json() if self.sequence is not None else None}
+                "edicao": self.sequence.to_json() if self.sequence is not None else None,
+                "capitulos": [[int(q), str(t)] for q, t in self.chapters]}
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExportJob":
@@ -785,7 +795,8 @@ class ExportJob:
         return cls(info=media.MediaInfo(**{k: raw[k] for k in names}), values=params.sanitize(d.get("valores") or {}),
                    settings=ExportSettings.from_dict(d.get("config") or {}), out_path=str(d["saida"]),
                    start_frame=int(d.get("inicio") or 0), end_frame=int(d.get("fim", -1)),
-                   name=str(d.get("nome") or ""), sequence=seq)
+                   name=str(d.get("nome") or ""), sequence=seq,
+                   chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []])
 
 
 class ExportQueue:
@@ -859,8 +870,12 @@ def run_job(job: ExportJob, engine: Engine) -> None:
         return
     target = _prepare_output(job.out_path, s)
     mix_path = None
+    chapters_path = None
     keep_partial = False
     try:
+        if job.chapters:
+            from . import chapters
+            chapters_path = chapters.export_file(job.chapters, s.container, start, end + 1, info.fps)
         if seq is not None:
             # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
             from . import audiomix
@@ -883,7 +898,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
         run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
-                   seq, mix_path)
+                   seq, mix_path, chapters_path)
         if wants_loudness(s) and not _measure_loudness(job, run, s):
             return
         if _encode_passes(job, engine, run, s):
@@ -903,6 +918,8 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             _discard_output(job.out_path, s)
         if mix_path:
             system.remove_file(mix_path)
+        if chapters_path:
+            system.remove_file(chapters_path)
 
 
 @dataclass
@@ -923,6 +940,7 @@ class _Run:
     target: str
     seq: Any
     mix_path: str | None
+    chapters_path: str | None = None  # FFMETADATA dos capítulos (apagado no fim do run_job)
     loud: dict | None = None  # volume medido (loudnorm.measure) para o loudnorm da gravação
 
 
@@ -1001,7 +1019,8 @@ def _encode(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings, two_pa
     job.encoded = job.rendered = job.done = 0
     pipe = media.NamedPipe(False) if media.use_named_pipes() else None
     cmd = build_encoder_cmd(run.target, info, s, run.w, run.h, run.fps_str, depth, run.start_time, run.duration,
-                            pipe.name if pipe else "pipe:0", audio_path=run.mix_path, two_pass=two_pass,
+                            pipe.name if pipe else "pipe:0", audio_path=run.mix_path, chapters_path=run.chapters_path,
+                            two_pass=two_pass,
                             loudness_measured=run.loud)
     frames = frame_pipeline(info, job.values, s, run.seq)
     reader, skip = open_reader(info, frames, run.start, total, run.fps_out, perf, run.seq)

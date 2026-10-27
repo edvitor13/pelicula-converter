@@ -67,13 +67,18 @@ pelicula/
                              (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
-  timeline.py                modo Edição: Source, Clip, Track, Layer, Sequence (montagem, sem Qt), History
+  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
+                             de som: micro_fade, audio_crossfade; sem Qt), History
+  chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
+  loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela) e a saída da tela
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
-  audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação), forma de onda
+  audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
+                             emendas, transição de potência constante; forma de onda; decode_wav/WavReader
+                             (som do arquivo para o medidor)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -83,6 +88,7 @@ pelicula/
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
@@ -254,6 +260,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
+| `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
+| `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
+| `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
+| `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |

@@ -168,3 +168,17 @@ def test_old_project_without_sequence(tmp_path):
     (tmp_path / "v.plc").write_text(json.dumps(data), encoding="utf-8")
     q = project.load(str(tmp_path / "v.plc"))
     assert q.sequence is None and q.mode == "pelicula"
+
+
+def test_markers_saved_without_changing_the_format(tmp_path):
+    from pelicula import timeline
+    p = make(tmp_path)
+    seq = timeline.Sequence.from_json(_seq_json(p.media_path))
+    seq.add_marker(12, "Abertura", chapter=True)
+    p.sequence = seq.to_json()
+    project.save(p, str(tmp_path / "m.plc"))
+    data = json.loads((tmp_path / "m.plc").read_text(encoding="utf-8"))
+    assert data["formato"] == 2 and data["edicao"]["marcadores"][0]["nome"] == "Abertura"
+    q = project.load(str(tmp_path / "m.plc"))
+    again = timeline.Sequence.from_json(q.sequence)
+    assert [(m.frame, m.name, m.chapter) for m in again.markers] == [(12, "Abertura", True)]

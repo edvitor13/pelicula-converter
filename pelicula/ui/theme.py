@@ -26,6 +26,15 @@ TRACK_BG = "#141210"
 TRACK_BG2 = "#181513"
 PLAYHEAD = "#ffcf7a"
 
+# Marcadores (chaves de timeline.MARKER_COLORS)
+MARKER_COLORS = {"laranja": "#f0a63a", "vermelho": "#e5534b", "amarelo": "#e8d44d", "verde": "#5cc48a",
+                 "ciano": "#45c4d6", "azul": "#5b8def", "roxo": "#a777e3", "rosa": "#e86fb0"}
+
+# Medidor de som: verde até −18 dBFS, amarelo até −6, vermelho acima
+METER_LOW = "#3fa597"
+METER_MID = "#e8c14d"
+METER_HIGH = "#e5534b"
+
 
 def ui_font() -> str:
     fams = set(QFontDatabase.families())

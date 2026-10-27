@@ -264,7 +264,7 @@ def test_export_job_round_trip(tmp_path, make_info):
     s = export.ExportSettings(codec="x265", quality=20, resolution="1080")
     job = export.ExportJob(info=make_info(path=str(tmp_path / "a.mp4")), values={"grao_forca": 1.5}, settings=s,
                            out_path=str(tmp_path / "saida.mp4"), start_frame=3, end_frame=40, name="Corte",
-                           sequence=seq)
+                           sequence=seq, chapters=[(0, "Abertura"), (240, "Cena 2")])
     job.status = "exportando"
     d = json.loads(json.dumps(job.to_dict()))  # vai para um arquivo JSON
     assert d["status"] == "exportando" and d["config"]["codec"] == "x265"
@@ -274,8 +274,9 @@ def test_export_job_round_trip(tmp_path, make_info):
     assert (new.start_frame, new.end_frame, new.name) == (3, 40, "Corte")
     assert new.values["grao_forca"] == 1.5
     assert new.sequence.to_json() == seq.to_json()
-    simple = export.ExportJob.from_dict({**d, "edicao": None})
-    assert simple.sequence is None
+    assert new.chapters == [(0, "Abertura"), (240, "Cena 2")]  # um trabalho recuperado não perde os capítulos
+    simple = export.ExportJob.from_dict({k: v for k, v in d.items() if k != "capitulos"} | {"edicao": None})
+    assert simple.sequence is None and simple.chapters == []  # fila guardada antes dos capítulos
     for broken in ({}, {**d, "midia": {"path": "x"}}, {**d, "saida": ""}, "lixo"):
         with pytest.raises(ValueError):
             export.ExportJob.from_dict(broken)

@@ -20,13 +20,15 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, audiomix, compositor, deps, editparams, export, i18n, look, luts, media,
-               modules, notify, params, presets, project, sequence, system, testimage, timeline, updater)
+from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
+               loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, timeline,
+               updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
+from .meter import AudioMeter
 from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
 from .viewer import SafeAreaButton, Viewer
@@ -229,6 +231,7 @@ class _MixBridge(QObject):
     done = Signal(str, str)  # chave da mixagem, arquivo WAV ("" = sem som)
     peaks = Signal(str)      # forma de onda de um arquivo ficou pronta
     thumb = Signal(str, object)  # miniatura de uma mídia importada (caminho, QImage)
+    meter = Signal(int, str)     # pedido do medidor de som, WAV com o som do arquivo ("" = não deu)
 
 
 class _UpdateBridge(QObject):
@@ -307,7 +310,7 @@ class MainWindow(QMainWindow):
         self.player = Player()
         # Modo Edição: a montagem (sequência) é a fonte da prévia quando tem mudanças em relação ao arquivo.
         self.mode = "pelicula"
-        self.model = TimelineModel(timeline.Sequence())
+        self.model = TimelineModel(timeline.Sequence(micro_fade=True))  # sequência nova: fades nas emendas
         self.file_info: media.MediaInfo | None = None  # arquivo aberto no modo Película
         self.src_seq: timeline.Sequence | None = None   # cópia da sequência que a prévia está mostrando
         self.cur_layers = None
@@ -331,6 +334,20 @@ class MainWindow(QMainWindow):
         # recuperação automática (`ui/recovery_ui.attach`, só pelo app.main(): testes não gravam cópias).
         self.notifier = notifier.for_window(self)
         self.recovery = None
+        # Medidor de som (módulo medidor_som): lê o mesmo som que está tocando, junto com o relógio da prévia.
+        self._meter_enabled = False
+        self._meter_for = ("", "")      # (tipo, caminho) do som que o medidor está lendo
+        self._meter_reader: audiomix.WavReader | None = None
+        self._meter_lm: loudness.LoudnessMeter | None = None
+        self._meter_pos: int | None = None  # próxima amostra a medir (None = recomeçar)
+        self._meter_token = 0
+        self._meter_cancel: threading.Event | None = None
+        self._meter_wav: tuple[tuple, str] = ((), "")  # som do arquivo já decodificado: ((caminho, mtime), WAV)
+        self._meter_files: list[str] = []
+        self._mix_bridge.meter.connect(self._meter_decoded)
+        self.meter_timer = QTimer(self)
+        self.meter_timer.setInterval(40)  # 25 vezes por segundo
+        self.meter_timer.timeout.connect(self._meter_tick)
 
         self._build_ui()
         self.store.changed.connect(self._on_param)
@@ -657,7 +674,14 @@ class MainWindow(QMainWindow):
         self.viewer.zoomChanged.connect(self._zoom_changed)
         self.viewer.set_safe_area(self.btn_safe.kind)
         self.btn_safe.changed.connect(self.viewer.set_safe_area)
-        vl.addWidget(self.viewer, 1)
+        self.meter = AudioMeter()
+        self.meter.resetRequested.connect(self._meter_reset)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self.viewer, 1)
+        row.addWidget(self.meter)
+        vl.addLayout(row, 1)
         tr = _TransportBar()
         tr.setObjectName("Transport")
         tv = QVBoxLayout(tr)
@@ -1141,6 +1165,7 @@ class MainWindow(QMainWindow):
         self._update_label_proc()
         self._update_history()
         self._refresh_source()
+        self._update_mute_tip()
         if edit:
             self.tl_editor.setFocus()
 
@@ -1184,6 +1209,7 @@ class MainWindow(QMainWindow):
             self.hist.set_image(None)
             self.edit_scopes.set_image(None)
             self.timeline.set_media(1, 24.0)
+            self._sync_film_markers()
             self.tl_editor.set_playhead(0)
             self.file_label.setText("")
             self.st_file.setText(_("Nenhum arquivo aberto") if self.mode == "pelicula"
@@ -1203,6 +1229,7 @@ class MainWindow(QMainWindow):
             self.outp = None
         self.timeline.set_media(info.frames, info.fps)
         self.timeline.set_inout(self.inp, self.outp)
+        self._sync_film_markers()
         self.tl_editor.set_inout(self.inp, self.outp)
         if self.src_seq is not None:
             seq = self.src_seq
@@ -1224,7 +1251,10 @@ class MainWindow(QMainWindow):
         """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
         if self._loading:
             return
-        if kind == "values" and self.src_seq is not None and self._use_sequence():
+        if kind == "markers":
+            # Marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução).
+            self._sync_film_markers()
+        elif kind == "values" and self.src_seq is not None and self._use_sequence():
             self.src_seq = self.model.seq.copy()
             if self._compose_current():
                 self.render_now()
@@ -1236,6 +1266,40 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._update_history()
 
+    # ---------------------------------------------------------------- marcadores e capítulos
+    def _sync_film_markers(self) -> None:
+        """Marcadores da montagem na barra de tempo do modo Película (só para ver e pular até eles)."""
+        seq = self.model.seq
+        items = []
+        if self.info is not None and seq.markers and abs(self.info.fps - seq.fps) < 1e-3:
+            items = [(mk.frame, theme.MARKER_COLORS.get(mk.color, theme.ACCENT), mk.name)
+                     for mk in seq.sorted_markers() if mk.frame < self.info.frames]
+        self.timeline.set_markers(items)
+
+    def goto_marker(self, step: int) -> None:
+        """Shift+↓ / Shift+↑: próximo / anterior marcador (nos dois modos)."""
+        if self.info is None:
+            return
+        seq = self.model.seq
+        mk = seq.next_marker(self.frame_idx) if step > 0 else seq.previous_marker(self.frame_idx)
+        if mk is None or mk.frame >= self.info.frames:
+            return
+        if self.mode == "edicao":
+            self.model.select_marker(mk.id)
+        self.seek(mk.frame)
+
+    def add_marker(self) -> None:
+        """M no modo Edição: marcador no cursor (se já há um ali, só o seleciona)."""
+        if self.info is not None and self.mode == "edicao":
+            self.model.add_marker(self.frame_idx)
+
+    def _export_chapters(self) -> list[tuple[int, str]]:
+        """Capítulos (quadro, título) da montagem, nos quadros do que vai ser exportado."""
+        seq = self.model.seq
+        if self.info is None or not seq.markers or abs(self.info.fps - seq.fps) > 1e-3:
+            return []
+        return chapters.points(seq)
+
     # ---------------------------------------------------------------- som da montagem
     def _set_audio(self, kind: str, path: str) -> None:
         """Troca o som da prévia (arquivo original ou mixagem da montagem) sem perder a reprodução."""
@@ -1243,6 +1307,7 @@ class MainWindow(QMainWindow):
             return
         self._audio_src = (kind, path)
         self._load_audio(path)
+        self._meter_source()
         if self.playing and self._audio_ok and self.audio is not None:
             self._audio_seek(self.frame_idx)
             self.audio.play()
@@ -1306,6 +1371,7 @@ class MainWindow(QMainWindow):
             self.audio.stop()
             self.audio.setSource(QUrl())
         self._clean_mixes()
+        self._meter_close()
 
     def _peaks_for(self, path: str):
         """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
@@ -1455,7 +1521,7 @@ class MainWindow(QMainWindow):
         dlg = SequenceDialog(self, self.model.seq)
         if dlg.exec():
             w, h, fps, bg = dlg.values()
-            self.model.set_settings(w, h, fps, bg)
+            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade())
 
     def auto_adjust_clip(self, cid: str) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
@@ -1604,7 +1670,17 @@ class MainWindow(QMainWindow):
             self.audio.setSource(QUrl.fromLocalFile(path) if self._audio_ok else QUrl())
         self.btn_mute.setEnabled(self._audio_ok)
         self.vol.setEnabled(self._audio_ok)
-        self.btn_mute.setToolTip(_("Som da prévia (M liga/desliga)") if self._audio_ok else _("Este arquivo não tem som"))
+        self._update_mute_tip()
+
+    def _update_mute_tip(self) -> None:
+        """No modo Película o M liga/desliga o som; no modo Edição o M põe um marcador e o som fica no Shift+M
+        (que vale nos dois modos)."""
+        if not self._audio_ok:
+            self.btn_mute.setToolTip(_("Este arquivo não tem som"))
+        elif self.mode == "edicao":
+            self.btn_mute.setToolTip(_("Som da prévia (Shift+M liga/desliga)"))
+        else:
+            self.btn_mute.setToolTip(_("Som da prévia (M liga/desliga)"))
 
     def _set_muted(self, on: bool) -> None:
         self.btn_mute.setIcon(icons.icon("mute" if on else "volume", theme.TEXT, 18))
@@ -1652,6 +1728,7 @@ class MainWindow(QMainWindow):
         if self._audio_ok and self.audio is not None:
             self._audio_seek(f)
             self.audio.play()
+        self._meter_start()
         self.btn_play.setIcon(icons.icon("pause", theme.TEXT, 18))
         self.play_timer.start(max(5, int(500 / self.info.fps)))
 
@@ -1663,6 +1740,10 @@ class MainWindow(QMainWindow):
         self.playing = False
         if self.audio is not None:
             self.audio.pause()
+        self.meter_timer.stop()
+        self._meter_pos = None
+        if self._meter_enabled:
+            self.meter.idle()
         self.btn_play.setIcon(icons.icon("play", theme.TEXT, 18))
         self.thumb_timer.start()
 
@@ -1700,6 +1781,144 @@ class MainWindow(QMainWindow):
         self._play_last = f
         self._set_frame(f, item[1])
         self._audio_follow(f)
+
+    # ================================================================ medidor de som (módulo medidor_som)
+    METER_JUMP_S = 5.0  # o relógio pulou mais que isso para a frente: medição nova
+
+    def _meter_source(self) -> None:
+        """Abre o som que o medidor lê, o mesmo que está tocando: a mixagem da montagem (WAV pronto) ou o
+        som do arquivo, decodificado uma vez num WAV temporário em segundo plano. Nada disso vai para a
+        exportação."""
+        kind, path = self._audio_src
+        want = (kind, path) if self._meter_enabled and path else ("", "")
+        if want == self._meter_for:
+            return
+        self._meter_close(drop_files=not want[1])
+        self._meter_for = want
+        self.meter.clear()
+        kind, path = want
+        if kind == "seq":
+            self._meter_open(path)
+        elif path:
+            key = self._meter_key(path)
+            if self._meter_wav[0] == key and os.path.exists(self._meter_wav[1]):
+                self._meter_open(self._meter_wav[1])
+            else:
+                self._meter_decode(path)
+
+    @staticmethod
+    def _meter_key(path: str) -> tuple:
+        try:
+            return path, os.path.getmtime(path)
+        except OSError:
+            return path, None
+
+    def _meter_decode(self, path: str) -> None:
+        self._meter_drop_files()
+        token = self._meter_token
+        out = os.path.join(tempfile.gettempdir(), f"pelicula_medidor_{os.getpid()}_{token}.wav")
+        self._meter_files.append(out)
+        cancel = self._meter_cancel = threading.Event()
+        self.meter.set_waiting(True)
+
+        def run():
+            try:
+                ok = audiomix.decode_wav(path, out, cancel)
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._mix_bridge.meter.emit(token, out if ok else "")
+
+        threading.Thread(target=run, daemon=True, name="medidor-som").start()
+
+    def _meter_decoded(self, token: int, wav: str) -> None:
+        if token != self._meter_token:  # a fonte mudou enquanto decodificava
+            if wav:
+                self._meter_remove(wav)
+            return
+        self._meter_cancel = None
+        self.meter.set_waiting(False)
+        if wav:
+            self._meter_wav = (self._meter_key(self._meter_for[1]), wav)
+            self._meter_open(wav)
+
+    def _meter_open(self, path: str) -> None:
+        try:
+            reader = audiomix.WavReader(path)
+        except (OSError, ValueError):
+            return
+        self._meter_reader = reader
+        self._meter_lm = loudness.LoudnessMeter(reader.rate, reader.channels)
+        self._meter_pos = None
+        if self.playing:
+            self._meter_start()
+
+    def _meter_close(self, drop_files: bool = True) -> None:
+        """Para de medir (fonte nova, módulo desligado ou janela fechando) e cancela a decodificação."""
+        if self._meter_cancel is not None:
+            self._meter_cancel.set()
+            self._meter_cancel = None
+        self._meter_token += 1
+        self._meter_for = ("", "")
+        self._meter_reader = self._meter_lm = None
+        self._meter_pos = None
+        self.meter_timer.stop()
+        if drop_files:
+            self._meter_drop_files()
+
+    def _meter_remove(self, f: str) -> None:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+            self._meter_files.remove(f)
+        except (OSError, ValueError):
+            pass  # o ffmpeg cancelado ainda está fechando; tenta de novo depois
+
+    def _meter_drop_files(self) -> None:
+        for f in list(self._meter_files):
+            self._meter_remove(f)
+        if self._meter_wav[1] not in self._meter_files:
+            self._meter_wav = ((), "")
+
+    def _meter_start(self) -> None:
+        """Play (também depois de pular durante a reprodução): a medição recomeça no quadro de partida."""
+        self._meter_pos = None
+        if self._meter_enabled and self._meter_for[1]:
+            if self._meter_reader is not None:
+                self.meter.restart()
+            self.meter_timer.start()
+
+    def _meter_reset(self) -> None:
+        """Clique no medidor: recomeça a integrada e o true peak sem parar a reprodução."""
+        if self._meter_lm is not None:
+            self._meter_lm.reset()
+        if self.playing and self._meter_reader is not None:
+            self.meter.restart()
+
+    def _meter_tick(self) -> None:
+        """Mede o som tocado desde o último toque, pelo mesmo relógio que escolhe o quadro mostrado."""
+        reader, lm = self._meter_reader, self._meter_lm
+        if not self.playing or reader is None or lm is None or self._play_t0 is None or self.info is None:
+            return
+        fps, rate = self.info.fps, reader.rate
+        now = int((self._play_f0 / fps + time.perf_counter() - self._play_t0) * rate)
+        pos = self._meter_pos
+        jump = self.METER_JUMP_S * rate
+        if pos is None or now < pos or now - pos > jump:
+            lm.reset()  # começo, volta do loop ou salto: mede a partir do quadro de partida (ou de agora)
+            self.meter.restart()
+            start = int(round(self._play_f0 / fps * rate))
+            pos = max(0, start if 0 <= now - start <= jump else now)
+        try:
+            x = reader.read(pos, now - pos)
+        except OSError:
+            return  # a mixagem antiga foi apagada; a nova chega por _set_audio
+        self._meter_pos = now
+        peaks = None
+        if len(x):
+            lm.add(x)
+            peaks = [loudness.db(float(v)) for v in lm.last_peak]
+        self.meter.push(peaks, lm.momentary(), lm.short_term(), lm.integrated(),
+                        lm.true_peak_db() if lm.samples else None)
 
     def seek(self, f: int) -> None:
         if self.info is None:
@@ -1982,7 +2201,8 @@ class MainWindow(QMainWindow):
         dlg = ExportDialog(self, self.info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
                            perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
-                           last_platform=str(self.settings.value("export_platform", "")))
+                           last_platform=str(self.settings.value("export_platform", "")),
+                           chapters=self._export_chapters())
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2074,9 +2294,12 @@ class MainWindow(QMainWindow):
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:
-        """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1)."""
+        """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1).
+
+        Marcadores contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
-        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path):
+        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
+                             and not seq.markers):
             return None
         return seq.to_json()
 
@@ -2195,7 +2418,7 @@ class MainWindow(QMainWindow):
         self.bin.clear()
         self._loading = True
         try:
-            self.model.set_sequence(timeline.Sequence())
+            self.model.set_sequence(timeline.Sequence(micro_fade=True))
         finally:
             self._loading = False
         self._refresh_source(reset=True)
@@ -2531,6 +2754,7 @@ class MainWindow(QMainWindow):
             "exportar_lut": [self.act_lut_sep, *self.act_luts],
             "scopes": [self.hist, self.edit_scopes],
             "curva": [self.curve_label, self.curve_switch],
+            "medidor_som": [self.meter],
             "davinci": [self.act_resolve_sep, self.act_resolve],
         }
 
@@ -2553,6 +2777,8 @@ class MainWindow(QMainWindow):
         self.curve_graph.setVisible(curve)  # sem gravar "show_curve": religado, volta como estava
         if curve:
             self.curve_timer.start()
+        self._meter_enabled = "medidor_som" in on
+        self._meter_source()  # desligado: nem decodifica nem mede
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._check_modules()
 
@@ -2591,6 +2817,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, _("Atalhos do teclado"), _(
             "Espaço — reproduzir / pausar\n← / → — quadro anterior / próximo\nShift + ← / → — 1 segundo\n"
             "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\nL — repetir\n"
+            "M — som da prévia (no modo Edição: Shift+M)\nShift + ↑ / ↓ — marcador anterior / próximo\n"
             "C — trocar o modo de comparação\nF — ajustar à janela\n+ / − — mais / menos zoom (de 10% a 1600%)\n"
             "1 / 2 — zoom 100% / 200%\nF11 — prévia em tela cheia (Esc sai) • Shift+F11 — janela em tela cheia\n"
             "Botão direito no vídeo (segurar) — ver o original\nDuplo clique no slider — volta ao padrão\n"
@@ -2600,6 +2827,7 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+F salvar quadro • Ctrl+Z / Ctrl+Y desfazer / refazer\n\n"
             "Ctrl+1 modo Película • Ctrl+2 modo Edição • Ctrl+I importar para a edição\n"
             "Edição: S divide no cursor • Delete apaga • Shift+Delete apaga e fecha o espaço\n"
+            "M marcador no cursor (dois cliques nele: nome, cor, nota e capítulo)\n"
             "Ctrl+Alt+C / Ctrl+Alt+V copiar / colar os ajustes de cor do clipe\n"
             "B lâmina • V seleção • N ímã • Ctrl + roda do mouse: zoom da linha do tempo"))
 
@@ -2629,6 +2857,12 @@ class MainWindow(QMainWindow):
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.model.delete_selected(ripple=shift)
+            return
+        if self.mode == "edicao" and k == Qt.Key.Key_M and not shift:
+            self.add_marker()  # no modo Edição o M marca; o som da prévia fica no Shift+M
+            return
+        if shift and k in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self.goto_marker(1 if k == Qt.Key.Key_Down else -1)
             return
         if k == Qt.Key.Key_Space:
             self.toggle_play()
