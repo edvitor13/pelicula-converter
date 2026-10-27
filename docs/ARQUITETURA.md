@@ -24,6 +24,8 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 16. [Módulos (recursos opcionais)](#16-módulos-recursos-opcionais)
 17. [Componentes externos (`tools.py`)](#17-componentes-externos-toolspy)
 18. [Fila de tarefas (`jobs.py`)](#18-fila-de-tarefas-jobspy)
+19. [Notificações do sistema (`notify.py`)](#19-notificações-do-sistema-notifypy)
+20. [Recuperação automática e relatórios de erro (`recovery.py`, `crashlog.py`)](#20-recuperação-automática-e-relatórios-de-erro-recoverypy-crashlogpy)
 
 ---
 
@@ -87,7 +89,7 @@ Três ideias guiam o projeto:
 | `PeliculaConverter.pyw` | Abre o app sem console (`pythonw`). |
 | `pelicula/__main__.py` | `python -m pelicula`. |
 | `pelicula/__init__.py` | `__version__` e `APP_NAME`. |
-| `pelicula/app.py` | `main()`: `QApplication`, estilo Fusion, paleta e folha de estilo, ícone; bloqueio do macOS (desativado); oferta de `pip install` se faltar `moderngl`/`numpy`/`glcontext`; cria a `MainWindow`; arquivos da linha de comando; gancho `PELICULA_SCREENSHOT`. |
+| `pelicula/app.py` | `main()`: `QApplication`, estilo Fusion, paleta e folha de estilo, ícone; bloqueio do macOS (desativado); oferta de `pip install` se faltar `moderngl`/`numpy`/`glcontext`; sessão da recuperação e registro de erros antes da janela (`recovery_ui.Guard`); cria a `MainWindow` e liga as notificações do sistema e a recuperação; aviso de recuperação antes das boas-vindas; arquivos da linha de comando; gancho `PELICULA_SCREENSHOT`. |
 | `pelicula/params.py` | `Param`, `Section`, `Schema` (esquema genérico: padrões e limpeza), `SECTIONS`/`FILM`, `PARAMS`, `defaults()`, `sanitize()`. |
 | `pelicula/look.py` | Tabelas de bitolas (`GAUGES`), cópias (`PRINTS`), scan (`SCAN_FORMATS`), filtros P&B, viragens, primárias e matrizes de gamut; Laboratório (negativos, cópias, processos, calibração `lab_paths`); `build_plan()` → `Plan`. |
 | `pelicula/shaders.py` | GLSL: `VERT`, `COMMON` (curvas, transferências log, look, cópia, LUT), `BASE`, `EXTRACT`, `BLUR`, `NOISE`, `FINAL`, `BAKE`. |
@@ -99,6 +101,9 @@ Três ideias guiam o projeto:
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
 | `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17). |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
+| `pelicula/notify.py` | Notificações do sistema sem Qt: tipos (`KINDS`), preferências `notificacoes/…`, `decide()` (avisar, tocar som, piscar), textos (`Notice`) e o resumo da fila (`queue_notices`) (seção 19). |
+| `pelicula/recovery.py` | Recuperação depois de um travamento, sem Qt: marcador da sessão (pid + hora de início), cópias automáticas com rodízio, fila de exportação guardada, `scan()` das sessões que travaram (seção 20). |
+| `pelicula/crashlog.py` | Relatórios de erro e de travamento em `<pasta do app>/logs/`: `faulthandler`, `sys.excepthook` e `threading.excepthook`, pasta de tamanho limitado (seção 20). |
 | `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema, gravação segura (`partial_path`, `replace_file`, `atomic_write`). |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
@@ -126,6 +131,8 @@ Três ideias guiam o projeto:
 | `pelicula/ui/queue_dialog.py` | Janela da fila. |
 | `pelicula/ui/settings_dialog.py` / `pages/` | Configurações em páginas; `pages/componentes.py` mostra os componentes (ffmpeg, ferramentas, programas do sistema), o espaço em disco e o sistema (placa de vídeo, bibliotecas). |
 | `pelicula/ui/job_bridge.py` | `JobBridge`/`bridge()`: eventos da fila de tarefas como sinais do Qt na thread principal; `on_finished`. |
+| `pelicula/ui/notifier.py` / `pages/notificacoes.py` | `Notifier` da janela (`MainWindow.notifier`) e os backends: bandeja/toast (`QSystemTrayIcon`), D-Bus (`org.freedesktop.Notifications`) e nulo (testes); página Configurações › Notificações (seção 19). |
+| `pelicula/ui/recovery_ui.py` / `crash_dialog.py` / `pages/recuperacao.py` | `Guard` (sessão + registro de erros de uma execução), `RecoveryController` (cópias automáticas, fila guardada), `RecoveryDialog` (aviso depois de um travamento), `ErrorDialog` (erro inesperado) e a página Configurações › Recuperação (seção 20). |
 | `pelicula/ui/theme.py` / `icons.py` | Cores, fontes, folha de estilo; ícones vetoriais e ícone do app (usa `assets/logo-*.png` quando existem). |
 
 ## 3. Dos ajustes aos uniforms
@@ -420,6 +427,9 @@ Regras que decorrem disso:
 - **Cancelamento cooperativo.** `ExportJob.cancel` (`threading.Event`) é conferido na leitura, na
   GPU e na gravação; o processo do codificador é morto e o parcial é apagado (arquivo ou pasta da
   sequência). O destino antigo nunca é tocado (veja a gravação segura em 9.2).
+- **Exceção sem tratamento numa thread.** `threading.excepthook` (de `crashlog.CrashLog`) grava o
+  relatório na própria thread; o aviso na tela chega à thread principal por um sinal em fila
+  (`ui/crash_dialog.CrashUi`). Veja a seção 20.
 
 ## 8. Leitura de quadros com o ffmpeg
 
@@ -569,6 +579,9 @@ novo.
 |---|---|
 | Sessão e preferências | `QSettings("PeliculaConverter", "PeliculaConverter")` — registro `HKCU\Software\PeliculaConverter\PeliculaConverter` no Windows, `~/.config/PeliculaConverter/PeliculaConverter.conf` no Linux. Chaves: `session_values` (JSON dos ajustes), `session_preset`, `geometry`, `splitter`, `compare`, `preview_quality`, `advanced`, `last_dir`, `export_dir`, `export_quality`, `export_perf`, `ffmpeg_dir`, `ffmpeg_skip`. A sessão é gravada no `closeEvent` da janela. |
 | Módulos | Nas mesmas preferências: `modulos/<id>` (`"1"`/`"0"`; sem valor vale o padrão), `modulos/perfil` e `modulos/mostrar_testes` (seção 16). |
+| Notificações | Nas mesmas preferências: `notificacoes/<tipo>` (`"1"`/`"0"`, um por tipo de `notify.KINDS`; sem valor = ligado), `notificacoes/so_sem_foco`, `notificacoes/som` e `notificacoes/piscar` (seção 19). |
+| Recuperação automática | Preferências `recuperacao/intervalo` (minutos: 1, 2, 5, 10 ou 15) e `recuperacao/versoes` (1–20). Arquivos em `<pasta do app>/recuperacao/` (`deps.app_data_dir()`): marcadores das sessões, cópias automáticas e fila guardada — nunca no `.plc` (seção 20). |
+| Relatórios de erro | `<pasta do app>/logs/`: `falha-<sessão>.log` (`faulthandler`) e `erro-<data>-<sessão>.txt`; no máximo 20 arquivos de até 256 KB (seção 20). |
 | Presets do usuário | `presets.user_dir()` = `$APPDATA/PeliculaConverter/presets` (sem `APPDATA`, a pasta pessoal) — um `.json` por preset, nome derivado do título. |
 | Meus LUTs | `luts.user_dir()` = `$APPDATA/PeliculaConverter/luts`. |
 | ffmpeg baixado | `deps.ffmpeg_dir()` (veja a seção 10). |
@@ -591,7 +604,12 @@ A suíte fica em `tests/` (configuração em `pytest.ini`, que já põe a raiz n
   usuário nunca são tocados;
 - os testes de componentes (`test_tools.py`, `componentes_ui_cases.py`) redirecionam também
   `LOCALAPPDATA`/`XDG_DATA_HOME` (a pasta do app, onde ficam o ffmpeg e as ferramentas baixadas) e não
-  usam a rede: pacotes locais, `file://` e um servidor HTTP em 127.0.0.1.
+  usam a rede: pacotes locais, `file://` e um servidor HTTP em 127.0.0.1;
+- os testes da recuperação e das notificações (`test_recovery*.py`, `test_crashlog.py`,
+  `recovery_ui_cases.py`, `notify_ui_cases.py`) também redirecionam a pasta do app e nunca mostram uma
+  notificação de verdade: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos (até um
+  servidor D-Bus de mentira); os travamentos são de verdade, em subprocessos (`os._exit`,
+  `faulthandler._sigsegv`).
 
 ```bash
 .venv\Scripts\python -m pytest -q      # Windows
@@ -834,6 +852,12 @@ em `_module_tools()` (widgets e `QAction`s que recebem `setVisible`); os casos e
 | `davinci` | *Plugin para o DaVinci Resolve…* no menu de Configurações. |
 | `medidor_som`, `notificacoes`, `recuperacao` | Ainda sem ferramenta na janela: entram em `_module_tools()` quando ganharem uma. |
 
+**Notificações e Recuperação** não escondem nada na janela; as páginas delas em Configurações explicam o
+estado e oferecem **Ligar**. `notificacoes` desligado: nenhuma notificação nem som, só o ícone da barra de
+tarefas pisca no fim de uma exportação, como antes (seção 19). `recuperacao` desligado: nenhuma cópia nem
+fila guardada e nenhuma pergunta ao abrir; o marcador da sessão e os relatórios de erro continuam, porque
+são diagnóstico e não mudam o trabalho (seção 20).
+
 **Aviso de uso** (`_check_modules()`): depois de abrir um projeto, aplicar um preset, soltar um LUT ou
 mudar os módulos, `modules.used_by(valores, montagem)` diz o que o trabalho usa de fato (`lab_on`,
 `desg_on`, `scan_on`, `lut_on` com arquivo, montagem que não é só o arquivo inteiro). Se algum desses
@@ -950,3 +974,207 @@ job = bridge().submit(analisar, _("Analisar cenas"), kind=jobs.GPU, key="analise
 - Ligue os sinais a métodos de widgets (o Qt desliga sozinho quando o widget some) e use `on_finished`
   para o que precisa acontecer mesmo com a janela fechada. Outros recursos (as notificações do sistema,
   por exemplo) podem ouvir `bridge().finished` para avisar quando um trabalho termina.
+
+## 19. Notificações do sistema (`notify.py`)
+
+Avisos do sistema operacional quando algo termina com o app em segundo plano. Módulo `notificacoes`
+(estável, ligado por padrão). A notificação é local: nada sai do computador.
+
+| Peça | O que faz |
+|---|---|
+| `notify.py` (sem Qt) | tipos de evento (`KINDS`), preferências, a decisão `decide()`, os textos (`Notice`) e o resumo da fila (`queue_notices`) |
+| `ui/notifier.py` | `Notifier` (um por janela, `MainWindow.notifier`): decide, mostra pelo backend, toca o som, pisca o ícone e trata o clique |
+| `ui/pages/notificacoes.py` | Configurações › Notificações: um liga/desliga por tipo (a lista sai de `KINDS`), as opções e *Testar notificação* |
+
+**Tipos** (o id fica gravado nas preferências: nunca renomear):
+
+| Id | Quando | Clique |
+|---|---|---|
+| `exportacao_concluida` | uma exportação terminou | mostra o arquivo selecionado na pasta (`system.reveal`); sequência de imagens: abre a pasta dos quadros |
+| `exportacao_falhou` | uma exportação parou com erro (a última linha do erro vai no texto) | abre a fila |
+| `fila_concluida` | a fila esvaziou depois de duas ou mais exportações; substitui o aviso da última | abre a pasta (todas deram certo, na mesma pasta) ou a fila |
+| `componente_baixado`, `componente_falhou` | um download de Configurações › Componentes terminou (inclusive o ffmpeg oferecido ao abrir o app) | abre Configurações › Componentes |
+| `atualizacao_disponivel` | a checagem automática achou uma versão nova que não foi pulada | abre a janela da atualização |
+
+**Decisão** (`decide(tipo, módulo_ligado, janela_em_foco, prefs)`), na ordem:
+
+1. módulo desligado → nenhuma notificação nem som; nas exportações (`LEGACY_FLASH`) o ícone ainda pisca,
+   como antes do módulo existir;
+2. tipo desligado → nada;
+3. *Só quando a janela não está em foco* (`notificacoes/so_sem_foco`, padrão ligado) com a janela em foco
+   → nada (o resultado já aparece nela). Em foco = app ativo (`QGuiApplication.applicationState()`) e
+   janela não minimizada;
+4. senão → notificação, mais o som (`notificacoes/som`, padrão desligado) e o piscar
+   (`notificacoes/piscar`, padrão ligado).
+
+*Testar notificação* ignora o tipo e o foco. Com *Fila concluída* desligado, a última exportação de uma
+fila avisa por conta própria.
+
+**Backends** (`system_backend()`; qualquer falha vira "não mostrou", nunca uma exceção na janela):
+
+| Sistema | Backend | Clique | Se não houver |
+|---|---|---|---|
+| Windows | `TrayBackend`: `QSystemTrayIcon.showMessage` — toast do Windows 10/11. O ícone na bandeja só aparece durante o aviso (some depois de 20 s). | `messageClicked` (ou clique no ícone) | nada |
+| Linux | `DBusBackend`: `org.freedesktop.Notifications.Notify` pelo `PySide6.QtDBus`, com o ícone do app, a ação `default` e as dicas `desktop-entry` e `sound-name`/`suppress-sound` | sinal `ActionInvoked` | `TrayBackend` (bandeja do ambiente); sem bandeja, nada |
+
+O `Notify` exige `replaces_id` como `uint32` (assinatura `susssasa{sv}i`) e o PySide6 converte `int` em
+`int32`; por isso a chamada passa por `QMetaObject.invokeMethod` com argumentos tipados
+(`Q_ARG("uint", 0)`) sobre o `QDBusInterface`. O serviço é procurado uma vez (registrado ou ativável): sem
+barramento de sessão ou sem serviço, o backend cai para a bandeja.
+
+- **Som**: `QApplication.beep()` — no Windows o "Aviso padrão" do esquema de sons (MessageBeep), no X11 o
+  sinal do servidor. Não precisa de arquivo de som nem de biblioteca nova (o `QtMultimedia` traria plugins
+  de áudio e um arquivo só para isso). No Linux com D-Bus quem toca é o servidor de notificações (som do
+  tema, `sound-name` = `message-new-instant`) e o `beep` fica de fora. No Windows o toast tem o som
+  próprio, que segue as configurações de notificação do sistema.
+- **Piscar**: `QApplication.alert(janela)` (barra de tarefas no Windows, *urgency hint* no X11); só faz
+  efeito com a janela fora de foco.
+- **Clique** (`Notifier.activate`): traz a janela para a frente; arquivo que existe → `system.reveal`;
+  pasta → `system.open_path`; arquivo que sumiu → a pasta dele; sem arquivo → `Notifier.actions[ação]`
+  (`show_queue`, `show_settings("componentes")`, `show_update`). Os 50 avisos mais recentes ficam
+  guardados pelo número da notificação.
+
+**De onde vêm os eventos**:
+
+- `MainWindow._queue_tick` (o timer de 500 ms que já via o fim das exportações) junta as que terminaram
+  em `notify.Finished` e chama `notifier.export_progress(terminadas, idle=not queue.busy)` — no lugar do
+  antigo `QApplication.alert`; o `Notifier` guarda o lote da fila para o resumo.
+- `Notifier.watch_jobs(bridge())`: `JobBridge.finished` dos trabalhos `componente:<id>` com
+  `data["acao"] == "baixar"` (página Componentes e `MainWindow.show_deps`).
+- `MainWindow._update_found`: checagem automática com versão nova (a manual já abre a janela).
+
+**Testes e automações nunca mostram nada**: a `MainWindow` cria o `Notifier` com o `NullBackend`; só o
+`app.main()` liga o backend do sistema. Os casos de `tests/notify_ui_cases.py` usam backends falsos e um
+objeto Qt com o método `Notify` no lugar do servidor D-Bus (a mesma chamada tipada).
+
+Tipo novo: receita *Nova notificação* em [AGENTS.md](../AGENTS.md#nova-notificação).
+
+## 20. Recuperação automática e relatórios de erro (`recovery.py`, `crashlog.py`)
+
+Se o app fecha de repente (travamento, falta de luz), o trabalho que ainda não estava salvo volta na
+próxima abertura. Módulo `recuperacao` (estável, ligado por padrão). O `.plc` da pessoa nunca é tocado:
+tudo fica na pasta do app (`deps.app_data_dir()`: `%LOCALAPPDATA%\PeliculaConverter` no Windows,
+`$XDG_DATA_HOME/PeliculaConverter` ou `~/.local/share/PeliculaConverter` no Linux).
+
+```
+<pasta do app>/
+  recuperacao/
+    sessoes/<sessão>.json       marcador de cada janela aberta: app, sessao, pid, inicio, versao_app,
+                                executavel e vivo_em (sinal de vida, renovado a cada 5 min)
+    <sessão>/copia-000001.json  cópias automáticas (ficam as recuperacao/versoes mais novas; padrão 5)
+    <sessão>/fila.json          exportações esperando ou rodando (ExportJob.to_dict)
+  logs/
+    falha-<sessão>.log          faulthandler: vazio enquanto nada acontece; apagado ao fechar normalmente
+    erro-<data>-<sessão>.txt    exceção sem tratamento: traceback, versão, sistema, Python, Qt e placa
+```
+
+O id da sessão é `AAAAMMDDhhmmss` + 8 dígitos hexadecimais (sem `-`, que separa os campos nos nomes dos
+logs).
+
+```mermaid
+flowchart LR
+    M["app.main()"] --> G["Guard.start()<br/>marcador + CrashLog.install()"]
+    G --> W["MainWindow"]
+    W --> A["recovery_ui.attach()<br/>RecoveryController · CrashUi"]
+    A --> S["start_flow: startup()<br/>scan() → RecoveryDialog"]
+    S --> R["app.exec()"]
+    R --> C["Guard.close()<br/>marcador, cópias e falha-*.log somem"]
+```
+
+**Uma execução** (`ui/recovery_ui.py`):
+
+1. `app.main()`, logo depois da `QApplication` (antes do idioma e da janela): `Guard.start()` grava o
+   marcador (`recovery.Session.start`) e liga o registro de erros (`crashlog.CrashLog.install`) — uma falha
+   ao iniciar o OpenGL já fica registrada. Não roda com `PELICULA_SCREENSHOT` nem nos testes que só criam
+   a janela.
+2. Depois da `MainWindow`: `recovery_ui.attach()` cria o `RecoveryController` (cópias, fila, sinal de
+   vida) e o `CrashUi` (aviso de erro) e passa o nome da placa de vídeo para os relatórios.
+3. `start_flow` (primeira volta do laço de eventos): `RecoveryController.startup()` procura sessões que
+   travaram e, havendo cópia ou fila, mostra o aviso **antes** das boas-vindas (que não aparecem se a
+   pessoa recuperou) e das novidades.
+4. Fechamento normal (`app.exec()` voltou; `finally` de `main()`): `Guard.close()` para os timers e apaga
+   o marcador, a pasta da sessão e o `falha-*.log` vazio. As cópias só servem depois de um travamento.
+
+**Detectar um travamento** (`recovery.scan`): um marcador de outra sessão cujo processo não é mais aquela
+sessão. `process_info(pid)`, sem dependências: no Windows `OpenProcess` + `GetExitCodeProcess`
+(`STILL_ACTIVE`) + `GetProcessTimes` (hora de criação); no Linux `os.kill(pid, 0)` + a hora de início em
+`/proc/<pid>/stat` (zumbi conta como morto). `pid_alive()`:
+
+| Situação | Resultado |
+|---|---|
+| o processo não existe (ou o marcador não dá para ler) | travou |
+| existe e começou até `START_TOLERANCE` (10 s) depois do `inicio` do marcador | a mesma sessão: outra janela aberta, **não** é travamento |
+| existe, mas começou depois disso | o pid foi reaproveitado por outro programa: travou |
+| existe e não dá para saber a hora de início (sem permissão, sem `/proc`) | aberta, a menos que o `vivo_em` tenha mais de 7 dias (`STALE_BEAT`) |
+
+Reutilização de pid: só o último caso pode esconder um travamento (outro programa com o mesmo pid e sem
+hora de início conhecida), até o `vivo_em` envelhecer. Na dúvida, a sessão conta como aberta — o app nunca
+pergunta sobre uma janela que ainda está aberta. Pastas de sessão sem marcador com mais de 30 dias
+(`ORPHAN_AGE`) são apagadas.
+
+**Cópia automática** (`RecoveryController.autosave`, timer de `recuperacao/intervalo` minutos, padrão 1):
+só com mudanças não salvas (`is_dirty()`) e se algo mudou desde a última cópia; também em
+`MainWindow._recovery_point()`, antes de exportar (`export_dialog`) e de importar um arquivo novo
+(`_probe_source`). Depois de salvar (`_write_project`), ou sem mudanças não salvas, as cópias da janela
+saem: uma cópia velha nunca parece mais nova que o `.plc`. A gravação roda na thread principal — o JSON é
+pequeno (`_make_project(backup=True)`: sem miniatura e sem fechar o passo de desfazer em andamento) e é
+gravado de uma vez (`system.atomic_write`); ficam as `recuperacao/versoes` mais novas (padrão 5, máximo 20).
+
+| Campo da cópia | O quê |
+|---|---|
+| `app`, `tipo` = `"recuperacao"`, `formato`, `sessao`, `salvo_em`, `versao_app` | identificação |
+| `projeto` | `project.Project.to_json()`: o mesmo JSON do `.plc`, com a montagem do modo Edição e caminhos absolutos |
+| `projeto_original` | o `.plc` aberto ("" se o projeto nunca foi salvo) |
+| `nome` | o que o aviso mostra (nome do `.plc`, do vídeo ou "Edição sem título") |
+| `interface` | modo, quadro, comparação, clipes selecionados, zoom e rolagem da linha do tempo |
+
+**Fila guardada**: a cada segundo `persist_queue()` confere as exportações esperando ou rodando e, se a
+lista (id, estado) mudou, regrava `fila.json` com `ExportJob.to_dict()` (mídia, ajustes,
+`ExportSettings.to_dict()`, destino, trecho, nome e a montagem); lista vazia apaga o arquivo.
+`ExportJob.from_dict()` monta um trabalho novo (aguardando, do começo); `run_job` não muda.
+
+**O aviso** (`RecoveryDialog`, "O PeliculaConverter fechou inesperadamente"): nome do projeto, hora da
+cópia, as exportações interrompidas (caixa *Pôr de volta na fila*, avisando que recomeçam do início) e o
+relatório do travamento (`crashlog.report_for`) com *Copiar relatório*. Uma sessão por abertura (a mais
+recente); as outras ficam para a próxima.
+
+| Escolha | O que acontece |
+|---|---|
+| **Recuperar** | `project.from_json(dados, "")` + `MainWindow.show_project(p, remember=False)`; `project_path` volta a ser o `.plc` original (ou nenhum) e o projeto fica **modificado** (`_saved_state = {}`: *Salvar* grava no `.plc` original ou pede um nome); o estado da tela volta e a sessão nova já grava uma cópia. Se a cópia não abrir: um aviso, e nada é apagado. |
+| **Abrir o salvo** (só se o `.plc` existe) | `open_project(original)` |
+| **Descartar** | nada abre |
+| fechar o aviso | nada muda: a pergunta volta na próxima abertura |
+
+Nos três primeiros casos os parciais das exportações interrompidas são apagados — só os da fila guardada
+(`export.partial_output`/`_discard_output` a partir do destino de cada uma; nenhuma pasta é varrida) —, as
+exportações marcadas voltam para a fila (as que perderam a mídia ficam de fora) e a sessão travada é
+esquecida (`recovery.forget`: marcador e pasta). Sessão travada sem cópia nem fila é esquecida sem
+pergunta; o relatório fica na pasta de logs.
+
+**Relatórios de erro** (`crashlog.py`, sempre ligado — é diagnóstico, não muda o trabalho):
+
+- *Travamento* (o processo morreu: falha de memória no driver de vídeo, `abort`…): o `faulthandler`
+  escreve as pilhas de todas as threads em `falha-<sessão>.log`, aberto ao iniciar.
+- *Erro sem tratamento*: `sys.excepthook` e `threading.excepthook` gravam `erro-<data>-<sessão>.txt`
+  (traceback, versão do app, sistema, Python, Qt/PySide6 e placa de vídeo) e avisam o `CrashUi`, que leva
+  o aviso para a thread principal por um sinal em fila: `ErrorDialog` com *Copiar relatório* e *Abrir
+  pasta*, no máximo 3 por sessão e um de cada vez. O app continua aberto. `KeyboardInterrupt` e
+  `SystemExit` não viram relatório.
+- Limites (`MAX_FILES`, `MAX_BYTES`): no máximo 20 arquivos (os mais antigos saem; o `falha-*.log` de uma
+  janela aberta nunca) e 256 KB por relatório. Nada é enviado.
+
+**Módulo desligado** (`recuperacao`): sem cópias, sem fila guardada e sem pergunta ao abrir; as cópias
+desta janela saem na hora. O marcador e os relatórios continuam (o marcador diz quais `falha-*.log` são de
+janelas abertas). Cópias de sessões que travaram ficam até o módulo voltar ou até *Apagar cópias*.
+
+**Página Configurações › Recuperação** (`ui/pages/recuperacao.py`): intervalo (1, 2, 5, 10 ou 15 min),
+número de cópias (1–20), espaço usado, *Abrir pasta de recuperação*, *Apagar cópias* (as desta janela e as
+de sessões que travaram; as de outras janelas abertas ficam) e o último relatório de travamento ou erro
+(ver, copiar, abrir a pasta). Com o módulo desligado, explica e oferece **Ligar**.
+
+**Testes**: `tests/test_recovery.py` (marcador, rodízio, pid vivo ou reaproveitado, `scan`, fila e
+travamentos de verdade em subprocessos com `os._exit(1)` e `faulthandler._sigsegv()`),
+`tests/test_crashlog.py`, `tests/test_recovery_ui.py` (casos de `recovery_ui_cases.py`: controlador,
+aviso, página e a janela inteira, que se pula sem OpenGL 3.3) e `tests/test_recovery_app.py` (o
+`app.main()` inteiro depois de um travamento simulado). A pasta do app vai para uma pasta temporária
+(`LOCALAPPDATA`/`XDG_DATA_HOME`).

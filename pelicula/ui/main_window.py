@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import (APP_NAME, __version__, audiomix, compositor, deps, editparams, export, i18n, look, luts, media,
-               modules, params, presets, project, sequence, system, testimage, timeline, updater)
+               modules, notify, params, presets, project, sequence, system, testimage, timeline, updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
@@ -38,7 +38,7 @@ from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .scopes import Scopes
 from .timeline_view import TimelineEditor
-from . import prefs, welcome
+from . import notifier, prefs, welcome
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -327,6 +327,10 @@ class MainWindow(QMainWindow):
         self._mix_bridge.peaks.connect(lambda path: self.tl_editor.peaks_ready(path))
         self._mix_bridge.thumb.connect(lambda path, img: self.bin.set_thumb(path, img))
         self._notice_muted: set[str] = set()  # módulos cujo aviso a pessoa fechou nesta sessão
+        # Notificações do sistema (o app.main() liga o backend do sistema; aqui nada aparece de verdade) e
+        # recuperação automática (`ui/recovery_ui.attach`, só pelo app.main(): testes não gravam cópias).
+        self.notifier = notifier.for_window(self)
+        self.recovery = None
 
         self._build_ui()
         self.store.changed.connect(self._on_param)
@@ -1327,6 +1331,7 @@ class MainWindow(QMainWindow):
     def _probe_source(self, path: str) -> timeline.Source | None:
         src = self._sources.get(path) or self.model.seq.sources.get(path)
         if src is None:
+            self._recovery_point()
             try:
                 src = media.probe_source(path)
             except Exception as exc:  # noqa: BLE001
@@ -1980,6 +1985,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("export_quality", dlg.quality.currentData())
         self.settings.setValue("export_perf", json.dumps(dlg.perf_dict()))
         self.queue.add(job)
+        self._recovery_point()
         self.show_queue()
 
     def _export_look(self) -> tuple[dict, str]:
@@ -1995,6 +2001,12 @@ class MainWindow(QMainWindow):
         self.queue_dialog.raise_()
         self.queue_dialog.activateWindow()
 
+    def _recovery_point(self) -> None:
+        """Cópia de segurança agora (antes de exportar e de importar; depois de salvar, as cópias saem) e a
+        fila guardada, se a recuperação automática está ligada (`ui/recovery_ui.py`)."""
+        if self.recovery is not None:
+            self.recovery.checkpoint()
+
     def _queue_tick(self) -> None:
         active = [j for j in self.queue.jobs if j.status in ("aguardando", "exportando")]
         running = next((j for j in self.queue.jobs if j.status == "exportando"), None)
@@ -2004,16 +2016,19 @@ class MainWindow(QMainWindow):
             self.btn_queue.setText(_("Fila ({n})").format(n=len(active)))
         else:
             self.btn_queue.setText(_("Fila"))
+        finished = []
         for j in self.queue.jobs:
             if j.status in ("concluido", "erro") and j.id not in self._seen_done:
                 self._seen_done.add(j.id)
+                target = export.output_target(j.out_path, j.settings)
                 if j.status == "concluido":
-                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(
-                        caminho=export.output_target(j.out_path, j.settings)), 10000)
+                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=target), 10000)
                 else:
                     self.statusBar().showMessage(_("Uma exportação falhou. Veja os detalhes na fila."), 10000)
                     self.show_queue()
-                QApplication.alert(self)
+                finished.append(notify.Finished(j.status, j.name or Path(target).name, target, j.error))
+        # Notificação do sistema (ou só piscar o ícone, com o módulo desligado); a fila inteira vira um resumo.
+        self.notifier.export_progress(finished, idle=not self.queue.busy)
 
     def save_frame(self) -> None:
         if self.info is None:
@@ -2113,16 +2128,19 @@ class MainWindow(QMainWindow):
         buf.close()
         return bytes(ba)
 
-    def _make_project(self) -> project.Project:
-        self.store.commit()
+    def _make_project(self, backup: bool = False) -> project.Project:
+        """O projeto atual. `backup`: cópia da recuperação automática (sem miniatura e sem fechar o passo de
+        desfazer em andamento)."""
+        if not backup:
+            self.store.commit()
         seq = self._seq_json()
         media_path = self.file_info.path if self.file_info else next(iter(self.model.seq.sources), "")
         return project.Project(
             media_path=media_path, values=self.store.snapshot(), preset_id=self.preset_id,
             frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
             preview=self.preview_q, export_quality=str(self.settings.value("export_quality", "")),
-            name=Path(self.project_path).stem if self.project_path else "", thumbnail_jpeg=self._thumbnail(),
-            sequence=seq, mode=self.mode)
+            name=Path(self.project_path).stem if self.project_path else "",
+            thumbnail_jpeg=b"" if backup else self._thumbnail(), sequence=seq, mode=self.mode)
 
     def save_project(self) -> bool:
         if self.info is None:
@@ -2152,6 +2170,7 @@ class MainWindow(QMainWindow):
             return False
         self.project_path = p.path
         self._saved_state = self._state()
+        self._recovery_point()  # salvo: as cópias de segurança desta janela saem
         welcome.add_recent(self.settings, p.path)
         self._update_title()
         self.statusBar().showMessage(_("Projeto salvo: {caminho}").format(caminho=p.path), 6000)
@@ -2193,8 +2212,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, _("Abrir projeto"), _("Este arquivo não é um projeto válido.\n\n{erro}").format(erro=exc))
             return
         self.settings.setValue("last_project_dir", str(Path(path).parent))
+        self.show_project(p)
+
+    def show_project(self, p: project.Project, remember: bool = True) -> None:
+        """Mostra um projeto já lido (de um .plc ou de uma cópia da recuperação automática, sem `p.path`).
+        `remember`: entra nos projetos recentes."""
         if p.sequence:
-            self._open_sequence_project(p)
+            self._open_sequence_project(p, remember)
             return
         mediapath = p.media_path
         if mediapath and not os.path.exists(mediapath):
@@ -2202,8 +2226,8 @@ class MainWindow(QMainWindow):
                                      _("O vídeo deste projeto não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
                                      .format(caminho=mediapath))
             if r == QMessageBox.StandardButton.Yes:
-                new, _f = QFileDialog.getOpenFileName(self, _("Localizar o vídeo"), str(Path(path).parent),
-                                                      media_filter())
+                new, _f = QFileDialog.getOpenFileName(self, _("Localizar o vídeo"),
+                                                      str(Path(p.path or mediapath).parent), media_filter())
                 mediapath = new or ""
             else:
                 mediapath = ""
@@ -2226,14 +2250,15 @@ class MainWindow(QMainWindow):
         if p.compare in ("proc", "split", "side", "orig"):
             self.compare.set_current(p.compare)
             self._set_compare(p.compare)
-        self.project_path = p.path
+        self.project_path = p.path or None
         self._saved_state = self._state() if mediapath == p.media_path else {}
-        welcome.add_recent(self.settings, p.path)
+        if remember and p.path:
+            welcome.add_recent(self.settings, p.path)
         self.set_mode(p.mode if p.mode in MODES else "pelicula")
         self._update_title()
         self._check_modules()
 
-    def _open_sequence_project(self, p: project.Project) -> None:
+    def _open_sequence_project(self, p: project.Project, remember: bool = True) -> None:
         """Projeto com montagem do modo Edição: relocaliza arquivos que sumiram e abre a sequência."""
         seq = timeline.Sequence.from_json(p.sequence)
         changed = False
@@ -2245,7 +2270,7 @@ class MainWindow(QMainWindow):
                                      .format(caminho=path))
             if r != QMessageBox.StandardButton.Yes:
                 continue
-            new, _f = QFileDialog.getOpenFileName(self, _("Localizar o arquivo"), str(Path(p.path).parent),
+            new, _f = QFileDialog.getOpenFileName(self, _("Localizar o arquivo"), str(Path(p.path or path).parent),
                                                   import_filter())
             if new:
                 seq.relink(path, new)
@@ -2289,9 +2314,10 @@ class MainWindow(QMainWindow):
         if p.compare in ("proc", "split", "side", "orig"):
             self.compare.set_current(p.compare)
             self._set_compare(p.compare)
-        self.project_path = p.path
+        self.project_path = p.path or None
         self._saved_state = {} if changed else self._state()
-        welcome.add_recent(self.settings, p.path)
+        if remember and p.path:
+            welcome.add_recent(self.settings, p.path)
         self._update_title()
         self._check_modules()
 
@@ -2394,6 +2420,8 @@ class MainWindow(QMainWindow):
         if manual or str(self.settings.value("update_skip", "")) != rel.tag:
             if manual:
                 self.show_update(rel)
+            else:  # checagem automática: notificação do sistema (clicar abre a janela da atualização)
+                self.notifier.notify(notify.update_available(rel.tag.lstrip("v")))
 
     def show_update(self, rel) -> None:
         if rel is None:
