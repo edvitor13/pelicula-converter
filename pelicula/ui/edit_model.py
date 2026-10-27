@@ -5,7 +5,7 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
-- "settings": resolução, fps ou fundo da sequência;
+- "settings": resolução, fps, fundo ou fades curtos nas emendas de som da sequência;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
@@ -25,6 +25,7 @@ from .. import editparams, timeline
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
+AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
 
 
 def _without_markers(seq: Sequence) -> dict[str, Any]:
@@ -305,9 +306,13 @@ class TimelineModel(QObject):
             self._done("structure")
 
     # ------------------------------------------------------------ sequência
-    def set_settings(self, width: int, height: int, fps_str: str, background=None) -> None:
-        """Resolução, fps e fundo. Ao mudar o fps, os clipes mantêm o tempo (em segundos)."""
+    def set_settings(self, width: int, height: int, fps_str: str, background=None,
+                     micro_fade: bool | None = None) -> None:
+        """Resolução, fps, fundo e fades curtos nas emendas de som. Ao mudar o fps, os clipes mantêm o
+        tempo (em segundos)."""
         seq = self.seq
+        if micro_fade is not None:
+            seq.micro_fade = bool(micro_fade)
         old_fps = seq.fps
         fr = timeline.parse_fps(fps_str)
         seq.width = max(16, int(width))
@@ -326,6 +331,27 @@ class TimelineModel(QObject):
             for mk in seq.markers:
                 mk.frame = int(round(mk.frame * ratio))
         self._done("settings")
+
+    # ------------------------------------------------------------ transição de som
+    def set_audio_transition(self, cid: str, seconds: float) -> float:
+        """Transição de som (potência constante) entre o clipe anterior da faixa e `cid`; 0 tira. Os fades
+        dos dois clipes nesse corte são zerados (a transição toma o lugar deles), num passo só do
+        desfazer. Devolve a duração que cabe com o arquivo que sobra além do corte (pode ser menor)."""
+        c = self.seq.find(cid)
+        if c is None or c.kind != AUDIO or self.seq.locked(c):
+            return 0.0
+        seconds = max(0.0, float(seconds))
+        vals = dict(c.values)
+        vals["transicao"] = seconds
+        if seconds > 0:
+            vals["fade_in"] = 0.0
+            prev = self.seq.previous_on_track(c)
+            if prev is not None and float(prev.values.get("fade_out", 0.0)) > 0:
+                self.seq.set_values(prev.id, {**prev.values, "fade_out": 0.0})
+        self.seq.set_values(cid, vals)
+        self._done("values")
+        _prev, before, after = self.seq.audio_crossfade(c)
+        return before + after
 
     # ------------------------------------------------------------ marcadores
     def select_marker(self, mid: str | None) -> None:

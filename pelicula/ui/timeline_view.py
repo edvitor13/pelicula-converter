@@ -19,10 +19,10 @@ import numpy as np
 from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QInputDialog, QMenu, QScrollBar, QSizePolicy,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QToolButton, QToolTip, QVBoxLayout, QWidget)
 
 from .. import timeline
-from ..i18n import _, decimal_sep
+from ..i18n import _, decimal_sep, fmt_decimal
 from ..timeline import AUDIO, VIDEO, Clip
 from . import icons, theme
 from .edit_model import TimelineModel
@@ -276,6 +276,7 @@ class TimelineCanvas(QWidget):
             if r is None or r.right() < x_min or r.left() > x_max:
                 continue
             self._paint_clip(p, c, r, fm, dim=c.id in moving)
+        self._paint_audio_transitions(p, x_min, x_max)
         self._paint_ghosts(p)
         if not self.seq.clips:
             p.setPen(QColor(theme.FAINT))
@@ -385,6 +386,51 @@ class TimelineCanvas(QWidget):
             col = QColor(255, 255, 255, 60) if v["saida_tipo"] in ("branco", "transparente") else QColor(0, 0, 0, 90)
             p.setBrush(col)
             p.drawPath(path)
+
+    def audio_transition_span(self, c: Clip) -> tuple[float, float] | None:
+        """(x inicial, x final) da transição de som que entra em `c`, na largura que de fato cabe."""
+        if c.kind != AUDIO or not c.values.get("transicao"):
+            return None
+        prev, before, after = self.seq.audio_crossfade(c)
+        if prev is None:
+            return None
+        fps = self.seq.fps
+        return self.frame_to_x(c.start - before * fps), self.frame_to_x(c.start + after * fps)
+
+    def _paint_audio_transitions(self, p: QPainter, x_min: float, x_max: float) -> None:
+        """Transição de som: as curvas seno (entra) e cosseno (sai) cruzando sobre o corte. Sem sobra de
+        arquivo para ela, só um traço vermelho no corte."""
+        for c in self.seq.clips:
+            span = self.audio_transition_span(c)
+            r = self.clip_rect(c) if span else None
+            if r is None or span[1] < x_min or span[0] > x_max:
+                continue
+            x0, x1 = span
+            top, bot = r.top() + 3, r.bottom() - 3
+            if x1 - x0 < 2:
+                p.setPen(QPen(QColor(theme.DANGER), 2))
+                p.drawLine(QPointF(r.left(), top), QPointF(r.left(), bot))
+                continue
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(255, 255, 255, 30))
+            p.drawRoundedRect(QRectF(x0, top, x1 - x0, bot - top), 3, 3)
+            n = max(8, int((x1 - x0) / 3))
+            rise, fall = QPainterPath(), QPainterPath()
+            for i in range(n + 1):
+                k = i / n
+                x = x0 + k * (x1 - x0)
+                y_in = bot - (bot - top) * math.sin(k * math.pi / 2)
+                y_out = bot - (bot - top) * math.cos(k * math.pi / 2)
+                if i == 0:
+                    rise.moveTo(x, y_in)
+                    fall.moveTo(x, y_out)
+                else:
+                    rise.lineTo(x, y_in)
+                    fall.lineTo(x, y_out)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(theme.ACCENT_HI), 1.4))
+            p.drawPath(rise)
+            p.drawPath(fall)
 
     def _paint_wave(self, p: QPainter, c: Clip, r: QRectF) -> None:
         peaks = self.peaks_provider(c.src) if self.peaks_provider else None
@@ -989,6 +1035,8 @@ class TimelineCanvas(QWidget):
                 act.setEnabled(m.has_clipboard())
             menu.addAction(_("Velocidade…"), lambda: self.ask_speed(clip.id))
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
+            if clip.kind == AUDIO:
+                self.audio_transition_action(menu, clip, pos.x())
             menu.addSeparator()
             menu.addAction(_("Remover espaços da faixa"), lambda: self._close_gaps(clip.kind, clip.track))
         else:
@@ -1004,6 +1052,47 @@ class TimelineCanvas(QWidget):
         menu.addSeparator()
         menu.addAction(_("Adicionar marcador no cursor (M)"), lambda: self.add_marker_at())
         menu.exec(e.globalPosition().toPoint())
+
+    def audio_cut_near(self, clip: Clip, x: float) -> Clip | None:
+        """O clipe que entra no corte de som mais perto do clique (`x`) dentro de `clip`: o próprio clipe
+        se o clique foi na metade da esquerda e há um clipe colado antes; o próximo, se foi na da direita
+        e há um colado depois. None se o clipe não encosta em nenhum outro na faixa."""
+        seq = self.seq
+        prev, nxt = seq.previous_on_track(clip), seq.next_on_track(clip)
+        r = self.clip_rect(clip)
+        left = r is None or x < r.center().x()
+        if prev is not None and (left or nxt is None):
+            return clip
+        return nxt
+
+    def audio_transition_action(self, menu: QMenu, clip: Clip, x: float):
+        """"Transição de som (potência constante)" no corte mais perto do clique: liga com a duração padrão
+        ou tira (a duração se ajusta no inspetor do clipe que entra)."""
+        incoming = self.audio_cut_near(clip, x)
+        act = menu.addAction(_("Transição de som (potência constante)"))
+        act.setCheckable(True)
+        if incoming is None or self.seq.locked(incoming):
+            act.setEnabled(False)
+            return act
+        act.setChecked(float(incoming.values.get("transicao", 0.0)) > 0)
+        act.triggered.connect(lambda on: self.set_audio_transition(incoming.id, on))
+        return act
+
+    def set_audio_transition(self, cid: str, on: bool) -> None:
+        from .edit_model import AUDIO_TRANSITION_S
+        got = self.model.set_audio_transition(cid, AUDIO_TRANSITION_S if on else 0.0)
+        if not on:
+            return
+        c = self.seq.find(cid)
+        r = self.clip_rect(c) if c is not None else None
+        where = self.mapToGlobal(r.topLeft().toPoint()) if r is not None else self.mapToGlobal(self.rect().center())
+        if got <= 1e-6:
+            QToolTip.showText(where, _("Sem sobra de som além do corte: a transição precisa de um pedaço do "
+                                       "arquivo depois do fim do clipe da esquerda ou antes do começo do da "
+                                       "direita."), self)
+        elif got < AUDIO_TRANSITION_S - 1e-3:
+            QToolTip.showText(where, _("Transição de {s} s: é o que sobra do arquivo além do corte.").format(
+                s=fmt_decimal(got, 2)), self)
 
     def _close_gaps(self, kind: str, idx: int) -> None:
         self.model.close_gaps(kind, idx)

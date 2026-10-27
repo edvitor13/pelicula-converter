@@ -5,6 +5,13 @@ de filtros: velocidade (`atempo`), volume do clipe + da faixa, equalização (gr
 agudos), realce de voz, redução de ruído, normalização, balanço, fades, recorte para o trecho
 pedido e atraso até a posição na sequência. Tudo é somado (`amix` sem normalizar) sobre um silêncio
 com a duração exata do trecho, e o resultado é um WAV de 48 kHz estéreo em 24 bits.
+
+Emendas: com `Sequence.micro_fade` ligado, cada borda de clipe que corta o arquivo no meio ganha um
+fade de `timeline.MICRO_FADE` (5 ms), menos onde o fade do clipe já é maior, onde há transição de som e
+onde o clipe vizinho continua o mesmo arquivo do ponto exato (corte não mexido). A transição de som
+(`values["transicao"]` no clipe que entra, tempo de `Sequence.audio_crossfade`) estende os dois
+clipes além do corte com o arquivo que sobra e cruza as curvas seno/cosseno (`afade curve=qsin`): a
+soma das potências fica constante. Projeto sem nada disso gera exatamente o mesmo grafo de antes.
 """
 
 from __future__ import annotations
@@ -53,28 +60,72 @@ def _range(seq: timeline.Sequence, start: int, end: int) -> tuple[int, int]:
     return a, b
 
 
+def crossfades(seq: timeline.Sequence) -> tuple[dict[str, tuple[float, float]], dict[str, tuple[float, float]]]:
+    """Transições de som da sequência: ({id do que entra: (antes, depois)}, {id do que sai: (antes, depois)}),
+    em segundos antes e depois do corte (só as que têm alguma duração)."""
+    heads: dict[str, tuple[float, float]] = {}
+    tails: dict[str, tuple[float, float]] = {}
+    for c in seq.clips:
+        if c.kind != timeline.AUDIO:
+            continue
+        prev, before, after = seq.audio_crossfade(c)
+        if prev is not None and before + after > 1e-6:
+            heads[c.id] = tails[prev.id] = (before, after)
+    return heads, tails
+
+
 def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict]:
     """Clipes de som que tocam no trecho [start, end) (quadros), com os tempos já calculados."""
     a, b = _range(seq, start, end)
     fps = seq.fps
+    heads, tails = crossfades(seq)
+    micro = timeline.MICRO_FADE if seq.micro_fade else 0.0
+    playing = seq.audio_clips()
+    audible = {c.id for c in playing}
     out = []
-    for c in seq.audio_clips():
+    for c in playing:
         src = seq.sources.get(c.src)
         if src is None or not src.has_audio or not os.path.exists(c.src):
             continue
-        s0, s1 = max(c.start, a), min(c.end, b)
-        if s1 <= s0:
-            continue
+        head, tail = heads.get(c.id), tails.get(c.id)
+        pre = head[0] if head else 0.0    # o clipe começa antes (transição com o anterior)
+        post = tail[1] if tail else 0.0   # e termina depois (transição com o próximo)
+        if head or tail:
+            t0 = c.start / fps - pre      # tempo da sequência no começo da cadeia do clipe
+            v0, v1 = max(t0, a / fps), min(c.end / fps + post, b / fps)
+            if v1 - v0 <= 1e-9:
+                continue
+            trim_start, trim_len, delay = v0 - t0, v1 - v0, v0 - a / fps
+        else:
+            s0, s1 = max(c.start, a), min(c.end, b)
+            if s1 <= s0:
+                continue
+            trim_start, trim_len, delay = (s0 - c.start) / fps, (s1 - s0) / fps, (s0 - a) / fps
+        micro_in = micro_out = False
+        if micro:
+            v = c.values
+            prev, nxt = seq.previous_on_track(c), seq.next_on_track(c)
+            micro_in = (head is None and float(v["fade_in"]) < micro and c.src_in > 1e-4
+                        and not (prev is not None and prev.id in audible and seq.continues(prev, c)))
+            micro_out = (tail is None and float(v["fade_out"]) < micro and c.dur < seq.max_dur(c)
+                         and not (nxt is not None and nxt.id in audible and seq.continues(c, nxt)))
         tr = seq.track(timeline.AUDIO, c.track)
         out.append({
             "clip": c,
-            "src_in": c.src_in,                                  # segundos no arquivo (início do clipe)
-            "src_len": c.dur / fps * c.speed,                    # segundos do arquivo usados pelo clipe
+            "src_in": max(0.0, c.src_in - pre * c.speed),        # segundos no arquivo (início da cadeia)
+            "src_len": (c.dur / fps + pre + post) * c.speed,     # segundos do arquivo usados
             "clip_len": c.dur / fps,                             # duração do clipe na sequência (s)
-            "trim_start": (s0 - c.start) / fps,                  # quanto do clipe fica antes do trecho
-            "trim_len": (s1 - s0) / fps,
-            "delay": (s0 - a) / fps,                             # posição no trecho
+            "trim_start": trim_start,                            # quanto da cadeia fica antes do trecho
+            "trim_len": trim_len,
+            "delay": delay,                                      # posição no trecho
             "gain_db": float(c.values["volume"]) + (tr.volume if tr else 0.0),
+            "pre": pre,                                          # s antes do início do clipe (transição)
+            "xf_in": sum(head) if head else 0.0,                 # transição de entrada (começa em 0)
+            "xf_out": sum(tail) if tail else 0.0,                # transição de saída...
+            "xf_out_st": pre + c.dur / fps - tail[0] if tail else 0.0,  # ...a partir daqui
+            "micro": micro if (micro_in or micro_out) else 0.0,
+            "micro_in": micro_in,
+            "micro_out": micro_out,
         })
     return out
 
@@ -106,12 +157,23 @@ def _chain(seg: dict, k: int) -> str:
     if abs(bal) > 1e-6:
         gl, gr = min(1.0, 1.0 - bal), min(1.0, 1.0 + bal)
         f.append(f"pan=stereo|c0={_fmt(gl)}*c0|c1={_fmt(gr)}*c1")
-    fi = min(float(v["fade_in"]), seg["clip_len"])
-    fo = min(float(v["fade_out"]), seg["clip_len"])
+    # Fades do clipe; numa borda com transição de som vale só a transição (o fade silenciaria a sobra).
+    pre = seg["pre"]
+    fi = 0.0 if seg["xf_in"] else min(float(v["fade_in"]), seg["clip_len"])
+    fo = 0.0 if seg["xf_out"] else min(float(v["fade_out"]), seg["clip_len"])
     if fi > 0:
-        f.append(f"afade=t=in:st=0:d={_fmt(fi)}")
+        f.append(f"afade=t=in:st={_fmt(pre)}:d={_fmt(fi)}")
     if fo > 0:
-        f.append(f"afade=t=out:st={_fmt(max(0.0, seg['clip_len'] - fo))}:d={_fmt(fo)}")
+        f.append(f"afade=t=out:st={_fmt(pre + max(0.0, seg['clip_len'] - fo))}:d={_fmt(fo)}")
+    if seg["xf_in"]:  # potência constante: sen² + cos² = 1 com a saída do clipe anterior
+        f.append(f"afade=t=in:st=0:d={_fmt(seg['xf_in'])}:curve=qsin")
+    if seg["xf_out"]:
+        f.append(f"afade=t=out:st={_fmt(seg['xf_out_st'])}:d={_fmt(seg['xf_out'])}:curve=qsin")
+    m = seg["micro"]
+    if seg["micro_in"]:
+        f.append(f"afade=t=in:st={_fmt(pre)}:d={_fmt(m)}")
+    if seg["micro_out"]:
+        f.append(f"afade=t=out:st={_fmt(pre + max(0.0, seg['clip_len'] - m))}:d={_fmt(m)}")
     f.append(f"atrim=start={_fmt(seg['trim_start'])}:duration={_fmt(seg['trim_len'])}")
     f.append("asetpts=PTS-STARTPTS")
     ms = int(round(seg["delay"] * 1000))
@@ -219,6 +281,8 @@ def mix_key(seq: timeline.Sequence) -> str:
         "clipes": [c.to_json() for c in seq.clips if c.kind == timeline.AUDIO],
         "fontes": sorted((p, round(s.duration, 6)) for p, s in seq.sources.items() if s.has_audio),
     }
+    if seq.micro_fade:
+        data["micro_fades"] = True
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 

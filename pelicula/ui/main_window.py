@@ -309,7 +309,7 @@ class MainWindow(QMainWindow):
         self.player = Player()
         # Modo Edição: a montagem (sequência) é a fonte da prévia quando tem mudanças em relação ao arquivo.
         self.mode = "pelicula"
-        self.model = TimelineModel(timeline.Sequence())
+        self.model = TimelineModel(timeline.Sequence(micro_fade=True))  # sequência nova: fades nas emendas
         self.file_info: media.MediaInfo | None = None  # arquivo aberto no modo Película
         self.src_seq: timeline.Sequence | None = None   # cópia da sequência que a prévia está mostrando
         self.cur_layers = None
@@ -1511,7 +1511,7 @@ class MainWindow(QMainWindow):
         dlg = SequenceDialog(self, self.model.seq)
         if dlg.exec():
             w, h, fps, bg = dlg.values()
-            self.model.set_settings(w, h, fps, bg)
+            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade())
 
     def auto_adjust_clip(self, cid: str) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
@@ -2391,7 +2391,7 @@ class MainWindow(QMainWindow):
         self.bin.clear()
         self._loading = True
         try:
-            self.model.set_sequence(timeline.Sequence())
+            self.model.set_sequence(timeline.Sequence(micro_fade=True))
         finally:
             self._loading = False
         self._refresh_source(reset=True)

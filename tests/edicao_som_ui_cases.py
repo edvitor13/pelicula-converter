@@ -284,6 +284,104 @@ def test_export_dialog_includes_chapters_option(tmp_path, monkeypatch):
     assert plain.chapters_box.isHidden() and plain.job().chapters == []
 
 
+# ------------------------------------------------------------------ transição de som e emendas
+def cut_model(handles=True) -> tuple[TimelineModel, tl.Clip, tl.Clip]:
+    """Dois clipes de som colados na A1 (arquivos só de som de 10 s); com sobra de arquivo nos dois lados
+    do corte ou sem nenhuma."""
+    m = TimelineModel()
+    seq = tl.Sequence(1920, 1080, "24/1", micro_fade=True)
+    for p in ("C:/v/a.wav", "C:/v/b.wav"):
+        seq.add_source(tl.Source(p, frames=1, duration=10.0, has_video=False, has_audio=True))
+    a_in, b_in, dur = (1.0, 2.0, 96) if handles else (0.0, 0.0, 240)
+    a = tl.Clip("ca", tl.AUDIO, "C:/v/a.wav", 0, 0, dur, a_in, values={"fade_out": 0.5})
+    b = tl.Clip("cb", tl.AUDIO, "C:/v/b.wav", 0, dur, 96, b_in, values={"fade_in": 0.5})
+    seq.clips += [a, b]
+    m.set_sequence(seq)
+    return m, m.seq.find("ca"), m.seq.find("cb")
+
+
+def test_audio_transition_from_the_cut_menu_with_undo(monkeypatch):
+    m, a, b = cut_model()
+    ed = editor(m, ppf=2.0)
+    c = ed.canvas
+    ra, rb = c.clip_rect(a), c.clip_rect(b)
+    # o corte mais perto do clique: metade da direita de A ou metade da esquerda de B → o corte A|B
+    assert c.audio_cut_near(a, ra.right() - 5).id == "cb" and c.audio_cut_near(b, rb.left() + 5).id == "cb"
+    assert c.audio_cut_near(a, ra.left() + 5).id == "cb"  # A não tem ninguém antes
+    assert c.audio_cut_near(b, rb.right() - 5) is b       # nem B depois
+    menu = QMenu()
+    act = c.audio_transition_action(menu, a, ra.right() - 5)
+    assert act.isEnabled() and act.isCheckable() and not act.isChecked()
+    assert act.text() == "Transição de som (potência constante)"
+    act.trigger()
+    b2, a2 = m.seq.find("cb"), m.seq.find("ca")
+    assert b2.values["transicao"] == 1.0 and b2.values["fade_in"] == 0.0 and a2.values["fade_out"] == 0.0
+    x0, x1 = c.audio_transition_span(b2)
+    assert x1 - x0 == pytest.approx(24 * 2.0, abs=1) and x0 < c.frame_to_x(96) < x1
+    assert not c.grab().isNull()
+    act = c.audio_transition_action(menu, b2, rb.left() + 5)
+    assert act.isChecked()
+    m.undo()  # um passo só desfaz a transição e devolve os fades
+    b3, a3 = m.seq.find("cb"), m.seq.find("ca")
+    assert b3.values["transicao"] == 0.0 and b3.values["fade_in"] == 0.5 and a3.values["fade_out"] == 0.5
+    assert c.audio_transition_span(b3) is None
+    m.redo()
+    act = c.audio_transition_action(menu, m.seq.find("cb"), rb.left() + 5)
+    act.trigger()  # desmarcar tira
+    assert m.seq.find("cb").values["transicao"] == 0.0
+    # clipe sozinho na faixa: a opção aparece desligada
+    m.seq.find("cb").start = 150
+    m.seq.find("ca").dur = 90
+    assert not c.audio_transition_action(menu, m.seq.find("ca"), ra.left() + 5).isEnabled()
+
+
+def test_audio_transition_without_spare_file_warns(monkeypatch):
+    from PySide6.QtWidgets import QToolTip
+    tips = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *a, **k: tips.append(a[1]))
+    m, a, b = cut_model(handles=False)
+    ed = editor(m, ppf=1.0)
+    c = ed.canvas
+    c.set_audio_transition("cb", True)
+    b2 = m.seq.find("cb")
+    assert b2.values["transicao"] == 1.0  # fica pedida (vale se o clipe for aparado depois)
+    x0, x1 = c.audio_transition_span(b2)
+    assert x1 - x0 < 1 and tips and "Sem sobra" in tips[-1]
+    assert not c.grab().isNull()  # o traço de aviso no corte
+    # aparado o fim de A: sobra 1,5 s do arquivo depois do corte → a transição cabe, mais curta que pedida
+    m.undo()
+    m.seq.find("ca").dur = 204
+    m.seq.find("cb").start = 204
+    m.seq.find("cb").values["transicao"] = 0.0
+    c.set_audio_transition("cb", True)
+    assert m.seq.audio_crossfade(m.seq.find("cb"))[1:] == pytest.approx((0.0, 1.0))
+    m.seq.find("cb").values["transicao"] = 4.0
+    m.seq.find("ca").dur = 228  # sobra 0,5 s
+    m.seq.find("cb").start = 228
+    tips.clear()
+    c.set_audio_transition("cb", True)
+    assert tips and "0,5" in tips[-1].replace(".", ",")
+
+
+def test_sequence_dialog_micro_fade_toggle_with_undo():
+    from pelicula.ui.sequence_dialog import SequenceDialog
+    m, _a, _b = cut_model()
+    dlg = SequenceDialog(None, m.seq)
+    assert dlg.micro.isChecked() and dlg.micro_fade()
+    dlg.micro.setChecked(False)
+    kinds = []
+    m.changed.connect(kinds.append)
+    w, h, fps, bg = dlg.values()
+    m.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade())
+    assert not m.seq.micro_fade and kinds[-1] == "settings"
+    m.undo()  # volta e recarrega o som (não é só marcador)
+    assert m.seq.micro_fade and kinds[-1] == "*"
+    m.set_settings(w, h, fps, bg)  # sem dizer nada, fica como está
+    assert m.seq.micro_fade
+    old = tl.Sequence(1920, 1080, "24/1")
+    assert not SequenceDialog(None, old).micro.isChecked()
+
+
 # ------------------------------------------------------------------ medidor de som
 def test_audio_meter_widget_peaks_hold_idle_and_click():
     from pelicula.ui.meter import FLOOR, HOLD_S, AudioMeter, fmt_level, level_to_t
@@ -605,3 +703,8 @@ def test_window_meter_decodes_the_file_sound_once(win, tmp_path):
     wait_reader()
     meter_source(win, "", "")
     assert win._meter_files == []
+
+
+def test_window_new_sequences_get_micro_fades(win):
+    win.new_project()
+    assert win.model.seq.micro_fade and not win.is_dirty()

@@ -11,6 +11,10 @@
   clipes não os mexe; "excluir e fechar o espaço" da sequência inteira puxa os que vêm depois do
   trecho apagado (os de dentro vão para o ponto do corte); mudar o fps mantém o tempo deles. Os
   marcados como capítulo viram os capítulos do YouTube e do arquivo exportado (`chapters.py`).
+- **Som nas emendas**: `Sequence.micro_fade` liga um fade curtíssimo (`MICRO_FADE`) onde um clipe de som
+  corta o arquivo no meio (sem estalo); a transição de som entre dois clipes vizinhos da faixa fica no
+  clipe que entra (`values["transicao"]`) e o tempo dela sai de `audio_crossfade`. A mixagem em si é
+  do `audiomix.py`.
 
 Tudo aqui é determinístico e puro: o mesmo JSON gera sempre a mesma montagem, e a prévia e a
 exportação usam as mesmas funções (`src_frame`, `clips_at`, `layers_at`).
@@ -47,6 +51,7 @@ MARKER_COLORS: list[tuple[str, str]] = [
 ]
 MARKER_COLOR_KEYS = tuple(k for k, _label in MARKER_COLORS)
 MARKER_TEXT_MAX = 500   # nome e nota de um marcador (caracteres)
+MICRO_FADE = 0.005      # s: fade automático nas emendas de som (some com o estalo e não se ouve como fade)
 
 
 def new_id() -> str:
@@ -294,6 +299,7 @@ class Sequence:
     clips: list[Clip] = field(default_factory=list)
     sources: dict[str, Source] = field(default_factory=dict)
     markers: list[Marker] = field(default_factory=list)
+    micro_fade: bool = False  # fades curtos nas emendas de som (sequências novas ligam; projeto antigo = sem)
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -430,6 +436,48 @@ class Sequence:
                 return c
         return None
 
+    def next_on_track(self, clip: Clip) -> Clip | None:
+        """Clipe que começa exatamente onde este termina, na mesma faixa."""
+        for c in self.clips:
+            if c is not clip and c.kind == clip.kind and c.track == clip.track and c.start == clip.end:
+                return c
+        return None
+
+    def continues(self, a: Clip, b: Clip) -> bool:
+        """`b` continua `a` sem emenda: mesma faixa, `b` começa onde `a` termina, mesmo arquivo, do ponto
+        exato onde `a` parou e na mesma velocidade (um corte que não foi mexido: não há estalo ali)."""
+        if a.kind != b.kind or a.track != b.track or a.end != b.start or a.src != b.src or a.frozen or b.frozen:
+            return False
+        if abs(a.speed - b.speed) > 1e-9:
+            return False
+        return abs(a.src_in + a.dur / self.fps * a.speed - b.src_in) < 1e-4
+
+    def audio_crossfade(self, clip: Clip) -> tuple[Clip | None, float, float]:
+        """Transição de som (potência constante) entre o clipe anterior da faixa e este, pedida em
+        `values["transicao"]` (segundos) no clipe que entra. Devolve (anterior, antes, depois): a parte da
+        transição antes do corte (o clipe que entra começa mais cedo, com o arquivo antes do ponto de
+        entrada) e depois dele (o que sai continua, com o arquivo depois do ponto de saída).
+
+        Centrada no corte; se um lado não tem sobra de arquivo, o outro fica com o resto, e sem sobra
+        nenhuma ela encolhe até zero. Cada lado usa no máximo metade do clipe, para não encostar numa
+        transição da outra ponta. Sem clipe anterior colado na faixa: (None, 0, 0).
+        """
+        d = float(clip.values.get("transicao", 0.0)) if clip.kind == AUDIO else 0.0
+        prev = self.previous_on_track(clip) if d > 0 else None
+        if prev is None:
+            return None, 0.0, 0.0
+        fps = self.fps
+        head = clip.src_in / clip.speed  # arquivo antes da entrada do que entra (s da sequência)
+        src = self.sources.get(prev.src)
+        tail = 0.0                       # arquivo depois da saída do que sai
+        if src is not None:
+            tail = max(0.0, src.length - (prev.src_in + prev.dur / fps * prev.speed)) / prev.speed
+        room_a, room_b = prev.dur / fps / 2, clip.dur / fps / 2
+        before = min(d / 2, head, room_a)
+        after = min(d - before, tail, room_b)
+        before = min(d - after, head, room_a)
+        return prev, max(0.0, before), max(0.0, after)
+
     def layers_at(self, t: int) -> list[Layer]:
         """Camadas de imagem do quadro t, de baixo para cima, já com as transições resolvidas."""
         fps = self.fps
@@ -538,6 +586,7 @@ class Sequence:
             c.values["saida_tipo"] = "corte"
         else:
             right.values["fade_in"] = 0.0
+            right.values["transicao"] = 0.0  # a transição de som fica com o corte de entrada (da esquerda)
             c.values["fade_out"] = 0.0
         self.clips.append(right)
         return right
@@ -821,6 +870,8 @@ class Sequence:
         # antigas do app ignoram chaves que não conhecem).
         if self.markers:
             out["marcadores"] = [m.to_json() for m in self.sorted_markers()]
+        if self.micro_fade:
+            out["micro_fades"] = True
         return out
 
     @classmethod
@@ -838,7 +889,7 @@ class Sequence:
             w, h = 1920, 1080
         tracks = [t for t in (Track.from_json(x) for x in d.get("faixas") or [] if isinstance(x, dict)) if t]
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
-                  background=bg, tracks=tracks)
+                  background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True)
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)
@@ -874,10 +925,10 @@ class Sequence:
 
     @classmethod
     def for_source(cls, src: Source, with_media: bool = True) -> "Sequence":
-        """Sequência no formato do arquivo (resolução e fps), já com ele dentro se `with_media`."""
+        """Sequência nova no formato do arquivo (resolução e fps), já com ele dentro se `with_media`."""
         w, h = (src.width, src.height) if src.has_video and src.width and src.height else (1920, 1080)
         fps = src.fps_str if (src.has_video and not src.is_image) else "24/1"
-        seq = cls(width=w, height=h, fps_str=fps)
+        seq = cls(width=w, height=h, fps_str=fps, micro_fade=True)
         if with_media:
             seq.insert_media(src, 0)
         return seq
