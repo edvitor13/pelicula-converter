@@ -253,6 +253,15 @@ quadros vizinhos:
   atualizar e remover em segundo plano, com progresso e cancelamento. Se o ffmpeg não existir ou estiver
   antigo, o app oferece baixar a versão oficial, conferida por SHA-256, só para o seu usuário (sem
   administrador). Programas instalados no computador (DaVinci Resolve) aparecem como *no sistema*.
+- **Notificações do sistema**: avisam quando uma exportação termina ou dá erro, quando a fila inteira
+  acaba, quando um componente termina de baixar e quando há versão nova — por padrão só com o app em
+  segundo plano. Clicar mostra o vídeo na pasta. Tipos, som e piscar o ícone em **Configurações →
+  Notificações**.
+- **Recuperação depois de um travamento**: com mudanças não salvas, o app guarda uma cópia de segurança a
+  cada minuto (e antes de exportar ou importar) numa pasta própria — o seu `.plc` só muda quando você
+  salva. Se ele fechar de repente, na próxima abertura oferece **Recuperar**, **Abrir o salvo** ou
+  **Descartar** e pôr de volta na fila as exportações interrompidas. Erros inesperados geram um relatório
+  local (*Copiar relatório*, *Abrir pasta*). Ajustes em **Configurações → Recuperação**.
 - **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
   enquanto.
 
@@ -1069,6 +1078,7 @@ opções de desempenho, pasta do ffmpeg) fica no `QSettings` do Qt — no Window
 | Efeitos lentos / prévia travando | Use a prévia *Rápida (540p)* ou *Normal (720p)*. Em notebooks, force a GPU dedicada (*Alto desempenho*). Halação, bloom e névoa com raios grandes custam mais. |
 | Exportação deixa o computador lento | Prioridade *Baixa* e menos núcleos na seção *Desempenho*. |
 | Ficou um `nome.parcial-pelicula.mp4` (ou uma pasta `nome.parcial-pelicula`) ao lado do vídeo | Sobra de uma exportação interrompida (o app fechou ou o computador desligou no meio). O arquivo final e o antigo não foram tocados. Pode apagar; a próxima exportação com o mesmo nome também apaga. |
+| O app fechou de repente | Abra de novo: se havia mudanças não salvas, ele oferece **Recuperar** a cópia de segurança (ou abrir o projeto salvo). O relatório do travamento fica em **Configurações → Recuperação** (*Copiar relatório*); anexe-o ao relatar o problema. |
 | *"A exportação terminou, mas não foi possível substituir…"* | O arquivo antigo estava aberto em outro programa (um player, por exemplo). O vídeo novo está completo no `nome.parcial-pelicula.mp4` indicado: feche o programa e renomeie, ou exporte de novo. |
 | Vídeo vertical saiu pequeno (608 × 1080 em 1080p) | Versões antigas usavam a resolução como altura. Agora ela vale para o lado menor (1080p vertical = 1080 × 1920); confira o tamanho em *Resolução* e na linha *Saída* da janela de exportação. |
 | Faixas (*banding*) em degradês | Mantenha o *Pontilhado (dither)* ligado em 8 bits ou exporte em 10 bits (MKV H.265, YouTube 4K H.265). |
@@ -1218,6 +1228,8 @@ internet nestes casos:
 
 - As duas consultas feitas ao abrir podem ser desligadas em **Configurações → Procurar atualizações
   automaticamente**. Desligadas, o app só se conecta quando você pede.
+- As notificações do sistema, as cópias da recuperação automática e os relatórios de erro ficam só neste
+  computador: nada é enviado.
 - Esses serviços têm as próprias políticas: [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)
   e [gyan.dev](https://www.gyan.dev/).
 

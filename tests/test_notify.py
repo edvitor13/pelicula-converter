@@ -152,6 +152,15 @@ def test_component_and_update_notices():
     assert (up.kind, up.action) == (notify.UPDATE, notify.ACTION_UPDATE) and "1.4.0" in up.body
 
 
+def test_notices_and_kinds_are_translated():
+    i18n.set_language("en")
+    assert notify.export_done("a.mp4", "/x/a.mp4").title == "Export finished"
+    assert notify.sample_notice().body == "Notifications are working."
+    assert i18n._(notify.get(notify.QUEUE_DONE).label) == "Queue finished"
+    i18n.set_language("es")
+    assert notify.update_available("2.0").body.startswith("PeliculaConverter 2.0 está disponible")
+
+
 # ------------------------------------------------------------------ fila
 F = notify.Finished
 
@@ -170,6 +179,12 @@ def test_queue_summary_replaces_the_last_notice():
     last = notify.queue_notices([b], [a, b], idle=True)
     assert [n.kind for n in last] == [notify.QUEUE_DONE]
     assert Path(last[0].target) == Path("/v") and "2 exportações concluídas" in last[0].body  # mesma pasta: abre a pasta
+
+
+def test_without_the_summary_kind_the_last_export_notifies_by_itself():
+    a, b = F("concluido", "a", "/v/a.mp4"), F("erro", "b", error="falhou")
+    out = notify.queue_notices([b], [a, b], idle=True, summary=False)
+    assert [n.kind for n in out] == [notify.EXPORT_FAILED]
 
 
 def test_queue_summary_with_errors_or_many_folders_opens_the_queue():

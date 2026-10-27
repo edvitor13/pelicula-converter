@@ -179,6 +179,10 @@ def test_export_progress_notifies_each_and_then_the_summary():
     # Fila nova: uma exportação sozinha avisa por conta própria.
     c = notify.Finished("erro", "c.mp4", error="falhou")
     assert [x.kind for x in n.export_progress([c], idle=True)] == [notify.EXPORT_FAILED]
+    # "Fila concluída" desligado: a última da fila avisa por conta própria (e não some junto com o resumo).
+    notify.set_kind(_s, notify.QUEUE_DONE, False)
+    assert [x.kind for x in n.export_progress([a], idle=False)] == [notify.EXPORT_DONE]
+    assert [x.kind for x in n.export_progress([b], idle=True)] == [notify.EXPORT_DONE]
 
 
 # ------------------------------------------------------------------ componentes (fila de tarefas)

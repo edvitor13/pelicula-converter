@@ -140,11 +140,17 @@ class RecoveryController(QObject):
         return recovery.make_payload(p.to_json(), original, ui_state(w), name, self.session.id)
 
     def autosave(self, force: bool = False) -> Path | None:
-        """Grava uma cópia se há mudanças não salvas e algo mudou desde a última cópia. Devolve o arquivo."""
+        """Grava uma cópia se há mudanças não salvas e algo mudou desde a última cópia. Devolve o arquivo.
+
+        Sem mudanças não salvas (salvou, descartou ou voltou ao estado salvo) as cópias desta janela saem:
+        não há nada a recuperar, e uma cópia velha não pode parecer mais nova que o .plc."""
         if not self.enabled():
             return None
         w = self.window
         if w.info is None or (not force and not w.is_dirty()):
+            if self._last_key is not None:
+                self.session.clear_copies()
+                self._last_key = None
             return None
         try:
             data = self.payload()
@@ -163,7 +169,8 @@ class RecoveryController(QObject):
         return path
 
     def checkpoint(self) -> None:
-        """Antes de exportar e de importar: grava a cópia agora (se houver mudanças) e a fila."""
+        """Antes de exportar e de importar e depois de salvar: a cópia agora (ou nenhuma, sem mudanças) e a
+        fila."""
         if self.enabled():
             self.autosave()
             self.persist_queue()

@@ -229,17 +229,18 @@ class Finished:
     error: str = ""
 
 
-def queue_notices(new: list[Finished], batch: list[Finished], idle: bool) -> list[Notice]:
+def queue_notices(new: list[Finished], batch: list[Finished], idle: bool, summary: bool = True) -> list[Notice]:
     """Avisos da fila de exportação num instante.
 
     `new`: exportações que terminaram agora; `batch`: todas as que terminaram desde que a fila começou a
     trabalhar (inclusive as de `new`); `idle`: nada mais esperando nem exportando. Cada exportação avisa
     por conta própria; quando a fila esvazia depois de duas ou mais, sai um aviso só, com o resumo da
-    fila (no lugar do aviso da última). Canceladas não avisam nem contam.
+    fila (no lugar do aviso da última). Canceladas não avisam nem contam. `summary` False (o tipo "Fila
+    concluída" desligado nas preferências): sem resumo, a última avisa por conta própria.
     """
     ok = sum(1 for f in batch if f.status == "concluido")
     failed = sum(1 for f in batch if f.status == "erro")
-    if idle and ok + failed >= 2 and any(f.status in ("concluido", "erro") for f in new):
+    if summary and idle and ok + failed >= 2 and any(f.status in ("concluido", "erro") for f in new):
         folders = {str(Path(f.target).parent) for f in batch if f.status == "concluido" and f.target}
         return [queue_done(ok, failed, folders.pop() if len(folders) == 1 else "")]
     out = []

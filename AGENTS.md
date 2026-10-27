@@ -29,7 +29,8 @@ PeliculaConverter.pyw        entrada sem console (pythonw); python -m pelicula t
 pelicula/
   __init__.py                __version__, __date__, APP_NAME
   __main__.py                python -m pelicula: sem comando abre a janela; com comando usa o modo terminal
-  app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, MainWindow, boas-vindas
+  app.py                     main(): tema, idioma (1º acesso), checagem de bibliotecas, sessão da recuperação,
+                             MainWindow, aviso de recuperação, boas-vindas
   cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
   i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
   modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
@@ -51,6 +52,11 @@ pelicula/
   tools.py                   componentes externos (sem Qt): registro TOOLS (versão e SHA-256 fixos), download e
                              instalação atômica, remover, espaço em disco, detecção de programas do sistema
   jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
+  notify.py                  notificações do sistema (sem Qt): tipos KINDS, preferências notificacoes/…, decide(),
+                             textos (Notice), resumo da fila
+  recovery.py                recuperação depois de um travamento (sem Qt): marcador da sessão (pid + início), cópias
+                             automáticas com rodízio, fila de exportação guardada, scan() das sessões que travaram
+  crashlog.py                relatórios de erro e de travamento em <pasta do app>/logs (faulthandler, excepthooks)
   system.py                  CPU, RAM, GPUs NVIDIA, abrir pasta/arquivo no sistema, gravação segura
                              (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
@@ -77,6 +83,9 @@ pelicula/
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
                              recurso desligado em uso)
+                             notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
+                             recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
+                             crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
@@ -254,6 +263,18 @@ do app vai para uma pasta temporária via `LOCALAPPDATA`/`XDG_DATA_HOME`):
 | `tests/test_tools.py` | registro consistente (ids, https, SHA-256, módulos), instalação atômica e relatada, SHA-256 ou tamanho errado não instala nada, caminhos suspeitos em zip/tar, cancelar, atualizar/manter versões, remover, espaço em disco, ffmpeg pelo fluxo de `deps.py`, detecção do Resolve |
 | `tests/test_jobs.py` | fila: ordem dos eventos, erros, cancelar (na espera e rodando), um trabalho de GPU por vez, 200 trabalhos de 8 threads |
 | `tests/test_componentes_ui.py` | página Componentes e ponte do Qt em subprocesso *offscreen*: baixar/remover pela fila, progresso e cancelar, erro de SHA-256, licença com aceite, `show_deps`, sinais na thread principal |
+
+Notificações e recuperação (a pasta do app vai para uma pasta temporária; nenhuma notificação de verdade
+aparece: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos):
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_notify.py` | tipos e preferências, `decide()` (foco, tipo, módulo desligado só pisca nas exportações, botão de teste), textos e traduções, resumo da fila |
+| `tests/test_notify_ui.py` | casos de `notify_ui_cases.py`: notificador (som, piscar, clique abre arquivo, pasta ou janela), backend com defeito, D-Bus com a chamada tipada (servidor falso), bandeja, downloads de componentes pela fila de tarefas, página Notificações |
+| `tests/test_recovery.py` | marcador da sessão, rodízio das cópias, pid vivo ou reaproveitado, `scan()`, fila guardada, `ExportJob.to_dict/from_dict`, travamentos de verdade em subprocessos (`os._exit`, `faulthandler._sigsegv`) |
+| `tests/test_crashlog.py` | relatório legível, `sys.excepthook`/`threading.excepthook`, limites da pasta, `faulthandler` num subprocesso |
+| `tests/test_recovery_ui.py` | casos de `recovery_ui_cases.py`: cópias só com mudanças não salvas (e nenhuma depois de salvar), recuperar (Película e Edição) marcado como modificado, fila de volta, parciais, aviso, erro inesperado, página Recuperação (a janela se pula sem OpenGL 3.3) |
+| `tests/test_recovery_app.py` | o `app.main()` inteiro depois de um travamento simulado: pergunta antes das boas-vindas, recupera e fecha sem deixar nada |
 
 Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFORM=offscreen` e
 `QApplication` própria (a sessão do pytest já tem uma `QGuiApplication`).
@@ -518,6 +539,28 @@ chama `job.report(etapa, feito, total)` e `job.check_cancel()` e devolve o resul
 `f(job)` roda na thread principal (é ali que se mexe em widgets, preferências ou no projeto). A
 interface acompanha pelos sinais `changed`/`finished` de `bridge()`, filtrando por `job.key`. Detalhes
 em `docs/ARQUITETURA.md` (seção 18).
+
+### Nova notificação
+
+1. **`notify.py`**: um `Kind("id_sem_acento", N_("Rótulo"), N_("Quando avisa."))` em `KINDS` (o id vira
+   `notificacoes/<id>` nas preferências: nunca renomeie) e uma função que monta o `Notice` (título, texto
+   e o destino do clique: `target` = arquivo ou pasta, ou `action` = um `ACTION_*`). Destino novo na
+   janela = uma constante `ACTION_*` e a entrada em `ui/notifier.for_window()`.
+2. **Onde o evento é visto**, na thread principal: `window.notifier.notify(notify.meu_aviso(...))` — na
+   `MainWindow`, num `on_finished` da fila de tarefas ou num ouvinte como `Notifier.watch_jobs`. Nunca
+   chame o backend direto: `notify()` aplica o módulo, o tipo, o foco, o som e o piscar.
+3. A página Configurações › Notificações mostra o tipo sozinha. Textos com `_()`/`N_()` +
+   `tools/i18n_extract.py --update` + en/es; teste o texto e o destino em `tests/test_notify.py` e o
+   gancho num caso de `tests/notify_ui_cases.py` (backend falso: nada aparece na tela).
+
+### Recuperação automática
+
+Tudo o que entra no `.plc` (`project.Project`) já entra na cópia automática. Estado da tela que vale a
+pena voltar depois de um travamento e não vai no projeto entra em `recovery_ui.ui_state()` e
+`restore_ui_state()`. As cópias ficam só em `recovery.recovery_dir()` (nunca no `.plc` da pessoa) e os
+relatórios em `crashlog.logs_dir()`; nos testes, `LOCALAPPDATA`/`XDG_DATA_HOME` temporários. Um
+`ExportJob` com campo novo que importa para refazer a exportação precisa dele em `to_dict()`/`from_dict()`.
+Detalhes em `docs/ARQUITETURA.md` (seção 20).
 
 ## Empacotamento e release
 

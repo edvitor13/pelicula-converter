@@ -2002,8 +2002,8 @@ class MainWindow(QMainWindow):
         self.queue_dialog.activateWindow()
 
     def _recovery_point(self) -> None:
-        """Cópia de segurança agora (antes de exportar e de importar) e a fila guardada, se a recuperação
-        automática está ligada (`ui/recovery_ui.py`)."""
+        """Cópia de segurança agora (antes de exportar e de importar; depois de salvar, as cópias saem) e a
+        fila guardada, se a recuperação automática está ligada (`ui/recovery_ui.py`)."""
         if self.recovery is not None:
             self.recovery.checkpoint()
 
@@ -2170,6 +2170,7 @@ class MainWindow(QMainWindow):
             return False
         self.project_path = p.path
         self._saved_state = self._state()
+        self._recovery_point()  # salvo: as cópias de segurança desta janela saem
         welcome.add_recent(self.settings, p.path)
         self._update_title()
         self.statusBar().showMessage(_("Projeto salvo: {caminho}").format(caminho=p.path), 6000)

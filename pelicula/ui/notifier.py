@@ -370,7 +370,8 @@ class Notifier(QObject):
     def export_progress(self, new: list[notify.Finished], idle: bool) -> list[notify.Notice]:
         """Fila de exportação: `new` terminou agora; `idle` = nada mais esperando ou exportando."""
         self._batch += list(new)
-        notices = notify.queue_notices(new, list(self._batch), idle)
+        summary = notify.load(self.settings).kind_on(notify.QUEUE_DONE)
+        notices = notify.queue_notices(new, list(self._batch), idle, summary)
         if idle:
             self._batch = []
         for n in notices:

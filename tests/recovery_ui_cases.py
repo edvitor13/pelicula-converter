@@ -242,6 +242,28 @@ def test_startup_forgets_crashes_without_anything_to_recover():
     ctl.close()
 
 
+def test_recover_that_fails_keeps_everything_for_another_try(monkeypatch):
+    root, logs = tmpdir("rec_"), tmpdir("logs_")
+    tmp = tmpdir("job_")
+    item = job_dict(tmp)
+    part = Path(system.partial_path(item["saida"]))
+    part.write_bytes(b"x")
+    dead = crashed_session(root, logs, queue=[item])
+    ctl, w, _s = controller(root=root, logs=logs)
+    warned = []
+    monkeypatch.setattr(recovery_ui.QMessageBox, "warning", lambda *a, **k: warned.append(str(a[2])))
+
+    def broken(p, remember=True):
+        raise RuntimeError("quebrou")
+    w.show_project = broken
+    ctl.ask = lambda c, data: (recovery_ui.RECOVER, True)
+    assert ctl.startup() == recovery_ui.LATER
+    assert len(warned) == 1 and "continua guardada" in warned[0] and "quebrou" in warned[0]
+    assert dead.folder.exists() and part.exists() and w.queue.jobs == []  # nada saiu: dá para tentar de novo
+    assert [c.session for c in recovery.scan(root, ctl.session.id, logs)] == [dead.id]
+    ctl.close()
+
+
 # ------------------------------------------------------------------ aviso depois do travamento
 def crashed_with(tmp: Path, original="", queue=None, report="") -> tuple[recovery.Crashed, dict]:
     data = recovery.make_payload(project.Project().to_json(), original, {}, "clipe.mp4", "x")
@@ -468,6 +490,25 @@ def test_autosave_only_with_unsaved_changes(win):
         assert ctl.session.copies() == []  # desligado: as cópias desta janela saem
         win.store.set("grao_forca", 1.4)
         assert ctl.autosave() is None
+    finally:
+        win.recovery = None
+        ctl.close()
+        clean_settings()
+
+
+def test_saving_or_discarding_drops_the_copies_of_this_window(win):
+    load_scene(win)
+    ctl, _w, _s = controller(window=win)
+    win.recovery = ctl
+    try:
+        win.store.set("grao_forca", 1.6)
+        assert ctl.autosave() is not None and len(ctl.session.copies()) == 1
+        assert win._write_project(str(tmpdir("plc_") / "salvo.plc"))
+        assert ctl.session.copies() == []  # o .plc tem tudo: uma cópia mais velha só confundiria
+        win.store.set("grao_forca", 1.7)
+        assert ctl.autosave() is not None and len(ctl.session.copies()) == 1
+        win.new_project()  # "Não salvar" (o fixture responde sozinho): nada a recuperar
+        assert ctl.autosave() is None and ctl.session.copies() == []
     finally:
         win.recovery = None
         ctl.close()
