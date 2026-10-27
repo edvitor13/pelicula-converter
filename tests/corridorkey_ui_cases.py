@@ -77,6 +77,8 @@ def install_fake() -> None:
     if deps.platform_key() not in ("win32", "linux"):
         pytest.skip("CorridorKey só no Windows e no Linux")
     tools.uv_command = lambda *a, **k: list(ta.FAKE_UV)
+    corridorkey.NVIDIA_SMI = tck.smi(tck.SMI_3060)  # o CI não tem placa NVIDIA
+    corridorkey.gpus(refresh=True)
     fake = tck.fake_corridorkey(_DATA / "fontes")
     tools.TOOLS = tuple(fake if t.id == "corridorkey" else t for t in tools.TOOLS)
     tools.download(fake)

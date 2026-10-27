@@ -151,9 +151,10 @@ def test_environment_variables_of_the_user_do_not_leak(monkeypatch):
     env = tools.uv_environ(Path("cache"), Path("python"))
     assert not {"UV_INDEX_URL", "PIP_INDEX_URL", "PYTHONPATH", "VIRTUAL_ENV"} & set(env)
     assert env["UV_NO_CONFIG"] == "1" and env["UV_CACHE_DIR"].endswith("uv")
-    run = tools.runtime_environ({"HF_HUB_OFFLINE": "1"}, ["C:/ffmpeg/bin"])
+    ff = os.path.join("ffmpeg", "bin")  # sem "C:" (no Linux o PATH separa por ":")
+    run = tools.runtime_environ({"HF_HUB_OFFLINE": "1"}, [ff])
     assert run["HF_HUB_OFFLINE"] == "1" and run["PYTHONNOUSERSITE"] == "1"
-    assert run["PATH"].split(os.pathsep)[0] == "C:/ffmpeg/bin" and "PYTHONPATH" not in run
+    assert run["PATH"].split(os.pathsep)[0] == ff and "PYTHONPATH" not in run
     assert Path(run["HF_HOME"]).is_relative_to(deps.app_data_dir())
 
 

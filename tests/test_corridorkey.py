@@ -313,9 +313,10 @@ def test_mask_with_accents_reaches_opencv_by_an_ascii_path(installed_ck, ffmpeg_
     used = argv[argv.index("--hint_first_frame") + 1]
     if sys.platform == "win32":
         assert used.isascii() and used != str(mask)
+        assert not Path(used).exists(), "a cópia é apagada no fim"
     else:
-        assert used == str(mask)
-    assert not Path(used).exists() and mask.exists(), "a cópia é apagada no fim; o original fica"
+        assert used == str(mask)  # fora do Windows o caminho com acentos vai direto
+    assert mask.exists(), "o original fica"
     assert corridorkey.main_output(res).name == "tela verde_cutout.mov"
 
 
