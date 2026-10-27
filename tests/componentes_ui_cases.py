@@ -69,6 +69,7 @@ GOOD = fake_tool("ferramenta_boa", PKG)
 BAD = fake_tool("ferramenta_hash_errado", PKG, digest="0" * 64)
 SLOW = fake_tool("ferramenta_lenta", SLOW_PKG, url="https://example.invalid/lento.zip")
 TERMS = fake_tool("ferramenta_termos", PKG, consent="Uso só com atribuição ao autor.")
+tools.REAL_TOOLS = tools.TOOLS  # os ícones dos componentes de verdade também são conferidos
 tools.TOOLS = (tools.FFMPEG, GOOD, BAD, SLOW, TERMS, tools.DAVINCI_RESOLVE)
 
 
@@ -414,8 +415,138 @@ def _has_ink(name: str) -> bool:
 
 
 def test_every_component_icon_is_drawn():
-    for name in {t.icon for t in tools.TOOLS} | {"video", "download", "shield", "chip", "box"}:
+    for name in {t.icon for t in tools.TOOLS + tools.REAL_TOOLS} | {"video", "download", "shield", "chip", "box"}:
         assert _has_ink(name), name
+
+
+# ------------------------------------------------------------------ componentes de receita (CorridorKey)
+def _recipe_tool(name: str, check: bytes | None = None) -> Tool:
+    """Receita falsa (código, ambiente pelo uv falso e modelos locais), como em test_ambiente.py."""
+    import test_ambiente as ta
+    from dataclasses import replace
+    folder = _DATA / "receitas" / name
+    tool = ta.fake_recipe(folder, check=check or ta.CHECK_OK, tool_id=name)
+    return replace(tool, name=f"Receita {name}", consent="Termos da receita de teste.",
+                   notes=("Crédito: autores da receita.",),
+                   licenses=(("Modelo X (Fulano)", "Licença do Modelo X", "https://example.org/modelo-x"),))
+
+
+def _with_tools(*extra: Tool):
+    saved = tools.TOOLS
+    tools.TOOLS = saved + extra
+    return saved
+
+
+def _fake_uv():
+    tools.uv_command = lambda *a, **k: [sys.executable, str(Path(__file__).with_name("uv_falso.py"))]
+
+
+def test_recipe_card_downloads_tests_and_removes():
+    _fake_uv()
+    rec = _recipe_tool("receita_boa")
+    saved = _with_tools(rec)
+    try:
+        page = page_of(dialog())
+        card = page.cards["receita_boa"]
+        assert card.chip.text() == "Não instalado" and shown(card.btn_main) and not shown(card.btn_test)
+        assert "Versão 1.0-abc para baixar" in card.info.text() and "ocupa cerca de" in card.info.text()
+        assert "Crédito: autores da receita." in card.notes.text() and not shown(card.req)
+        assert "Modelos de terceiros" in card.links.text() and "https://example.org/modelo-x" in card.links.text()
+        assert "fontes oficiais" in card.links.text()
+        asked = []
+        page._consent = lambda tool: asked.append(tool.id) or True
+        job = page.download("receita_boa")
+        assert asked == ["receita_boa"] and job.kind == jobs.REDE
+        finish(job)
+        assert job.state == jobs.CONCLUIDO, job.error
+        assert card.chip.text() == "Instalado" and shown(card.badge) and shown(card.btn_test)
+        assert card.badge.toolTip().startswith("Código, bibliotecas e modelos conferidos com SHA-256")
+        assert "no disco" in card.info.text() and card.message.text() == "Receita receita_boa instalado e pronto para uso."
+        card.btn_test.click()
+        job = bridge().queue.find(componentes.job_key("receita_boa"))
+        assert job is not None and job.kind == jobs.GPU and job.title == "Testar Receita receita_boa"
+        finish(job)
+        assert job.state == jobs.CONCLUIDO, job.error
+        assert card.message.text() == "Teste concluído: Receita receita_boa funcionou na placa de vídeo."
+        page._confirm = lambda title, text: True
+        finish(page.remove("receita_boa"))
+        assert tools.installed(rec) == [] and not tools.tool_dir(rec).exists()
+        assert card.chip.text() == "Não instalado" and not shown(card.btn_test)
+    finally:
+        tools.TOOLS = saved
+
+
+def test_recipe_card_keeps_a_partial_download_to_continue():
+    _fake_uv()
+    bad = _recipe_tool("receita_falha", check="import sys\nprint('falhou de propósito')\nsys.exit(3)\n".encode())
+    saved = _with_tools(bad)
+    try:
+        page = page_of(dialog())
+        page._consent = lambda tool: True
+        card = page.cards["receita_falha"]
+        job = page.download("receita_falha")
+        finish(job)
+        assert job.state == jobs.ERRO and "O teste de Receita receita_falha falhou" in card.message.text()
+        assert "falhou de propósito" in card.message.text()
+        assert card.chip.text() == "Download incompleto" and card.btn_main.text().strip() == "Continuar download"
+        assert "continua de onde parou" in card.notes.text() and shown(card.btn_remove)
+        page._confirm = lambda title, text: True
+        finish(page.remove("receita_falha"))
+        assert not tools.tool_dir(bad).exists() and card.chip.text() == "Não instalado"
+    finally:
+        tools.TOOLS = saved
+
+
+def test_recipe_requirements_hide_the_download():
+    rec = _recipe_tool("receita_bloqueada")
+    tools.REQUIREMENTS["receita_bloqueada"] = lambda: ["Este computador não tem a placa que a receita pede."]
+    saved = _with_tools(rec)
+    try:
+        page = page_of(dialog())
+        card = page.cards["receita_bloqueada"]
+        assert card.chip.text() == "Requisitos não atendidos" and not shown(card.btn_main)
+        assert shown(card.req) and "não tem a placa" in card.req.text()
+        assert page.download("receita_bloqueada") is None
+        assert "não tem a placa" in card.message.text()
+    finally:
+        tools.TOOLS = saved
+        del tools.REQUIREMENTS["receita_bloqueada"]
+
+
+def test_corridorkey_card_credits_licenses_and_gpu_check():
+    from pelicula import corridorkey
+    saved = _with_tools(tools.CORRIDORKEY)
+    try:
+        corridorkey.NVIDIA_SMI = [sys.executable, "-c", "print('0, NVIDIA GeForce GTX 1080, 8192, 551.23, 6.1')"]
+        corridorkey.gpus(refresh=True)
+        page = page_of(dialog())
+        card = page.cards["corridorkey"]
+        assert "Corridor Digital" in card.notes.text() and "US$ 20 milhões" in card.notes.text()
+        assert "pode ser usado comercialmente" in card.notes.text()
+        for need in ("NVIDIA Open Model License", "MoGe-2", "Apache-2.0", "Corridor Key Licence"):
+            assert need in card.links.text(), need
+        assert "Recorte por IA (CorridorKey)" in card.used.text()
+        if deps.platform_key() in ("win32", "linux"):
+            assert card.chip.text() == "Requisitos não atendidos" and not shown(card.btn_main)
+            assert "GTX 1080 (6.1)" in card.req.text() and "RTX série 30" in card.req.text()
+        corridorkey.NVIDIA_SMI = [sys.executable, "-c", "print('0, NVIDIA GeForce RTX 3060, 12288, 630.20, 8.6')"]
+        corridorkey.gpus(refresh=True)
+        page.refresh("corridorkey")
+        if deps.platform_key() in ("win32", "linux"):
+            assert not shown(card.req) or "Espaço insuficiente" in card.req.text()
+        corridorkey.NVIDIA_SMI = [sys.executable, "-c", "import sys; sys.exit(9)"]
+        corridorkey.gpus(refresh=True)
+        page.refresh("corridorkey")
+        if deps.platform_key() in ("win32", "linux"):
+            assert "NVIDIA" in card.req.text() and not shown(card.btn_main)
+        seen = []
+        page._consent = lambda tool: seen.append(tool.id) or False
+        assert page.download("corridorkey") is None and not seen  # bloqueado: nem pergunta
+        assert _has_ink("matte")
+    finally:
+        tools.TOOLS = saved
+        corridorkey.NVIDIA_SMI = None
+        corridorkey.gpus(refresh=True)
 
 
 # ------------------------------------------------------------------ ponte da fila (Qt)

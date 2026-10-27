@@ -105,6 +105,19 @@ def _remove_fn(tool: tools.Tool):
     return run
 
 
+def _test_fn(tool: tools.Tool):
+    def run(job: jobs.Job):
+        return tools.test_installed(tool, job.progress_callback(), job.cancel_event)
+    return run
+
+
+def _recipe_sizes(tool: tools.Tool) -> tuple[int, int]:
+    """(download, espaço no disco depois de instalado) de um componente de receita neste sistema."""
+    key = deps.platform_key()
+    rec = tool.recipe
+    return rec.download_size.get(key, 0), rec.disk_size.get(key, 0)
+
+
 def _gpu_text(main) -> str:
     eng = getattr(main, "engine", None)
     if eng is None:
@@ -247,6 +260,11 @@ class ToolCard(QFrame):
         self.notes.setObjectName("Muted")
         self.notes.setWordWrap(True)
         col.addWidget(self.notes)
+        self.req = QLabel()  # requisitos que faltam neste computador (sem eles, sem download)
+        self.req.setWordWrap(True)
+        self.req.setStyleSheet(f"color: {theme.ACCENT_HI};")
+        self.req.setVisible(False)
+        col.addWidget(self.req)
         self.message = QLabel()
         self.message.setWordWrap(True)
         self.message.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -280,6 +298,13 @@ class ToolCard(QFrame):
         self.btn_main = QPushButton()
         self.btn_main.clicked.connect(lambda: self.page.download(self.tool.id))
         buttons.addWidget(self.btn_main)
+        self.btn_test = None
+        if tool.recipe is not None and tool.recipe.check:
+            self.btn_test = QPushButton("  " + _("Testar"))
+            self.btn_test.setIcon(icons.icon("chip", theme.TEXT, 15))
+            self.btn_test.setToolTip(_("Roda o teste do componente na placa de vídeo, sem internet"))
+            self.btn_test.clicked.connect(lambda: self.page.test(self.tool.id))
+            buttons.addWidget(self.btn_test)
         self.btn_remove = QPushButton("  " + _("Remover"))
         self.btn_remove.setIcon(icons.icon("trash", theme.TEXT, 15))
         self.btn_remove.clicked.connect(lambda: self.page.remove(self.tool.id))
@@ -317,14 +342,19 @@ class ToolCard(QFrame):
         self.status = st
         t = self.tool
         system_tool = t.kind == tools.SISTEMA
+        recipe = t.recipe is not None
         # selo de estado
         if self.busy:
-            removing = (self.job.data or {}).get("acao") == "remover"
-            self._set_chip(_("Removendo…") if removing else _("Baixando…"), "accent")
+            acao = (self.job.data or {}).get("acao")
+            self._set_chip({"remover": _("Removendo…"), "testar": _("Testando…")}.get(acao, _("Baixando…")), "accent")
         elif system_tool:
             self._set_chip(_("No sistema") if st.installed else _("Não encontrado"), "ok" if st.installed else "muted")
         elif st.state == tools.INDISPONIVEL:
             self._set_chip(_("Indisponível neste sistema"), "muted")
+        elif st.state == tools.AUSENTE and st.blocked:
+            self._set_chip(_("Requisitos não atendidos"), "muted")
+        elif st.state == tools.AUSENTE and st.partial:
+            self._set_chip(_("Download incompleto"), "accent")
         elif st.state == tools.AUSENTE:
             self._set_chip(_("Não instalado"), "danger" if t.core else "muted")
         elif st.state == tools.DESATUALIZADO:
@@ -334,7 +364,10 @@ class ToolCard(QFrame):
         else:
             self._set_chip(_("Instalado"), "ok")
         self.badge.setVisible(st.verified)
-        if st.verified:
+        if st.verified and recipe:
+            self.badge.setToolTip(_("Código, bibliotecas e modelos conferidos com SHA-256 antes de instalar.\nSelo "
+                                    "da instalação: {hash}").format(hash=st.sha256))
+        elif st.verified:
             self.badge.setToolTip(_("Conferido com o SHA-256 antes de instalar:\n{hash}").format(hash=st.sha256))
         # versão e espaço
         parts = []
@@ -343,7 +376,9 @@ class ToolCard(QFrame):
         elif not system_tool and st.state == tools.AUSENTE and st.available and t.backend != "ffmpeg":
             parts.append(_("Versão {versao} para baixar ({tamanho})").format(
                 versao=st.available, tamanho=tools.fmt_size(st.download_size)))
-        if st.size:
+            if recipe and _recipe_sizes(t)[1]:
+                parts.append(_("ocupa cerca de {tamanho} no disco").format(tamanho=tools.fmt_size(_recipe_sizes(t)[1])))
+        if st.size and not st.partial:
             parts.append(_("{tamanho} no disco").format(tamanho=tools.fmt_size(st.size)))
         if st.installed and st.update_available and st.available:
             parts.append(_("versão {versao} disponível").format(versao=st.available))
@@ -375,9 +410,15 @@ class ToolCard(QFrame):
         elif t.kind == tools.BAIXADO and st.origin == tools.CI:
             links.append(_link(st.source_url or t.homepage,
                                _("Compilado pelo PeliculaConverter a partir do código oficial")))
+        elif recipe:
+            links.append(_link(t.source_url or t.homepage, _("Código e modelos das fontes oficiais")))
         elif t.kind == tools.BAIXADO and st.origin == tools.OFICIAL:
             links.append(html.escape(_("Binário oficial do autor")))
-        self.links.setText(" &nbsp;•&nbsp; ".join(links))
+        text = " &nbsp;•&nbsp; ".join(links)
+        if t.licenses:  # modelos de terceiros que o componente baixa, cada um com a sua licença
+            third = [f"{html.escape(what)}: {_link(url, lic)}" for what, lic, url in t.licenses]
+            text += "<br>" + _("Modelos de terceiros: {lista}").format(lista=" &nbsp;•&nbsp; ".join(third))
+        self.links.setText(text)
         # quem usa
         if t.core:
             self.used.setText(_("Usado por: núcleo do app (abrir, prévia e exportação)"))
@@ -385,21 +426,32 @@ class ToolCard(QFrame):
             names = [_(modules.get(m).name) for m in tools.used_by(t) if modules.exists(m)]
             self.used.setText(_("Usado por: {lista}").format(lista=", ".join(names)) if names else "")
         self.used.setVisible(bool(self.used.text()))
-        notes = list(st.notes)
+        notes = [_(n) for n in t.notes] + list(st.notes)
         if t.backend == "ffmpeg" and not st.downloadable:
             notes.append(ffmpeg_manual_text())
+        if st.partial and not st.installed:
+            notes.append(_("{tamanho} já baixados ficaram guardados: o download continua de onde parou. \"Remover\" "
+                           "apaga o que já veio.").format(tamanho=tools.fmt_size(st.partial)))
         self.notes.setText("\n".join(notes))
         self.notes.setVisible(bool(notes))
+        blocked = st.blocked if not st.installed else []
+        self.req.setText("\n".join(blocked))
+        self.req.setVisible(bool(blocked))
         # botões
         self.btn_main.setVisible(not system_tool and st.downloadable)
         ffmpeg = t.backend == "ffmpeg"  # o aviso de "ffmpeg ausente" ao abrir o app fala em "Baixar ffmpeg"
-        if st.state == tools.AUSENTE:
+        if st.state == tools.AUSENTE and st.partial:
+            self._main_button(_("Continuar download"), primary=True)
+        elif st.state == tools.AUSENTE:
             self._main_button(_("Baixar ffmpeg") if ffmpeg else _("Baixar"), primary=True)
         elif st.update_available or st.state == tools.DESATUALIZADO:
             self._main_button(_("Atualizar ffmpeg") if ffmpeg else _("Atualizar"), primary=True)
         else:
             self._main_button(_("Baixar de novo"), primary=False)
         self.btn_main.setEnabled(not self.busy)
+        if self.btn_test is not None:
+            self.btn_test.setVisible(st.installed)
+            self.btn_test.setEnabled(not self.busy)
         self.btn_remove.setVisible(st.managed and not system_tool)
         self.btn_remove.setEnabled(not self.busy)
         if self.btn_other is not None:
@@ -626,9 +678,13 @@ class Page(PageBase):
         tool = card.tool
         st = card.status or tools.status(tool, latest=latest_ffmpeg())
         if not st.downloadable:
-            card.show_message(ffmpeg_manual_text() if tool.backend == "ffmpeg" else
-                              _("{nome} ainda não tem download para este sistema.").format(nome=_(tool.name)),
-                              "danger")
+            if st.blocked:
+                text = "\n".join(st.blocked)
+            elif tool.backend == "ffmpeg":
+                text = ffmpeg_manual_text()
+            else:
+                text = _("{nome} ainda não tem download para este sistema.").format(nome=_(tool.name))
+            card.show_message(text, "danger")
             return None
         if tool.consent and not self._consent(tool):
             return None
@@ -655,6 +711,17 @@ class Page(PageBase):
                               key=job_key(tool_id), data={"tool": tool_id, "acao": "remover",
                                                           "settings": self.settings},
                               on_finished=_after_job)
+        card.show_job(job)
+        return job
+
+    def test(self, tool_id: str) -> jobs.Job | None:
+        """Botão "Testar" (componentes de receita): roda o teste da instalação como trabalho da placa de vídeo."""
+        card = self.cards.get(tool_id)
+        if card is None or card.busy or card.status is None or not card.status.installed:
+            return None
+        tool = card.tool
+        job = bridge().submit(_test_fn(tool), _("Testar {nome}").format(nome=_(tool.name)), kind=jobs.GPU,
+                              key=job_key(tool_id), data={"tool": tool_id, "acao": "testar", "settings": self.settings})
         card.show_job(job)
         return job
 
@@ -705,7 +772,13 @@ class Page(PageBase):
         box = QMessageBox(self)
         box.setWindowTitle(_("Licença de {nome}").format(nome=_(tool.name)))
         box.setText(_(tool.consent))
-        box.setInformativeText(_("Licença: {licenca} — {url}").format(licenca=_(tool.license), url=tool.license_url))
+        lines = [_("Licença: {licenca} — {url}").format(licenca=_(tool.license), url=tool.license_url)]
+        lines += [f"{what}: {lic} — {url}" for what, lic, url in tool.licenses]
+        if tool.recipe is not None:
+            down, disk = _recipe_sizes(tool)
+            lines.append(_("Download de cerca de {download}; ocupa cerca de {disco} no disco.").format(
+                download=tools.fmt_size(down), disco=tools.fmt_size(disk)))
+        box.setInformativeText("\n".join(lines))
         ok = box.addButton(_("Aceitar e baixar"), QMessageBox.ButtonRole.AcceptRole)
         box.addButton(_("Cancelar"), QMessageBox.ButtonRole.RejectRole)
         box.exec()
@@ -744,7 +817,16 @@ class Page(PageBase):
         card.show_job(job)
         self.refresh(card.tool.id)
         name = _(card.tool.name)
-        removing = (job.data or {}).get("acao") == "remover"
+        acao = (job.data or {}).get("acao")
+        removing = acao == "remover"
+        if acao == "testar":
+            if job.state == jobs.CONCLUIDO:
+                card.show_message(_("Teste concluído: {nome} funcionou na placa de vídeo.").format(nome=name), "ok")
+            elif job.state == jobs.CANCELADO:
+                card.show_message(_("Teste cancelado."), "muted")
+            else:
+                card.show_message(job.error or _("Não foi possível concluir."), "danger")
+            return
         if job.state == jobs.CONCLUIDO:
             if removing:
                 card.show_message(_("{nome} removido: {tamanho} liberados.").format(
@@ -754,6 +836,9 @@ class Page(PageBase):
                     caminho=media.tool_dir()), "ok")
             else:
                 card.show_message(_("{nome} instalado e pronto para uso.").format(nome=name), "ok")
+        elif job.state == jobs.CANCELADO and card.tool.recipe is not None:
+            card.show_message(_("Download cancelado. O que já foi baixado fica guardado e continua de onde parou."),
+                              "muted")
         elif job.state == jobs.CANCELADO:
             card.show_message(_("Download cancelado."), "muted")
         else:

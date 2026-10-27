@@ -428,7 +428,23 @@ def fmt_size(n: int) -> str:
 
 def disk_usage(root: str | Path | None = None, include_ffmpeg: bool = True) -> int:
     """Espaço que os componentes baixados pelo app ocupam (ferramentas + ffmpeg)."""
-    total = dir_size(Path(root) if root is not None else tools_dir())
+    base = Path(root) if root is not None else tools_dir()
+    recipes = {t.id: t for t in TOOLS if t.recipe is not None}
+    total = 0
+    try:
+        entries = list(base.iterdir()) if base.is_dir() else []
+    except OSError:
+        entries = []
+    for p in entries:
+        try:
+            if p.is_dir() and p.name in recipes:  # gigabytes em milhares de arquivos: tamanho guardado
+                total += recipe_size(recipes[p.name], root)[0]
+            elif p.is_dir():
+                total += dir_size(p)
+            else:
+                total += p.stat().st_size
+        except OSError:
+            pass
     if include_ffmpeg and ffmpeg_home().is_dir():
         total += dir_size(ffmpeg_home())
     return total
@@ -1453,7 +1469,7 @@ def _corridorkey_requirements() -> list[str]:
 # id da ferramenta → função que diz o que falta no computador para baixá-la (lista vazia = tudo certo)
 REQUIREMENTS: dict[str, Callable[[], list[str]]] = {"corridorkey": _corridorkey_requirements}
 
-_sizes: dict[tuple, tuple[int, int]] = {}
+_sizes: dict[str, tuple[tuple, tuple[int, int]]] = {}  # pasta → (carimbo, (total, cache))
 _sizes_lock = threading.Lock()
 
 
@@ -1474,14 +1490,14 @@ def recipe_size(tool: Tool, root: str | Path | None = None) -> tuple[int, int]:
         marks = tuple(_stamp(p / MARKER) for p in sorted(base.iterdir()) if p.is_dir())
     except OSError:
         marks = ()
-    key = (str(base), _stamp(base), _stamp(cache), marks)
+    stamp = (_stamp(base), _stamp(cache), _stamp(cache / "arquivos"), marks)
     with _sizes_lock:
-        if key in _sizes:
-            return _sizes[key]
+        hit = _sizes.get(str(base))
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
     found = (dir_size(base), dir_size(cache))
     with _sizes_lock:
-        _sizes.clear()
-        _sizes[key] = found
+        _sizes[str(base)] = (stamp, found)
     return found
 
 
