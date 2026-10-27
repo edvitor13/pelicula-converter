@@ -229,6 +229,12 @@ quadros vizinhos:
   H.264), Full HD, redes sociais, leve 720p, WebM, AVI, GIF, masters ProRes/DNxHR, FFV1 e
   sequência PNG. A resolução (1080p, 720p, 4K…) vale para o **lado menor**: vídeo vertical continua
   vertical (1080 × 1920 em 1080p).
+- **Por plataforma**: YouTube (1080p, 1440p, 4K, Shorts), Instagram (Reels, Stories, Feed 4:5 e 1:1),
+  Facebook, TikTok, Kwai, X, LinkedIn, Pinterest, Snapchat, Threads, Bluesky, WhatsApp, Telegram,
+  Discord, Vimeo, Spotify, *Compatível com tudo*, Apple (HEVC), Festival (ProRes 422 HQ) e Arquivo (FFV1)
+  — com quadro, encaixe (cortar, bordas ou fundo desfocado), **tamanho alvo** em duas passadas (Discord,
+  WhatsApp), **volume alvo** (−14/−16/−23 LUFS) e **Grão para redes**. Nada é enviado: o arquivo fica no
+  computador.
 - **Gravação segura**: o vídeo é gravado num arquivo parcial ao lado do destino e só ganha o nome final
   quando termina; cancelar, dar erro ou o computador desligar no meio nunca deixa um arquivo quebrado
   com o nome final nem apaga antes da hora o antigo com o mesmo nome.
@@ -639,6 +645,49 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 
 **Exportar** (`Ctrl+E`) abre a janela de exportação com o look atual.
 
+**Plataforma** (vídeo): escolha onde o vídeo vai ser postado e a janela preenche tudo — quadro, codec,
+taxa, som, volume e os limites da plataforma (duração e tamanho máximos), com uma nota e uma **prévia do
+resultado** feita pelo mesmo caminho da exportação. Depois dá para mudar qualquer opção; escolher uma
+qualidade pronta volta para *Nenhuma*. O app não envia nada: ele só grava o arquivo.
+
+| Plataforma | Quadro | Limites | Volume |
+|---|---|---|---|
+| YouTube 1080p / 1440p / 4K | lado menor 1080 / 1440 / 2160 (aumenta vídeos menores no 1440p/4K) | até 12 h, 256 GB | −14 LUFS |
+| YouTube Shorts | 1080 × 1920 | até 3 min | −14 LUFS |
+| Instagram Reels / Stories | 1080 × 1920, teto 25 Mb/s | 15 min / 60 s, 4 GB | −14 LUFS |
+| Instagram Feed 4:5 / 1:1 | 1080 × 1350 / 1080 × 1080 | 1 s a 60 min, 4 GB | −14 LUFS |
+| Facebook, LinkedIn, Telegram, Bluesky | mantém a orientação, 1080p | conforme a plataforma | −14 LUFS |
+| TikTok, Kwai, Pinterest, Snapchat, Threads | 1080 × 1920 | conforme a plataforma | −14 LUFS |
+| X (Twitter) | lado menor 720 | 2 min 20 s, 512 MB | −14 LUFS |
+| WhatsApp (status / conversa) | 720 × 1280 / lado menor 720, 30 quadros/s | 60 s / tamanho alvo 16 MB | −14 LUFS |
+| Discord | lado menor 720, 30 quadros/s | tamanho alvo 20 MB (mude para 50 MB ou mais com Nitro) | −14 LUFS |
+| Vimeo | lado menor 1080, até 20 Mb/s | — | −14 LUFS |
+| Spotify (videocast) | 1920 × 1080 | até 12 h | −16 LUFS, pico −2 dBTP |
+| Compatível com tudo | até 1080p e 30 quadros/s, H.264 8 bits | — | original |
+| Apple (HEVC) | resolução do vídeo, H.265 10 bits | — | original |
+| Festival (ProRes 422 HQ) | resolução do vídeo, PCM 24 bits | — | −23 LUFS (EBU R 128) |
+| Arquivo (preservação) | FFV1 16 bits sem perdas, som original | — | original |
+
+Os números vêm das páginas oficiais de cada plataforma (conferidas em outubro de 2026; a fonte de cada
+uma está em `pelicula/platforms.py`). Kwai e o status do WhatsApp não publicam especificação: os valores
+são conservadores e a janela avisa. O DCP de cinema não é gerado: o master *Festival* serve de entrada
+para um programa de DCP (ex.: DCP-o-matic).
+
+- **Quadro** e **Encaixe**: com um quadro fixo (1080 × 1920, 1080 × 1350…), um vídeo de outra proporção
+  é **cortado para preencher**, ganha **bordas pretas** ou fica sobre um **fundo desfocado** feito dele
+  mesmo. O look de película (vinheta, bordas do scan, halação, grão) é desenhado no quadro final.
+- **Tamanho alvo**: o arquivo sai com no máximo esse tamanho (Discord, WhatsApp, e-mail), em duas
+  passadas do x264/x265 — leva cerca do dobro do tempo, e a estimativa já conta isso.
+- **Volume alvo** e **Pico real**: o som é medido e acertado em duas passadas (EBU R 128): −14 LUFS nas
+  redes, −16 em podcast, −23 na TV e no festival; pico −1 dBTP. Com *Copiar original*, o som passa a ser
+  recodificado (a janela avisa).
+- **Grão para redes**: grão com tamanho mínimo no quadro de saída e um pouco mais forte, para sobreviver
+  à recompressão das redes (desligado por padrão; a prévia do resultado mostra o efeito).
+- **Avisos**: vídeo mais longo que o limite (com *Exportar só os primeiros N s*), tamanho estimado acima
+  do máximo, duas passadas e som recodificado.
+- **Área segura**: o botão de área segura na barra da prévia mostra onde a interface do TikTok, do Reels
+  ou do Shorts cobre o vídeo vertical (ou o título e a ação da TV). Só aparece na tela, nunca no arquivo.
+
 **Qualidades prontas** (vídeo):
 
 | Qualidade | Codec e ajustes |
@@ -906,6 +955,7 @@ tem um apelido em inglês e as mensagens seguem o idioma do app (ou a variável 
 | `presets` (`list-presets`) | Lista os presets prontos e os seus |
 | `parametros` (`params`) | Lista todos os parâmetros: chave, nome, faixa e padrão |
 | `qualidades` (`qualities`) | Lista as qualidades de exportação (para um arquivo, se informado) |
+| `plataformas` (`platforms`) | Lista as plataformas de exportação com os limites de cada uma (`--json` para scripts) |
 | `info` | Mostra resolução, fps, codec e áudio de um arquivo |
 | `ffmpeg` | Mostra a versão do ffmpeg em uso; `--baixar` baixa/atualiza da fonte oficial |
 | `resolve` (`davinci`) | Plugin do DaVinci Resolve: `--ofx-instalar` (plugin OpenFX, Resolve gratuito), `--ofx-pasta DIR`, `--instalar` (DCTLs e LUTs), `--pasta DIR` (gera o pacote numa pasta) ou `--listar` |
@@ -925,6 +975,10 @@ pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --trecho
 # um quadro em 16 bits e o LUT do look
 pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
 pelicula-cli lut --preset vision3_250d -o vision3_250d.cube
+
+# exportar para uma plataforma (veja a lista com "plataformas")
+pelicula-cli exportar video.mp4 --plataforma instagram_reels --encaixe desfocado --grao-redes
+pelicula-cli exportar video.mp4 --plataforma discord --tamanho-alvo 50     # Nitro Basic
 
 # exportar a montagem do modo Edição (projeto salvo pela janela)
 pelicula-cli exportar edicao.plc -o montagem.mp4 --preset lab_technicolor3
@@ -950,7 +1004,11 @@ porcentagens como `45%`, booleanos `true/false`), `--qualidade` (chaves de `qual
 (`original` ou o lado menor em pixels, `1080` ou `1080p`: vertical em 1080 sai 1080 × 1920),
 `--fps`, `--audio`, `--inicio`/`--fim` (segundos, `00:01:02.5` ou `#quadro`), `--trecho` (usa a
 entrada/saída do projeto), `--threads`, `--prioridade`, `--hwaccel`, `--buffer`, `-y` (substituir),
-`--json` (progresso em JSON, uma linha por segundo) e `-q` (sem barra de progresso). `Ctrl+C`
+`--json` (progresso em JSON, uma linha por segundo, com a etapa e o progresso das duas passadas) e `-q`
+(sem barra de progresso). Exportação por plataforma: `--plataforma ID` (no lugar de `--qualidade`),
+`--quadro LxA` (ex.: `1080x1920`; `auto` segue a resolução), `--encaixe cortar|bordas|desfocado`,
+`--tamanho-alvo MB` (duas passadas; 0 desliga), `--volume LUFS` (ex.: `-14`; 0 desliga), `--pico dBTP`
+e `--grao-redes` — todas também valem sem `--plataforma`. `Ctrl+C`
 cancela e apaga o arquivo parcial; um arquivo antigo com o mesmo nome continua intacto (com `-y`, ele
 só é trocado quando a exportação termina). Códigos de saída: 0 sucesso, 1 erro, 2 uso incorreto,
 130 cancelado.

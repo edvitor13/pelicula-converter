@@ -107,6 +107,17 @@ def test_default_dialog_settings_are_neutral():
         assert getattr(s, key) == getattr(preset, key), key
 
 
+def test_tune_grain_survives_closing_the_dialog():
+    """Regressão: o trabalho é montado depois que a janela fecha; o "tune grain" não pode sumir aí."""
+    dlg = dialog(quality="mp4")
+    dlg.show()
+    assert dlg.settings().tune_grain
+    dlg.hide()
+    assert dlg.job().settings.tune_grain
+    dlg.codec.setCurrentIndex(dlg.codec.findData("prores"))  # sem a opção no codec: desligado
+    assert not dlg.settings().tune_grain
+
+
 def test_last_platform_is_restored():
     dlg = dialog(platform="youtube_shorts")
     assert dlg.platform_id() == "youtube_shorts" and dlg.settings().frame == "1080x1920"

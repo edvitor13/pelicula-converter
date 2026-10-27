@@ -151,6 +151,11 @@ Acima dos ajustes há um monitor com quatro vistas:
 - **Exportar** (Ctrl+E) grava a montagem inteira ou o trecho entre a entrada (I) e a saída (O), com o som
   mixado de todas as faixas. A resolução das qualidades (1080p, 720p, 4K…) vale para o lado menor: uma
   sequência vertical 1080 × 1920 exportada em *Redes sociais 1080p* continua 1080 × 1920.
+- Em **Plataforma** (YouTube, Instagram, TikTok, WhatsApp…) a janela de exportação preenche o quadro, o som
+  e os limites. Uma montagem de outra proporção entra no quadro da plataforma cortada, com bordas pretas
+  ou sobre um fundo desfocado, sempre com o look desenhado no quadro final; o **volume alvo** mede e acerta
+  o som mixado. A **área segura** (botão na barra da prévia) mostra onde a interface do TikTok, do Reels ou
+  do Shorts cobre o vídeo vertical — só na tela, nunca no arquivo.
 - **Projeto → Salvar** (Ctrl+S) guarda a edição no arquivo `.plc` junto com o look. Se um arquivo usado na
   edição mudar de lugar, o app pergunta onde ele está ao abrir o projeto.
 

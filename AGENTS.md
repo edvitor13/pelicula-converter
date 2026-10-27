@@ -46,7 +46,13 @@ pelicula/
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
-                             run_job() (grava num parcial e troca no fim), measure_speed(), save_still()
+                             run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
+                             alvo), FramePipeline/preview_frame() (o mesmo caminho na exportação e na prévia dela),
+                             measure_speed(), save_still()
+  platforms.py               exportação por plataforma (sem Qt): PLATFORMS (YouTube, Instagram, TikTok, WhatsApp,
+                             Discord… com fonte oficial), settings_for() → ExportSettings, limites, avisos, SAFE_AREAS
+  fit.py                     encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): plan() → Fit
+  loudnorm.py                volume alvo da exportação: loudnorm do ffmpeg em duas passadas (measure, filter_for)
   deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), extract_archive(), pip_install()
   tools.py                   componentes externos (sem Qt): registro TOOLS (versão e SHA-256 fixos), download e
                              instalação atômica, remover, espaço em disco, detecção de programas do sistema
@@ -401,6 +407,29 @@ Todo recurso que dá para dispensar é um módulo (regra 17). Para criar um:
    `media.encoder_works()`; mantenha esse padrão para qualquer codificador que "aparece mas não
    funciona".
 7. Teste em `tests/test_export_cmd.py` (estrutura do comando) e documente no README.
+
+### Nova plataforma de exportação
+
+1. **`platforms.PLATFORMS`**: um `Platform(...)` no grupo certo (`GROUPS`), com **id ASCII novo** (nunca
+   renomeie um id: ele fica nas preferências `export_platform` e nos scripts com `--plataforma`). Nome da
+   marca como está; partes em português com `N_()`, e a `note` com `N_()`.
+2. Valores da página oficial de envio da plataforma, com a URL e "conferido em AAAA-MM" num comentário logo
+   acima. Sem especificação publicada: valores conservadores (H.264 + AAC em MP4, 30 quadros/s),
+   `official=False` e a nota dizendo isso.
+3. Quadro: `frame="1080x1920"` para formato fixo (vertical, 4:5, 1:1) ou `resolution="1080"` para manter a
+   orientação do vídeo. Tamanhos pares; `upscale=True` só quando a plataforma dá mais qualidade a um envio
+   maior. Limite de taxa: `maxrate` (Mb/s) com o CRF de sempre; limite de arquivo pequeno (mensageiros):
+   `target_mb` (duas passadas).
+4. Som: `audio` (chave de `export.AUDIO`), `loudness` (−14 redes/streaming, −16 podcast, −23 TV/festival) e
+   `true_peak` (−1; −2 só se a plataforma pedir). `loudness=0` deixa o volume como está.
+5. Vídeo vertical com interface por cima: uma `SafeArea` em `SAFE_AREAS` medida no modelo oficial
+   (frações do quadro, y para baixo, `aspect=9 / 16`) e `safe=` na plataforma.
+6. `tools/i18n_extract.py --update` e traduza em `locales/en.json` e `es.json`.
+7. `tests/test_platforms.py` confere ids, tamanhos pares, limites e textos de toda a tabela; rode-o e o
+   `tests/test_cli_platforms.py`. Nada no comando do codificador muda para quem não usa a plataforma.
+
+A exportação por plataforma é núcleo, não módulo: exportar está sempre visível e a lista só preenche
+opções que já existiam. Nenhuma plataforma envia arquivo (só grava no computador).
 
 ### Gravar arquivos do usuário
 

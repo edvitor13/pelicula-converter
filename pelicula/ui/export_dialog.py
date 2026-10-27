@@ -697,7 +697,8 @@ class ExportDialog(QDialog):
             pix=self.pix.currentData() or "yuv420p", quality=self.qval.value(), preset=self.speed.currentData() or "",
             profile=self.profile.currentData() or "", bitrate=self.bitrate.value(),
             resolution=self.res.currentData(), fps=self.fps.currentData(), audio=self.audio.currentData(),
-            tune_grain=self.grain.isChecked() and self.grain.isVisible(), dither=self.dither.isChecked())
+            # isHidden e não isVisible: depois de "Adicionar à fila" a janela já fechou e nada mais é visível.
+            tune_grain=self.grain.isChecked() and not self.grain.isHidden(), dither=self.dither.isChecked())
         if not self.info.is_image:
             s.platform = self.platform_id()
             s.frame = self.frame_box.currentData() or ""
