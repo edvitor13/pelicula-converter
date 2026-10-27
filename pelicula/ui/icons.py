@@ -539,6 +539,24 @@ def _draw_components(name: str, p: QPainter, c: QColor) -> None:
         path.lineTo(19, 9)
         p.drawPath(path)
         p.drawLine(QPointF(10, 12.5), QPointF(14, 12.5))
+    elif name == "matte":
+        # Recorte com transparência (CorridorKey): xadrez de fundo e uma pessoa recortada na frente.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 4.5, 17, 15), 2.2, 2.2)
+        p.setPen(Qt.PenStyle.NoPen)
+        faded = QColor(c)
+        faded.setAlphaF(c.alphaF() * 0.35)
+        p.setBrush(QBrush(faded))
+        for x, y in ((3.5, 4.5), (11.5, 4.5), (7.5, 8.5), (15.5, 8.5), (3.5, 12.5), (11.5, 12.5)):
+            p.drawRect(QRectF(x, y, 4, 4))
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(12, 10), 2.6, 2.6)
+        body = QPainterPath()
+        body.moveTo(6.5, 19.5)
+        body.quadTo(6.8, 13.6, 12, 13.6)
+        body.quadTo(17.2, 13.6, 17.5, 19.5)
+        body.closeSubpath()
+        p.drawPath(body)
 
 
 @lru_cache(maxsize=256)

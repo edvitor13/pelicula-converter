@@ -44,6 +44,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   novo ele oferece *Recuperar*, *Abrir o salvo* ou *Descartar*, e as exportações que estavam na fila
   podem voltar (recomeçam do início). Relatório de erro só no computador (nada é enviado), com *Copiar
   relatório* e *Abrir pasta*.
+- **Recorte por IA (CorridorKey, Beta)**: tira o fundo verde ou azul de um vídeo com o
+  [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0), da Corridor Digital, e grava o
+  recorte com transparência (ProRes 4444 com alfa) e a máscara, ou EXR. Começa desligado (ligue em
+  **Recursos**). O CorridorKey é um **download à parte de cerca de 7,6 GB** (uns 10,7 GB no disco) em
+  **Componentes**, direto das fontes oficiais, com versões e SHA-256 fixos, e precisa de placa **NVIDIA
+  RTX série 30 ou mais nova**. Roda num processo separado, pela fila de tarefas. O que você recorta é seu
+  e pode ser usado comercialmente; empresas com faturamento anual acima de US$ 20 milhões precisam de
+  licença da Corridor (corridorkey.com).
 
 ### Alterado
 - Atalhos: no modo Edição, **M** agora põe um marcador, e o som da prévia passa para **Shift+M**, que vale

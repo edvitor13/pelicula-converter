@@ -61,6 +61,10 @@ MODULES: tuple[Module, ...] = (
            N_("Histograma, forma de onda, parada RGB e vetorscópio."), "cor"),
     Module("curva", N_("Gráfico da curva"),
            N_("Curva de entrada e saída do look em vermelho, verde e azul."), "cor"),
+    Module("recorte_ia", N_("Recorte por IA (CorridorKey)"),
+           N_("Tira o fundo verde ou azul de um vídeo com o CorridorKey, da Corridor Digital, e grava o vídeo com "
+              "transparência e a máscara. Precisa de uma placa NVIDIA RTX série 30 ou mais nova e de um download à "
+              "parte em Componentes."), "edicao", BETA, requires=("corridorkey",)),
     Module("medidor_som", N_("Medidor de som"),
            N_("Pico e volume (LUFS) do som durante a reprodução."), "audio"),
     Module("davinci", N_("Plugin do DaVinci Resolve"),

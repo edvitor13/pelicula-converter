@@ -56,7 +56,12 @@ pelicula/
   loudnorm.py                volume alvo da exportação: loudnorm do ffmpeg em duas passadas (measure, filter_for)
   deps.py                    versão do ffmpeg, download verificado (gyan.dev / BtbN), extract_archive(), pip_install()
   tools.py                   componentes externos (sem Qt): registro TOOLS (versão e SHA-256 fixos), download e
-                             instalação atômica, remover, espaço em disco, detecção de programas do sistema
+                             instalação atômica, remover, espaço em disco, detecção de programas do sistema;
+                             receitas de IA (Recipe: código por manifesto + ambiente Python pelo uv com lista
+                             travada + modelos retomáveis), build_env(), fetch_file(), run_process()
+  corridorkey.py             CorridorKey (módulo Beta recorte_ia, sem Qt): placa NVIDIA 8.0+ (nvidia-smi),
+                             linha de comando e progresso do infer.py, run() num processo separado
+  data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/)
   jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
   notify.py                  notificações do sistema (sem Qt): tipos KINDS, preferências notificacoes/…, decide(),
                              textos (Notice), resumo da fila
@@ -91,6 +96,7 @@ pelicula/
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             corridorkey_dialog (Recorte por IA, Beta);
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
@@ -101,7 +107,8 @@ pelicula/
 plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): openfx/ (OpenFX 1.4, BSD-3),
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
-tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated)
+tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated),
+                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
                              (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
                              <nome>_ui_cases.py de widgets num subprocesso offscreen)
@@ -162,7 +169,9 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     é biblioteca padrão. Nada de Pillow, OpenCV, SciPy, requests. O ffmpeg é externo e só é baixado
     de fontes confiáveis com conferência de SHA-256 (`deps.py`). Outras ferramentas externas (IA etc.)
     são **componentes baixados à parte**, nunca dentro do pacote, com versão e SHA-256 fixos no código
-    (`tools.py`, receita "Nova ferramenta externa").
+    (`tools.py`, receita "Nova ferramenta externa"); as de Python (PyTorch etc.) rodam num ambiente
+    próprio montado pelo uv e **sempre num processo separado**, nunca no processo do app (receita
+    "Novo ambiente Python (uv)").
 11. **Multiplataforma.** Use `system.open_path()`/`system.reveal()` em vez de `os.startfile`/`explorer`,
     `Perf.popen_kwargs()` para prioridade de processos e `media.NO_WINDOW` só no Windows. Caminhos
     do Windows ficam atrás de `sys.platform == "win32"`. O macOS fica desativado
@@ -278,7 +287,10 @@ do app vai para uma pasta temporária via `LOCALAPPDATA`/`XDG_DATA_HOME`):
 |---|---|
 | `tests/test_tools.py` | registro consistente (ids, https, SHA-256, módulos), instalação atômica e relatada, SHA-256 ou tamanho errado não instala nada, caminhos suspeitos em zip/tar, cancelar, atualizar/manter versões, remover, espaço em disco, ffmpeg pelo fluxo de `deps.py`, detecção do Resolve |
 | `tests/test_jobs.py` | fila: ordem dos eventos, erros, cancelar (na espera e rodando), um trabalho de GPU por vez, 200 trabalhos de 8 threads |
-| `tests/test_componentes_ui.py` | página Componentes e ponte do Qt em subprocesso *offscreen*: baixar/remover pela fila, progresso e cancelar, erro de SHA-256, licença com aceite, `show_deps`, sinais na thread principal |
+| `tests/test_componentes_ui.py` | página Componentes e ponte do Qt em subprocesso *offscreen*: baixar/remover pela fila, progresso e cancelar, erro de SHA-256, licença com aceite, `show_deps`, sinais na thread principal; receitas: requisitos, download incompleto, Testar, créditos e licenças do CorridorKey |
+| `tests/test_ambiente.py` | receita de ambiente Python com o uv falso (`tests/uv_falso.py`): dois ambientes que não se tocam, retomada depois de cair, download com `Range`, SHA-256 errado, cancelar, código conferido por manifesto, instalação inteira e troca de pasta |
+| `tests/test_corridorkey.py` / `test_corridorkey_ui.py` | requisitos pelo `nvidia-smi` falso, instalação falsa no formato do CorridorKey, recorte com `infer.py` falso num processo de verdade (PATH, pasta parcial, cancelar, erros), janela do recorte |
+| `tests/test_corridorkey_real.py` | **manual**: `PELICULA_TESTE_CORRIDORKEY=1` (e `PELICULA_TEST_TIMEOUT=0`) baixa ~7,6 GB das fontes oficiais em `PELICULA_TESTE_CORRIDORKEY_DIR` e recorta um clipe 1080p na placa NVIDIA |
 
 Notificações e recuperação (a pasta do app vai para uma pasta temporária; nenhuma notificação de verdade
 aparece: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos):
@@ -550,7 +562,15 @@ downloads separados, com um cartão em Configurações › Componentes.
 3. **Licença**: confira a do programa **e a dos pesos/modelos** — nada de licença não comercial
    (CC-BY-NC e afins) nem "só para pesquisa". Preencha `license`/`license_url`. Licença com condições
    (atribuição, avisos, uso aceitável) → texto em `consent` (PT-BR, `N_()`): a página pede o aceite do
-   usuário antes de baixar.
+   usuário antes de baixar. Modelos de terceiros que o componente baixa vão em `Tool.licenses`
+   (o quê, licença, link `https`).
+   **Exceção aprovada (27/10/2026): o CorridorKey** (Corridor Key Licence, CC BY-NC-SA 4.0 com termos
+   adicionais que permitem uso comercial). Ele é baixado **à parte, das fontes oficiais** (GitHub da
+   Corridor e Hugging Face, commits e revisões fixos), **direto no computador do usuário** — nunca
+   redistribuído nem espelhado (nada no repositório, no pacote ou numa release do projeto); o app
+   continua gratuito e MIT; o que o usuário recorta é dele; o cartão e a janela mostram o nome
+   "CorridorKey", os créditos da Corridor Digital e a regra das empresas acima de US$ 20 milhões. Outra
+   exceção precisa de decisão do dono do projeto.
 4. **Pasta**: sempre `deps.app_data_dir()/ferramentas/<id>/<versão>/`, montada por `tools.download()`
    (SHA-256 conferido antes de extrair, troca atômica, `pelicula-origem.json`), só para o usuário, sem
    administrador e sem rodar instaladores. O `id` é ASCII sem acento e **nunca muda** (é o nome da pasta).
@@ -569,6 +589,41 @@ Programa do sistema (instalado pelo usuário, como o DaVinci Resolve): `kind=too
 `artifacts`, e uma função em `tools.DETECTORS` que só lê (pastas padrão, lista de desinstalação do
 Windows) — o app não instala nem baixa nada. O ffmpeg (`backend="ffmpeg"`) é a exceção documentada
 ao modelo de versão fixa: não copie o fluxo dele para ferramentas novas.
+
+### Novo ambiente Python (uv)
+
+Para ferramentas de IA em Python (PyTorch, CUDA, modelos), use uma **receita** em vez de um `Artifact`
+(`Tool(backend="receita", recipe=tools.Recipe(...))`; exemplo completo: `tools.CORRIDORKEY_RECIPE`;
+detalhes em `docs/ARQUITETURA.md`, seção 21):
+
+1. **Lista travada com hash** em `pelicula/data/<id>/`: escreva `requirements.in` (versões exatas onde
+   importa) e gere, para cada sistema, com o uv fixado (`tools.UV_VERSION`):
+   `uv pip compile requirements.in --generate-hashes --torch-backend cu128 --python-version 3.12
+   --python-platform x86_64-pc-windows-msvc|x86_64-manylinux_2_28 --system-certs --no-header -o
+   requirements-<sistema>.txt` e ponha o comando no topo do arquivo. Só wheels (`--only-binary :all:` na
+   instalação), nada de `git+` nem `http://`.
+2. **`PythonEnv`**: versão exata do Python (uma que o uv fixado ofereça), índice do PyTorch (`cu128`,
+   outro CUDA ou `cpu`), as listas por sistema e o tamanho baixado (`size`, para o progresso).
+3. **Código**: zip do commit em `codeload.github.com` (`SourceZip`) + manifesto de
+   `tools/gerar_manifesto.py <repo> <commit> pelicula/data/<id>/codigo-<commit>.sha256 --pular "*.bat"`
+   (confere cada arquivo contra o blob do git). Pacote Python sem wheel: `SourceZip(package=True)`.
+4. **Modelos**: `Piece(url com revisão fixa, sha256, tamanho, destino)` — o SHA-256 do LFS publicado pelo
+   Hugging Face (ou conferido com o hash publicado pelo autor), nunca lido na hora do download.
+5. **Teste da receita** (`check` + `check_env`): um script deles que carrega o modelo **sem rede**; ele
+   roda antes de a instalação valer e no botão Testar.
+6. **Requisitos** que não dependem de espaço (placa, sistema): uma função em `tools.REQUIREMENTS[id]`
+   que devolve os motivos (PT-BR); o cartão os mostra no lugar do download.
+7. **Rodar**: sempre `tools.run_process([python, script, ...], cwd=..., env=tools.runtime_environ(...),
+   cancel=job.cancel_event, on_line=...)` num trabalho da fila (GPU) — nunca importe torch no app.
+   Arquivos do usuário: pasta parcial e troca no fim ("Gravar arquivos do usuário"). Teste caminhos
+   com acentos: no Windows o `cv2.imread` não abre (veja `corridorkey._ascii_copy`).
+8. **Tamanhos** (`download_size`, `disk_size`, `env.size`): meça numa instalação de verdade.
+9. **Testes** com o uv falso (`tests/uv_falso.py`) e uma receita falsa (`test_ambiente.fake_recipe`);
+   um teste manual de ponta a ponta atrás de uma variável de ambiente (como `test_corridorkey_real.py`).
+
+Pastas: `ferramentas/<id>/python` (Python base, fora da pasta trocada: o venv `--relocatable` aponta para
+ele), `ferramentas/<id>/<versão>/venv` e `ferramentas/<id>/cache` (downloads retomáveis; a limpeza de
+12 h não mexe; apagado depois da instalação).
 
 ### Trabalho em segundo plano (fila de tarefas)
 

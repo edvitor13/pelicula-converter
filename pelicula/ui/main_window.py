@@ -568,6 +568,10 @@ class MainWindow(QMainWindow):
         self.act_resolve_sep = menu.addSeparator()
         self.act_resolve = menu.addAction(icons.icon("davinci", theme.TEXT, 16), _("Plugin para o DaVinci Resolve…"),
                                           self.show_resolve)
+        # Módulo Beta "recorte_ia": só aparece ligado e com o componente instalado (ver apply_modules).
+        self.act_corridorkey = menu.addAction(icons.icon("matte", theme.TEXT, 16), _("Recorte por IA (CorridorKey)…"),
+                                              self.show_corridorkey)
+        menu.aboutToShow.connect(self._sync_corridorkey_action)
         menu.addSeparator()
         menu.addAction(_("Atalhos do teclado"), self.show_shortcuts)
         menu.addAction(_("Sobre o {app}").format(app=APP_NAME), self.about)
@@ -2722,6 +2726,15 @@ class MainWindow(QMainWindow):
         self._uploaded = None
         self.render_now()
 
+    def show_corridorkey(self) -> None:
+        """Recorte por IA (módulo Beta): janela não modal; o CorridorKey roda num processo separado, pela fila."""
+        from .corridorkey_dialog import open_for
+        open_for(self)
+
+    def _sync_corridorkey_action(self) -> None:
+        from .. import corridorkey
+        self.act_corridorkey.setVisible(modules.is_enabled(self.settings, "recorte_ia") and corridorkey.available())
+
     # ================================================================ configurações
     def show_settings(self, page: str = "geral") -> None:
         """Janela de Configurações; as mudanças chegam em `settings_changed`."""
@@ -2780,6 +2793,7 @@ class MainWindow(QMainWindow):
         self._meter_enabled = "medidor_som" in on
         self._meter_source()  # desligado: nem decodifica nem mede
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
+        self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
         self._check_modules()
 
     def _check_modules(self) -> None:

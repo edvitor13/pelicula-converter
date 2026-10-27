@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from pelicula import deps, modules, tools
+from pelicula.i18n import _
 from pelicula.tools import Artifact, Tool
 
 EXE = ".exe" if sys.platform == "win32" else ""
@@ -118,11 +119,16 @@ def test_registry_is_consistent():
         assert t.name and t.description and t.icon and t.license
         assert t.homepage.startswith("https://") and t.license_url.startswith("https://")
         assert set(t.modules) <= module_ids, f"{t.id}: módulo desconhecido"
-        assert t.backend in ("", "ffmpeg")
+        assert t.backend in ("", "ffmpeg", "receita")
+        assert (t.backend == "receita") == (t.recipe is not None), f"{t.id}: receita só com backend 'receita'"
         if t.kind == tools.SISTEMA:
             assert not t.artifacts and t.id in tools.DETECTORS, f"{t.id}: programa do sistema precisa de detector"
         if t.backend == "" and t.kind == tools.BAIXADO:
             assert t.artifacts, f"{t.id}: ferramenta baixada sem artefato"
+        for what, lic, url in t.licenses:
+            assert what and lic and url.startswith("https://"), f"{t.id}: licença de terceiros sem link https"
+        if t.recipe is not None:
+            check_recipe(t)
         platforms = [a.platform for a in t.artifacts]
         assert len(platforms) == len(set(platforms)), f"{t.id}: dois artefatos para o mesmo sistema"
         for a in t.artifacts:
@@ -138,6 +144,50 @@ def test_registry_is_consistent():
                 assert "github.com/edvitor13/pelicula-converter/releases/" in a.url
     for m in modules.MODULES:
         assert set(m.requires) <= set(ids), f"módulo {m.id} pede ferramenta desconhecida"
+
+
+def check_recipe(t: tools.Tool) -> None:
+    """Receita fixa tudo: commits, hashes e tamanhos; listas travadas com hash; nada fora de https."""
+    hex64 = re.compile(r"[0-9a-f]{64}")
+    rec = t.recipe
+    assert t.kind == tools.BAIXADO and not t.artifacts
+    assert re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", rec.version), rec.version
+    assert set(rec.platforms()) <= set(tools.PLATFORMS) and rec.platforms()
+    assert re.fullmatch(r"3\.\d+\.\d+", rec.env.python), "versão exata do Python"
+    for key, rel in rec.env.requirements.items():
+        text = tools.data_path(rel).read_text(encoding="utf-8")
+        reqs = [ln for ln in text.splitlines() if ln and not ln.startswith((" ", "#"))]
+        assert reqs and all("==" in ln for ln in reqs), f"{rel}: toda biblioteca com versão exata"
+        assert text.count("--hash=sha256:") >= len(reqs), f"{rel}: toda biblioteca com hash"
+        assert "git+" not in text and "http://" not in text
+        assert rec.download_size.get(key, 0) > 0 and rec.disk_size.get(key, 0) > rec.download_size[key] // 2
+        assert rec.env.size.get(key, 0) > 0
+    for z in rec.code:
+        assert z.url.startswith("https://codeload.github.com/") and re.search(r"/zip/[0-9a-f]{40}$", z.url), z.url
+        assert tools.read_manifest(z.manifest)
+    dests = [p.dest for p in rec.files]
+    assert len(dests) == len(set(dests))
+    for p in rec.files:
+        assert p.url.startswith("https://") and hex64.fullmatch(p.sha256) and p.size > 0, p.dest
+        assert deps.safe_member(p.dest) and "\\" not in p.dest and not p.dest.endswith(".pth.tar")
+        assert "/resolve/" not in p.url or re.search(r"/resolve/[0-9a-f]{40}/", p.url), f"revisão fixa: {p.url}"
+    assert rec.workdir and rec.check
+
+
+def test_corridorkey_recipe_pins_the_layout_of_download_weights():
+    rec = tools.CORRIDORKEY.recipe
+    dests = {p.dest for p in rec.files}
+    for need in ("codigo/weights/corridorkey_v2.safetensors", "codigo/weights/foundation_stats.safetensors",
+                 "codigo/vfms/cradio/C-RADIOv4-SO400M/model.safetensors", "codigo/vfms/cradio/C-RADIOv4-SO400M/hf_model.py",
+                 "codigo/vfms/moge/model.pt", "codigo/vfms/rvm/pretrain_rvm_small16_256_204031069.npz"):
+        assert need in dests, need
+    assert rec.check == ("scripts/smoke_test_runtime.py", "--load_model")
+    assert rec.check_env == {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+    assert rec.env.torch == "cu128" and tools.CORRIDORKEY.modules == ("recorte_ia",)
+    assert {z.dest for z in rec.code} == {"codigo", "utils3d"} and any(z.package for z in rec.code)
+    names = " ".join(_(n) for n in tools.CORRIDORKEY.notes)
+    assert "CorridorKey" in names and "Corridor Digital" in names and "20" in names
+    assert modules.get("recorte_ia").status == modules.BETA
 
 
 def test_get_and_used_by(monkeypatch):

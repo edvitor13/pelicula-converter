@@ -74,10 +74,11 @@ def version_info(description, filename):
     )
 
 
-# Dados lidos em tempo de execução. As pastas de traduções e de novidades são lidas pelo app
-# com Path(__file__).parent / "locales" (ou "novidades"); entram só se existirem.
+# Dados lidos em tempo de execução. As pastas de traduções, de novidades e de dados (listas
+# travadas e manifestos dos componentes de IA) são lidas pelo app com Path(__file__).parent /
+# "locales" (ou "novidades", "data"); entram só se existirem.
 DATAS = [(os.path.join(ROOT, "assets"), "assets")]
-for _sub in ("locales", "novidades"):
+for _sub in ("locales", "novidades", "data"):
     _src = os.path.join(ROOT, "pelicula", _sub)
     if os.path.isdir(_src):
         DATAS.append((_src, os.path.join("pelicula", _sub)))

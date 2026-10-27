@@ -1,0 +1,22 @@
+# Bibliotecas do CorridorKey 2.0 (requirements.txt do commit 485f5e9), com o PyTorch testado pela
+# Corridor (2.9.1 + CUDA 12.8). As listas travadas saem deste arquivo com o uv 0.13.5:
+#   uv pip compile requirements.in --generate-hashes --torch-backend cu128 --python-version 3.12
+#     --python-platform x86_64-pc-windows-msvc -o requirements-windows.txt
+#     --python-platform x86_64-manylinux_2_28  -o requirements-linux.txt
+torch==2.9.1
+torchvision==0.24.1
+numpy>=1.26,<2
+opencv-python>=4.11
+transformers>=4.57,<5
+timm>=1.0
+safetensors>=0.6
+huggingface-hub>=0.36
+einops>=0.8
+scipy>=1.16
+pillow>=11
+tqdm>=4.67
+# O utils3d (commit 83bfa5b) vem do zip do commit, instalado sem dependências e sem baixar nada na
+# hora: as dependências dele e o que o pyproject.toml dele pede para montar o pacote entram aqui.
+moderngl
+setuptools>=61.0
+wheel

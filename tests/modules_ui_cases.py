@@ -401,3 +401,30 @@ def test_features_page_changes_reach_the_window(win):
     APP.processEvents()
     assert all(shown(t) for ts in win._module_tools().values() for t in ts)
     dlg.reject()
+
+
+def test_corridorkey_action_needs_the_beta_module_and_the_component(win, monkeypatch):
+    from pelicula import corridorkey
+    from pelicula.ui import corridorkey_dialog
+    fresh(win)
+    installed = [False]
+    monkeypatch.setattr(corridorkey, "available", lambda root=None: installed[0])
+    assert not shown(win.act_corridorkey), "Beta: começa desligado"
+    set_module(win, "recorte_ia", True)
+    assert not shown(win.act_corridorkey), "sem o componente instalado, sem a ação"
+    installed[0] = True
+    win.btn_settings.menu().aboutToShow.emit()  # instalado em Componentes: aparece ao abrir o menu
+    assert shown(win.act_corridorkey)
+    opened = []
+    monkeypatch.setattr(corridorkey_dialog, "open_for", lambda main: opened.append(main))
+    win.act_corridorkey.trigger()
+    assert opened == [win]
+    set_module(win, "recorte_ia", False)
+    assert not shown(win.act_corridorkey)
+    # tudo estável ligado não liga o Beta
+    page_dlg = SettingsDialog(win, win.settings, "recursos", main=win)
+    page_dlg.settings_changed.connect(win.settings_changed)
+    page_dlg.page("recursos").cards["tudo"].click()
+    APP.processEvents()
+    assert not shown(win.act_corridorkey) and not modules.is_enabled(win.settings, "recorte_ia")
+    page_dlg.reject()
