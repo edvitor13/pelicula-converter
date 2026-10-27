@@ -1,3 +1,18 @@
+## Version 1.4.0 — October 27, 2026
+
+**Exports ready for every platform, markers and chapters, AI keying and an app your way.**
+
+- 📱 **Ready for every platform.** When exporting, pick the platform (YouTube, Shorts, Reels, Stories, TikTok, Kwai, WhatsApp and more, 27 in all) and the app fills in the frame, codec, sound and limits. Crop, add black bars or a blurred background, choose the file size and the loudness. The preview shows the safe area, where the platform's buttons cover the video.
+- 📍 **Markers and chapters.** In Edit mode, the M key adds a marker, with a color, name and note. The ones you set as chapters become ready-to-paste text for the YouTube description and go into the MP4, MOV or MKV file.
+- ⌨️ **The preview sound has a new key.** It is now **Shift+M**, in both modes. In Film mode, M still works as before.
+- 🔊 **Better sound.** An audio meter next to the preview (peaks and loudness in LUFS), smooth audio crossfades between clips and splices without clicks.
+- ✂️ **AI keying (Beta).** Remove the green or blue background from a video with CorridorKey, by Corridor Digital. It starts turned off: turn it on in Settings → Features by checking *Show features in testing*. It is a separate download of about 7.6 GB and needs an NVIDIA RTX 30 series card or newer.
+- 🧩 **An app your way.** In Settings → Features, keep only the tools you use, one by one or by profile (Simple, Creator, Cinema or Everything). Turning one off only hides it: your projects still render the same. In Components you can see, download, update and remove the extra programs, such as ffmpeg.
+- 🔔 **Notifications and recovery.** The app tells you when an export finishes, even with the window minimized. If it closes unexpectedly, the next time it opens it offers to recover the project and the export queue.
+- 📷 **Phone HDR.** HDR videos (HLG and PQ, like the iPhone's) are detected and converted automatically.
+- 🎨 **S-Log3, V-Log and N-Log with the right exposure.** These profiles read the video on the wrong scale. They are correct now, in the DaVinci plugin too, so older projects that use them may look slightly different (up to about ⅓ stop).
+- 🛠️ **Fixes.** Vertical video no longer shrinks in the ready-made qualities; an interrupted export no longer leaves a broken file or deletes the old one; *Tune the encoder for grain* works again; and canceling the close in the update window no longer closes the app.
+
 ## Version 1.3.0 — October 19, 2026
 
 **Edit mode, film Lab and a DaVinci Resolve plugin.**

@@ -1,4 +1,4 @@
-// PeliculaConverter 1.3.0 - nucleo de cor e textura do plugin OpenFX.
+// PeliculaConverter 1.4.0 - nucleo de cor e textura do plugin OpenFX.
 // Gerado por pelicula/ofx.py a partir dos kernels de pelicula/resolve.py. Nao edite: rode
 // "python tools/gerar_ofx.py" (ou pelicula-cli resolve --ofx-fonte DIR).
 #pragma once
