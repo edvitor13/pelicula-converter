@@ -253,6 +253,11 @@ quadros vizinhos:
   atualizar e remover em segundo plano, com progresso e cancelamento. Se o ffmpeg não existir ou estiver
   antigo, o app oferece baixar a versão oficial, conferida por SHA-256, só para o seu usuário (sem
   administrador). Programas instalados no computador (DaVinci Resolve) aparecem como *no sistema*.
+- **Recorte por IA (CorridorKey, Beta)**: tira o fundo verde ou azul de um vídeo com o
+  [CorridorKey](https://github.com/nikopueringer/CorridorKey2.0), da Corridor Digital, e grava o recorte
+  com transparência (ProRes 4444 com alfa) e a máscara, ou EXR. Ligue em **Recursos** e baixe em
+  **Componentes** (download à parte de cerca de 7,6 GB, direto das fontes oficiais); precisa de uma
+  placa **NVIDIA RTX série 30 ou mais nova**. Roda num processo separado, pela fila de tarefas.
 - **Windows 10/11 e Linux**. O macOS está preparado no código e no CI, mas **desativado** por
   enquanto.
 
@@ -471,6 +476,12 @@ extrair, e ficam em `%LOCALAPPDATA%\PeliculaConverter\ferramentas` (Linux:
 `~/.local/share/PeliculaConverter/ferramentas`). Licenças com condições pedem o seu aceite antes do
 download. O ffmpeg é a exceção: como os builds mudam o tempo todo, o app baixa o mais recente e confere
 com o SHA-256 publicado pelo autor do build.
+
+Ferramentas de IA em Python (o CorridorKey) ganham um **ambiente Python próprio**, montado pelo
+[uv](https://github.com/astral-sh/uv) (também baixado e conferido por SHA-256) numa pasta do componente,
+sem mexer no Python do computador: Python e bibliotecas de uma lista travada com o hash de cada arquivo,
+código de um commit fixo conferido arquivo por arquivo e modelos com SHA-256 fixo. Um download
+interrompido continua de onde parou; antes de valer, a instalação passa por um teste sem internet.
 
 ### Dependências e por que cada uma existe
 
@@ -1238,6 +1249,27 @@ requested by the user.
 
 O ffmpeg baixado pelo app não faz parte deste repositório e segue a licença do próprio ffmpeg
 (os builds *essentials* do gyan.dev e os builds do BtbN são GPL).
+
+### Créditos e licenças de terceiros (componentes baixados à parte)
+
+Nada disto vem no repositório, no pacote ou nas releases do PeliculaConverter: cada componente é
+baixado, quando você pede, das fontes oficiais direto para o seu computador.
+
+- **CorridorKey**, da **Corridor Digital** ([código](https://github.com/nikopueringer/CorridorKey2.0),
+  [pesos](https://huggingface.co/nikopueringer/CorridorKey2.0)) —
+  [Corridor Key Licence](https://github.com/nikopueringer/CorridorKey2.0/blob/485f5e9ab759ead6138cc990776184b59d6ea971/LICENSE)
+  (CC BY-NC-SA 4.0 com termos adicionais, que valem primeiro). Você pode usar o CorridorKey em
+  qualquer trabalho legal, inclusive comercial, e **o que você recortar é seu**. Não é permitido
+  revender, redistribuir nem cobrar pelo acesso ao CorridorKey ou aos pesos, nem oferecer o recorte como
+  serviço pago. **Empresas com faturamento anual acima de US$ 20 milhões** precisam comprar uma licença
+  por pessoa em corridorkey.com. O PeliculaConverter continua gratuito e MIT.
+- Modelos de terceiros que o CorridorKey usa: **C-RADIOv4** (NVIDIA,
+  [NVIDIA Open Model License](https://developer.download.nvidia.com/licenses/nvidia-open-model-license-agreement-june-2024.pdf)),
+  **MoGe-2** (Microsoft, [MIT](https://github.com/microsoft/MoGe/blob/main/LICENSE)) e **RVM**
+  (Google DeepMind, [representations4d](https://github.com/google-deepmind/representations4d): código
+  Apache-2.0, pesos CC-BY 4.0).
+- **uv**, da Astral ([MIT / Apache-2.0](https://github.com/astral-sh/uv)), monta o ambiente Python;
+  o PyTorch e as outras bibliotecas seguem as próprias licenças.
 
 ## Aviso legal
 

@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -329,6 +329,45 @@ def _promote(src: Path, dst: Path) -> None:
         system.replace_file(src, dst)
 
 
+def short_path(path: str | Path) -> str:
+    """No Windows, o nome curto (8.3) do caminho, só com ASCII quando o disco guarda esses nomes."""
+    s = str(path)
+    if sys.platform != "win32" or s.isascii():
+        return s
+    import ctypes
+    from ctypes import wintypes
+    fn = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    fn.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    fn.restype = wintypes.DWORD
+    size = fn(s, None, 0)
+    if size:
+        buf = ctypes.create_unicode_buffer(size)
+        if fn(s, buf, size):
+            return buf.value
+    return s
+
+
+def _ascii_copy(src: Path, temp: Path, made: list[Path]) -> str:
+    """Cópia da máscara num caminho só com ASCII: no Windows, o OpenCV deles (`cv2.imread`) não abre
+    caminhos com acentos (vídeos abrem: passam pelo FFmpeg). Tenta a pasta temporária do recorte (pelo
+    nome curto) e, se o nome do usuário tiver acentos num disco sem nomes curtos, a pasta ProgramData."""
+    ext = src.suffix.lower() if src.suffix.isascii() else ".png"
+    program_data = Path(os.environ.get("ProgramData") or r"C:\ProgramData") / "PeliculaConverter" / "tmp"
+    for folder in (temp, program_data):
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"dica-{secrets.token_hex(3)}{ext}"
+            shutil.copy2(src, target)
+        except OSError:
+            continue
+        made.append(target)
+        short = short_path(target)
+        if short.isascii():
+            return short
+    raise CorridorKeyError(_("O CorridorKey não abre a máscara num caminho com acentos neste computador. Copie a "
+                             "imagem para uma pasta sem acentos (por exemplo, C:\\mascaras) e escolha de novo."))
+
+
 def _failure(res: tools.ProcessResult) -> CorridorKeyError:
     low = "\n".join(res.lines).lower()
     if "out of memory" in low:
@@ -383,11 +422,15 @@ def run(opts: Options, progress: Progress | None = None, cancel: threading.Event
             report(*step)
 
     report(_("Iniciando o CorridorKey…"))
+    made: list[Path] = []
     try:
         work.mkdir(parents=True)
         temp.mkdir(parents=True, exist_ok=True)
+        args = opts
+        if sys.platform == "win32" and opts.hint == "mascara" and opts.hint_path and not opts.hint_path.isascii():
+            args = replace(opts, hint_path=_ascii_copy(Path(opts.hint_path), temp, made))
         try:
-            res = tools.run_process(command(inst.python, opts, work, temp), cwd=inst.code,
+            res = tools.run_process(command(inst.python, args, work, temp), cwd=inst.code,
                                     env=environment(ffmpeg_dir), cancel=cancel, on_line=on_line, perf=perf)
         except tools.ToolError as exc:
             raise CorridorKeyError(str(exc)) from exc
@@ -408,6 +451,11 @@ def run(opts: Options, progress: Progress | None = None, cancel: threading.Event
     finally:
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(temp, ignore_errors=True)
+        for f in made:
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def main_output(result: Result) -> Path | None:

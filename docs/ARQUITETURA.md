@@ -24,6 +24,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 16. [Módulos (recursos opcionais)](#16-módulos-recursos-opcionais)
 17. [Componentes externos (`tools.py`)](#17-componentes-externos-toolspy)
 18. [Fila de tarefas (`jobs.py`)](#18-fila-de-tarefas-jobspy)
+19. [Componentes de IA: receitas com o uv e o CorridorKey](#19-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
 
 ---
 
@@ -97,7 +98,9 @@ Três ideias guiam o projeto:
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor), `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial), `measure_speed()`, `save_still()`. |
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
-| `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17). |
+| `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17); receitas de IA (código + ambiente Python pelo uv + modelos): `Recipe`, `build_env()`, `fetch_file()` retomável, `install_recipe()`, `run_process()` (seção 19). |
+| `pelicula/corridorkey.py` | CorridorKey (módulo Beta `recorte_ia`): requisitos da placa (`nvidia-smi`, capacidade 8.0+), linha de comando e progresso do `infer.py`, `run()` num processo separado com pasta parcial, aviso de entrada (log/HDR/RAW). Sem Qt (seção 19). |
+| `pelicula/data/` | Dados lidos em tempo de execução: listas travadas com hash e manifestos de código das receitas (`corridorkey/`). Gerados por `uv pip compile` e `tools/gerar_manifesto.py`. |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
 | `pelicula/system.py` | Processador, núcleos, RAM, GPUs NVIDIA (`nvidia-smi`), abrir pasta/arquivo no sistema, gravação segura (`partial_path`, `replace_file`, `atomic_write`). |
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
@@ -115,6 +118,7 @@ Três ideias guiam o projeto:
 | `pelicula/ui/edit_panels.py` | `MediaBin` (Mídia) e `ClipInspector` (ajustes do clipe gerados de `editparams`). |
 | `pelicula/ui/scopes.py` | Medidores: histograma, forma de onda, parada RGB e vetorscópio. |
 | `pelicula/ui/sequence_dialog.py` / `resolve_dialog.py` | Resolução e fps da sequência; instalação do plugin do DaVinci. |
+| `pelicula/ui/corridorkey_dialog.py` | Janela não modal "Recorte por IA (CorridorKey)": arquivo, opções e o trabalho GPU na fila (seção 19). |
 | `pelicula/sequence.py` | Quadros da sequência: `grab` (acesso direto), `SequenceReader` (em ordem, com pré-abertura), `media_info`. |
 | `pelicula/audiomix.py` | Mixagem do som da sequência com o ffmpeg (`render_mix`), chave da prévia (`mix_key`), forma de onda (`peaks`). |
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
@@ -857,7 +861,7 @@ Registro dos programas externos que o app usa, mostrado em **Configurações ›
 
 | Tipo | O que o app faz | Exemplos |
 |---|---|---|
-| `BAIXADO` | baixa da fonte oficial, confere o SHA-256 fixo no código e instala na pasta do app | ffmpeg (exceção, veja abaixo); ferramentas de IA nas próximas versões |
+| `BAIXADO` | baixa da fonte oficial, confere o SHA-256 fixo no código e instala na pasta do app | ffmpeg (exceção, veja abaixo); uv; CorridorKey (receita, seção 19) |
 | `SISTEMA` | só detecta (`DETECTORS`, leitura), nunca baixa nem instala | DaVinci Resolve (agora), Blender (depois) |
 
 `Tool`: id ASCII (é o nome da pasta; nunca muda), nome, descrição, ícone de `ui/icons.py`, site
@@ -875,7 +879,8 @@ ou `arquivo`), executáveis dentro da pasta, tamanho extraído e origem.
   com `SHA256SUMS.txt` (`origin=CI`);
 - só `https`; nada de instaladores nem de administrador;
 - licença com condições → `consent` (a página pede o aceite); pesos e modelos com licença não comercial
-  não entram.
+  não entram — com uma exceção registrada no AGENTS.md: o CorridorKey (Corridor Key Licence), baixado à
+  parte das fontes oficiais no computador do usuário, nunca redistribuído (seção 19).
 
 **Exceção: o ffmpeg** (`backend="ffmpeg"`) segue o fluxo de `deps.py` (seção 10). No registro ele
 aparece para a página mostrar versão, local e espaço, atualizar, remover e escolher outra pasta.
@@ -950,3 +955,121 @@ job = bridge().submit(analisar, _("Analisar cenas"), kind=jobs.GPU, key="analise
 - Ligue os sinais a métodos de widgets (o Qt desliga sozinho quando o widget some) e use `on_finished`
   para o que precisa acontecer mesmo com a janela fechada. Outros recursos (as notificações do sistema,
   por exemplo) podem ouvir `bridge().finished` para avisar quando um trabalho termina.
+
+## 19. Componentes de IA: receitas com o uv e o CorridorKey
+
+Ferramentas de IA não cabem num pacote só: precisam de um código num commit fixo, de um ambiente
+Python próprio (PyTorch com CUDA) e de modelos de gigabytes. Uma **receita** (`Tool.recipe`,
+`backend="receita"`) descreve tudo isso com versões e hashes fixos no código; `tools.download()` chama
+`install_recipe()`. A primeira receita é o **CorridorKey 2.0** (Corridor Digital), no módulo Beta
+`recorte_ia`; a 1.8 reaproveita a mesma receita para o ambiente PyTorch próprio da "Cor por planos".
+
+```python
+Recipe(version="2.0-485f5e9",
+       env=PythonEnv(python="3.12.15", torch="cu128",                       # índice do PyTorch (ou "cpu")
+                     requirements={"win32": "corridorkey/requirements-windows.txt",   # pelicula/data/
+                                   "linux": "corridorkey/requirements-linux.txt"},
+                     size={"win32": ..., "linux": ...}),                   # bytes baixados (progresso)
+       code=(SourceZip(codeload_url_do_commit, "corridorkey/codigo-485f5e9.sha256", dest="codigo"),
+             SourceZip(utils3d_url, "corridorkey/utils3d-83bfa5b.sha256", dest="utils3d", package=True)),
+       files=(Piece(url_com_revisao_fixa, sha256, tamanho, "codigo/weights/..."), ...),
+       workdir="codigo", check=("scripts/smoke_test_runtime.py", "--load_model"),
+       check_env={"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
+       download_size={...}, disk_size={...})
+```
+
+**O uv** (Astral, 0.13.5) é um componente `BAIXADO` comum (`tools.UV`, SHA-256 fixo); `uv_command()` baixa a
+versão `UV_VERSION` se faltar e guarda as outras (`keep_old`: cada receita usa a versão com que foi
+testada). `build_env(spec, venv, python_dir=, cache=, uv=)` é a receita genérica:
+
+1. `uv python install <versão> --install-dir <ferramentas/<id>/python> --no-bin [--no-registry]` — o Python
+   base (python-build-standalone, conferido pelo próprio uv) numa pasta do componente, sem atalhos no
+   PATH nem registro do Windows; `uv python find --managed-python` confirma que é o dessa pasta;
+2. `uv venv <venv> --relocatable`;
+3. `uv pip install --require-hashes --only-binary :all: -r <lista travada> --torch-backend <índice>
+   --system-certs` (o antigo `--native-tls`: certificados do sistema, que funcionam com antivírus que
+   examinam HTTPS; o uv 0.13 avisa que `--native-tls` saiu);
+4. pacotes locais já conferidos (`SourceZip(package=True)`) com `--no-deps --no-build-isolation --offline`.
+
+O uv roda com `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_NO_CONFIG=1`, `UV_PYTHON_DOWNLOADS=manual` e sem as
+variáveis `UV_*`, `PIP_*`, `PYTHON*`, `VIRTUAL_ENV`, `CONDA_*` do usuário (`clean_environ`). As listas
+travadas saem de `uv pip compile requirements.in --generate-hashes --torch-backend cu128 --python-version
+3.12 --python-platform <alvo>` (o comando está no topo de cada arquivo); os manifestos de código, de
+`tools/gerar_manifesto.py repo commit saída`, que confere cada arquivo do zip contra o blob do git no commit.
+
+**Instalação** (`install_recipe`), numa ordem que mostra cedo os problemas comuns (rede, TLS, espaço):
+
+```
+requisitos (REQUIREMENTS[id]: placa; espaço livre) → uv → código (zip do commit, conferido arquivo por
+arquivo; .bat/.sh deles ficam de fora) → Python e bibliotecas (build_env) → modelos (fetch_file) →
+teste da receita (check, sem rede) → troca .novo-* → <versão> → o Python ainda roda na pasta nova
+(sys.prefix) → pelicula-origem.json → apaga o cache
+```
+
+Duas armadilhas e como foram resolvidas:
+
+- **O venv não é relocável e a pasta `.novo-*` muda de nome no fim.** O Python base fica fora da pasta
+  trocada (`ferramentas/<id>/python`), o venv é criado com `--relocatable` (scripts e `pyvenv.cfg` sem o
+  caminho da pasta temporária) e, depois da troca, `python -c "import sys; print(sys.prefix)"` confere que
+  o ambiente aponta para a pasta final — só então o marcador é gravado. A troca tenta de novo por até 30 s
+  (o antivírus do Windows segura por instantes o `python.exe` recém-criado).
+- **`_clean_stale()` apaga `.novo-*` com mais de 12 h** (um download de 7 GB pode passar disso, e o
+  usuário pode continuar outro dia). Tudo o que é retomável fica em `ferramentas/<id>/cache/`, que a
+  limpeza nunca toca: `cache/uv` (wheels já baixadas — o uv não continua um arquivo pela metade, mas não
+  baixa de novo os inteiros) e `cache/arquivos/<sha256>` (modelos; `fetch_file` continua o `.part` com
+  `Range` e confere o SHA-256 antes do nome final). Os modelos entram na instalação por *hard link*
+  (instantâneo; sem suporte, movendo e devolvendo ao cache se algo falhar). O cache só é apagado depois
+  da instalação; "Remover" apaga tudo, inclusive um download incompleto. Já a pasta `.novo-*` de uma
+  instalação cujo app fechou ou travou no meio (gigabytes do venv) sai na próxima instalação, sem esperar
+  12 h: ela guarda o PID do dono em `.dono` (`_clean_orphans`).
+
+`run_process(cmd, cwd=, env=, cancel=, on_line=, timeout=)` roda programas externos lendo a saída linha a
+linha (também as terminadas em `\r`), num grupo próprio sem janela (`CREATE_NEW_PROCESS_GROUP | NO_WINDOW`;
+`start_new_session` no Linux); cancelar encerra o processo e os filhos (`taskkill /T /F`, `killpg`).
+`runtime_environ()` dá o ambiente do Python da receita: saída sem buffer em UTF-8, `PYTHONNOUSERSITE`,
+caches do Hugging Face e do PyTorch na pasta do app e pastas na frente do PATH.
+
+**Página Componentes** com receita: requisitos que faltam no lugar do botão de baixar (`Status.blocked`),
+download incompleto guardado (`Status.partial`, "Continuar download"), créditos (`Tool.notes`), licenças
+dos modelos de terceiros (`Tool.licenses`), selo com o SHA-256 da receita (listas, manifestos e modelos) e
+o botão **Testar** (`test_installed`, trabalho `GPU` na fila). O tamanho da pasta é guardado por pasta
+(`recipe_size`), sem varrer dezenas de milhares de arquivos a cada atualização.
+
+**CorridorKey** (`corridorkey.py`, sem Qt):
+
+- requisitos: `nvidia-smi --query-gpu=index,name,memory.total,driver_version,compute_cap` — precisa de
+  capacidade 8.0+ (bfloat16: RTX série 30 em diante); nenhum número de driver é fixado (o teste da
+  instalação confirma CUDA). Com várias placas, o recorte usa a melhor (`CUDA_VISIBLE_DEVICES`);
+- instalação: código no commit `485f5e9`, `utils3d` no commit `83bfa5b`, pesos na revisão `cf44a8d` do
+  Hugging Face e os três modelos de terceiros (C-RADIOv4, MoGe-2, RVM) nas revisões e pastas do
+  `scripts/download_weights.py` desse commit (sem os `*.pth.tar`);
+- `run(opts)`: `<python do ambiente> infer.py --input … --output_dir <pasta parcial> --outputs cutout alpha
+  [fg checker] [--output_format exr] --despill_strength … --temp_dir <cache do app>/corridorkey/… [dica]
+  [--low_vram]`, com cwd na pasta do código, o ffmpeg do app primeiro no PATH (eles gravam com o ffmpeg do
+  PATH: `prores_ks -profile:v 4 -pix_fmt yuva444p10le` para o recorte), `HF_HUB_OFFLINE=1`,
+  `TRANSFORMERS_OFFLINE=1`. O progresso vem das linhas deles (`ProgressParser`: carregando, quadros,
+  análises, `window i/N`; depois da última janela, uns 40 s sem saída viram "Gravando os arquivos…").
+  Caminhos com acentos: vídeos (entrada, dica, saída, EXR) passam, porque eles abrem vídeo pelo FFmpeg;
+  já a máscara do primeiro quadro é lida com `cv2.imread`, que no Windows não abre caminho com acento,
+  então vai uma cópia num caminho só com ASCII (nome curto 8.3 na pasta temporária do recorte ou em
+  `%ProgramData%`), apagada no fim. Os arquivos (`<clipe>_cutout.mov`, `_alpha.mp4`, `_fg.mp4`,
+  `_checker_comp_despill050.mp4`, pastas `_exr`, `_settings.txt`) saem em
+  `<saída>/<clipe>-corridorkey.parcial-pelicula/` e só trocam de lugar no fim; cancelado ou com erro,
+  nada muda no destino;
+- **nunca roda no processo do app** (PyTorch, CUDA e os `.py` da NVIDIA que o C-RADIO executa ficam no
+  processo filho); a renderização do app nunca usa o CorridorKey;
+- entrada Rec.709: `source_warning()` avisa para RAW (codec/extensão), HDR (`media.detect_profile`) e
+  perfil de entrada log do look; converter antes fica para depois.
+
+Na janela: ação "Recorte por IA (CorridorKey)…" no menu Configurações, visível só com o módulo ligado e o
+componente instalado (`MainWindow._sync_corridorkey_action`, chamada em `apply_modules` e ao abrir o
+menu — fora de `_module_tools`, porque Beta começa desligado). `ui/corridorkey_dialog.py` usa o arquivo
+aberto (Película) ou o arquivo de origem do clipe de vídeo selecionado (Edição) e põe o trabalho na fila
+com a chave `recorte_ia`; a janela pode ser fechada e mostra o andamento ao reabrir.
+
+**Testes**: `test_ambiente.py` (uv falso `tests/uv_falso.py`: dois ambientes que não se tocam, retomada,
+hash errado, cancelar, instalação inteira e troca de pasta), `test_corridorkey.py` (requisitos pelo
+`nvidia-smi` falso, instalação falsa no formato do CorridorKey e `infer.py` falso num processo de
+verdade), `corridorkey_ui_cases.py` e casos em `componentes_ui_cases.py`/`modules_ui_cases.py`. O teste
+de ponta a ponta de verdade (`test_corridorkey_real.py`, ~7,6 GB) só roda com
+`PELICULA_TESTE_CORRIDORKEY=1` e instala em `PELICULA_TESTE_CORRIDORKEY_DIR`.

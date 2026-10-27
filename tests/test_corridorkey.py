@@ -105,6 +105,8 @@ p.add_argument("--hint_quality", type=float); p.add_argument("--low_vram", actio
 a = p.parse_args()
 pathlib.Path(os.environ["PCTEST_ARGS"]).write_text(repr(sys.argv[1:]) + "\\n" + os.environ["PATH"], encoding="utf-8")
 assert os.environ["HF_HUB_OFFLINE"] == "1"
+if a.hint_first_frame:
+    assert pathlib.Path(a.hint_first_frame).read_bytes() == b"mascara", a.hint_first_frame
 if os.environ.get("PCTEST_FALHAR"):
     print("torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB", flush=True)
     sys.exit(1)
@@ -298,6 +300,23 @@ def test_cancel_kills_the_process_and_writes_nothing(installed_ck, ffmpeg_dir, c
         corridorkey.run(corridorkey.Options(input=str(clip), output_dir=str(out)), progress, cancel)
     assert time.monotonic() - t0 < 30, "cancelar encerra o processo na hora"
     assert list(out.iterdir()) == [] and not list(corridorkey.temp_dir().iterdir())
+
+
+def test_mask_with_accents_reaches_opencv_by_an_ascii_path(installed_ck, ffmpeg_dir, clip, monkeypatch, tmp_path):
+    """No Windows o cv2.imread deles não abre caminhos com acentos (visto no teste real): vai uma cópia."""
+    mask = tmp_path / "máscaras ção" / "início.png"
+    mask.parent.mkdir()
+    mask.write_bytes(b"mascara")
+    res, _stages, seen = key(clip, tmp_path / "saída", monkeypatch, tmp_path, hint="mascara", hint_path=str(mask),
+                             hint_quality=0.9)
+    argv = eval(seen.split("\n", 1)[0])  # noqa: S307 — repr de uma lista de strings gravado pelo infer falso
+    used = argv[argv.index("--hint_first_frame") + 1]
+    if sys.platform == "win32":
+        assert used.isascii() and used != str(mask)
+    else:
+        assert used == str(mask)
+    assert not Path(used).exists() and mask.exists(), "a cópia é apagada no fim; o original fica"
+    assert corridorkey.main_output(res).name == "tela verde_cutout.mov"
 
 
 def test_run_needs_the_component(ffmpeg_dir, clip, tmp_path):
