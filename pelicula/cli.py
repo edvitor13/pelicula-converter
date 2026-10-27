@@ -4,17 +4,19 @@ Exemplos:
     pelicula-cli exportar video.mp4 --preset vision3_500t --set grao_forca=1.5 --qualidade mp4
     pelicula-cli projeto meu.plc --criar video.mp4 --preset super8_kodachrome --set scan_on=true
     pelicula-cli exportar meu.plc -o final.mov --qualidade prores_hq --inicio 00:00:05 --fim 00:00:12
+    pelicula-cli exportar video.mp4 --plataforma instagram_reels --encaixe desfocado --grao-redes
+    pelicula-cli exportar video.mp4 --plataforma discord --tamanho-alvo 50   (Nitro Basic)
     pelicula-cli quadro video.mp4 -o quadro.png --tempo 3.5 --preset double_x
     pelicula-cli lut --preset vision3_250d -o 250d.cube
     pelicula-cli resolve --ofx-instalar    (plugin OpenFX: funciona no DaVinci Resolve gratuito)
     pelicula-cli resolve --instalar        (DCTLs do Resolve Studio e LUTs)
     pelicula-cli modulos --perfil criador --ligar laboratorio   (o que aparece na janela)
-    pelicula-cli presets | parametros | qualidades | info video.mp4 | ffmpeg --baixar | versao
+    pelicula-cli presets | parametros | qualidades | plataformas | info video.mp4 | ffmpeg --baixar | versao
 
 Projetos .plc com uma edição (modo Edição) exportam a montagem: cortes, cor dos clipes e som mixado.
 
 Cada comando tem um apelido em inglês (export, project, frame, list-presets, params,
-qualities, modules, version). O idioma das mensagens segue o app (ou a variável PELICULA_LANG).
+qualities, platforms, modules, version). O idioma das mensagens segue o app (ou a variável PELICULA_LANG).
 
 Os módulos (recursos opcionais) só mostram ou escondem ferramentas na janela: o modo terminal
 nunca os consulta e exporta tudo do mesmo jeito.
@@ -44,6 +46,7 @@ COMMANDS = {
     "presets": "presets", "list-presets": "presets",
     "parametros": "params", "params": "params",
     "qualidades": "qualities", "qualities": "qualities",
+    "plataformas": "platforms", "platforms": "platforms",
     "info": "info",
     "ffmpeg": "ffmpeg",
     "resolve": "resolve", "davinci": "resolve",
@@ -250,9 +253,73 @@ def _need_ffmpeg() -> None:
         raise CliError(_("ffmpeg não encontrado. Rode \"pelicula-cli ffmpeg --baixar\" ou instale o ffmpeg."))
 
 
+def _platform_arg(a, info):
+    """A plataforma de `--plataforma` (None sem ela). Não combina com `--qualidade` nem com imagem."""
+    if not a.plataforma:
+        return None
+    from . import platforms
+    p = platforms.get(a.plataforma)
+    if p is None:
+        raise CliError(_("Plataforma desconhecida: {nome}. Veja a lista com \"plataformas\".").format(
+            nome=a.plataforma))
+    if a.qualidade:
+        raise CliError(_("Use --plataforma ou --qualidade, não os dois."))
+    if info.is_image:
+        raise CliError(_("As plataformas são para vídeo; para imagem use --qualidade."))
+    return p
+
+
+def _platform_overrides(a, s) -> None:
+    """--quadro, --encaixe, --tamanho-alvo, --volume, --pico e --grao-redes (com ou sem --plataforma)."""
+    from . import export
+    if a.quadro is not None:
+        text = a.quadro.strip().lower()
+        if text in ("", "auto", "0"):
+            s.frame = ""
+        elif export.parse_frame(text) is None:
+            raise CliError(_("Quadro inválido: {valor}. Use largura x altura, por exemplo 1080x1920.").format(
+                valor=a.quadro))
+        else:
+            w, h = export.parse_frame(text)
+            s.frame = f"{w}x{h}"
+    if a.encaixe is not None:
+        s.fit = a.encaixe
+    if a.tamanho_alvo is not None:
+        if a.tamanho_alvo < 0:
+            raise CliError(_("Tamanho alvo inválido: {valor} (MB; 0 desliga).").format(valor=a.tamanho_alvo))
+        s.target_mb = a.tamanho_alvo
+    if a.volume is not None:
+        if not -70 <= a.volume <= 0:
+            raise CliError(_("Volume alvo inválido: {valor}. Use LUFS negativos (ex.: -14) ou 0 para desligar.")
+                           .format(valor=a.volume))
+        s.loudness = a.volume
+    if a.pico is not None:
+        if not -9 <= a.pico <= 0:
+            raise CliError(_("Pico real inválido: {valor}. Use de -9 a 0 dBTP.").format(valor=a.pico))
+        s.true_peak = a.pico
+    if a.grao_redes:
+        s.net_grain = True
+
+
+def _export_notes(plat, s, info, duration: float) -> list[str]:
+    """Avisos da exportação (os mesmos da janela): limites da plataforma, duas passadas, som recodificado."""
+    from . import export, platforms
+    out = []
+    if plat is not None:
+        out.append(_("Plataforma: {nome} ({limites})").format(nome=_(plat.name), limites=platforms.limits_text(plat)))
+        out += [_("Aviso: {texto}").format(texto=t) for t in platforms.warnings(plat, duration)]
+    if export.uses_target(s):
+        out.append(_("Tamanho alvo de {mb} MB: duas passadas, leva cerca do dobro do tempo.").format(
+            mb=export.fmt_mb(float(s.target_mb))))
+    if export.audio_reencoded_for_volume(s, info):
+        out.append(_("O som vai ser recodificado: copiar o original não deixa acertar o volume nem o "
+                     "tamanho do arquivo."))
+    return out
+
+
 # ------------------------------------------------------------------ comandos
 def cmd_export(a) -> int:
-    from . import export, media
+    from . import export, media, platforms
     from .engine import Engine
     resolution = parse_resolution(a.resolucao) if a.resolucao is not None else None
     _need_ffmpeg()
@@ -264,12 +331,20 @@ def cmd_export(a) -> int:
         info = media.probe(src)
         if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
             _report_auto_profile(auto_input_profile(values, a.set, info))
-    presets_q = {k: s for k, _l, s in export.quality_presets(info)}
-    qkey = a.qualidade or (proj.export_quality if proj and proj.export_quality in presets_q else None)
-    qkey = qkey or ("img_png" if info.is_image else "mp4")
-    if qkey not in presets_q:
-        raise CliError(_("Qualidade desconhecida: {nome}. Veja a lista com \"qualidades\".").format(nome=qkey))
-    s = export.ExportSettings.from_dict(presets_q[qkey].to_dict())
+    start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
+    end = parse_time(a.fim, info.fps) if a.fim else (proj.out_point if proj and a.trecho and proj.out_point else -1)
+    duration = ((info.frames - 1 if end < 0 else min(end, info.frames - 1)) - start + 1) / info.fps
+    plat = _platform_arg(a, info)
+    if plat is not None:
+        qkey = plat.id
+        s = platforms.settings_for(plat.id, info, duration=duration, fit_mode=a.encaixe)
+    else:
+        presets_q = {k: s for k, _l, s in export.quality_presets(info)}
+        qkey = a.qualidade or (proj.export_quality if proj and proj.export_quality in presets_q else None)
+        qkey = qkey or ("img_png" if info.is_image else "mp4")
+        if qkey not in presets_q:
+            raise CliError(_("Qualidade desconhecida: {nome}. Veja a lista com \"qualidades\".").format(nome=qkey))
+        s = export.ExportSettings.from_dict(presets_q[qkey].to_dict())
     overrides = {"codec": a.codec, "container": a.recipiente, "pix": a.pix, "preset": a.velocidade,
                  "profile": a.perfil, "resolution": resolution, "fps": a.fps, "audio": a.audio,
                  "priority": a.prioridade, "hwaccel": a.hwaccel}
@@ -284,6 +359,7 @@ def cmd_export(a) -> int:
         s.threads = a.threads
     if a.buffer is not None:
         s.buffer = a.buffer
+    _platform_overrides(a, s)
     if s.codec not in export.CODECS or not export.available(s.codec):
         raise CliError(_("Codec indisponível neste computador: {codec}").format(codec=s.codec))
     if s.container not in export.CODECS[s.codec]["exts"]:
@@ -301,8 +377,6 @@ def cmd_export(a) -> int:
                 caminho=export.output_target(out, s)))
         raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=out))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
-    end = parse_time(a.fim, info.fps) if a.fim else (proj.out_point if proj and a.trecho and proj.out_point else -1)
     if values.get("scan_on"):
         _gui_app()
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
@@ -312,6 +386,8 @@ def cmd_export(a) -> int:
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
         print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix} • {w}×{h}").format(
             preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
+        for line in _export_notes(plat, s, info, duration):
+            print(line, file=sys.stderr)
 
     def on_sigint(*_args):
         job.cancel.set()
@@ -341,9 +417,11 @@ def cmd_export(a) -> int:
             if time.time() - last > 1:
                 last = time.time()
                 print(json.dumps({"feito": job.done, "total": job.total, "qps": round(job.fps_rate, 2),
-                                  "restante_s": round(job.eta, 1)}), flush=True)
+                                  "restante_s": round(job.eta, 1), "etapa": job.stage,
+                                  "progresso": round(job.progress, 4)}), flush=True)
         elif not a.silencioso and job.total:
-            sys.stderr.write("\r" + _bar(job.done, job.total, job.fps_rate, job.eta))
+            stage = f"{job.stage}  " if job.stage else ""
+            sys.stderr.write("\r" + stage + _bar(job.done, job.total, job.fps_rate, job.eta))
             sys.stderr.flush()
     signal.signal(signal.SIGINT, old)
     th.join(timeout=5)
@@ -521,6 +599,31 @@ def cmd_qualities(a) -> int:
     return 0
 
 
+def cmd_platforms(a) -> int:
+    from . import platforms
+    rows = []
+    for gid, glabel, items in platforms.grouped():
+        for p in items:
+            rows.append({"id": p.id, "nome": _(p.name), "grupo": _(glabel), "grupo_id": gid, "quadro": p.frame,
+                         "resolucao": "" if p.frame else p.resolution, "fps_max": p.max_fps, "codec": p.codec,
+                         "recipiente": p.container, "pix": p.pix, "crf": p.quality, "teto_mbps": p.maxrate,
+                         "audio": p.audio, "duracao_min_s": p.min_s, "duracao_max_s": p.max_s,
+                         "tamanho_max_mb": p.max_mb, "tamanho_alvo_mb": p.target_mb, "volume_lufs": p.loudness,
+                         "pico_dbtp": p.true_peak if p.loudness else 0.0, "oficial": p.official,
+                         "limites": platforms.limits_text(p), "nota": _(p.note) if p.note else ""})
+    if a.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    group = None
+    for r in rows:
+        if r["grupo"] != group:
+            group = r["grupo"]
+            print(f"\n{group.upper()}")
+        print(f"  {r['id']:<20} {r['nome']}")
+        print(f"  {'':<20} {r['limites']}")
+    return 0
+
+
 def cmd_info(a) -> int:
     from . import media
     _need_ffmpeg()
@@ -689,6 +792,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--saida", help=_("arquivo de saída (padrão: ao lado da entrada)"))
     look_args(p)
     p.add_argument("--qualidade", help=_("qualidade pronta (veja \"qualidades\"; padrão: mp4)"))
+    p.add_argument("--plataforma", metavar="ID",
+                   help=_("opções prontas para uma plataforma (veja \"plataformas\"); não combina com --qualidade"))
+    p.add_argument("--quadro", metavar=_("LxA"),
+                   help=_("quadro fixo, ex.: 1080x1920 (auto = segue --resolucao)"))
+    p.add_argument("--encaixe", choices=["cortar", "bordas", "desfocado"],
+                   help=_("vídeo de outra proporção no quadro fixo: cortar, bordas pretas ou fundo desfocado"))
+    p.add_argument("--tamanho-alvo", type=float, metavar="MB",
+                   help=_("tamanho máximo do arquivo em MB, em duas passadas (0 desliga)"))
+    p.add_argument("--volume", type=float, metavar="LUFS", help=_("volume alvo do som, ex.: -14 (0 desliga)"))
+    p.add_argument("--pico", type=float, metavar="DBTP", help=_("pico real máximo com volume alvo (padrão: -1)"))
+    p.add_argument("--grao-redes", action="store_true",
+                   help=_("grão com tamanho mínimo no quadro de saída, para sobreviver à recompressão das redes"))
     p.add_argument("--codec")
     p.add_argument("--recipiente", help=_("extensão do arquivo (mp4, mov, mkv…)"))
     p.add_argument("--pix", help=_("formato de cor (yuv420p, yuv422p10le…)"))
@@ -747,6 +862,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("qualidades", aliases=["qualities"], help=_("lista as qualidades de exportação"))
     p.add_argument("entrada", nargs="?", help=_("vídeo ou imagem (mostra as opções para ele)"))
     p.set_defaults(func=cmd_qualities)
+
+    p = sub.add_parser("plataformas", aliases=["platforms"],
+                       help=_("lista as plataformas de exportação (YouTube, Instagram, WhatsApp…)"))
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_platforms)
 
     p = sub.add_parser("info", help=_("mostra as informações de um arquivo"))
     p.add_argument("entrada")

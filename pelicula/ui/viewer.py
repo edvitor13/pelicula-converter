@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QActionGroup, QColor, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget
 
+from .. import platforms
 from ..i18n import _
 from . import icons, theme
 
@@ -40,6 +41,7 @@ class Viewer(QWidget):
         self._peek = False
         self._drop_hover = False
         self._hint = False
+        self.safe_area = ""  # área segura desenhada por cima (platforms.SAFE_AREAS); "" = nenhuma
         self.label_proc = _("PELÍCULA")
         self._build_empty()
         self.hint_timer = QTimer(self)
@@ -95,6 +97,12 @@ class Viewer(QWidget):
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+        self.update()
+
+    def set_safe_area(self, kind: str) -> None:
+        """Mostra (ou esconde, com "") a área segura de uma plataforma por cima da prévia. Só na tela: a
+        exportação nunca passa por aqui."""
+        self.safe_area = kind if kind in platforms.SAFE_BY_ID else ""
         self.update()
 
     def set_zoom(self, z: float | None) -> None:
@@ -192,6 +200,52 @@ class Viewer(QWidget):
         p.setFont(f)
         p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
+    def safe_geometry(self, r: QRectF) -> tuple[QRectF, list[QRectF]]:
+        """Onde a área segura cai na imagem desenhada em `r`: (quadro da plataforma, retângulos livres).
+
+        As zonas de TikTok, Reels e Shorts foram medidas no quadro 9:16; num vídeo de outra proporção elas
+        ficam no recorte 9:16 do centro (o que sai com "Cortar para preencher")."""
+        area = platforms.SAFE_BY_ID.get(self.safe_area)
+        if area is None:
+            return QRectF(r), []
+        f = QRectF(r)
+        if area.aspect:
+            if r.width() / max(r.height(), 1e-6) > area.aspect:
+                w = r.height() * area.aspect
+                f = QRectF(r.center().x() - w / 2, r.top(), w, r.height())
+            else:
+                h = r.width() / area.aspect
+                f = QRectF(r.left(), r.center().y() - h / 2, r.width(), h)
+        rects = [QRectF(f.left() + x, f.top() + y, w, h)
+                 for x, y, w, h in platforms.safe_rects(area.id, f.width(), f.height())]
+        return f, rects
+
+    def _draw_safe(self, p: QPainter, r: QRectF) -> None:
+        area = platforms.SAFE_BY_ID.get(self.safe_area)
+        if area is None:
+            return
+        f, rects = self.safe_geometry(r)
+        p.save()
+        p.setClipRect(QRectF(self.rect()))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if area.dim:
+            free = QPainterPath()
+            for q in rects:
+                free.addRect(q)
+            whole = QPainterPath()
+            whole.addRect(QRectF(r))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(0, 0, 0, 120))
+            p.drawPath(whole.subtracted(free.simplified()))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for i, q in enumerate(rects):
+            color = QColor(theme.ACCENT) if i == 0 or area.dim else QColor(255, 255, 255, 170)
+            p.setPen(QPen(color, 1.5, Qt.PenStyle.DashLine))
+            p.drawRect(q)
+        p.restore()
+        self._pill(p, f.left() + 10, min(f.bottom(), self.height()) - 32,
+                   _("ÁREA SEGURA: {nome}").format(nome=_(area.name)).upper())
+
     def _draw_hint(self, p: QPainter) -> None:
         text = _("Esc sai da tela cheia  •  + / − ou roda do mouse: zoom  •  arraste para mover  •  "
                  "C compara  •  Espaço reproduz")
@@ -230,6 +284,8 @@ class Viewer(QWidget):
                 p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, s < 1)
                 p.drawImage(r, img)
                 p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                if i == 1:
+                    self._draw_safe(p, r)
                 self._pill(p, r.left() + 10, r.top() + 10, lab)
             if self._hint:
                 self._draw_hint(p)
@@ -240,6 +296,9 @@ class Viewer(QWidget):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, s < 1.0)
         p.drawImage(r, proc)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        split = self.mode == "split" and self.orig is not None and not self._peek
+        if not split:
+            self._draw_safe(p, r)
         if self._peek or self.mode == "orig":
             self._pill(p, r.left() + 10, max(r.top(), 0) + 10, _("ORIGINAL"))
         elif self.mode == "split" and self.orig is not None:
@@ -250,6 +309,7 @@ class Viewer(QWidget):
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, s < 1.0)
             p.drawImage(r, self.orig)
             p.restore()
+            self._draw_safe(p, r)
             top = max(r.top(), 0)
             bot = min(r.bottom(), self.height())
             p.setPen(QPen(QColor(255, 255, 255, 220), 1.5))
@@ -374,3 +434,65 @@ class Viewer(QWidget):
         if paths:
             self.filesDropped.emit(paths)
         self.update()
+
+
+def safe_area_icon(color: str, size: int = 18) -> QIcon:
+    """Ícone da área segura (um celular em pé com a área livre tracejada), desenhado aqui."""
+    dpr = 2
+    pm = QPixmap(size * dpr, size * dpr)
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = size / 18
+    p.setPen(QPen(QColor(color), 1.5 * s))
+    p.drawRoundedRect(QRectF(4.5 * s, 1.5 * s, 9 * s, 15 * s), 2 * s, 2 * s)
+    p.setPen(QPen(QColor(color), 1.0 * s, Qt.PenStyle.DotLine))
+    p.drawRect(QRectF(6.5 * s, 4 * s, 5 * s, 7.5 * s))
+    p.end()
+    return QIcon(pm)
+
+
+class SafeAreaButton(QToolButton):
+    """Botão da barra da prévia que escolhe a área segura (Desligada, TikTok, Reels, Shorts, Título e ação).
+
+    A escolha fica nas preferências (`safe_area`) e começa desligada; `changed` avisa o visualizador."""
+
+    changed = Signal(str)
+
+    def __init__(self, settings=None, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.setObjectName("Flat")
+        self.setIcon(safe_area_icon(theme.TEXT))
+        self.setIconSize(QSize(18, 18))
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCheckable(True)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self)
+        group = QActionGroup(self)
+        self.actions_by_kind = {}
+        for kind, name in [("", _("Desligada"))] + [(a.id, _(a.name)) for a in platforms.SAFE_AREAS]:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setData(kind)
+            group.addAction(act)
+            act.triggered.connect(lambda _checked=False, k=kind: self.set_kind(k))
+            self.actions_by_kind[kind] = act
+        self.setMenu(menu)
+        kind = str(settings.value("safe_area", "") or "") if settings is not None else ""
+        self.kind = ""
+        self.set_kind(kind, save=False)
+
+    def set_kind(self, kind: str, save: bool = True) -> None:
+        kind = kind if kind in platforms.SAFE_BY_ID else ""
+        self.kind = kind
+        self.actions_by_kind[kind].setChecked(True)
+        self.setChecked(bool(kind))
+        name = _(platforms.SAFE_BY_ID[kind].name) if kind else _("desligada")
+        self.setToolTip(_("Área segura da prévia: {nome}. Mostra onde os botões e a legenda do app cobrem o "
+                          "vídeo vertical; só aparece aqui, nunca na exportação.").format(nome=name))
+        if save and self.settings is not None:
+            self.settings.setValue("safe_area", kind)
+        self.changed.emit(kind)

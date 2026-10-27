@@ -29,7 +29,7 @@ from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
 from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
-from .viewer import Viewer
+from .viewer import SafeAreaButton, Viewer
 from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch, compact, timecode
 from .flow import AdaptiveBar, ElideLabel, FlowLayout
 from .labcurve import CurveGraph
@@ -639,6 +639,8 @@ class MainWindow(QMainWindow):
         self.prev_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.prev_combo.currentIndexChanged.connect(self._preview_changed)
         hl.addWidget(self.prev_combo)
+        self.btn_safe = SafeAreaButton(self.settings)  # área segura das plataformas (só na tela)
+        hl.addWidget(self.btn_safe)
         self.btn_full = self._flat("fullscreen", _("Prévia em tela cheia (F11). Esc sai."))
         self.btn_full.clicked.connect(self.toggle_preview_fullscreen)
         hl.addWidget(self.btn_full)
@@ -653,6 +655,8 @@ class MainWindow(QMainWindow):
         self.viewer.testRequested.connect(self.open_test_scene)
         self.viewer.filesDropped.connect(self.handle_files)
         self.viewer.zoomChanged.connect(self._zoom_changed)
+        self.viewer.set_safe_area(self.btn_safe.kind)
+        self.btn_safe.changed.connect(self.viewer.set_safe_area)
         vl.addWidget(self.viewer, 1)
         tr = _TransportBar()
         tr.setObjectName("Transport")
@@ -1977,12 +1981,14 @@ class MainWindow(QMainWindow):
         seq = self.src_seq.copy() if self.src_seq is not None else None
         dlg = ExportDialog(self, self.info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
-                           perf, self.engine.renderer.split("/")[0], sequence=seq)
+                           perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
+                           last_platform=str(self.settings.value("export_platform", "")))
         if not dlg.exec():
             return
         job = dlg.job()
         self.settings.setValue("export_dir", str(Path(job.out_path).parent))
         self.settings.setValue("export_quality", dlg.quality.currentData())
+        self.settings.setValue("export_platform", dlg.platform_id())
         self.settings.setValue("export_perf", json.dumps(dlg.perf_dict()))
         self.queue.add(job)
         self._recovery_point()

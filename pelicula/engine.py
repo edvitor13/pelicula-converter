@@ -53,7 +53,8 @@ class Engine:
         self.vaos: dict[str, moderngl.VertexArray] = {}
         for name, src in (("base", shaders.BASE), ("extract", shaders.EXTRACT), ("blur", shaders.BLUR),
                           ("noise", shaders.NOISE), ("final", shaders.FINAL), ("bake", shaders.BAKE),
-                          ("clip", editshaders.CLIP), ("canvas_out", editshaders.OUT)):
+                          ("clip", editshaders.CLIP), ("canvas_out", editshaders.OUT),
+                          ("copy", shaders.COPY), ("fit", shaders.FIT)):
             prog = self.ctx.program(vertex_shader=shaders.VERT, fragment_shader=src)
             self.progs[name] = prog
             self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, "2f", "in_pos")])
@@ -157,6 +158,15 @@ class Engine:
 
     def render(self, plan: look.Plan, depth: int = 8) -> np.ndarray:
         """Renderiza a imagem de entrada atual e devolve (h, w, 3) uint8 ou uint16."""
+        out = self._render_look(plan, depth)
+        w, h = out[0].size
+        out_dtype = "f1" if depth == 8 else "nu2"
+        data = out[1].read(components=3, alignment=1, dtype=out_dtype)
+        arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
+        return arr.reshape(h, w, 3)
+
+    def _render_look(self, plan: look.Plan, depth: int):
+        """Todos os passos do look; devolve o alvo `out8`/`out16` (textura, framebuffer) já desenhado."""
         if self.input_tex is None:
             raise RuntimeError("Nenhuma imagem carregada no motor.")
         w, h = self.input_tex.size
@@ -211,9 +221,48 @@ class Engine:
             "t_lut": self._lut_texture(plan.lut_path),
         }
         self._run("final", out, textures, U)
+        return out
+
+    def render_fit(self, plan: look.Plan, depth: int, fit) -> np.ndarray:
+        """Look na imagem de entrada (o tamanho de `fit.box`) e encaixe num quadro `fit.out_w` × `fit.out_h`.
+
+        `fit` é um `fit.Fit` com modo `bordas` (fundo preto) ou `desfocado` (a própria imagem com o look,
+        ampliada para cobrir o quadro, desfocada — `fit.BLUR_PX` em px@1080 — e escurecida por `fit.DIM`).
+        Dentro da caixa o quadro é exatamente o que `render()` devolveria. Devolve (h, w, 3) uint8 ou uint16.
+        """
+        from . import fit as fitmod
+        img = self._render_look(plan, depth)[0]
+        cw, ch = img.size
+        ow, oh = int(fit.out_w), int(fit.out_h)
+        x, y = int(fit.box[0]), int(fit.box[1])
+        U = {"u_box": (x, y, cw, ch), "u_bg_mode": 0, "u_cover": (0.0, 0.0, 1.0, 1.0), "u_dim": fitmod.DIM,
+             "u_max": 255.0 if depth == 8 else 65535.0, "u_dither": int(plan.uniforms.get("u_dither", 0)),
+             "u_frame": int(plan.uniforms.get("u_frame", 0))}
+        bg = img
+        if fit.mode == fitmod.DESFOCADO:
+            src = self._target("fit_src", (cw, ch), mip=True)
+            self._run("copy", src, {"t_src": img}, {})
+            src[0].build_mipmaps()
+            cover = max(ow / cw, oh / ch)
+            sigma = fit.blur_sigma() / cover  # em px da imagem (o fundo é ela ampliada `cover` vezes)
+            lvl = 0
+            while sigma / (2 ** lvl) > 6.0 and lvl < 8 and (cw >> (lvl + 1)) >= 4 and (ch >> (lvl + 1)) >= 4:
+                lvl += 1
+            sw, sh = max(1, cw >> lvl), max(1, ch >> lvl)
+            sig = max(sigma / (2 ** lvl), 0.5)
+            a = self._target("fit_a", (sw, sh))
+            b = self._target("fit_b", (sw, sh))
+            self._blur(src[0], a, (1.0 / sw, 0.0), sig, lvl)
+            self._blur(a[0], b, (0.0, 1.0 / sh), sig, 0)
+            bg = b[0]
+            U["u_bg_mode"] = 1
+            U["u_cover"] = ((ow - cw * cover) / 2.0, (oh - ch * cover) / 2.0, 1.0 / (cw * cover), 1.0 / (ch * cover))
+        out_dtype = "u1" if depth == 8 else "u2"
+        out = self._target("fit_out8" if depth == 8 else "fit_out16", (ow, oh), dtype=out_dtype)
+        self._run("fit", out, {"t_img": img, "t_bg": bg}, U)
         data = out[1].read(components=3, alignment=1, dtype=out_dtype)
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
-        return arr.reshape(h, w, 3)
+        return arr.reshape(oh, ow, 3)
 
     def bake_lut(self, values: dict, size: int = 33, legal: bool = False) -> np.ndarray:
         """Grava só a parte de cor do look num LUT 3D (ordem .cube).
@@ -258,12 +307,13 @@ class Engine:
         return t
 
     def compose(self, frame_layers, seq, canvas_w: int, canvas_h: int, depth: int = 8,
-                neutral: bool = False) -> np.ndarray:
+                neutral: bool = False, crop: tuple[int, int, int, int] | None = None) -> np.ndarray:
         """Monta um quadro da sequência (modo Edição) e devolve (h, w, 3) uint8 ou uint16.
 
         `frame_layers` é um `sequence.FrameLayers` (imagens já decodificadas, de baixo para cima).
         Cada camada é desenhada por `editshaders.CLIP` com os valores de `compositor.clip_uniforms`
         sobre uma tela RGBA de 32 bits (alterna entre dois alvos). Só na thread dona do contexto.
+        `crop` (x, y, largura, altura) devolve só esse recorte da tela (exportação com "cortar", `fit.py`).
         """
         from . import compositor
         size = (int(canvas_w), int(canvas_h))
@@ -285,11 +335,15 @@ class Engine:
             self._run("clip", dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         out_dtype = "u1" if depth == 8 else "u2"
-        out = self._target("canvas_out8" if depth == 8 else "canvas_out16", size, dtype=out_dtype)
-        self._run("canvas_out", out, {"t_canvas": src[0]}, {"u_max": 255.0 if depth == 8 else 65535.0})
+        osize, offset = size, (0, 0)
+        if crop is not None:
+            osize, offset = (int(crop[2]), int(crop[3])), (int(crop[0]), int(crop[1]))
+        out = self._target("canvas_out8" if depth == 8 else "canvas_out16", osize, dtype=out_dtype)
+        self._run("canvas_out", out, {"t_canvas": src[0]},
+                  {"u_max": 255.0 if depth == 8 else 65535.0, "u_offset": offset})
         data = out[1].read(components=3, alignment=1, dtype=out_dtype)
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
-        return arr.reshape(size[1], size[0], 3)
+        return arr.reshape(osize[1], osize[0], 3)
 
     def release(self) -> None:
         for t in self._clip_tex.values():

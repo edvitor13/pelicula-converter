@@ -97,7 +97,10 @@ Três ideias guiam o projeto:
 | `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
-| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor), `build_encoder_cmd()`, `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial), `measure_speed()`, `save_still()`. |
+| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `FramePipeline`/`preview_frame()` (o mesmo caminho na exportação e na prévia dela), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
+| `pelicula/platforms.py` | Exportação por plataforma: `PLATFORMS` (YouTube, Instagram, TikTok, WhatsApp, Discord…, com fonte oficial), `settings_for()` → `ExportSettings`, `limits_text()`, `warnings()`, áreas seguras (`SAFE_AREAS`). Sem Qt (seção 9.5). |
+| `pelicula/fit.py` | Encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): `plan()` → `Fit`, a geometria usada pela exportação e pela prévia dela (seção 9.6). |
+| `pelicula/loudnorm.py` | Volume alvo da exportação: medida (`measure`) e filtro da 2ª passada (`filter_for`) do `loudnorm` do ffmpeg (seção 9.8). |
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
 | `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17). |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
@@ -125,9 +128,9 @@ Três ideias guiam o projeto:
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
 | `pelicula/ui/store.py` | `ParamStore`: valores atuais, sinal `changed`, desfazer/refazer (agrupado por 400 ms, até 300 passos). |
 | `pelicula/ui/widgets.py` | `FilmSlider`, `ToggleSwitch`, linhas de parâmetro, `LutRow`, `SectionCard`, `Segmented`, `Histogram`, `Timeline`, `timecode()`. |
-| `pelicula/ui/viewer.py` | Visualizador: modos de comparação, zoom livre (10%–1600%) e pan, espiar o original, modo de tela cheia (sem borda, fundo preto, dica das teclas), arrastar e soltar. |
+| `pelicula/ui/viewer.py` | Visualizador: modos de comparação, zoom livre (10%–1600%) e pan, espiar o original, modo de tela cheia (sem borda, fundo preto, dica das teclas), arrastar e soltar; área segura das plataformas por cima (`SafeAreaButton`, só na tela). |
 | `pelicula/ui/looks.py` | Painel de miniaturas dos presets com busca. |
-| `pelicula/ui/export_dialog.py` | Janela de exportação, desempenho e estimativa. |
+| `pelicula/ui/export_dialog.py` | Janela de exportação: plataforma (limites, avisos, prévia do resultado), qualidade, opções do arquivo, desempenho e estimativa. |
 | `pelicula/ui/queue_dialog.py` | Janela da fila. |
 | `pelicula/ui/settings_dialog.py` / `pages/` | Configurações em páginas; `pages/componentes.py` mostra os componentes (ffmpeg, ferramentas, programas do sistema), o espaço em disco e o sistema (placa de vídeo, bibliotecas). |
 | `pelicula/ui/job_bridge.py` | `JobBridge`/`bridge()`: eventos da fila de tarefas como sinais do Qt na thread principal; `on_finished`. |
@@ -472,9 +475,25 @@ oferecê-los.
 ### 9.1 Do diálogo à fila
 
 `ExportDialog` monta um `ExportSettings` (codec, recipiente, formato de pixel, qualidade,
-velocidade, perfil, taxa de bits, resolução, fps, áudio, *tune grain*, pontilhado e as opções de
-desempenho) e um `ExportJob` com uma **cópia** dos valores atuais. A janela principal guarda a
-pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
+velocidade, perfil, taxa de bits, resolução, fps, áudio, *tune grain*, pontilhado, as opções de
+desempenho e as da exportação por plataforma) e um `ExportJob` com uma **cópia** dos valores atuais. A
+janela principal guarda a pasta, a qualidade, a plataforma (`export_platform`) e o desempenho escolhidos
+e põe o trabalho na `ExportQueue`.
+
+Campos da exportação por plataforma (1.4), todos com padrão neutro: um `to_dict()` antigo, sem eles,
+exporta exatamente como antes (`tests/test_export_neutral.py` compara os comandos do codificador com os
+da 1.3.1 gravados em `tests/export_cmds_1_3.json`).
+
+| Campo | Padrão | O que faz |
+|---|---|---|
+| `platform` | `""` | id da plataforma que preencheu as opções (só informativo) |
+| `frame` | `""` | quadro fixo `"LxA"`; vazio = `resolution` e a proporção do vídeo |
+| `fit` | `"cortar"` | encaixe no quadro fixo: `cortar`, `bordas`, `desfocado` |
+| `target_mb` | `0` | tamanho alvo em MB (1.000.000 bytes), duas passadas no x264/x265 |
+| `maxrate` | `0` | teto de taxa (Mb/s) com qualidade constante no x264/x265 |
+| `loudness` | `0` | volume alvo em LUFS (negativo); 0 = o som não muda |
+| `true_peak` | `-1` | pico real máximo (dBTP) com volume alvo |
+| `net_grain` | `False` | "Grão para redes" |
 
 ### 9.2 `run_job()`
 
@@ -511,9 +530,12 @@ pasta, a qualidade e o desempenho escolhidos e põe o trabalho na `ExportQueue`.
      `-tag:v hvc1`, opções de NVENC/QSV/AMF, FFV1 nível 3 com GOP 1 e 16 *slices*, TIFF com
      *deflate* etc.);
    - tags de cor BT.709, `+faststart` em MP4/MOV, áudio conforme `_audio_args()`.
-4. `FrameReader` em alta qualidade. Com troca de fps, o leitor aplica o filtro `fps=` desde o
-   começo e pula os quadros antes do trecho.
-5. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*.
+4. `FrameReader` em alta qualidade (`open_reader`, no tamanho do encaixe da seção 9.6). Com troca de fps,
+   o leitor aplica o filtro `fps=` desde o começo e pula os quadros antes do trecho.
+5. Três etapas em paralelo (leitura → GPU → gravação) com filas do tamanho do *buffer*. A GPU usa
+   `FramePipeline.render()` — montagem (modo Edição), `look.build_plan()` e o encaixe — o mesmo objeto que
+   `preview_frame()` usa na prévia da janela de exportação. Antes disso, com volume alvo, vem a medida do
+   som (seção 9.8); com tamanho alvo, as etapas 3–7 rodam duas vezes (seção 9.7).
 6. Progresso: quadros **gravados** pelo ffmpeg (`frame=` do `-progress`) ou, antes disso, quadros
    processados; velocidade e tempo restante a partir daí.
 7. Fim: fecha o pipe, espera o ffmpeg, confere código de saída e erros de escrita; troca o destino
@@ -536,7 +558,87 @@ o mesmo croma; senão x264 com o mesmo croma.
 
 `_audio_args()` copia quando o codec do original cabe no recipiente (tabela por recipiente) e senão
 converte: WebM → Opus, AVI → MP3, MOV → PCM 24 bits, demais → AAC 320. PCM em MP4 vira AAC. GIF,
-imagens e sequências não têm áudio.
+imagens e sequências não têm áudio. Com volume alvo ou tamanho alvo o som nunca é copiado
+(`_audio_mode`): "Copiar original" vira o formato do recipiente (AAC 128 kb/s no tamanho alvo) e a janela
+avisa (`audio_reencoded_for_volume`).
+
+### 9.5 Plataformas (`platforms.py`)
+
+`PLATFORMS` é a tabela de alvos prontos: id ASCII que nunca muda (fica nas preferências como
+`export_platform` e nos scripts com `--plataforma`), nome, grupo (`GROUPS`) e o alvo — quadro fixo ou lado
+menor mantendo a orientação, fps máximo, codec/recipiente/formato de cor, CRF e teto de taxa, som, duração e
+tamanho máximos, tamanho alvo, volume alvo, área segura e uma nota. Cada entrada tem a fonte oficial em
+comentário ("conferido em 2026-10"); quando a plataforma não publica especificação (Kwai, status do
+WhatsApp), os valores são conservadores e `official=False` (a janela diz isso).
+
+- `settings_for(id, info, base, duration, fit_mode)` → `ExportSettings`: as opções de desempenho e o
+  pontilhado vêm de `base`; o fps é o da origem dividido pelo menor inteiro que cabe no máximo (`fps_for`:
+  59,94 → 29,97, 50 → 25); o encaixe é o da plataforma ou `auto_fit` (cortar quando as proporções diferem
+  até 25%, senão fundo desfocado); sem quadro fixo, nunca aumenta um vídeo menor (só o YouTube 1440p/4K,
+  de propósito); com tamanho alvo, a resolução é a que a taxa disponível sustenta (`resolution_for_rate`).
+- `limits_text()` e `warnings()` dão o resumo e os avisos da janela e do terminal.
+- A janela (`ExportDialog`) mostra a lista em grupos, preenche tudo e deixa mudar qualquer opção; escolher
+  uma qualidade pronta volta para "Nenhuma". Avisos: duração acima do máximo (com "Exportar só os primeiros
+  N s", que encurta o trecho do `ExportJob`), tamanho estimado acima do máximo (`estimate_bytes` com a
+  medida de `measure_speed(stats=...)`), duas passadas e som recodificado. A estimativa de tempo conta as
+  duas passadas.
+- Terminal: `pelicula-cli plataformas [--json]` e `exportar --plataforma ID` (não combina com
+  `--qualidade`), com `--quadro`, `--encaixe`, `--tamanho-alvo`, `--volume`, `--pico` e `--grao-redes`.
+- Nada é enviado: a exportação só grava o arquivo. A exportação por plataforma é parte do núcleo (não é um
+  módulo de `modules.MODULES`): exportar é sempre visível, e a lista só preenche opções que já existiam.
+
+### 9.6 Encaixe no quadro (`fit.py`)
+
+Com quadro fixo (`frame`), `output_size()` devolve esse quadro e `fit.plan()` calcula uma vez a geometria
+(`Fit`) que `FramePipeline` usa:
+
+- **cortar**: o vídeo é recortado na proporção do quadro **antes** do look — no modo Película no
+  decodificador (`FrameReader(crop=...)`, em pixels do arquivo), no modo Edição numa tela montada maior, da
+  qual só o centro sai (`Engine.compose(crop=...)`). Vinheta, bordas do scan, halação e grão (px@1080)
+  seguem o quadro final.
+- **bordas** e **desfocado**: o vídeo inteiro cabe no quadro (`box`); o look é desenhado nesse tamanho e
+  `Engine.render_fit()` (programa `FIT` de `shaders.py`) o põe sobre o fundo — preto, ou a própria imagem
+  com o look ampliada para cobrir o quadro, desfocada (`BLUR_PX` px@1080) e escurecida (`DIM`). Uma passada
+  determinística na GPU, com y para baixo como o resto.
+- Sem quadro fixo, ou com a mesma proporção (até 1 px de diferença), nada muda (`mode == ""`).
+
+A prévia da janela de exportação chama `preview_frame()` numa thread com o próprio `Engine` (um contexto
+por thread), com `scale` < 1: o mesmo plano em tamanho menor. `tests/test_fit.py` confere que o quadro da
+prévia em escala 1 é igual ao quadro gravado (FFV1 16 bits) nos dois modos.
+
+### 9.7 Tamanho alvo (duas passadas)
+
+`target_bitrate()` desconta do tamanho alvo o som (5% acima da taxa nominal), o recipiente (48 kB + 1,5 kB
+por segundo) e uma folga de 4% (`TARGET_MARGIN`), e `_encode_passes()` roda o x264/x265 com `-pass 1` e
+`-pass 2` num diretório temporário (o registro `pelicula_2passadas` fica lá e é apagado no fim). A GPU
+renderiza o vídeo duas vezes ("leva cerca do dobro do tempo"); `ExportJob.passes`/`pass_index` fazem o
+progresso encher metade em cada passada e `stage` mostra "Passada 1 de 2" na fila e no terminal. Se a 2ª
+passada ainda passar do alvo (raro), uma 3ª refaz só ela com a taxa corrigida; se não couber, o trabalho
+vira `erro` com a explicação. Cancelar ou errar em qualquer passada apaga o parcial e mantém o arquivo
+antigo (a gravação segura da seção 9.2 vale para todas). Taxa de vídeo abaixo de `MIN_TARGET_RATE` (0,05
+Mb/s) é recusada antes de começar.
+
+### 9.8 Volume alvo (`loudnorm.py`)
+
+Só quando o som é recodificado. 1ª passada (`measure`): `loudnorm=I:TP:LRA:print_format=json` sobre o som
+que vai para o arquivo — o trecho do original (modo Película) ou o WAV de `audiomix.render_mix` (modo
+Edição); a fila mostra "Medindo o volume do som…". 2ª passada: o filtro de `filter_for()` com os valores
+medidos e `linear=true` entra no comando do codificador (um ganho só; se o ganho passaria do pico, o próprio
+`loudnorm` limita), saída a 48 kHz. Silêncio (abaixo de −70 LUFS) fica como está. Alvos: −14 LUFS nas
+redes e no streaming, −16 no Spotify (podcast, pico −2 dBTP), −23 no festival (EBU R 128); pico real −1
+dBTP. `tests/test_export_platforms_e2e.py` mede o arquivo com `ebur128` (±1 LU).
+
+### 9.9 Grão para redes e área segura
+
+- **Grão para redes** (`net_grain`): `look.build_plan(net_grain=...)` recebe quantos pixels da imagem
+  processada valem um pixel da saída; o grão fica com pelo menos `NET_GRAIN_MIN_PX` pixels da saída, um
+  pouco mais forte (`NET_GRAIN_BOOST`) e com menos cor (`NET_GRAIN_CHROMA`), para sobreviver à recompressão.
+  Desligado (padrão) o plano é idêntico ao de sempre; ligado é determinístico (`tests/test_net_grain.py`).
+  A prévia da janela de exportação mostra o efeito.
+- **Área segura**: `platforms.SAFE_AREAS` (TikTok, Reels, Shorts — medidos no quadro 9:16 — e título/ação
+  da TV, EBU R 95). O botão da barra da prévia (`viewer.SafeAreaButton`, preferência `safe_area`, desligado
+  por padrão) faz o `Viewer` escurecer onde a interface do app cobre o vídeo. Só o visualizador desenha;
+  nada passa pela exportação.
 
 ## 10. Dependências externas (`deps.py`)
 
@@ -713,6 +815,9 @@ de onda (com cache por arquivo).
   resolução da exportação vale para o lado menor, uma sequência vertical (1080 × 1920) continua vertical
   nas qualidades prontas (*Redes sociais 1080p* → 1080 × 1920, *Leve 720p* → 720 × 1280). A faixa
   da tela para o look vem de `sequence.legal_range(seq)` (a dos clipes de vídeo), nunca desse `MediaInfo`.
+- Plataformas (seção 9.5): com quadro fixo, "cortar" monta a tela num tamanho que cobre o quadro e só o
+  centro sai (`Engine.compose(crop=...)`), antes do look; "bordas" e "desfocado" montam a tela no tamanho
+  encaixado e passam por `Engine.render_fit()`. O volume alvo mede o WAV da mixagem.
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
   como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
   continuam `1` e abrem nas versões antigas.
