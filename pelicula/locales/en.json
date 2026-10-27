@@ -65,6 +65,7 @@
   "A exportação terminou, mas não foi possível substituir {destino} (ele pode estar aberto em outro programa): {erro}\nO resultado ficou em: {parcial}": "The export finished, but {destino} couldn't be replaced (it may be open in another program): {erro}\nThe result was left at: {parcial}",
   "A imagem e a exportação não mudam; só as ferramentas ficam escondidas.": "The image and the export don't change; only the tools are hidden.",
   "A instalação do plugin OpenFX não foi concluída: a permissão de administrador foi negada ou o plugin está em uso (feche o DaVinci Resolve e tente de novo).\n\n{erro}": "The OpenFX plugin installation didn't finish: administrator permission was denied or the plugin is in use (close DaVinci Resolve and try again).\n\n{erro}",
+  "A instalação ficou para depois e o app continua aberto. Clique em \"Atualizar agora\" quando quiser instalar.": "Installation postponed; the app stays open. Click \"Update now\" whenever you want to install.",
   "A maior qualidade do ProRes, com cor 4:4:4. Arquivos muito grandes.": "The highest ProRes quality, with 4:4:4 color. Very large files.",
   "A partir de quantos stops acima do cinza médio brilha.": "How many stops above middle gray it takes to glow.",
   "A pasta já tem uma sequência de quadros com este nome:\n{caminho}\n\nSubstituir? Os quadros antigos só são trocados quando a exportação terminar.": "The folder already has a frame sequence with this name:\n{caminho}\n\nReplace it? The old frames are only swapped once the export finishes.",
