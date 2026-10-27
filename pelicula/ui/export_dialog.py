@@ -1,17 +1,22 @@
-"""Janela de exportação: qualidades prontas, opções do arquivo e desempenho da máquina."""
+"""Janela de exportação: plataformas, qualidades prontas, opções do arquivo e desempenho da máquina."""
 
 from __future__ import annotations
 
+import math
 import os
+import queue
 import threading
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import export, media, system
+from .. import export, media, platforms, system
+from .. import fit as fitmod
 from ..i18n import N_, _, fmt_decimal, fmt_int
 from . import icons, theme
 from .widgets import FilmSlider, compact, timecode
@@ -29,7 +34,15 @@ Q_LABELS = {"crf": N_("CRF (menor = melhor)"), "cq": N_("CQ (menor = melhor)"), 
 Q_DEFAULT = {"crf": 16, "cq": 17, "gq": 20, "qp": 20, "qscale": 3, "jpgq": 2, "webpq": 90}
 P_DEFAULT = {"x264": "slow", "x265": "slow", "h264_nvenc": "p6", "hevc_nvenc": "p6", "h264_qsv": "medium",
              "hevc_qsv": "medium", "h264_amf": "quality", "hevc_amf": "quality", "vp9": "2", "av1": "5"}
-
+# Quadros fixos da lista (as plataformas acrescentam o delas se faltar); "" = segue a resolução.
+FRAMES = ("", "1080x1920", "720x1280", "1080x1350", "1080x1080", "1920x1080", "1280x720", "2160x3840", "3840x2160")
+# Volume alvo (LUFS integrados; 0 = desligado) com o uso de cada um.
+LOUDNESS = ((0.0, N_("Desligado (volume original)")), (-14.0, N_("−14 LUFS (redes e streaming)")),
+            (-16.0, N_("−16 LUFS (podcast)")), (-23.0, N_("−23 LUFS (TV e festival, EBU R 128)")),
+            (-24.0, N_("−24 LUFS (TV nos EUA, ATSC A/85)")))
+PLATFORM_KEYS = ("platform", "frame", "fit", "target_mb", "maxrate", "loudness", "true_peak")
+PREVIEW_BOX = 200  # px do quadrado onde a prévia do resultado aparece
+PREVIEW_MAX = 400  # maior lado (px) do quadro renderizado para a prévia
 
 def fmt_dur(sec: float) -> str:
     sec = int(round(max(sec, 1)))
@@ -42,13 +55,60 @@ def fmt_dur(sec: float) -> str:
 
 
 class _Bridge(QObject):
-    done = Signal(int, float)
+    done = Signal(int, float, float)   # medição: (vez, quadros/s, bytes de vídeo por segundo)
+    preview = Signal(int, object)      # prévia: (vez, quadro RGB 8 bits ou None se falhou)
+
+
+class _PreviewWorker:
+    """Renderiza a prévia do resultado numa thread com o próprio `Engine` (um contexto OpenGL por thread),
+    pelo mesmo caminho da exportação (`export.preview_frame`). Só o pedido mais recente é atendido."""
+
+    def __init__(self, bridge: _Bridge):
+        self.bridge = bridge
+        self.q: queue.Queue = queue.Queue()
+        self.thread: threading.Thread | None = None
+
+    def request(self, token: int, args: tuple) -> None:
+        if self.thread is None:
+            self.thread = threading.Thread(target=self._loop, daemon=True, name="previa_exportacao")
+            self.thread.start()
+        self.q.put((token, args))
+
+    def stop(self) -> None:
+        if self.thread is not None:
+            self.q.put(None)
+
+    def _loop(self) -> None:
+        engine = None
+        failed = False
+        while True:
+            item = self.q.get()
+            while item is not None and not self.q.empty():  # pula pedidos velhos
+                nxt = self.q.get()
+                item = nxt
+            if item is None:
+                break
+            token, (info, values, s, frame, seq, scale) = item
+            img = None
+            if not failed:
+                try:
+                    if engine is None:
+                        from ..engine import Engine
+                        engine = Engine()
+                    img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8)
+                except Exception:  # noqa: BLE001 — sem GPU ou arquivo ilegível: a janela diz "indisponível"
+                    img = None
+                    failed = engine is None
+            self.bridge.preview.emit(token, img)
+        if engine is not None:
+            engine.release()
 
 
 class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
-                 perf: dict | None = None, gpu_name: str = "", sequence=None):
+                 perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
+                 last_platform: str = ""):
         super().__init__(parent)
         self.info = info
         self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
@@ -56,6 +116,9 @@ class ExportDialog(QDialog):
         self.preset_name = preset_name
         self.in_out = in_out
         self.gpu_name = gpu_name
+        self.frame_index = int(frame)  # quadro da prévia do resultado (o que está na tela da janela principal)
+        self._maxrate = 0.0  # teto de taxa da plataforma (sem campo próprio; aparece no resumo)
+        self._vbps = 0.0     # bytes de vídeo por segundo medidos na estimativa (tamanho provável)
         self.setWindowTitle(_("Exportar"))
         self.setMinimumWidth(700)
         self.resize(720, 860)
@@ -94,6 +157,11 @@ class ExportDialog(QDialog):
         g0 = QGroupBox(_("Destino"))
         QVBoxLayout(g0).addLayout(row)
         lay.addWidget(g0)
+
+        # plataforma (só vídeo)
+        self.platform_group = self._platform_group()
+        lay.addWidget(self.platform_group)
+        self.platform_group.setVisible(not info.is_image)
 
         # qualidade
         g1 = QGroupBox(_("Formato e qualidade"))
@@ -161,9 +229,11 @@ class ExportDialog(QDialog):
         form.addRow("", self.grain)
         form.addRow("", self.dither)
         self.form = form
+        self._platform_rows(form)
         lay.addWidget(g2)
         if image:
-            for w in (self.fps, self.audio, self.grain, self.bitrate, self.speed):
+            for w in (self.fps, self.audio, self.grain, self.bitrate, self.speed, self.frame_box, self.fit_box,
+                      self.target, self.loud, self.peak, self.net_grain):
                 form.setRowVisible(w, False)
 
         # desempenho
@@ -195,6 +265,11 @@ class ExportDialog(QDialog):
         foot = QWidget()
         fl = QVBoxLayout(foot)
         fl.setContentsMargins(22, 8, 22, 16)
+        self.warn = QLabel()  # avisos: limites da plataforma, duas passadas, som recodificado
+        self.warn.setStyleSheet(f"color: {theme.DANGER};")
+        self.warn.setWordWrap(True)
+        self.warn.setVisible(False)
+        fl.addWidget(self.warn)
         self.est_label = QLabel()
         self.est_label.setStyleSheet(f"color: {theme.ACCENT_HI}; font-weight: 600;")
         self.est_label.setWordWrap(True)
@@ -205,6 +280,14 @@ class ExportDialog(QDialog):
         fl.addWidget(self.summary)
         self._bridge = _Bridge()
         self._bridge.done.connect(self._est_done)
+        self._bridge.preview.connect(self._preview_done)
+        self._preview_worker = _PreviewWorker(self._bridge)
+        self._preview_token = 0
+        self._preview_key = None
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(350)
+        self._preview_timer.timeout.connect(self._start_preview)
         self._est_token = 0
         self._est_cancel: threading.Event | None = None
         self._est_timer = QTimer(self)
@@ -236,10 +319,197 @@ class ExportDialog(QDialog):
             w.toggled.connect(self._custom)
         self.res.currentIndexChanged.connect(self._update_mem)
         self.pix.currentIndexChanged.connect(self._update_mem)
+        self.frame_box.currentIndexChanged.connect(self._frame_changed)
+        for w in (self.fit_box, self.loud):
+            w.currentIndexChanged.connect(self._custom)
+        for w in (self.target, self.peak):
+            w.valueChanged.connect(self._custom)
+        self.net_grain.toggled.connect(self._custom)
+        self.trim_max.toggled.connect(self._summary)
+        self.platform.currentIndexChanged.connect(self._platform_changed)
         i = self.quality.findData(last_quality)
         self.quality.setCurrentIndex(i if i >= 0 else 0)
         self._quality_changed()
+        if platforms.get(last_platform) is not None and not info.is_image:
+            self._set_combo(self.platform, last_platform)  # a última plataforma usada preenche tudo de novo
         self._update_mem()
+
+    # ------------------------------------------------------------ plataforma
+    def _platform_group(self) -> QGroupBox:
+        g = QGroupBox(_("Plataforma"))
+        h = QHBoxLayout(g)
+        h.setSpacing(14)
+        v = QVBoxLayout()
+        v.setSpacing(6)
+        self.platform = compact(QComboBox(), 20)
+        self.platform.setMaxVisibleItems(32)
+        self.platform.addItem(_("Nenhuma (escolha a qualidade abaixo)"), "")
+        model = self.platform.model()
+        for _gid, label, items in platforms.grouped():
+            self.platform.addItem(_(label).upper(), None)  # título do grupo (não dá para escolher)
+            head = model.item(self.platform.count() - 1)
+            head.setEnabled(False)
+            font = head.font()
+            font.setBold(True)
+            head.setFont(font)
+            for p in items:
+                self.platform.addItem("    " + _(p.name), p.id)
+        self.platform.setToolTip(_("Preenche o formato, o quadro, o som e os limites para a plataforma escolhida. "
+                                   "Depois dá para mudar qualquer opção. Nada é enviado: o arquivo fica no "
+                                   "computador."))
+        v.addWidget(self.platform)
+        self.plimits = QLabel()
+        self.plimits.setObjectName("Muted")
+        self.plimits.setWordWrap(True)
+        v.addWidget(self.plimits)
+        self.pnote = QLabel()
+        self.pnote.setObjectName("Faint")
+        self.pnote.setWordWrap(True)
+        v.addWidget(self.pnote)
+        self.trim_max = QCheckBox()
+        self.trim_max.setVisible(False)
+        v.addWidget(self.trim_max)
+        v.addStretch(1)
+        h.addLayout(v, 1)
+        pv = QVBoxLayout()
+        pv.setSpacing(4)
+        self.preview = QLabel()
+        self.preview.setFixedSize(PREVIEW_BOX, PREVIEW_BOX)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setStyleSheet(f"background: #000; border: 1px solid {theme.BORDER}; color: {theme.FAINT};")
+        self.preview.setWordWrap(True)
+        self.preview.setToolTip(_("Um quadro do resultado, feito pelo mesmo caminho da exportação: quadro, encaixe "
+                                  "e look como vão sair."))
+        pv.addWidget(self.preview)
+        self.preview_caption = QLabel(_("Prévia do resultado"))
+        self.preview_caption.setObjectName("Faint")
+        self.preview_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pv.addWidget(self.preview_caption)
+        pv.addStretch(1)
+        h.addLayout(pv)
+        return g
+
+    def _platform_rows(self, form: QFormLayout) -> None:
+        """Quadro fixo, encaixe, tamanho alvo, volume alvo, pico real e "Grão para redes"."""
+        self.frame_box = compact(QComboBox())
+        for key in FRAMES:
+            self._add_frame(key)
+        self.frame_box.setToolTip(_("Tamanho exato do quadro (ex.: 1080 × 1920 para Reels e TikTok). Um vídeo de "
+                                    "outra proporção entra conforme o Encaixe. Automático segue a Resolução."))
+        self.fit_box = compact(QComboBox())
+        for key, label in fitmod.MODES:
+            self.fit_box.addItem(_(label), key)
+        self.fit_box.setToolTip(_("Vídeo de outra proporção no quadro: cortar as sobras, bordas pretas ou o próprio "
+                                  "vídeo desfocado no fundo. O look de película é desenhado no quadro final."))
+        self.target = QDoubleSpinBox()
+        self.target.setRange(0, 100_000)
+        self.target.setDecimals(1)
+        self.target.setSuffix(" MB")
+        self.target.setSpecialValueText(_("Desligado"))
+        self.target.setToolTip(_("O arquivo sai com no máximo este tamanho (1 MB = 1.000.000 bytes), para "
+                                 "Discord, WhatsApp e e-mail. Usa duas passadas: leva cerca do dobro do tempo."))
+        self.loud = compact(QComboBox())
+        for val, label in LOUDNESS:
+            self.loud.addItem(_(label), val)
+        self.loud.setToolTip(_("Acerta o volume do som (medido em duas passadas, EBU R 128). As plataformas "
+                               "abaixam o som alto demais; no volume delas o vídeo soa como os outros."))
+        self.peak = QDoubleSpinBox()
+        self.peak.setRange(-9.0, 0.0)
+        self.peak.setDecimals(1)
+        self.peak.setSingleStep(0.5)
+        self.peak.setSuffix(" dBTP")
+        self.peak.setValue(export.ExportSettings().true_peak)
+        self.peak.setToolTip(_("Pico real máximo do som com volume alvo (−1 dBTP é o padrão; −2 no Spotify)."))
+        self.net_grain = QCheckBox(_("Grão para redes"))
+        self.net_grain.setToolTip(_("Grão com tamanho mínimo no quadro de saída, para sobreviver à recompressão "
+                                    "das redes. Desligado, o grão sai como na prévia."))
+        form.addRow(_("Quadro"), self.frame_box)
+        form.addRow(_("Encaixe"), self.fit_box)
+        form.addRow(_("Tamanho alvo"), self.target)
+        form.addRow(_("Volume alvo"), self.loud)
+        form.addRow(_("Pico real"), self.peak)
+        form.addRow("", self.net_grain)
+
+    def _add_frame(self, key: str) -> None:
+        size = export.parse_frame(key)
+        if size:
+            label = f"{size[0]} × {size[1]} ({platforms.aspect_name(*size)})"
+        else:
+            label = _("Automático (pela resolução)")
+        self.frame_box.addItem(label, key)
+
+    def _set_loudness(self, value: float) -> None:
+        i = self.loud.findData(float(value))
+        if i < 0:
+            self.loud.addItem(_("{lufs} LUFS").format(lufs=platforms.fmt_lufs(value)), float(value))
+            i = self.loud.count() - 1
+        self.loud.setCurrentIndex(i)
+
+    def platform_id(self) -> str:
+        return str(self.platform.currentData() or "")
+
+    def current_platform(self) -> platforms.Platform | None:
+        return platforms.get(self.platform_id())
+
+    def _platform_changed(self, *_args) -> None:
+        if self._building:
+            return
+        p = self.current_platform()
+        if p is None:
+            self._quality_changed()  # "Nenhuma": volta à qualidade escolhida (ou só limpa os limites)
+            return
+        dur = self._duration()
+        s = platforms.settings_for(p.id, self.info, base=self.settings(), duration=dur)
+        s.net_grain = self.net_grain.isChecked()  # escolha do usuário, não da plataforma
+        self._apply(s)
+        self.quality.blockSignals(True)
+        self.quality.setCurrentIndex(self.quality.count() - 1)
+        self.quality.blockSignals(False)
+        self.qdesc.setText(_("Opções de {plataforma}. Dá para mudar qualquer uma abaixo.").format(
+            plataforma=_(p.name)))
+
+    def _frame_changed(self, *_args) -> None:
+        if self._building:
+            return
+        size = export.parse_frame(self.frame_box.currentData() or "")
+        if size:  # quadro escolhido à mão: encaixe automático (cortar quando a proporção é parecida)
+            self._building = True
+            self._set_combo(self.fit_box, platforms.auto_fit(self.info.width, self.info.height, *size))
+            self._building = False
+        self._custom()
+
+    def _platform_info(self) -> None:
+        """Limites e nota da plataforma, e o corte opcional na duração máxima."""
+        p = self.current_platform()
+        self.plimits.setVisible(p is not None)
+        self.pnote.setVisible(p is not None)
+        if p is None:
+            self.trim_max.setVisible(False)
+            return
+        self.plimits.setText(platforms.limits_text(p))
+        note = _(p.note) if p.note else ""
+        if not p.official:
+            note = (note + " " if note else "") + _("(Valores conservadores: a plataforma não publica especificação.)")
+        self.pnote.setText(note)
+        over = bool(p.max_s) and self._duration(trim=False) > p.max_s + 0.05
+        self.trim_max.setVisible(over)
+        if over:
+            self.trim_max.setText(_("Exportar só os primeiros {dur} (o limite de {plataforma})").format(
+                dur=platforms.fmt_seconds(p.max_s), plataforma=_(p.name)))
+
+    def _sync_rows(self, s: export.ExportSettings) -> None:
+        """Habilita as linhas que valem para as opções atuais."""
+        fixed = export.parse_frame(s.frame) is not None
+        self.res.setEnabled(not fixed)
+        self.fit_box.setEnabled(fixed)
+        if not self.info.is_image:
+            self.form.setRowVisible(self.target, s.codec in export.TWO_PASS_CODECS)
+            sound = bool(self.info.has_audio) and s.audio != "none"
+            self.loud.setEnabled(sound)
+            self.peak.setEnabled(sound and export.wants_loudness(s))
+        target = export.uses_target(s)
+        self.qval.setEnabled(not target)
+        self.bitrate.setEnabled(not target)
 
     # ------------------------------------------------------------ desempenho
     def _perf_group(self, perf: dict) -> QGroupBox:
@@ -405,6 +675,16 @@ class ExportDialog(QDialog):
         self._set_combo(self.audio, s.audio)
         self.grain.setChecked(s.tune_grain)
         self.dither.setChecked(s.dither)
+        if self.frame_box.findData(s.frame) < 0:
+            self._add_frame(s.frame)
+        self._set_combo(self.frame_box, s.frame)
+        self._set_combo(self.fit_box, s.fit)
+        self.target.setValue(float(s.target_mb))
+        self._set_loudness(s.loudness)
+        self.peak.setValue(float(s.true_peak))
+        self.net_grain.setChecked(bool(s.net_grain))
+        self._maxrate = float(s.maxrate)
+        self._set_combo(self.platform, s.platform)
         self._building = False
         self._fix_ext()
         self._summary()
@@ -418,6 +698,15 @@ class ExportDialog(QDialog):
             profile=self.profile.currentData() or "", bitrate=self.bitrate.value(),
             resolution=self.res.currentData(), fps=self.fps.currentData(), audio=self.audio.currentData(),
             tune_grain=self.grain.isChecked() and self.grain.isVisible(), dither=self.dither.isChecked())
+        if not self.info.is_image:
+            s.platform = self.platform_id()
+            s.frame = self.frame_box.currentData() or ""
+            s.fit = self.fit_box.currentData() or fitmod.CORTAR
+            s.target_mb = self.target.value() if s.codec in export.TWO_PASS_CODECS else 0.0
+            s.maxrate = self._maxrate
+            s.loudness = float(self.loud.currentData() or 0.0) if self.info.has_audio else 0.0
+            s.true_peak = self.peak.value()
+            s.net_grain = self.net_grain.isChecked()
         if hasattr(self, "buffer"):
             p = self.perf_dict()
             s.threads, s.priority, s.hwaccel, s.gpu, s.buffer = (p["threads"], p["priority"], p["hwaccel"],
@@ -431,6 +720,12 @@ class ExportDialog(QDialog):
                 self._apply(s)
                 self.qdesc.setText(_describe(k))
                 return
+        if not self.platform_id():  # "Nenhuma" no ajuste livre: tira o que a plataforma tinha posto
+            s, neutral = self.settings(), export.ExportSettings()
+            for k in PLATFORM_KEYS:
+                setattr(s, k, getattr(neutral, k))
+            s.net_grain = self.net_grain.isChecked()
+            self._apply(s)
         self.qdesc.setText(_("Ajuste livre de todas as opções abaixo."))
 
     def _codec_changed(self) -> None:
@@ -495,24 +790,63 @@ class ExportDialog(QDialog):
             self.summary.setText(_("Saída: {w}×{h} • {bits} bits por canal").format(
                 w=w, h=h, bits=16 if export.high_depth(s) else 8))
             return
-        a, b = (self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, self.info.frames - 1))
-        dur = (b - a + 1) / self.info.fps
+        self._sync_rows(s)
+        self._platform_info()
+        dur = self._duration()
         frames = round(dur * fps)
         depth = 16 if export.high_depth(s) else 8
         mins = int(dur // 60)
         secs = dur - mins * 60
         size = ""
-        if s.bitrate > 0:
+        if s.bitrate > 0 and not export.uses_target(s):
             mb = s.bitrate * dur / 8
             size = f" • ~{mb / 1000:.1f} GB" if mb > 1000 else f" • ~{mb:.0f} MB"
+        elif s.maxrate > 0 and s.codec in export.TWO_PASS_CODECS and not export.uses_target(s):
+            size = " • " + _("teto de {taxa} Mb/s").format(taxa=fmt_decimal(s.maxrate, 1))
         self.summary.setText(_("Saída: {w}×{h} • {fps} quadros/s • {duracao} • {quadros} quadros • "
                                "processamento em {bits} bits por canal").format(
             w=w, h=h, fps=f"{fps:.3f}", duracao=f"{mins}min{secs:04.1f}s", quadros=frames, bits=depth) + size)
         self._schedule_estimate()
+        self._warnings(s, dur)
+        self._schedule_preview()
+
+    def _warnings(self, s: export.ExportSettings, dur: float) -> None:
+        """Avisos: limites da plataforma (duração, tamanho estimado), duas passadas e som recodificado."""
+        out = []
+        p = self.current_platform()
+        if p is not None:
+            out += platforms.warnings(p, dur, export.estimate_bytes(s, self.info, dur, self._vbps))
+        if export.uses_target(s):
+            if export.target_bitrate(s, self.info, dur) < export.MIN_TARGET_RATE:
+                out.append(export.target_too_small_message(s, dur))
+            else:
+                out.append(_("Tamanho alvo de {mb} MB: duas passadas, leva cerca do dobro do tempo.").format(
+                    mb=export.fmt_mb(float(s.target_mb))))
+        if export.audio_reencoded_for_volume(s, self.info):
+            out.append(_("O som vai ser recodificado: copiar o original não deixa acertar o volume nem o "
+                         "tamanho do arquivo."))
+        self.warn.setText("\n".join("⚠ " + t for t in out))
+        self.warn.setVisible(bool(out))
 
     # ------------------------------------------------------------ tempo estimado
     def _range(self) -> tuple[int, int]:
-        return self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, -1)
+        """Quadros (início, fim inclusivo; -1 = até o fim) que saem, com o corte na duração da plataforma."""
+        a, b = self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, -1)
+        p = self.current_platform()
+        if p is not None and p.max_s and not self.trim_max.isHidden() and self.trim_max.isChecked():
+            last = self.info.frames - 1 if b < 0 else b
+            n = max(1, int(math.floor(p.max_s * self.info.fps + 1e-6)))
+            b = min(last, a + n - 1)
+        return a, b
+
+    def _duration(self, trim: bool = True) -> float:
+        """Duração (s) do que sai: vídeo inteiro ou trecho, e o corte na duração máxima (`trim`)."""
+        if trim:
+            a, b = self._range()
+        else:
+            a, b = self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, -1)
+        b = self.info.frames - 1 if b < 0 else b
+        return (b - a + 1) / self.info.fps
 
     def _cancel_estimate(self) -> None:
         if self._est_cancel is not None:
@@ -524,6 +858,7 @@ class ExportDialog(QDialog):
             return
         self._cancel_estimate()
         self._est_token += 1
+        self._vbps = 0.0
         self.est_label.setText(_("Tempo estimado: medindo a velocidade desta máquina…"))
         self._est_timer.start()
 
@@ -537,16 +872,17 @@ class ExportDialog(QDialog):
         info, values, seq = self.info, dict(self.values), self.sequence
 
         def run():
+            stats: dict = {}
             try:
-                fps = export.measure_speed(info, values, s, cancel, sequence=seq)
+                fps = export.measure_speed(info, values, s, cancel, sequence=seq, stats=stats)
             except Exception:  # noqa: BLE001
                 fps = 0.0
             if not cancel.is_set():
-                self._bridge.done.emit(token, fps)
+                self._bridge.done.emit(token, fps, float(stats.get("video_bytes_per_second", 0.0)))
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _est_done(self, token: int, fps: float) -> None:
+    def _est_done(self, token: int, fps: float, vbps: float = 0.0) -> None:
         if token != self._est_token:
             return
         self._est_cancel = None
@@ -554,17 +890,71 @@ class ExportDialog(QDialog):
             self.est_label.setText(_("Tempo estimado: não foi possível medir com estas opções."))
             return
         a, b = self._range()
-        frames = export.job_frames(self.info, self.settings(), a, b)
-        secs = frames / fps + 2
+        s = self.settings()
+        frames = export.job_frames(self.info, s, a, b)
+        passes = 2 if export.uses_target(s) else 1  # tamanho alvo: a GPU renderiza duas vezes
+        secs = frames / fps * passes + 2
         if self.info.is_image:
             self.est_label.setText(_("Tempo estimado: {tempo}").format(tempo=fmt_dur(secs)))
-        else:
-            self.est_label.setText(_("Tempo estimado: ≈ {tempo}  •  {fps} quadros/s medidos agora nesta máquina "
-                                     "com estas opções").format(tempo=fmt_dur(secs), fps=fmt_decimal(fps, 1)))
+            return
+        text = _("Tempo estimado: ≈ {tempo}  •  {fps} quadros/s medidos agora nesta máquina "
+                 "com estas opções").format(tempo=fmt_dur(secs), fps=fmt_decimal(fps, 1))
+        if passes == 2:
+            text += "  •  " + _("duas passadas")
+        self.est_label.setText(text)
+        if vbps > 0:  # tamanho provável (qualidade constante): os avisos de tamanho da plataforma
+            self._vbps = vbps
+            self._warnings(s, self._duration())
+
+    # ------------------------------------------------------------ prévia do resultado
+    def _schedule_preview(self) -> None:
+        if not hasattr(self, "_preview_timer") or self.info.is_image:
+            return
+        self._preview_timer.start()
+
+    def _preview_args(self) -> tuple:
+        s = self.settings()
+        ow, oh = export.output_size(self.info, s)
+        scale = min(1.0, PREVIEW_MAX / max(ow, oh))
+        a, b = self._range()
+        last = self.info.frames - 1 if b < 0 else b
+        frame = max(a, min(self.frame_index, last))
+        return self.info, dict(self.values), s, frame, self.sequence, scale
+
+    def _start_preview(self) -> None:
+        args = self._preview_args()
+        s = args[2]
+        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3])
+        if key == self._preview_key:
+            return
+        self._preview_key = key
+        self._preview_token += 1
+        if self.preview.pixmap() is None or self.preview.pixmap().isNull():
+            self.preview.setText(_("Renderizando…"))
+        self._preview_worker.request(self._preview_token, args)
+
+    def _preview_done(self, token: int, img) -> None:
+        if token != self._preview_token:
+            return
+        if img is None:
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText(_("Prévia indisponível"))
+            return
+        arr = np.ascontiguousarray(img if img.dtype == np.uint8 else (img >> 8).astype(np.uint8))
+        h, w = arr.shape[:2]
+        qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        pm = QPixmap.fromImage(qimg).scaled(PREVIEW_BOX - 2, PREVIEW_BOX - 2, Qt.AspectRatioMode.KeepAspectRatio,
+                                            Qt.TransformationMode.SmoothTransformation)
+        self.preview.setText("")
+        self.preview.setPixmap(pm)
+        w, h = self._preview_key[0] if self._preview_key else (w, h)
+        self.preview_caption.setText(_("Prévia do resultado • {w} × {h}").format(w=w, h=h))
 
     def done(self, r: int) -> None:
         self._est_timer.stop()
         self._cancel_estimate()
+        self._preview_timer.stop()
+        self._preview_worker.stop()
         super().done(r)
 
     def _accept(self) -> None:
@@ -593,7 +983,7 @@ class ExportDialog(QDialog):
         self.accept()
 
     def job(self) -> export.ExportJob:
-        a, b = (self.in_out if (self.r_sel.isChecked() and self.in_out) else (0, -1))
+        a, b = self._range()
         return export.ExportJob(info=self.info, values=dict(self.values), settings=self.settings(),
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",

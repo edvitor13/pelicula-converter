@@ -79,9 +79,11 @@ class JobRow(QFrame):
         self.cancel.setVisible(active)
         self.open.setVisible(j.status == "concluido")
         if j.status == "exportando":
-            self.info.setText(_("{feitos} de {total} quadros • {pct}% • {fps} quadros/s • faltam {tempo}").format(
-                feitos=j.done, total=j.total, pct=f"{j.progress * 100:.1f}", fps=f"{j.fps_rate:.1f}",
-                tempo=_dur(j.eta)))
+            # Etapa das exportações por plataforma ("Medindo o volume do som…", "Passada 1 de 2").
+            stage = f"{j.stage}  •  " if j.stage else ""
+            self.info.setText(stage + _("{feitos} de {total} quadros • {pct}% • {fps} quadros/s • faltam {tempo}")
+                              .format(feitos=j.done, total=j.total, pct=f"{j.progress * 100:.1f}",
+                                      fps=f"{j.fps_rate:.1f}", tempo=_dur(j.eta)))
         elif j.status == "concluido":
             self.info.setText(_("{total} quadros em {tempo}").format(total=j.total, tempo=_dur(j.finished - j.started)))
         elif j.status == "erro":

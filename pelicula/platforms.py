@@ -440,6 +440,7 @@ class SafeArea:
     name: str
     rects: tuple[tuple[float, float, float, float], ...]
     dim: bool = True
+    aspect: float = 0.0  # largura/altura do quadro em que as zonas foram medidas (0 = qualquer quadro)
 
 
 SAFE_AREAS: tuple[SafeArea, ...] = (
@@ -447,12 +448,12 @@ SAFE_AREAS: tuple[SafeArea, ...] = (
     # 2026-10), medido em 1080 × 1920: 120 px livres de cada lado, 240 em cima e 660 embaixo, e a coluna dos
     # botões (curtir, comentar, compartilhar) ocupa x ≥ 780 a partir de y = 840.
     SafeArea("tiktok", "TikTok", ((120 / 1080, 240 / 1920, 840 / 1080, 600 / 1920),
-                                  (120 / 1080, 840 / 1920, 660 / 1080, 420 / 1920))),
+                                  (120 / 1080, 840 / 1920, 660 / 1080, 420 / 1920)), aspect=9 / 16),
     # Meta Ads Guide, Instagram Reels (conferido em 2026-10): 14% em cima, 35% embaixo e 6% de cada lado livres.
-    SafeArea("reels", "Instagram Reels", ((0.06, 0.14, 0.88, 0.51),)),
+    SafeArea("reels", "Instagram Reels", ((0.06, 0.14, 0.88, 0.51),), aspect=9 / 16),
     # Google Ads, modelo vertical 1080 × 1920 (support.google.com/google-ads/answer/13547298, conferido em
     # 2026-10): margens de 288 px em cima, 672 embaixo, 48 à esquerda e 192 à direita.
-    SafeArea("shorts", "YouTube Shorts", ((48 / 1080, 288 / 1920, 840 / 1080, 960 / 1920),)),
+    SafeArea("shorts", "YouTube Shorts", ((48 / 1080, 288 / 1920, 840 / 1080, 960 / 1920),), aspect=9 / 16),
     # EBU R 95 (tech.ebu.ch/publications/r095): título/gráficos a 5% de cada borda, ação a 3,5%.
     SafeArea("titulo", N_("Título e ação (TV)"), ((0.05, 0.05, 0.90, 0.90), (0.035, 0.035, 0.93, 0.93)),
              dim=False),
