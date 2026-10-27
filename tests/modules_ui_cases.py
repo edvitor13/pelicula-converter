@@ -242,7 +242,7 @@ def test_each_module_hides_and_restores_its_tools(win):
     cards = {c.section.key: c for c in win.cards}
     expected = {"laboratorio": cards["lab"], "defeitos": cards["desgaste"], "scan": cards["scan"],
                 "luts": cards["lut"], "scopes": win.hist, "curva": win.curve_switch, "davinci": win.act_resolve,
-                "exportar_lut": win.act_luts[0], "edicao": win.mode_switch}
+                "exportar_lut": win.act_luts[0], "edicao": win.mode_switch, "medidor_som": win.meter}
     for module_id, items in win._module_tools().items():
         set_module(win, module_id, False)
         assert not any(shown(t) for t in items), module_id

@@ -6,6 +6,7 @@ Qt precisam de uma QApplication própria. Este arquivo não é coletado sozinho 
 
 from __future__ import annotations
 
+import math
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -283,6 +284,44 @@ def test_export_dialog_includes_chapters_option(tmp_path, monkeypatch):
     assert plain.chapters_box.isHidden() and plain.job().chapters == []
 
 
+# ------------------------------------------------------------------ medidor de som
+def test_audio_meter_widget_peaks_hold_idle_and_click():
+    from pelicula.ui.meter import FLOOR, HOLD_S, AudioMeter, fmt_level, level_to_t
+    assert level_to_t(0.0) == 1.0 and level_to_t(FLOOR) == 0.0 and level_to_t(None) == 0.0
+    assert 0 < level_to_t(-40) < level_to_t(-20) < level_to_t(-6) < 1
+    assert fmt_level(None) == "—" and fmt_level(float("-inf")) == "−∞"
+    assert fmt_level(-23.04).replace(".", ",") == "−23,0"
+    m = AudioMeter()
+    m.resize(88, 320)
+    m.show()
+    assert not m.active and m.integrated is None and not m.grab().isNull()
+    m.restart()
+    m.push([-6.0, -12.0], -20.0, None, -21.5, -5.5, now=10.0)
+    assert m.active and m.level == [-6.0, -12.0] and m.hold == [-6.0, -12.0]
+    assert (m.momentary, m.short_term, m.integrated, m.true_peak) == (-20.0, None, -21.5, -5.5)
+    m.push([-30.0, -30.0], now=10.5)  # a barra cai 24 dB/s e o traço do pico fica
+    assert m.level[0] == pytest.approx(-18.0) and m.hold[0] == -6.0
+    m.push([-30.0, -30.0], now=10.5 + HOLD_S + 0.1)  # passou a retenção
+    assert m.hold[0] == pytest.approx(-30.0) and m.level[0] == pytest.approx(-30.0)
+    m.push([float("-inf")], now=14.0)  # mono vai para as duas barras; silêncio é a base
+    assert m.level == [FLOOR, FLOOR]
+    m.push([0.0, -40.0], now=14.5)
+    assert m.clip == [True, False]
+    m.set_waiting(True)
+    assert not m.grab().isNull()
+    resets = []
+    m.resetRequested.connect(lambda: resets.append(1))
+    QTest.mouseClick(m, LMB, NOMOD, pt(40, 100))
+    assert resets == [1] and m.clip == [False, False]
+    m.idle()  # parou: as barras descem e as leituras ficam
+    assert not m.active and m.level == [FLOOR, FLOOR] and m.integrated is None and m.momentary is None
+    m.push([-10.0, -10.0], -15.0, -16.0, -17.0, -3.0, now=20.0)
+    m.idle()
+    assert m.integrated == -17.0 and m.true_peak == -3.0 and not m.grab().isNull()
+    m.clear()
+    assert m.integrated is None and not m.waiting
+
+
 # ------------------------------------------------------------------ janela principal (pula sem OpenGL)
 @pytest.fixture(scope="module")
 def win():
@@ -398,3 +437,171 @@ def test_window_keeps_markers_of_a_plain_file_in_the_project(win):
         assert data is not None and data["marcadores"][0]["nome"] == "Cena 2"
     finally:
         win.file_info = old
+
+
+def tone_wav(path, secs=8.0, dbfs=-23.0, rate=48000) -> str:
+    """WAV estéreo de 24 bits com um seno de 1 kHz (como a mixagem da prévia)."""
+    import struct
+
+    import numpy as np
+    t = np.arange(int(secs * rate)) / rate
+    x = 10 ** (dbfs / 20) * np.sin(2 * np.pi * 1000 * t)
+    v = np.round(np.repeat(x[:, None], 2, axis=1) * 8388607).astype(np.int64) & 0xFFFFFF
+    data = np.stack([v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF], axis=-1).astype(np.uint8).tobytes()
+    fmt = struct.pack("<HHIIHH", 1, 2, rate, rate * 6, 6, 24)
+    with open(path, "wb") as fh:
+        fh.write(b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(data)) + b"WAVE")
+        fh.write(b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(data)) + data)
+    return str(path)
+
+
+def meter_on(win, on: bool) -> None:
+    from pelicula import modules
+    modules.set_enabled(win.settings, "medidor_som", on)
+    win.apply_modules()
+
+
+def meter_source(win, kind, path) -> None:
+    """Troca o som que o medidor lê sem passar pelo QMediaPlayer (o resto de `_set_audio`)."""
+    win._audio_src = (kind, path)
+    win._meter_source()
+
+
+def test_window_meter_follows_the_playback_clock(win, tmp_path, monkeypatch):
+    import time
+    with_sequence(win, fake_source("C:/nao_existe/a.mp4"))
+    meter_on(win, True)
+    assert win.meter.isVisible() and win.meter.parent() is win.viewer.parent()
+    wav = tone_wav(tmp_path / "mix.wav")
+    meter_source(win, "seq", wav)
+    assert win._meter_reader is not None and win._meter_reader.rate == 48000
+    monkeypatch.setattr(win.player, "start", lambda *a, **k: None)  # sem decodificar quadros de verdade
+    win.start_play(0)
+    try:
+        assert win.meter_timer.isActive() and win.meter.active and win._meter_pos is None
+        win._meter_tick()  # antes do primeiro quadro chegar o relógio não começou: nada a medir
+        assert win._meter_lm.samples == 0
+        # 2 s tocados a partir do quadro 24 (1 s): mede o trecho 1 s → 3 s do WAV
+        win._play_f0, win._play_t0 = 24, time.perf_counter() - 2.0
+        win._meter_tick()
+        lm = win._meter_lm
+        assert lm.samples == pytest.approx(2 * 48000, abs=4800)
+        assert win._meter_pos == pytest.approx(3 * 48000, abs=4800)
+        assert win.meter.momentary == pytest.approx(-23.0, abs=0.1)
+        assert win.meter.integrated == pytest.approx(-23.0, abs=0.1)
+        assert win.meter.true_peak == pytest.approx(-23.0, abs=0.2)  # o seno tem pico de −23 dBFS
+        assert win.meter.level[0] == pytest.approx(-23.0, abs=0.2) and win.meter.level[1] == win.meter.level[0]
+        # mais 1 s: continua somando
+        win._play_t0 -= 1.0
+        win._meter_tick()
+        assert lm.samples == pytest.approx(3 * 48000, abs=4800) and win.meter.short_term is not None
+        # volta do loop (o tempo anda para trás): medição nova a partir do quadro de partida
+        win._play_f0, win._play_t0 = 0, time.perf_counter() - 0.5
+        win._meter_tick()
+        assert lm.samples == pytest.approx(0.5 * 48000, abs=4800) and win.meter.short_term is None
+        # salto para a frente maior que 5 s (a janela travou): recomeça de agora
+        win._play_t0 -= 6.0
+        win._meter_tick()
+        assert lm.samples == 0 and win._meter_pos == pytest.approx(6.5 * 48000, abs=4800)
+        # clique no medidor: recomeça sem parar
+        win.meter.resetRequested.emit()
+        assert lm.samples == 0 and win.meter.integrated is None
+        # pular durante a reprodução passa por start_play: recomeça
+        win._play_t0 -= 1.0
+        win._meter_tick()
+        assert lm.samples > 0
+        win.start_play(48)
+        assert win._meter_pos is None and win.meter.integrated is None
+        win._play_f0, win._play_t0 = 48, time.perf_counter() - 1.0
+        win._meter_tick()
+        assert win.meter.integrated == pytest.approx(-23.0, abs=0.1)
+    finally:
+        win.stop_play()
+    assert not win.meter_timer.isActive() and not win.meter.active
+    assert win.meter.integrated == pytest.approx(-23.0, abs=0.1)  # a leitura fica (apagada) depois do stop
+    # fonte nova: o medidor zera; arquivo apagado no meio da leitura não derruba nada
+    meter_source(win, "seq", "")
+    assert win._meter_reader is None and win.meter.integrated is None
+    meter_source(win, "seq", wav)
+    os.remove(wav)
+    win.playing, win._play_f0, win._play_t0 = True, 0, time.perf_counter() - 1.0
+    try:
+        win._meter_tick()
+    finally:
+        win.playing = False
+
+
+def test_window_meter_hides_and_stops_when_the_module_is_off(win, tmp_path):
+    with_sequence(win, fake_source("C:/nao_existe/a.mp4"))
+    meter_on(win, True)
+    wav = tone_wav(tmp_path / "mix.wav", secs=1.0)
+    meter_source(win, "seq", wav)
+    assert win._meter_reader is not None
+    meter_on(win, False)
+    try:
+        assert not win.meter.isVisible() and win._meter_reader is None and win._meter_for == ("", "")
+        win._meter_start()
+        assert not win.meter_timer.isActive()
+        meter_source(win, "file", wav)  # desligado: nem decodifica
+        assert win._meter_files == [] and not win.meter.waiting and win._meter_reader is None
+        meter_source(win, "seq", wav)
+        assert win._meter_reader is None
+    finally:
+        meter_on(win, True)
+    assert win.meter.isVisible() and win._meter_for == ("seq", wav) and win._meter_reader is not None
+
+
+def test_window_meter_decodes_the_file_sound_once(win, tmp_path):
+    import time
+
+    from pelicula import media
+    try:
+        ok = media.configure()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"ffmpeg indisponível: {exc}")
+    if not ok:
+        pytest.skip("ffmpeg/ffprobe não encontrados")
+    with_sequence(win, fake_source("C:/nao_existe/a.mp4"), mode="pelicula")
+    meter_on(win, True)
+    src = tone_wav(tmp_path / "filme.wav", secs=2.0)
+
+    def wait_reader():
+        deadline = time.monotonic() + 30
+        while win._meter_reader is None and time.monotonic() < deadline:
+            APP.processEvents()
+            time.sleep(0.02)
+        assert win._meter_reader is not None
+
+    meter_source(win, "", "")
+    meter_source(win, "file", src)
+    assert win.meter.waiting and len(win._meter_files) == 1
+    decoded = win._meter_files[0]
+    assert os.path.basename(decoded).startswith("pelicula_medidor_")
+    wait_reader()
+    assert not win.meter.waiting and win._meter_reader.path == decoded
+    assert (win._meter_reader.rate, win._meter_reader.channels) == (48000, 2)
+    # Edição e volta: o som decodificado é reaproveitado
+    meter_source(win, "seq", src)
+    assert os.path.exists(decoded) and win._meter_reader.path == src
+    meter_source(win, "file", src)
+    assert win._meter_reader.path == decoded and not win.meter.waiting
+    # fonte trocada no meio da decodificação: o pedido antigo é cancelado e o arquivo dele não fica
+    other = tone_wav(tmp_path / "outro.wav", secs=2.0)
+    meter_source(win, "file", other)
+    assert not os.path.exists(decoded) and win.meter.waiting
+    cancelled = win._meter_files[-1]
+    meter_source(win, "file", src)
+    wait_reader()
+    deadline = time.monotonic() + 10
+    while os.path.exists(cancelled) and time.monotonic() < deadline:
+        APP.processEvents()
+        time.sleep(0.05)
+    assert not os.path.exists(cancelled) and win._meter_reader.path in win._meter_files
+    # fechar a janela (audio_stop_and_clean) apaga o que foi decodificado
+    current = win._meter_reader.path
+    win._meter_close()
+    assert not os.path.exists(current) and win._meter_reader is None
+    win._meter_source()  # volta a ler o mesmo som (decodifica de novo)
+    wait_reader()
+    meter_source(win, "", "")
+    assert win._meter_files == []

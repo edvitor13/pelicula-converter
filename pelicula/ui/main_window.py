@@ -20,13 +20,14 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look, luts,
-               media, modules, params, presets, project, sequence, system, testimage, timeline, updater)
+from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
+               loudness, luts, media, modules, params, presets, project, sequence, system, testimage, timeline, updater)
 from ..i18n import N_, _
 from ..engine import Engine, lut_info
 from . import icons, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
+from .meter import AudioMeter
 from .queue_dialog import QueueDialog, open_folder
 from .store import ParamStore
 from .viewer import Viewer
@@ -229,6 +230,7 @@ class _MixBridge(QObject):
     done = Signal(str, str)  # chave da mixagem, arquivo WAV ("" = sem som)
     peaks = Signal(str)      # forma de onda de um arquivo ficou pronta
     thumb = Signal(str, object)  # miniatura de uma mídia importada (caminho, QImage)
+    meter = Signal(int, str)     # pedido do medidor de som, WAV com o som do arquivo ("" = não deu)
 
 
 class _UpdateBridge(QObject):
@@ -327,6 +329,20 @@ class MainWindow(QMainWindow):
         self._mix_bridge.peaks.connect(lambda path: self.tl_editor.peaks_ready(path))
         self._mix_bridge.thumb.connect(lambda path, img: self.bin.set_thumb(path, img))
         self._notice_muted: set[str] = set()  # módulos cujo aviso a pessoa fechou nesta sessão
+        # Medidor de som (módulo medidor_som): lê o mesmo som que está tocando, junto com o relógio da prévia.
+        self._meter_enabled = False
+        self._meter_for = ("", "")      # (tipo, caminho) do som que o medidor está lendo
+        self._meter_reader: audiomix.WavReader | None = None
+        self._meter_lm: loudness.LoudnessMeter | None = None
+        self._meter_pos: int | None = None  # próxima amostra a medir (None = recomeçar)
+        self._meter_token = 0
+        self._meter_cancel: threading.Event | None = None
+        self._meter_wav: tuple[tuple, str] = ((), "")  # som do arquivo já decodificado: ((caminho, mtime), WAV)
+        self._meter_files: list[str] = []
+        self._mix_bridge.meter.connect(self._meter_decoded)
+        self.meter_timer = QTimer(self)
+        self.meter_timer.setInterval(40)  # 25 vezes por segundo
+        self.meter_timer.timeout.connect(self._meter_tick)
 
         self._build_ui()
         self.store.changed.connect(self._on_param)
@@ -649,7 +665,14 @@ class MainWindow(QMainWindow):
         self.viewer.testRequested.connect(self.open_test_scene)
         self.viewer.filesDropped.connect(self.handle_files)
         self.viewer.zoomChanged.connect(self._zoom_changed)
-        vl.addWidget(self.viewer, 1)
+        self.meter = AudioMeter()
+        self.meter.resetRequested.connect(self._meter_reset)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self.viewer, 1)
+        row.addWidget(self.meter)
+        vl.addLayout(row, 1)
         tr = _TransportBar()
         tr.setObjectName("Transport")
         tv = QVBoxLayout(tr)
@@ -1275,6 +1298,7 @@ class MainWindow(QMainWindow):
             return
         self._audio_src = (kind, path)
         self._load_audio(path)
+        self._meter_source()
         if self.playing and self._audio_ok and self.audio is not None:
             self._audio_seek(self.frame_idx)
             self.audio.play()
@@ -1338,6 +1362,7 @@ class MainWindow(QMainWindow):
             self.audio.stop()
             self.audio.setSource(QUrl())
         self._clean_mixes()
+        self._meter_close()
 
     def _peaks_for(self, path: str):
         """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
@@ -1693,6 +1718,7 @@ class MainWindow(QMainWindow):
         if self._audio_ok and self.audio is not None:
             self._audio_seek(f)
             self.audio.play()
+        self._meter_start()
         self.btn_play.setIcon(icons.icon("pause", theme.TEXT, 18))
         self.play_timer.start(max(5, int(500 / self.info.fps)))
 
@@ -1704,6 +1730,10 @@ class MainWindow(QMainWindow):
         self.playing = False
         if self.audio is not None:
             self.audio.pause()
+        self.meter_timer.stop()
+        self._meter_pos = None
+        if self._meter_enabled:
+            self.meter.idle()
         self.btn_play.setIcon(icons.icon("play", theme.TEXT, 18))
         self.thumb_timer.start()
 
@@ -1741,6 +1771,144 @@ class MainWindow(QMainWindow):
         self._play_last = f
         self._set_frame(f, item[1])
         self._audio_follow(f)
+
+    # ================================================================ medidor de som (módulo medidor_som)
+    METER_JUMP_S = 5.0  # o relógio pulou mais que isso para a frente: medição nova
+
+    def _meter_source(self) -> None:
+        """Abre o som que o medidor lê, o mesmo que está tocando: a mixagem da montagem (WAV pronto) ou o
+        som do arquivo, decodificado uma vez num WAV temporário em segundo plano. Nada disso vai para a
+        exportação."""
+        kind, path = self._audio_src
+        want = (kind, path) if self._meter_enabled and path else ("", "")
+        if want == self._meter_for:
+            return
+        self._meter_close(drop_files=not want[1])
+        self._meter_for = want
+        self.meter.clear()
+        kind, path = want
+        if kind == "seq":
+            self._meter_open(path)
+        elif path:
+            key = self._meter_key(path)
+            if self._meter_wav[0] == key and os.path.exists(self._meter_wav[1]):
+                self._meter_open(self._meter_wav[1])
+            else:
+                self._meter_decode(path)
+
+    @staticmethod
+    def _meter_key(path: str) -> tuple:
+        try:
+            return path, os.path.getmtime(path)
+        except OSError:
+            return path, None
+
+    def _meter_decode(self, path: str) -> None:
+        self._meter_drop_files()
+        token = self._meter_token
+        out = os.path.join(tempfile.gettempdir(), f"pelicula_medidor_{os.getpid()}_{token}.wav")
+        self._meter_files.append(out)
+        cancel = self._meter_cancel = threading.Event()
+        self.meter.set_waiting(True)
+
+        def run():
+            try:
+                ok = audiomix.decode_wav(path, out, cancel)
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._mix_bridge.meter.emit(token, out if ok else "")
+
+        threading.Thread(target=run, daemon=True, name="medidor-som").start()
+
+    def _meter_decoded(self, token: int, wav: str) -> None:
+        if token != self._meter_token:  # a fonte mudou enquanto decodificava
+            if wav:
+                self._meter_remove(wav)
+            return
+        self._meter_cancel = None
+        self.meter.set_waiting(False)
+        if wav:
+            self._meter_wav = (self._meter_key(self._meter_for[1]), wav)
+            self._meter_open(wav)
+
+    def _meter_open(self, path: str) -> None:
+        try:
+            reader = audiomix.WavReader(path)
+        except (OSError, ValueError):
+            return
+        self._meter_reader = reader
+        self._meter_lm = loudness.LoudnessMeter(reader.rate, reader.channels)
+        self._meter_pos = None
+        if self.playing:
+            self._meter_start()
+
+    def _meter_close(self, drop_files: bool = True) -> None:
+        """Para de medir (fonte nova, módulo desligado ou janela fechando) e cancela a decodificação."""
+        if self._meter_cancel is not None:
+            self._meter_cancel.set()
+            self._meter_cancel = None
+        self._meter_token += 1
+        self._meter_for = ("", "")
+        self._meter_reader = self._meter_lm = None
+        self._meter_pos = None
+        self.meter_timer.stop()
+        if drop_files:
+            self._meter_drop_files()
+
+    def _meter_remove(self, f: str) -> None:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+            self._meter_files.remove(f)
+        except (OSError, ValueError):
+            pass  # o ffmpeg cancelado ainda está fechando; tenta de novo depois
+
+    def _meter_drop_files(self) -> None:
+        for f in list(self._meter_files):
+            self._meter_remove(f)
+        if self._meter_wav[1] not in self._meter_files:
+            self._meter_wav = ((), "")
+
+    def _meter_start(self) -> None:
+        """Play (também depois de pular durante a reprodução): a medição recomeça no quadro de partida."""
+        self._meter_pos = None
+        if self._meter_enabled and self._meter_for[1]:
+            if self._meter_reader is not None:
+                self.meter.restart()
+            self.meter_timer.start()
+
+    def _meter_reset(self) -> None:
+        """Clique no medidor: recomeça a integrada e o true peak sem parar a reprodução."""
+        if self._meter_lm is not None:
+            self._meter_lm.reset()
+        if self.playing and self._meter_reader is not None:
+            self.meter.restart()
+
+    def _meter_tick(self) -> None:
+        """Mede o som tocado desde o último toque, pelo mesmo relógio que escolhe o quadro mostrado."""
+        reader, lm = self._meter_reader, self._meter_lm
+        if not self.playing or reader is None or lm is None or self._play_t0 is None or self.info is None:
+            return
+        fps, rate = self.info.fps, reader.rate
+        now = int((self._play_f0 / fps + time.perf_counter() - self._play_t0) * rate)
+        pos = self._meter_pos
+        jump = self.METER_JUMP_S * rate
+        if pos is None or now < pos or now - pos > jump:
+            lm.reset()  # começo, volta do loop ou salto: mede a partir do quadro de partida (ou de agora)
+            self.meter.restart()
+            start = int(round(self._play_f0 / fps * rate))
+            pos = max(0, start if 0 <= now - start <= jump else now)
+        try:
+            x = reader.read(pos, now - pos)
+        except OSError:
+            return  # a mixagem antiga foi apagada; a nova chega por _set_audio
+        self._meter_pos = now
+        peaks = None
+        if len(x):
+            lm.add(x)
+            peaks = [loudness.db(float(v)) for v in lm.last_peak]
+        self.meter.push(peaks, lm.momentary(), lm.short_term(), lm.integrated(),
+                        lm.true_peak_db() if lm.samples else None)
 
     def seek(self, f: int) -> None:
         if self.info is None:
@@ -2550,6 +2718,7 @@ class MainWindow(QMainWindow):
             "exportar_lut": [self.act_lut_sep, *self.act_luts],
             "scopes": [self.hist, self.edit_scopes],
             "curva": [self.curve_label, self.curve_switch],
+            "medidor_som": [self.meter],
             "davinci": [self.act_resolve_sep, self.act_resolve],
         }
 
@@ -2572,6 +2741,8 @@ class MainWindow(QMainWindow):
         self.curve_graph.setVisible(curve)  # sem gravar "show_curve": religado, volta como estava
         if curve:
             self.curve_timer.start()
+        self._meter_enabled = "medidor_som" in on
+        self._meter_source()  # desligado: nem decodifica nem mede
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._check_modules()
 

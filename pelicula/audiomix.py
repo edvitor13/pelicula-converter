@@ -260,3 +260,93 @@ def peaks(path: str, rate: int = 100) -> np.ndarray | None:
     with _PEAKS_LOCK:
         _PEAKS[key] = (mtime, out)
     return out
+
+
+# ------------------------------------------------------------------ som para o medidor
+def decode_wav(path: str, out_path: str, cancel: threading.Event | None = None) -> bool:
+    """O som do arquivo inteiro num WAV estéreo de 16 bits em 48 kHz, para o medidor de som do modo
+    Película ler junto com a reprodução. False se não deu (sem som, erro do ffmpeg ou cancelado)."""
+    cmd = [media.ffmpeg(), "-y", "-v", "error", "-nostdin", "-hide_banner", "-i", path, "-map", "0:a:0", "-vn",
+           "-ac", "2", "-ar", str(RATE), "-c:a", "pcm_s16le", "-f", "wav", out_path]
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, **media.Perf(priority="baixa").popen_kwargs())
+    except OSError:
+        return False
+    while proc.poll() is None:
+        if cancel is not None and cancel.is_set():
+            proc.kill()
+            proc.wait()
+            _remove(out_path)
+            return False
+        time.sleep(0.05)
+    if proc.returncode != 0:
+        _remove(out_path)
+        return False
+    return True
+
+
+class WavReader:
+    """Lê trechos de um WAV PCM (inteiros de 16, 24 ou 32 bits, ou float de 32 bits) sem carregar o
+    arquivo inteiro: cada leitura abre, lê e fecha (o arquivo pode ser apagado entre uma e outra)."""
+
+    def __init__(self, path: str):
+        import struct
+        self.path = path
+        fmt = None
+        with open(path, "rb") as fh:
+            head = fh.read(12)
+            if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                raise ValueError(f"não é um WAV: {path}")
+            while True:
+                hdr = fh.read(8)
+                if len(hdr) < 8:
+                    raise ValueError(f"WAV sem dados: {path}")
+                cid, size = hdr[:4], struct.unpack("<I", hdr[4:])[0]
+                if cid == b"fmt ":
+                    body = fh.read(size + (size & 1))
+                    tag, ch, rate, _rate_bytes, align, bits = struct.unpack("<HHIIHH", body[:16])
+                    if tag == 0xFFFE and len(body) >= 26:  # WAVE_FORMAT_EXTENSIBLE: o tipo vem no GUID
+                        tag = struct.unpack("<H", body[24:26])[0]
+                    fmt = (tag, ch, rate, align, bits)
+                elif cid == b"data":
+                    self.offset = fh.tell()
+                    break
+                else:
+                    fh.seek(size + (size & 1), 1)
+        if fmt is None:
+            raise ValueError(f"WAV sem formato: {path}")
+        tag, self.channels, self.rate, self.align, self.bits = fmt
+        if (tag, self.bits) not in ((1, 16), (1, 24), (1, 32), (3, 32)) or self.align != self.channels * self.bits // 8:
+            raise ValueError(f"WAV num formato que o medidor não lê ({tag}, {self.bits} bits): {path}")
+        self.float = tag == 3
+        avail = os.path.getsize(path) - self.offset
+        self.frames = max(0, (min(size, avail) if size not in (0, 0xFFFFFFFF) else avail) // self.align)
+
+    @property
+    def duration(self) -> float:
+        return self.frames / self.rate if self.rate else 0.0
+
+    def read(self, start: int, count: int) -> np.ndarray:
+        """Amostras [start, start + count) em float32 (n, canais), de −1 a 1; menos no fim do arquivo."""
+        start = max(0, int(start))
+        count = max(0, min(int(count), self.frames - start))
+        if count == 0:
+            return np.zeros((0, self.channels), np.float32)
+        with open(self.path, "rb") as fh:
+            fh.seek(self.offset + start * self.align)
+            raw = fh.read(count * self.align)
+        n = len(raw) // self.align
+        raw = raw[:n * self.align]
+        if self.float:
+            x = np.frombuffer(raw, dtype="<f4")
+        elif self.bits == 16:
+            x = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+        elif self.bits == 32:
+            x = (np.frombuffer(raw, dtype="<i4").astype(np.float64) / 2147483648.0).astype(np.float32)
+        else:
+            b = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.int32)
+            v = b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)
+            v = np.where(v >= 1 << 23, v - (1 << 24), v)
+            x = v.astype(np.float32) / 8388608.0
+        return x.reshape(n, self.channels)
