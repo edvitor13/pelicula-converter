@@ -1457,6 +1457,12 @@ class TimelineEditor(QWidget):
         self._sync_actions()
         self._sync_tools(c.tool)
 
+    def add_lane(self, widget: QWidget) -> None:
+        """Uma faixa fina entre a barra de ferramentas e as faixas, alinhada com elas pelo `canvas.frame_to_x`
+        (a linha "Look" das chaves do look: `keyframes_ui.KeyStrip`)."""
+        self.layout().insertWidget(1, widget)
+        self.canvas.viewChanged.connect(widget.update)
+
     def _btn(self, icon: str, tip: str, text: str = "", checkable: bool = False) -> QToolButton:
         b = QToolButton()
         b.setObjectName("Flat")

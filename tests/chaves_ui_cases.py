@@ -1,7 +1,8 @@
 """Casos da interface das chaves de animação (losangos no inspetor, no look e na linha do tempo).
 
 Rodados por test_chaves_ui.py num subprocesso offscreen (via `uicases.run_cases`): os widgets do Qt precisam de
-uma QApplication própria. Este arquivo não é coletado sozinho pelo pytest. Nada aqui precisa de OpenGL.
+uma QApplication própria. Este arquivo não é coletado sozinho pelo pytest. Só os casos da janela (no fim)
+precisam de OpenGL 3.3: sem ele, pulam.
 """
 
 from __future__ import annotations
@@ -319,3 +320,146 @@ def test_timeline_key_drag_snaps_and_stays_inside_the_clip():
     b = _key_point(cv, v, 5)
     _click(cv, b, to=b - QPoint(int(40 * cv.ppf), 0))      # não sai pela esquerda do clipe
     assert m.keys_of(v.id, "brilho")[0][0] == float(v.start)
+
+
+# ------------------------------------------------------------------ faixa das chaves do look
+def _strip(playhead=0):
+    from pelicula.ui.store import ParamStore
+    st = ParamStore()
+    pos = {"f": playhead}
+    strip = kui.KeyStrip(st, lambda f: 20 + 4 * f, lambda x: (x - 20) / 4, lambda: pos["f"], lambda: 24.0,
+                         "Look", 20)
+    strip.resize(900, 18)
+    strip.show()
+    seen = []
+    strip.seekRequested.connect(seen.append)
+    return st, strip, seen, pos
+
+
+def _strip_click(strip, frame, mods=None, to_frame=None):
+    from PySide6.QtCore import QPoint
+    _click(strip, QPoint(20 + 4 * frame, 9), mods, None if to_frame is None else QPoint(20 + 4 * to_frame, 9))
+
+
+def test_look_strip_click_drag_delete():
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    st, strip, seen, _pos = _strip()
+    st.add_key("exposicao", 10, 0.0)
+    st.add_key("grao_forca", 10, 1.0)
+    st.add_key("exposicao", 50, 1.0)
+    assert strip.has_keys() and [f for f, _n in strip.marks()] == [10.0, 50.0]
+    assert kui._("Exposição") in strip.tooltip_at(20 + 40)
+    _strip_click(strip, 50)
+    assert seen == [50] and strip.selected == {50.0}
+    _strip_click(strip, 10, to_frame=30)                  # arrasta as duas chaves do quadro 10
+    assert [k[0] for k in st.keys_of("exposicao")] == [30.0, 50.0] and st.keys_of("grao_forca")[0][0] == 30.0
+    assert seen[-1] == 30 and strip.selected == {30.0}
+    st.undo()
+    assert st.keys_of("grao_forca")[0][0] == 10.0, "mover é um passo só do desfazer"
+    _strip_click(strip, 10)
+    _strip_click(strip, 50, Qt.KeyboardModifier.ShiftModifier)
+    assert strip.selected == {10.0, 50.0}
+    strip.setFocus()
+    QTest.keyClick(strip, Qt.Key.Key_Delete)
+    assert st.keys == {}
+    st.undo()
+    assert len(st.keys_of("exposicao")) == 2 and len(st.keys_of("grao_forca")) == 1
+    strip.grab()
+
+
+def test_look_strip_drag_snaps_to_the_playhead_and_stops_at_zero():
+    st, strip, _seen, _pos = _strip(playhead=40)
+    st.add_key("exposicao", 20, 0.0)
+    _strip_click(strip, 20, to_frame=39)
+    assert st.keys_of("exposicao")[0][0] == 40.0
+    _strip_click(strip, 40, to_frame=-30)
+    assert st.keys_of("exposicao")[0][0] == 0.0
+
+
+# ------------------------------------------------------------------ na janela (precisa de OpenGL)
+@pytest.fixture(scope="module")
+def win():
+    from pelicula.ui import prefs
+    from pelicula.ui.main_window import MainWindow
+    st = prefs.settings()
+    st.setValue("auto_update", "false")
+    st.setValue("language", "pt_BR")
+    try:
+        w = MainWindow()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"OpenGL 3.3 indisponível: {exc}")
+    w.confirm_discard = lambda: True
+    w.resize(1400, 900)
+    w.show()
+    APP.processEvents()
+    yield w
+
+
+def _pump(cond, timeout=20.0) -> bool:
+    import time
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        APP.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_look_keys_in_the_window_follow_the_playhead(win, sample_video):
+    win.set_mode("pelicula")
+    win.cur = None
+    win.load_media(sample_video)
+    assert _pump(lambda: win.cur is not None)
+    win.store.clear_keys()
+    assert not win.look_strip.isVisible()
+    win.request_frame(0)
+    assert win.store.view_frame == 0
+    win.look_keys.controls["exposicao"].button.click()    # o losango do painel do look
+    assert win.store.keys_of("exposicao") == [(0.0, win.store.values["exposicao"], "linear")]
+    assert win.look_strip.isVisible(), "a faixa das chaves aparece sob a barra da prévia"
+    win.request_frame(20)
+    assert win.store.view_frame == 20
+    win.store.set("exposicao", 1.0)                       # chave automática no cursor
+    assert [k[0] for k in win.store.keys_of("exposicao")] == [0.0, 20.0]
+    win.request_frame(10)
+    row = next(r for c in win.cards for r in c.rows if r.param.key == "exposicao")
+    assert row.slider.value() == pytest.approx(win.store.value_at("exposicao", 10))
+    win.set_mode("edicao")
+    win._set_edit_film(True)
+    assert win.look_lane.isVisible() and not win.look_strip.isVisible()
+    win._set_edit_film(False)
+    assert not win.look_lane.isVisible()
+    win.set_mode("pelicula")
+    win.store.clear_keys()
+    assert not win.look_strip.isVisible()
+
+
+def test_clip_inspector_in_the_window_follows_the_playhead(win, sample_video):
+    from pelicula import media
+    win.set_mode("pelicula")
+    win.cur = None
+    win.load_media(sample_video)
+    assert _pump(lambda: win.cur is not None)
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_key(v.id, "opacidade", 0, 1.0)
+    seq.set_key(v.id, "opacidade", 10, 0.0)
+    win._loading = True
+    try:
+        win.model.set_sequence(seq)
+    finally:
+        win._loading = False
+    win._refresh_source(reset=True)
+    win.set_mode("edicao")
+    win.model.select([v.id])
+    win.request_frame(5)
+    assert _pump(lambda: win.inspector.vstore.view_frame == 5)
+    assert win.inspector.vstore.shown("opacidade") == pytest.approx(0.5)
+    seen = []
+    win.inspector.seekRequested.connect(seen.append)
+    win.inspector.vkeys.controls["opacidade"].next.click()
+    assert seen == [10] and _pump(lambda: win.frame_idx == 10)
+    win.set_mode("pelicula")

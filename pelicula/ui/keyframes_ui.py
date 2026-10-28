@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QObject, QPointF, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QToolButton, QWidget
 
@@ -350,5 +350,152 @@ class KeyRows(QObject):
         return m
 
 
-__all__ = ["ANIMATED", "ClipKeys", "KeyButton", "KeyControl", "KeyRows", "NONE", "ON", "StepButton",
+# ------------------------------------------------------------------ faixa das chaves do look
+class KeyStrip(QWidget):
+    """As chaves do look ao longo do tempo, numa faixa fina alinhada com uma régua de tempo.
+
+    `frame_to_x` / `x_to_frame` são os da régua ao lado (a barra da prévia no modo Película, a linha do tempo no
+    modo Edição); `left` reserva à esquerda o espaço do cabeçalho das faixas, onde vai o `label`. Clique num
+    losango seleciona e leva o cursor; arrastar move a seleção (quadros inteiros, ímã no cursor, um passo do
+    desfazer); Shift soma à seleção; Delete apaga.
+    """
+
+    seekRequested = Signal(int)
+
+    def __init__(self, store, frame_to_x: Callable[[float], float], x_to_frame: Callable[[float], float],
+                 playhead: Callable[[], float], fps: Callable[[], float], label: str = "", left: float = 0.0,
+                 parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.frame_to_x, self.x_to_frame, self.playhead, self.fps = frame_to_x, x_to_frame, playhead, fps
+        self.label = label
+        self.left = float(left)
+        self.selected: set[float] = set()
+        self._drag: dict | None = None
+        self.setObjectName("KeyStrip")
+        self.setFixedHeight(18)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        store.changed.connect(self._store_changed)
+
+    def marks(self) -> list[tuple[float, list[str]]]:
+        return merged_marks(self.store.keys)
+
+    def has_keys(self) -> bool:
+        return bool(self.store.keys)
+
+    def mark_at(self, x: float) -> float | None:
+        best = None
+        for f, _names in self.marks():
+            d = abs(self.frame_to_x(f) - x)
+            if d <= HIT_PX and (best is None or d < best[0]):
+                best = (d, f)
+        return best[1] if best else None
+
+    def _store_changed(self, _key: str) -> None:
+        frames = {f for f, _n in self.marks()}
+        self.selected &= frames
+        self.update()
+
+    def tooltip_at(self, x: float) -> str:
+        f = self.mark_at(x)
+        if f is None:
+            return ""
+        from .widgets import timecode
+        names = dict(self.marks())[f]
+        return _("Chave do look em {tempo}: {ajustes}").format(tempo=timecode(int(round(f)), self.fps() or 24.0),
+                                                               ajustes=param_names(self.store.schema, names))
+
+    # -------------------------------------------------------- desenho
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.fillRect(QRectF(self.left, 0, w - self.left, h), QColor(theme.TRACK_BG))
+        if self.left > 0:
+            p.fillRect(QRectF(0, 0, self.left, h), QColor(theme.PANEL))
+            p.setPen(QColor(theme.MUTED))
+            p.setFont(theme.font(8))
+            p.drawText(QRectF(10, 0, self.left - 14, h), Qt.AlignmentFlag.AlignVCenter, self.label)
+        p.setClipRect(QRectF(self.left, 0, w - self.left, h))
+        xp = self.frame_to_x(self.playhead())
+        p.setPen(QPen(QColor(theme.PLAYHEAD), 1))
+        p.drawLine(QPointF(xp, 0), QPointF(xp, h))
+        off = self._drag["delta"] if self._drag and self._drag.get("active") else 0
+        cy = h / 2
+        for f, _names in self.marks():
+            chosen = f in self.selected
+            x = self.frame_to_x(f + (off if chosen else 0))
+            if chosen:
+                paint_diamond(p, x, cy, 5.0, QColor(theme.PLAYHEAD), QColor("#1a120a"), 1.3)
+            else:
+                paint_diamond(p, x, cy, 4.5, QColor(theme.ACCENT), QColor("#1a120a"), 1.2)
+        p.end()
+
+    # -------------------------------------------------------- mouse e teclado
+    def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        x = e.position().x()
+        f = self.mark_at(x)
+        if f is None:
+            self.selected = set()
+            self.update()
+            return
+        if e.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier):
+            self.selected ^= {f}
+        elif f not in self.selected:
+            self.selected = {f}
+        if f in self.selected:
+            self._drag = {"grab": f, "press_x": x, "delta": 0, "active": False}
+        self.seekRequested.emit(int(round(f)))
+        self.update()
+
+    def mouseMoveEvent(self, e):
+        x = e.position().x()
+        d = self._drag
+        if d is None:
+            self.setToolTip(self.tooltip_at(x))
+            return
+        if not d["active"] and abs(x - d["press_x"]) < 3:
+            return
+        d["active"] = True
+        target = d["grab"] + (self.x_to_frame(x) - self.x_to_frame(d["press_x"]))
+        ph = self.playhead()
+        if abs(self.frame_to_x(target) - self.frame_to_x(ph)) <= SNAP_PX:
+            target = ph
+        d["delta"] = int(max(round(target - d["grab"]), -min(self.selected)))  # nunca antes do quadro 0
+        self.update()
+
+    def mouseReleaseEvent(self, _e):
+        d, self._drag = self._drag, None
+        if d is None or not d["active"] or not d["delta"]:
+            self.update()
+            return
+        delta = d["delta"]
+        moves = [(name, f, f + delta) for f, names in self.marks() if f in self.selected for name in names]
+        before, self.selected = self.selected, {f + delta for f in self.selected}  # antes do aviso do store
+        if self.store.move_keys(moves):
+            self.seekRequested.emit(int(round(d["grab"] + delta)))
+        else:
+            self.selected = before
+        self.update()
+
+    def delete_selected(self) -> bool:
+        items = [(name, f) for f, names in self.marks() if f in self.selected for name in names]
+        self.selected = set()
+        self.update()
+        return bool(items) and self.store.remove_keys(items)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.selected:
+            self.delete_selected()
+        elif e.key() == Qt.Key.Key_Escape and self.selected:
+            self.selected = set()
+            self.update()
+        else:
+            e.ignore()
+
+
+__all__ = ["ANIMATED", "ClipKeys", "KeyButton", "KeyControl", "KeyRows", "KeyStrip", "NONE", "ON", "StepButton",
            "diamond", "merged_marks", "paint_diamond", "param_names"]
