@@ -124,6 +124,10 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/vulkansdk.tar.xz" \
             "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSAO/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSAO.tar.xz"
           echo "$VULKAN_SDK_SHA256_LINUX  $RUNNER_TEMP/vulkansdk.tar.xz" | sha256sum -c -
+          # O SDK do Linux não traz mais o carregador (libvulkan.so): o do sistema só serve para ligar
+          # (a biblioteca pede libvulkan.so.1, que o driver de vídeo instala).
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libvulkan-dev > /dev/null
           mkdir -p "$RUNNER_TEMP/vulkansdk"
           tar -xJf "$RUNNER_TEMP/vulkansdk.tar.xz" -C "$RUNNER_TEMP/vulkansdk" --strip-components=1
           sdk="$RUNNER_TEMP/vulkansdk/x86_64"
