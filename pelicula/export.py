@@ -13,8 +13,9 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from . import look, media, system
-from .engine import Engine, lut_info
+from . import media, system
+from .engine import Engine
+from .frame import Recipe, lut_of
 from .i18n import _
 
 X26_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
@@ -646,41 +647,15 @@ def _commit_output(path: str, s: ExportSettings) -> None:
 
 
 # ------------------------------------------------------------------ quadro a quadro (exportação e prévia)
-@dataclass
-class FramePipeline:
-    """Do quadro decodificado ao quadro gravado: montagem (modo Edição), look e encaixe no quadro (`fit.py`).
-
-    A exportação (`_encode`) e a prévia da janela de exportação (`preview_frame`) usam este mesmo objeto:
-    o quadro N da prévia é o quadro N gravado.
-    """
-    values: dict
-    fit: Any                 # fit.Fit
-    fps: float
-    depth: int
-    dither: bool
-    legal: bool
-    lut: tuple | None = None
-    seq: Any = None
-    net_grain: float = 0.0   # "Grão para redes": px da imagem por px da saída (0 = desligado)
-
-    def render(self, engine: Engine, img, index: int):
-        """`img` é o quadro decodificado (ou `sequence.FrameLayers` no modo Edição); `index`, o número do quadro."""
-        f = self.fit
-        if self.seq is not None:
-            img = engine.compose(img, self.seq, f.dec_w, f.dec_h, self.depth, crop=f.canvas_crop)
-        engine.set_input(img)
-        h, w = img.shape[:2]
-        plan = look.build_plan(self.values, w, h, index, self.fps, self.lut, dither=self.dither, legal=self.legal,
-                               net_grain=self.net_grain)
-        if f.composite:
-            return engine.render_fit(plan, self.depth, f)
-        return engine.render(plan, self.depth)
+# Do quadro decodificado ao quadro gravado: a receita única de `frame.py` (montagem, look e encaixe). O nome
+# antigo continua valendo para quem já usava `export.FramePipeline`.
+FramePipeline = Recipe
 
 
 def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=None, scale: float = 1.0,
-                   depth: int | None = None) -> FramePipeline:
-    """O caminho de um quadro desta exportação. `scale` < 1 reduz tudo (prévia): o quadro, o encaixe e o
-    tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura)."""
+                   depth: int | None = None) -> Recipe:
+    """A receita de um quadro desta exportação (`frame.Recipe`). `scale` < 1 reduz tudo (prévia): o quadro, o
+    encaixe e o tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura)."""
     from . import fit as fitmod
     ow, oh = output_size(info, s)
     if scale != 1.0:
@@ -697,12 +672,11 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
         legal = legal_range(seq)
     else:
         legal = media.legal_range(info)
-    lut = lut_info(values.get("lut_arquivo", "")) if values.get("lut_on") else None
-    return FramePipeline(values, geometry, fps, depth, bool(s.dither) and depth == 8, legal, lut, seq,
-                         float(scale) if s.net_grain else 0.0)
+    return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
+                  seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, src_fps=float(info.fps))
 
 
-def open_reader(info: media.MediaInfo, frames: FramePipeline, start: int, total: int, fps_out: str | None,
+def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
                 perf: media.Perf, seq=None):
     """Leitor em ordem da exportação no tamanho do encaixe: (leitor, quadros a pular no começo)."""
     f = frames.fit

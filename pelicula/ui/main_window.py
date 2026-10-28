@@ -24,7 +24,8 @@ from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, edi
                loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, timeline,
                updater)
 from ..i18n import N_, _
-from ..engine import Engine, lut_info
+from ..engine import Engine
+from ..frame import Recipe
 from . import icons, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
@@ -1108,16 +1109,32 @@ class MainWindow(QMainWindow):
                 out.append(sequence.LayerImage(dataclasses.replace(li.layer, clip=clip), li.image))
         return sequence.FrameLayers(fl.frame, out)
 
+    def frame_recipe(self, depth: int = 8, full: bool = False) -> Recipe:
+        """A receita do quadro da janela (`frame.Recipe`, a mesma da exportação): a prévia em 8 bits, no tamanho
+        reduzido e com o pontilhado do look; `depth=16, full=True` é a do "Salvar quadro" (tamanho do arquivo,
+        sem pontilhado e com o look que vai para a exportação). No modo Edição sem película, a prévia é só a
+        montagem (`values` None); em 8 bits o look "Original" da exportação devolve a mesma imagem."""
+        info = self.info
+        fps = info.fps if info is not None else 24.0
+        seq = self.model.seq if self.src_seq is not None else None
+        if full:
+            size = (info.width, info.height)
+            values = self._export_look()[0]
+        else:
+            size = self.preview_size() if info is not None else None
+            values = None if (self.mode == "edicao" and not self.edit_film) else self.store.values
+        return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
+                                 size=size)
+
     def _compose_current(self) -> bool:
         """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
         if self.cur_layers is None:
             return False
         live = self._live_layers(self.cur_layers)
-        w, h = self.preview_size()
+        recipe = self.frame_recipe()
         try:
-            img = self.engine.compose(live, self.model.seq, w, h, 8)
-            neutral = (self.engine.compose(live, self.model.seq, w, h, 8, neutral=True)
-                       if self.mode == "edicao" else None)
+            img = recipe.montage(self.engine, live)
+            neutral = recipe.montage(self.engine, live, neutral=True) if self.mode == "edicao" else None
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro ao montar o quadro: {erro}").format(erro=exc), 8000)
             return False
@@ -1561,7 +1578,8 @@ class MainWindow(QMainWindow):
         if self.cur is None:
             return
         h, w = self.cur.shape[:2]
-        if self.mode == "edicao" and not self.edit_film:
+        recipe = self.frame_recipe()
+        if recipe.values is None:
             # Só a edição: o quadro montado já é o resultado.
             self.viewer.set_images(self.cur_q, self.cur_neutral_q or self.cur_q)
             self.hist.set_image(self.cur)
@@ -1569,16 +1587,12 @@ class MainWindow(QMainWindow):
             self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
             self.st_render.setText("")
             return
-        if self._uploaded is not self.cur:
-            self.engine.set_input(self.cur)
-            self._uploaded = self.cur
+        upload = self._uploaded is not self.cur  # só os ajustes mudaram: a imagem já está na GPU
+        self._uploaded = self.cur
         v = self.store.values
-        info = lut_info(v["lut_arquivo"]) if v["lut_on"] and v["lut_arquivo"] else None
         t0 = time.perf_counter()
         try:
-            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info,
-                                   legal=self._source_legal())
-            out = self.engine.render(plan, 8)
+            out = recipe.look(self.engine, self.cur, self.cur_frame, upload=upload)
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
             return
@@ -1589,7 +1603,7 @@ class MainWindow(QMainWindow):
         self.edit_scopes.set_image(out)
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
-        if v["lut_on"] and v["lut_arquivo"] and info is None:
+        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None:
             self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
     def _render_thumbs(self) -> None:
@@ -1611,9 +1625,8 @@ class MainWindow(QMainWindow):
         images = {}
         for item in self._all_presets():
             v = presets.with_source(item["valores"], current)
-            info = lut_info(v["lut_arquivo"]) if v.get("lut_on") and v.get("lut_arquivo") else None
-            try:
-                out = self.thumb_engine.render(look.build_plan(v, tw, th, 3, 24.0, info, dither=False, legal=legal), 8)
+            try:  # a mesma receita do quadro, na imagem já enviada (quadro 3 a 24 quadros/s, sem pontilhado)
+                out = Recipe.for_source(v, 24.0, 8, legal=legal).look(self.thumb_engine, src, 3, upload=False)
             except Exception:  # noqa: BLE001
                 continue
             images[item["id"]] = qimage_from(out)
@@ -2272,21 +2285,7 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            w, h = self.info.width, self.info.height
-            if self.src_seq is not None:
-                fl = sequence.grab(self.src_seq, self.frame_idx, w, h, 16, hq=True)
-                img = self.engine.compose(self._live_layers(fl), self.model.seq, w, h, 16)
-            else:
-                img = media.grab_frame(self.info, self.frame_idx, w, h, 16, hq=True)
-            self._uploaded = None
-            v, _name = self._export_look()
-            if self.mode == "edicao" and not self.edit_film:
-                out = img
-            else:
-                self.engine.set_input(img)
-                info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
-                out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False,
-                                                         legal=self._source_legal()), 16)
+            out = self.still_frame(self.frame_idx)
             export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
         except Exception as exc:  # noqa: BLE001
             QApplication.restoreOverrideCursor()
@@ -2295,6 +2294,16 @@ class MainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self.render_now()
         self.statusBar().showMessage(_("Quadro salvo: {caminho}").format(caminho=path), 8000)
+
+    def still_frame(self, frame: int):
+        """O quadro `frame` em 16 bits no tamanho do arquivo, como sai na exportação ("Salvar quadro")."""
+        w, h = self.info.width, self.info.height
+        if self.src_seq is not None:
+            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
+        else:
+            img = media.grab_frame(self.info, frame, w, h, 16, hq=True)
+        self._uploaded = None
+        return self.frame_recipe(16, full=True).render(self.engine, img, frame)
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:

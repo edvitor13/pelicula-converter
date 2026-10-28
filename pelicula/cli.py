@@ -475,8 +475,9 @@ def cmd_project(a) -> int:
 
 
 def cmd_frame(a) -> int:
-    from . import export, look, media
-    from .engine import Engine, lut_info
+    from . import export, media
+    from .engine import Engine
+    from .frame import Recipe
     _need_ffmpeg()
     src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
@@ -497,15 +498,17 @@ def cmd_frame(a) -> int:
     if values.get("scan_on"):
         _gui_app()
     w, h = info.width, info.height
+    # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
+    recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h))
     engine = Engine()
-    if seq is not None:
-        img = engine.compose(sequence.grab(seq, frame, w, h, 16, hq=True), seq, w, h, 16)
-    else:
-        img = media.grab_frame(info, frame, w, h, 16, hq=True)
-    engine.set_input(img)
-    li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
-    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False, legal=legal), 16)
-    engine.release()
+    try:
+        if seq is not None:
+            img = sequence.grab(seq, frame, w, h, 16, hq=True)
+        else:
+            img = media.grab_frame(info, frame, w, h, 16, hq=True)
+        out = recipe.render(engine, img, frame)
+    finally:
+        engine.release()
     try:
         export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
     except (RuntimeError, OSError) as exc:

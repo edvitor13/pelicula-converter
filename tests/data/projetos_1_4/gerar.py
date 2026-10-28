@@ -4,10 +4,15 @@ Foi rodado **com o código da 1.4.0** (commit `5743a27`), antes de qualquer muda
 
     python tests/data/projetos_1_4/gerar.py
 
-`tests/test_project_migration.py` abre esses projetos com o código atual e confere que eles carregam, montam e
-soam exatamente como na 1.4: as camadas de cada quadro, os uniforms de cada camada (`compositor.clip_uniforms`),
-o plano do look (`look.build_plan`) e o grafo do som (`audiomix.build_graph`) têm que ser os mesmos, e o JSON da
-montagem salvo de novo também. Só regenere de propósito, a partir da versão que vira a nova referência.
+`referencia.json` é o que a 1.4 faz ao **abrir** os arquivos gravados (com a mídia gerada em outra pasta, achada
+pelo caminho relativo): os valores, as camadas de cada quadro, os uniforms de cada camada
+(`compositor.clip_uniforms`), o plano do look (`look.build_plan`), o grafo do som (`audiomix.build_graph`) e o
+JSON da montagem salvo de novo. `tests/test_project_migration.py` abre os mesmos arquivos com o código atual e
+confere tudo isso (`references`). Só regenere de propósito, a partir da versão que vira a nova referência.
+
+Atenção: a 1.4 grava `entrada` (início no arquivo) com 6 casas; um clipe cortado em 20/24 s volta como
+0,833333 s e o quadro de origem do seu primeiro quadro é o 19, não o 20. A referência é o que a 1.4 mostra depois
+de abrir o projeto (a prévia e a exportação usam sempre uma cópia por JSON), e isso não pode mudar.
 
 A mídia não vai para o repositório: `make_media()` gera arquivos com o ffmpeg (`lavfi`) e o teste gera de novo
 na pasta temporária (os projetos guardam os metadados das fontes e acham os arquivos pelo caminho relativo).
@@ -116,9 +121,20 @@ def sequence_ref(seq, media_dir: str) -> dict:
 def norm(text: str, media_dir: str) -> str:
     """Troca a pasta da mídia desta máquina por `<MIDIA>` (barras normais)."""
     s = str(text)
-    for d in {media_dir, os.path.normpath(media_dir)}:
+    for d in sorted({media_dir, os.path.normpath(media_dir), os.path.abspath(media_dir)}, key=len, reverse=True):
         s = s.replace(d, MEDIA_TOKEN)
     return s.replace("\\", "/")
+
+
+def norm_obj(obj, media_dir: str):
+    """`norm` em todos os textos de um JSON."""
+    if isinstance(obj, dict):
+        return {k: norm_obj(v, media_dir) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [norm_obj(v, media_dir) for v in obj]
+    if isinstance(obj, str):
+        return norm(obj, media_dir)
+    return obj
 
 
 def build(folder: Path, ffmpeg: str):
@@ -183,24 +199,51 @@ def _fake_paths(obj, real: str):
     return obj
 
 
+def references(simples, edicao, media_dir: str) -> dict:
+    """O que os dois projetos abertos (`project.load`) dão: valores, planos do look, montagem e som."""
+    from pelicula import look, sequence, timeline
+    ref = {"simples": {"valores": simples.values, "estado": state(simples), "look": {}}, "edicao": {}}
+    for f in LOOK_FRAMES:
+        ref["simples"]["look"][str(f)] = plan_ref(look.build_plan(simples.values, W, H, f, float(FPS), None,
+                                                                  legal=True))
+    seq = timeline.Sequence.from_json(edicao.sequence)
+    legal = sequence.legal_range(seq)
+    ref["edicao"]["valores"] = edicao.values
+    ref["edicao"]["estado"] = state(edicao)
+    ref["edicao"]["look"] = {str(f): plan_ref(look.build_plan(edicao.values, W, H, f, float(FPS), None, legal=legal))
+                             for f in LOOK_FRAMES}
+    ref["edicao"]["montagem"] = sequence_ref(seq, media_dir)
+    ref["edicao"]["json"] = norm_obj(json.loads(json.dumps(seq.to_json())), media_dir)
+    return ref
+
+
+def state(p) -> dict:
+    """Os campos do projeto fora dos valores e da montagem."""
+    return {"preset": p.preset_id, "quadro": p.frame, "entrada": p.in_point, "saida": p.out_point,
+            "comparacao": p.compare, "previa": p.preview, "qualidade": p.export_quality, "modo": p.mode,
+            "midia": os.path.basename(p.media_path)}
+
+
+def open_copies(folder: Path, ffmpeg: str):
+    """Gera a mídia em `folder/midia`, copia os dois projetos para `folder` e os abre (`project.load`)."""
+    import shutil
+    from pelicula import project
+    make_media(folder, ffmpeg)
+    out = []
+    for name in ("simples", "edicao"):
+        shutil.copyfile(HERE / f"{name}.plc", folder / f"{name}.plc")
+        out.append(project.load(str(folder / f"{name}.plc")))
+    return out
+
+
 def main() -> int:
     sys.path.insert(0, str(ROOT))
-    from pelicula import __version__, look, media, project
+    from pelicula import __version__, media, project
     if not media.configure():
         print("ffmpeg não encontrado", file=sys.stderr)
         return 1
     tmp = Path(tempfile.mkdtemp(prefix="pelicula_ref14_"))
-    simples, edicao, seq = build(tmp, media.ffmpeg())
-    media_dir = str(tmp / "midia")
-    ref = {"versao": __version__, "simples": {}, "edicao": {}}
-    for f in LOOK_FRAMES:
-        ref["simples"][str(f)] = plan_ref(look.build_plan(simples.values, W, H, f, float(FPS), None, legal=True))
-    from pelicula import sequence
-    legal = sequence.legal_range(seq)
-    ref["edicao"]["look"] = {str(f): plan_ref(look.build_plan(edicao.values, W, H, f, float(FPS), None, legal=legal))
-                             for f in LOOK_FRAMES}
-    ref["edicao"]["montagem"] = sequence_ref(seq, media_dir)
-    ref["edicao"]["json"] = json.loads(norm(json.dumps(seq.to_json(), ensure_ascii=False), media_dir))
+    simples, edicao, _seq = build(tmp, media.ffmpeg())
     for name, p in (("simples", simples), ("edicao", edicao)):
         path = tmp / f"{name}.plc"
         project.save(p, str(path))
@@ -209,6 +252,11 @@ def main() -> int:
         data["salvo_em"] = "2026-10-27T12:00:00"
         data = _fake_paths(data, str(tmp))
         (HERE / f"{name}.plc").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # A referência é o que esta versão faz ao abrir os arquivos gravados (com a mídia em outra pasta).
+    other = Path(tempfile.mkdtemp(prefix="pelicula_ref14_abrir_"))
+    s2, e2 = open_copies(other, media.ffmpeg())
+    ref = references(s2, e2, str(other / "midia"))
+    ref["versao"] = __version__
     (HERE / "referencia.json").write_text(json.dumps(ref, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                                           + "\n", encoding="utf-8")
     print(f"referência gerada com a versão {__version__} em {HERE}")

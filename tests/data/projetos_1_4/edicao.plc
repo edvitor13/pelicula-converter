@@ -334,14 +334,14 @@
     ],
     "clipes": [
       {
-        "id": "d791e656e4",
+        "id": "72c6a10391",
         "tipo": "audio",
         "fonte": "/projetos/exemplo/midia/amostra.mp4",
         "faixa": 0,
         "inicio": 0,
         "duracao": 20,
         "entrada": 0.0,
-        "ligacao": "c6a012b697",
+        "ligacao": "0c427f9da5",
         "nome": "amostra.mp4",
         "valores": {
           "volume": 0.0,
@@ -360,14 +360,14 @@
         }
       },
       {
-        "id": "e734a006f1",
+        "id": "aa58e8ed25",
         "tipo": "audio",
         "fonte": "/projetos/exemplo/midia/amostra.mp4",
         "faixa": 0,
         "inicio": 20,
         "duracao": 28,
         "entrada": 0.833333,
-        "ligacao": "9a8ee3864c",
+        "ligacao": "9e2ca5ecac",
         "nome": "amostra.mp4",
         "valores": {
           "volume": 0.0,
@@ -386,14 +386,14 @@
         }
       },
       {
-        "id": "42cb980fdc",
+        "id": "271a166d43",
         "tipo": "audio",
         "fonte": "/projetos/exemplo/midia/barras.mp4",
         "faixa": 0,
         "inicio": 54,
         "duracao": 84,
         "entrada": 0.25,
-        "ligacao": "28000b96f4",
+        "ligacao": "451c0222fc",
         "nome": "barras.mp4",
         "valores": {
           "volume": -3.0,
@@ -412,7 +412,7 @@
         }
       },
       {
-        "id": "6d8981fb59",
+        "id": "f2c498ff7e",
         "tipo": "audio",
         "fonte": "/projetos/exemplo/midia/tom.wav",
         "faixa": 1,
@@ -438,14 +438,14 @@
         }
       },
       {
-        "id": "b4bb2314ee",
+        "id": "d38d51cda5",
         "tipo": "video",
         "fonte": "/projetos/exemplo/midia/amostra.mp4",
         "faixa": 0,
         "inicio": 0,
         "duracao": 20,
         "entrada": 0.0,
-        "ligacao": "c6a012b697",
+        "ligacao": "0c427f9da5",
         "nome": "amostra.mp4",
         "valores": {
           "exposicao": 0.0,
@@ -532,14 +532,14 @@
         }
       },
       {
-        "id": "11d84476de",
+        "id": "f9690303dd",
         "tipo": "video",
         "fonte": "/projetos/exemplo/midia/amostra.mp4",
         "faixa": 0,
         "inicio": 20,
         "duracao": 28,
         "entrada": 0.833333,
-        "ligacao": "9a8ee3864c",
+        "ligacao": "9e2ca5ecac",
         "nome": "amostra.mp4",
         "valores": {
           "exposicao": 0.5,
@@ -626,14 +626,14 @@
         }
       },
       {
-        "id": "58a5ef3788",
+        "id": "163c7c2dfe",
         "tipo": "video",
         "fonte": "/projetos/exemplo/midia/barras.mp4",
         "faixa": 0,
         "inicio": 54,
         "duracao": 84,
         "entrada": 0.25,
-        "ligacao": "28000b96f4",
+        "ligacao": "451c0222fc",
         "nome": "barras.mp4",
         "valores": {
           "exposicao": 0.0,
@@ -720,7 +720,7 @@
         }
       },
       {
-        "id": "2a8ee52eea",
+        "id": "9e21077e31",
         "tipo": "video",
         "fonte": "/projetos/exemplo/midia/amostra.mp4",
         "faixa": 0,
@@ -814,7 +814,7 @@
         }
       },
       {
-        "id": "e1663a7b69",
+        "id": "a382663750",
         "tipo": "video",
         "fonte": "/projetos/exemplo/midia/cena.png",
         "faixa": 1,
@@ -910,7 +910,7 @@
     ],
     "marcadores": [
       {
-        "id": "f89d59f3b8",
+        "id": "74312e5478",
         "quadro": 5,
         "cor": "laranja",
         "nome": "Início",
@@ -918,7 +918,7 @@
         "capitulo": true
       },
       {
-        "id": "a28619ce42",
+        "id": "91bab7a720",
         "quadro": 30,
         "cor": "azul",
         "nome": "Cor",

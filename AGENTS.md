@@ -43,13 +43,16 @@ pelicula/
                              Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
+  frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
+                             quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
+                             exportação, prévia da exportação, medição de velocidade e linha de comando
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
-                             alvo), FramePipeline/preview_frame() (o mesmo caminho na exportação e na prévia dela),
-                             measure_speed(), save_still()
+                             alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
+                             exportação; FramePipeline = frame.Recipe), measure_speed(), save_still()
   platforms.py               exportação por plataforma (sem Qt): PLATFORMS (YouTube, Instagram, TikTok, WhatsApp,
                              Discord… com fonte oficial), settings_for() → ExportSettings, limites, avisos, SAFE_AREAS
   fit.py                     encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): plan() → Fit
@@ -129,12 +132,16 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
 
 ## Regras que não podem ser quebradas
 
-1. **Prévia e exportação usam o mesmo caminho.** Todo efeito vive em `look.build_plan()` +
-   `shaders.py`/`Engine.render()`. Nunca implemente um efeito só na interface, só na exportação ou
-   só no "Salvar quadro". Prévia, miniaturas, salvar quadro, estimativa e exportação chamam as mesmas
-   funções. No modo Edição vale o mesmo: ajuste de clipe só em `compositor.py` + `editshaders.py` /
-   `Engine.compose()`; qual quadro de qual arquivo aparece só em `timeline.Sequence.src_frame()` /
-   `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem que a exportação grava).
+1. **Prévia e exportação usam o mesmo caminho.** Todo quadro mostrado ou gravado passa pela **receita
+   única** `frame.Recipe` (entrada → `Engine.compose` → valores do look no quadro → `look.build_plan(...,
+   legal=)` → `render`/`render_fit`): a prévia da janela, as miniaturas dos presets, "Salvar quadro", a
+   prévia da exportação, a medição de velocidade, a exportação e `pelicula-cli quadro`/`exportar`. Quem
+   chama só muda os campos (tamanho, profundidade, pontilhado); nunca monte o quadro à mão em outro lugar.
+   Todo efeito vive em `look.build_plan()` + `shaders.py`/`Engine.render()`. Nunca implemente um efeito só
+   na interface, só na exportação ou só no "Salvar quadro". No modo Edição vale o mesmo: ajuste de clipe só
+   em `compositor.py` + `editshaders.py` / `Engine.compose()`; qual quadro de qual arquivo aparece só em
+   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
+   que a exportação grava).
 2. **Determinismo por quadro.** Tudo o que muda no tempo deriva do **número do quadro**, do fps e
    das **sementes** (`_hash`/`_vnoise` em `look.py`; `pcg`/`rnd`/`vnoise2` no GLSL). Proibido
    `random`, `np.random`, `time.time()` ou estado acumulado entre quadros no caminho de render. O
