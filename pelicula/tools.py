@@ -354,9 +354,80 @@ CORRIDORKEY = Tool(
                "https://github.com/google-deepmind/representations4d")),
 )
 
+# whisper.cpp (ggml-org, MIT): transcrição local para as legendas automáticas (módulo "legendas_auto").
+# O autor não publica binários com checksum para Linux nem builds com Vulkan para os dois sistemas: o
+# whisper-cli e as bibliotecas são compilados pelo nosso CI (.github/workflows/componentes.yml) a partir da
+# tag oficial (commit conferido) e publicados na pre-release componente-whisper-cpp-<versão>; SHA-256 e
+# tamanho daqui conferidos com o SHA256SUMS.txt dela. Variante "vulkan": CPU + Vulkan carregado na hora
+# (sem driver Vulkan roda na CPU). Receita "Componente compilado no CI" no AGENTS.md.
+WHISPER_CPP_VERSION = "1.9.5"
+_WCPP_COMMIT = "d1be6fde11ac6e0407606b4e42fe72d34add8037"
+_WCPP_REPO = "https://github.com/ggml-org/whisper.cpp"
+_WCPP_URL = ("https://github.com/edvitor13/pelicula-converter/releases/download/"
+             f"componente-whisper-cpp-{WHISPER_CPP_VERSION}/whisper-cpp-{WHISPER_CPP_VERSION}-")
+WHISPER_CPP = Tool(
+    id="whisper_cpp", name="whisper.cpp",
+    description=N_("Transcreve a fala dos vídeos em texto, neste computador (nada é enviado): é o motor das "
+                   "legendas automáticas. Usa a placa de vídeo (Vulkan) quando há; senão, o processador."),
+    icon="captions", homepage=_WCPP_REPO, license="MIT", license_url=f"{_WCPP_REPO}/blob/{_WCPP_COMMIT}/LICENSE",
+    kind=BAIXADO, modules=("legendas_auto",), source_url=f"{_WCPP_REPO}/tree/v{WHISPER_CPP_VERSION}",
+    notes=(N_("Compilado pelo CI do PeliculaConverter a partir do código oficial, sem mudanças."),),
+    artifacts=(
+        Artifact("win32", WHISPER_CPP_VERSION, _WCPP_URL + "windows-x64-vulkan.zip",
+                 "aaa472a7d948cee82d59d9dd076aac2169fbf27b95be21b7dbe9aaf2443e932d", 18108677, "zip",
+                 ("whisper-cli.exe",), unpacked_size=58657906, origin=CI),
+        Artifact("linux", WHISPER_CPP_VERSION, _WCPP_URL + "linux-x64-vulkan.tar.gz",
+                 "184598fbfc348549acdd077dc96c003aa6fc345229386b178843dee410eafd8e", 21293425, "tar.gz",
+                 ("whisper-cli",), unpacked_size=64733539, origin=CI),
+    ))
+
+
+def _hf_model(repo: str, rev: str, name: str, sha256: str, size: int, version: str) -> tuple[Artifact, ...]:
+    """Um arquivo de modelo do Hugging Face (revisão fixa; SHA-256 do LFS), o mesmo nos dois sistemas."""
+    url = f"{_HF}/{repo}/resolve/{rev}/{name}"
+    return tuple(Artifact(p, version, url, sha256, size, "arquivo", (name,), unpacked_size=size)
+                 for p in ("win32", "linux"))
+
+
+# Modelos de fala do whisper.cpp (pesos do Whisper, da OpenAI, MIT, convertidos para ggml pelo autor do
+# whisper.cpp), no repositório oficial ggerganov/whisper.cpp do Hugging Face, revisão fixa:
+# small em q8_0 (quase igual ao f16, metade do tamanho) e large-v3-turbo em q5_0 (o mais preciso que
+# ainda cabe em placas de 4 GB e roda na CPU; o q8_0 tem 874 MB e quase nenhum ganho de acerto).
+_WM_REPO, _WM_REV = "ggerganov/whisper.cpp", "5359861c739e955e79d9a303bcbc70fb988958b1"
+_WHISPER_LICENSE = "https://github.com/openai/whisper/blob/c0d2f624c09dc18e709e37c2ad90c039a4eb72a2/LICENSE"
+WHISPER_SMALL = Tool(
+    id="whisper_small", name=N_("Modelo de fala Rápido (small)"),
+    description=N_("Modelo de transcrição leve e rápido, para muitos idiomas. Bom para a maioria dos vídeos."),
+    icon="box", homepage=f"{_HF}/{_WM_REPO}", license="MIT", license_url=_WHISPER_LICENSE,
+    kind=BAIXADO, modules=("legendas_auto",),
+    notes=(N_("Pesos do Whisper (OpenAI), convertidos pelo autor do whisper.cpp."),),
+    artifacts=_hf_model(_WM_REPO, _WM_REV, "ggml-small-q8_0.bin",
+                        "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f", 264464607, "small-q8_0"))
+WHISPER_TURBO = Tool(
+    id="whisper_turbo", name=N_("Modelo de fala Preciso (turbo)"),
+    description=N_("Modelo de transcrição mais preciso (large-v3-turbo), para muitos idiomas. Mais lento sem "
+                   "placa de vídeo."),
+    icon="box", homepage=f"{_HF}/{_WM_REPO}", license="MIT", license_url=_WHISPER_LICENSE,
+    kind=BAIXADO, modules=("legendas_auto",),
+    notes=(N_("Pesos do Whisper (OpenAI), convertidos pelo autor do whisper.cpp."),),
+    artifacts=_hf_model(_WM_REPO, _WM_REV, "ggml-large-v3-turbo-q5_0.bin",
+                        "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574041195,
+                        "large-v3-turbo-q5_0"))
+# Silero VAD 6.2.0 (Silero, MIT) em ggml, do repositório oficial ggml-org/whisper-vad (o que o
+# models/download-vad-model.sh do whisper.cpp usa), revisão fixa.
+_SILERO = "https://github.com/snakers4/silero-vad"
+SILERO_VAD = Tool(
+    id="silero_vad", name="Silero VAD",
+    description=N_("Detecta onde há fala no som: a transcrição pula os silêncios e não inventa texto neles."),
+    icon="box", homepage=_SILERO, license="MIT", license_url=f"{_SILERO}/blob/v6.2/LICENSE",
+    kind=BAIXADO, modules=("legendas_auto",),
+    artifacts=_hf_model("ggml-org/whisper-vad", "9ffd54a1e1ee413ddf265af9913beaf518d1639b", "ggml-silero-v6.2.0.bin",
+                        "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987", 885098, "6.2.0"))
+
 # Ordem da página Componentes: o ffmpeg primeiro. Ferramenta nova: veja a receita "Nova ferramenta
 # externa" no AGENTS.md (fonte oficial, versão e SHA-256 fixos, licença, testes).
-TOOLS: tuple[Tool, ...] = (FFMPEG, CORRIDORKEY, UV, DAVINCI_RESOLVE)
+TOOLS: tuple[Tool, ...] = (FFMPEG, CORRIDORKEY, WHISPER_CPP, WHISPER_SMALL, WHISPER_TURBO, SILERO_VAD, UV,
+                           DAVINCI_RESOLVE)
 
 
 def all_tools() -> tuple[Tool, ...]:

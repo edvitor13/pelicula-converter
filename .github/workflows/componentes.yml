@@ -43,6 +43,7 @@ on:
         type: boolean
         default: false
   push:
+    branches: ["**"]          # só branches: um push de tag (v* ou componente-*) não compila nada aqui
     paths: [".github/workflows/componentes.yml"]
 
 permissions:

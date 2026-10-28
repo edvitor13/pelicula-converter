@@ -65,6 +65,11 @@ MODULES: tuple[Module, ...] = (
            N_("Tira o fundo verde ou azul de um vídeo com o CorridorKey, da Corridor Digital, e grava o vídeo com "
               "transparência e a máscara. Precisa de uma placa NVIDIA RTX série 30 ou mais nova e de um download à "
               "parte em Componentes."), "edicao", BETA, requires=("corridorkey",)),
+    Module("legendas_auto", N_("Legendas automáticas"),
+           N_("Transcreve a fala dos vídeos neste computador, sem enviar nada para a internet, e cria as legendas "
+              "com o tempo de cada palavra; também acha os silêncios e corta trechos pelo texto. Precisa do "
+              "whisper.cpp, de um modelo de fala e do Silero VAD, baixados à parte em Componentes."),
+           "edicao", BETA, requires=("whisper_cpp", "silero_vad")),
     Module("medidor_som", N_("Medidor de som"),
            N_("Pico e volume (LUFS) do som durante a reprodução."), "audio"),
     Module("davinci", N_("Plugin do DaVinci Resolve"),
