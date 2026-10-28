@@ -209,6 +209,40 @@ Um clique resolve o mais comum:
 > **Dissolver** mistura o começo deste clipe com o fim do clipe anterior da mesma faixa (encostado nele).
 > Para a mistura ficar bonita, o clipe anterior precisa ter um pouco de vídeo sobrando depois do corte.
 
+#### Transições de película
+
+Com o recurso **Transições de película** ligado (Configurações › Recursos; vem ligado nos perfis Criador,
+Cinema e Tudo), a lista de **Entrada** ganha:
+
+| Transição | Como fica | Ajustes |
+|---|---|---|
+| **Fusão ótica** | Como na copiadora ótica: as duas imagens se somam na luz, e as partes claras do plano novo aparecem primeiro | Duração |
+| **Surgir do preto na exposição** | A luz sobe do preto como na copiadora; os tons seguem a curva da película, sem ficar "lavado" | Duração |
+| **Queima da película** | A película queima no projetor: um furo com a borda branca e laranja borbulha e abre, mostrando o plano novo | Duração, centro, suavidade da borda |
+| **Emenda com clarão** | Um corte com a emenda à vista: de 1 a 3 quadros estouram de luz, com a linha da emenda e um pulinho da imagem | Quadros do clarão, força do clarão |
+| **Ponta entre os planos** | Alguns quadros de ponta (preta ou clara) com poeira, riscos e o furo de perfuração no quadro do meio | Duração, ponta preta ou clara |
+| **Íris** | Um círculo abre do centro escolhido, como nos filmes mudos | Duração, centro, suavidade, anel preto |
+| **Empurrar** | O clipe novo empurra o anterior para fora, com desfoque de movimento | Duração, direção |
+| **Cortina** | Uma borda atravessa o quadro e troca um plano pelo outro | Duração, direção, suavidade da borda |
+| **Zoom** | O plano anterior amplia até a troca e o novo chega ampliado e volta ao tamanho | Duração, centro, ampliação |
+
+E a lista de **Saída** ganha **Escurecer na exposição**, **Queimar a película** (mostra a faixa de baixo)
+e **Íris** (fecha o círculo). O painel só mostra os ajustes do tipo escolhido; centro e suavidade são
+medidos no quadro, então ficam iguais em qualquer resolução da prévia ou da exportação.
+
+**Pelo menu do corte**: botão direito num clipe de vídeo → **Transição** → escolha o tipo. Perto do começo
+do clipe, vale para a entrada dele; perto do fim, para a entrada do clipe colado à direita (ou para a saída
+deste, se não houver). A duração é 1 segundo na primeira vez e depois a última que você usou; **Desfazer**
+volta tudo num passo só. Na linha do tempo, a transição aparece como uma faixa sobre o corte, com o ícone e
+o nome.
+
+As misturas são feitas na luz do perfil de entrada da película (o mesmo que o look usa: vídeo comum,
+S-Log3, LogC…), por isso combinam com a emulação; a prévia e a exportação dão exatamente o mesmo quadro, e
+cada clipe repete a mesma queima e a mesma poeira toda vez. O som não muda: para cruzar o som use a
+**Transição de som** abaixo. Desligar o recurso só esconde os tipos novos e o menu; um projeto que já os
+usa continua saindo igual (o app avisa e oferece religar). Projetos com transições de película pedem a 1.5
+ou mais nova para abrir.
+
 ### Som
 
 | Seção | O que faz |

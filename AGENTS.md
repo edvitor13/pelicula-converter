@@ -100,6 +100,8 @@ pelicula/
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
                              pré-multiplicada, alfa na cobertura) e a saída da tela
+  transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
+                             (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
                              RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo)
@@ -117,6 +119,8 @@ pelicula/
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
+                             transitions_ui (transições de película: inspetor, menu "Transição" do corte,
+                             desenho na linha do tempo, módulo),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
                              corridorkey_dialog (Recorte por IA, Beta);
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
@@ -313,6 +317,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |
 | `tests/test_corte_ui.py` | casos de `corte_ui_cases.py`: modelo (desfazer/refazer de inserir, Q/W, J/L, faixa magnética), botão Inserir e Ctrl, Alt ao aparar, menu Corte J/L, Mídia `,`/`.`, diálogo da sequência e a janela (J/K/L, K + J/L, Ctrl+L, Q/W, ajuda de atalhos) |
+| `tests/test_transitions.py` | transições de película: escolhas só no fim, JSON enxuto (projeto antigo grava o mesmo JSON), formato 3, camadas e andamentos de cada tipo, uniforms do `CLIP_TR`; na GPU: pontas iguais aos clipes puros (8 e 16 bits), determinismo, cinza neutro em rec709/S-Log3/LogC3, fusão e exposição pelas fórmulas da curva, prévia = exportação e transições antigas iguais à BASE (`transicoes_base.py` + `data/transicoes_base.json`) |
+| `tests/test_transicoes_ui.py` | casos de `transicoes_ui_cases.py`: inspetor (ícones, dicas, ajustes do tipo, módulo desligado), menu "Transição" do corte (alvo, desfazer num passo, última duração, faixa travada), desenho na linha do tempo e o módulo na janela |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
@@ -379,12 +385,26 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
 
 1. **`editparams.py`**: um `F`/`B`/`C`/`W` (roda) na seção certa de `VIDEO_SECTIONS` ou
    `AUDIO_SECTIONS`, com padrão neutro, chave sem acento e rótulo/dica em PT-BR. O inspetor aparece
-   sozinho. Se for de cor, ele entra no "Copiar/Colar ajustes" (seções em `COLOR_SECTIONS`).
+   sozinho. Se for de cor, ele entra no "Copiar/Colar ajustes" (seções em `COLOR_SECTIONS`). Ponha a
+   chave em `editparams.SPARSE_KEYS`: no padrão ela não vai para o JSON e um projeto antigo grava igual.
 2. **Imagem**: `compositor.py` transforma o valor em uniform(s) e `editshaders.CLIP` usa; mantenha
    o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
    cadeia do clipe.
 3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
 4. Se ele deve aceitar chaves de animação, veja *Tornar um ajuste animável*.
+
+### Adicionar um tipo de transição (modo Edição)
+
+1. **`editparams.py`**: o tipo **no fim** das escolhas de `entrada_tipo`/`saida_tipo` (nunca renomeie nem
+   reordene) e em `EXTRA_IN`/`EXTRA_OUT` (e `EXTRA_TWO_CLIP` se mostra o clipe anterior por baixo); ajustes
+   novos na seção "Transições", com padrão neutro e em `SPARSE_KEYS`.
+2. **`transitions.py`**: número em `KIND_IDS`, ajustes em `PARAMS`, geometria (se mexe no quadro) em
+   `apply()`; **`editshaders.py`**: um ramo no `main` do `CLIP_TR`, misturando com `lightMix`/`lightGain`/
+   `lightAffine` (pontas exatas, cinza neutro) e ruído só com `u_tr_seed` e `u_tr_index`.
+3. **`ui/transitions_ui.py`**: dica em `TIPS`, nome curto em `SHORT` e o desenho em `draw_glyph`.
+4. Testes: o tipo entra sozinho nos laços de `tests/test_transitions.py` (pontas, determinismo, prévia =
+   exportação); acrescente o caso no teste do cinza neutro se ele não tinge de propósito. Documente em
+   `docs/EDICAO.md` e na seção 26 de `docs/ARQUITETURA.md`.
 
 ### Tornar um ajuste animável
 
