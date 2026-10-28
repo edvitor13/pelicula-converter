@@ -8,6 +8,10 @@ mudança é aplicada ao soltar o mouse.
 Marcadores ficam na régua, na cor de cada um (ponto branco = capítulo): clique seleciona e leva o
 cursor até ele, arrastar move, dois cliques editam, Delete apaga, M põe um no cursor e Shift+↑/↓
 vão ao anterior/próximo.
+
+As chaves de animação do clipe selecionado aparecem como losangos no meio do clipe (todos os ajustes
+juntos por quadro; a dica diz quais): clique seleciona e leva o cursor, arrastar move (um passo do
+desfazer), Delete apaga, Shift soma à seleção. Veja os métodos `key_*`.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from . import icons, theme
 from .edit_model import TimelineModel
 from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
+from .keyframes_ui import merged_marks, paint_diamond, param_names
 from .widgets import FilmSlider, timecode
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
@@ -81,6 +86,8 @@ class TimelineCanvas(QWidget):
         self._hover_x: float | None = None
         self._snap_x: float | None = None
         self._drop: tuple[float, str, int, bool] | None = None
+        self.key_clip: str | None = None     # chaves selecionadas: o clipe e os quadros (da sequência)
+        self.key_sel: set[float] = set()
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -280,6 +287,7 @@ class TimelineCanvas(QWidget):
             self._paint_clip(p, c, r, fm, dim=c.id in moving)
         self._paint_audio_transitions(p, x_min, x_max)
         self._paint_ghosts(p)
+        self._paint_keys(p)
         if not self.seq.clips:
             p.setPen(QColor(theme.FAINT))
             p.setFont(theme.font(9.5))
@@ -797,6 +805,8 @@ class TimelineCanvas(QWidget):
                 self._drag = {"mode": "volume", "kind": kind, "idx": idx}
                 self._set_volume_from(pos.x())
             return
+        if self.tool != "blade" and self.key_press(pos, e.modifiers()):
+            return
         clip, zone = self.hit(pos)
         mods = e.modifiers()
         if clip is None:
@@ -839,6 +849,9 @@ class TimelineCanvas(QWidget):
                 self.update()
             return
         mode = d["mode"]
+        if mode == "keys":
+            self.key_drag(pos, e.modifiers())
+            return
         if mode == "scrub":
             self.seekRequested.emit(max(0, int(round(self.x_to_frame(pos.x())))))
             return
@@ -909,6 +922,9 @@ class TimelineCanvas(QWidget):
         if d is None:
             return
         mode = d["mode"]
+        if mode == "keys":
+            self.key_release(d)
+            return
         if mode == "scrub":
             self.scrubbing.emit(False)
             self.seekRequested.emit(max(0, int(round(self.x_to_frame(e.position().x())))))
@@ -942,6 +958,124 @@ class TimelineCanvas(QWidget):
             if d["delta"]:
                 self.model.trim_end(cid, o_start + o_dur + d["delta"], solo=solo)
         self.update()
+
+    # ------------------------------------------------------------ chaves do clipe selecionado
+    def key_clips(self) -> list[Clip]:
+        """Clipes cujas chaves aparecem: os selecionados que têm animação."""
+        return [c for c in self.model.selected_clips() if c.keys]
+
+    def key_marks(self, c: Clip) -> list[tuple[float, list[str]]]:
+        """Chaves do clipe juntas por quadro da sequência, só as que caem dentro dele."""
+        return [(f, names) for f, names in merged_marks(c.keys, lambda tau: self.seq.seq_time(c, tau))
+                if c.start <= f < c.end]
+
+    def key_y(self, r: QRectF) -> float:
+        return r.top() + r.height() * 0.55
+
+    def key_at(self, pos: QPointF) -> tuple[Clip, float] | None:
+        """(clipe, quadro) do losango sob o ponto."""
+        best = None
+        for c in self.key_clips():
+            r = self.clip_rect(c)
+            if r is None or abs(pos.y() - self.key_y(r)) > 7 or not (r.left() - 6 <= pos.x() <= r.right() + 6):
+                continue
+            for f, _names in self.key_marks(c):
+                dx = abs(self.frame_to_x(f) - pos.x())
+                if dx <= 6 and (best is None or dx < best[0]):
+                    best = (dx, c, f)
+        return (best[1], best[2]) if best else None
+
+    def _key_offset(self) -> float:
+        d = self._drag
+        return d["delta"] if d is not None and d.get("mode") == "keys" else 0
+
+    def _paint_keys(self, p: QPainter) -> None:
+        sel_clip = self.key_clip if self.seq.find(self.key_clip or "") is not None else None
+        off = self._key_offset()
+        for c in self.key_clips():
+            r = self.clip_rect(c)
+            if r is None or r.width() < 10:
+                continue
+            p.save()
+            p.setClipRect(r.adjusted(-6, -2, 6, 2))
+            cy = self.key_y(r)
+            for f, _names in self.key_marks(c):
+                chosen = c.id == sel_clip and f in self.key_sel
+                x = self.frame_to_x(f + (off if chosen else 0))
+                if chosen:
+                    paint_diamond(p, x, cy, 5.0, QColor(theme.PLAYHEAD), QColor("#1a120a"), 1.4)
+                else:
+                    paint_diamond(p, x, cy, 4.5, QColor("#fff6e8"), QColor("#1a120a"), 1.2)
+            p.restore()
+
+    def key_press(self, pos: QPointF, mods) -> bool:
+        """Clique num losango: seleciona (Shift soma ou tira) e leva o cursor. True se pegou um."""
+        hit = self.key_at(pos)
+        if hit is None:
+            if self.key_sel:
+                self.key_sel = set()
+                self.update()
+            return False
+        c, f = hit
+        add = bool(mods & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier))
+        if c.id != self.key_clip:
+            self.key_clip, self.key_sel = c.id, set()
+        if add:
+            self.key_sel ^= {f}
+        elif f not in self.key_sel:
+            self.key_sel = {f}
+        if f in self.key_sel and not self.seq.locked(c):
+            self._drag = {"mode": "keys", "clip": c.id, "grab": f, "press_x": pos.x(), "delta": 0, "active": False}
+        self.seekRequested.emit(int(round(f)))
+        self.update()
+        return True
+
+    def key_drag(self, pos: QPointF, mods) -> None:
+        d = self._drag
+        c = self.seq.find(d["clip"])
+        if c is None or not self.key_sel:
+            return
+        if not d["active"] and abs(pos.x() - d["press_x"]) < 3:
+            return
+        d["active"] = True
+        snap_on = self.snap != bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        f, s = self.snap_frame(d["grab"] + (pos.x() - d["press_x"]) / self.ppf, {c.id}, snap_on)
+        lo, hi = c.start - min(self.key_sel), c.end - 1 - max(self.key_sel)  # nenhuma sai do clipe
+        d["delta"] = int(min(max(f - d["grab"], lo), hi))
+        self._snap_x = self.frame_to_x(s) if s is not None and d["delta"] == f - d["grab"] else None
+        self.update()
+
+    def key_release(self, d: dict) -> None:
+        delta = d["delta"] if d.get("active") else 0
+        c = self.seq.find(d["clip"])
+        if c is not None and delta:
+            moves = [(name, f, f + delta) for f, names in self.key_marks(c) if f in self.key_sel for name in names]
+            if self.model.move_keys(c.id, moves):
+                self.key_sel = {f + delta for f in self.key_sel}
+                self.seekRequested.emit(int(round(d["grab"] + delta)))
+        self.update()
+
+    def delete_keys(self) -> bool:
+        """Delete com chaves selecionadas: apaga as chaves (um passo do desfazer), não o clipe."""
+        c = self.seq.find(self.key_clip or "")
+        if c is None or not self.key_sel or c.id not in {x.id for x in self.key_clips()}:
+            self.key_sel = set()
+            return False
+        items = [(name, f) for f, names in self.key_marks(c) if f in self.key_sel for name in names]
+        self.key_sel = set()
+        self.model.remove_keys(c.id, items)
+        self.update()
+        return bool(items)
+
+    def key_tooltip(self, pos: QPointF) -> str | None:
+        hit = self.key_at(pos)
+        if hit is None:
+            return None
+        c, f = hit
+        names = next(n for t, n in self.key_marks(c) if t == f)
+        from .. import editparams
+        return _("Chave em {tempo}: {ajustes}").format(tempo=timecode(int(round(f)), self.seq.fps),
+                                                       ajustes=param_names(editparams.SCHEMAS[c.kind], names))
 
     def insert_for(self, mods) -> bool:
         """Inserir (empurrar) ou sobrescrever: o modo da barra, invertido enquanto o Ctrl está apertado."""
@@ -980,6 +1114,11 @@ class TimelineCanvas(QWidget):
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             mk = self.marker_at(pos)
             self.setToolTip(marker_tooltip(mk, self.seq.fps) if mk is not None else "")
+            return
+        key_tip = self.key_tooltip(pos)
+        if key_tip is not None:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip(key_tip)
             return
         clip, zone = self.hit(pos)
         if clip is not None and zone in ("left", "right"):
@@ -1209,7 +1348,8 @@ class TimelineCanvas(QWidget):
         elif k == Qt.Key.Key_S:
             m.split_at(self.playhead)
         elif k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            m.delete_selected(ripple=bool(mods & Qt.KeyboardModifier.ShiftModifier))
+            if not self.delete_keys():
+                m.delete_selected(ripple=bool(mods & Qt.KeyboardModifier.ShiftModifier))
         elif k == Qt.Key.Key_B:
             self.set_tool("blade")
         elif k == Qt.Key.Key_V:
@@ -1222,6 +1362,7 @@ class TimelineCanvas(QWidget):
         elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
             self.set_ppf(self.ppf * 0.8, self.frame_to_x(self.playhead))
         elif k == Qt.Key.Key_Escape:
+            self.key_sel = set()
             m.select([])
             self.set_tool("select")
         else:

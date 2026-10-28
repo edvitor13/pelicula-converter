@@ -3053,7 +3053,8 @@ class MainWindow(QMainWindow):
             self.model.split_at(self.frame_idx)
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            self.model.delete_selected(ripple=shift)
+            if not self.tl_editor.canvas.delete_keys():  # chaves selecionadas na linha do tempo vão antes
+                self.model.delete_selected(ripple=shift)
             return
         if self.mode == "edicao" and k == Qt.Key.Key_M and not shift:
             self.add_marker()  # no modo Edição o M marca; o som da prévia fica no Shift+M

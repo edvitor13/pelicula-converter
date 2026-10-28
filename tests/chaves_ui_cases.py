@@ -220,3 +220,102 @@ def test_look_color_param_keys():
     assert st.keys_of(color)[-1][1] == [1.0, 0.0, 0.0]
     rows.set_frame(5)
     assert _row(cards, color).btn.color.redF() > 0.4
+
+
+# ------------------------------------------------------------------ losangos na linha do tempo
+def _canvas():
+    from pelicula.ui.timeline_view import TimelineCanvas
+    m, v = _model()
+    cv = TimelineCanvas(m)
+    cv.resize(1400, 260)
+    cv.show()
+    APP.processEvents()
+    seen = []
+    cv.seekRequested.connect(seen.append)
+    return m, v, cv, seen
+
+
+def _key_point(cv, clip, frame):
+    from PySide6.QtCore import QPoint
+    r = cv.clip_rect(clip)
+    return QPoint(int(round(cv.frame_to_x(frame))), int(round(cv.key_y(r))))
+
+
+def _click(cv, pt, mods=None, to=None):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    mods = mods if mods is not None else Qt.KeyboardModifier.NoModifier
+    QTest.mousePress(cv, Qt.MouseButton.LeftButton, mods, pt)
+    if to is not None:
+        QTest.mouseMove(cv, QPoint((pt.x() + to.x()) // 2, pt.y()))
+        QTest.mouseMove(cv, to)
+    QTest.mouseRelease(cv, Qt.MouseButton.LeftButton, mods, to if to is not None else pt)
+
+
+def test_timeline_shows_the_selected_clip_keys_merged():
+    m, v, cv, _seen = _canvas()
+    m.add_key(v.id, "exposicao", 20, 0.0)
+    m.add_key(v.id, "escala", 20, 1.0)
+    m.add_key(v.id, "escala", 60, 0.5)
+    assert cv.key_clips() == []                           # nada selecionado: nenhum losango
+    m.select([v.id])
+    assert [f for f, _n in cv.key_marks(v)] == [20.0, 60.0]
+    assert sorted(dict(cv.key_marks(v))[20.0]) == ["escala", "exposicao"]
+    tip = cv.key_tooltip(_key_point(cv, v, 20))
+    assert tip and kui._("Exposição") in tip and kui._("Escala") in tip
+    assert cv.key_at(_key_point(cv, v, 40)) is None
+    cv.grab()                                             # desenha sem erro
+
+
+def test_timeline_key_click_seeks_and_drag_moves_in_one_undo_step():
+    from PySide6.QtCore import QPoint
+    m, v, cv, seen = _canvas()
+    m.add_key(v.id, "exposicao", 20, 0.0)
+    m.add_key(v.id, "escala", 20, 1.0)
+    m.add_key(v.id, "escala", 60, 0.5)
+    m.select([v.id])
+    _click(cv, _key_point(cv, v, 60))
+    assert seen[-1] == 60 and cv.key_sel == {60.0} and m.keys_of(v.id, "escala")[1][0] == 60.0
+    cv.snap = False
+    a = _key_point(cv, v, 20)
+    _click(cv, a, to=a + QPoint(int(10 * cv.ppf), 0))      # 10 quadros para a direita
+    assert [k[0] for k in m.keys_of(v.id, "escala")] == [30.0, 60.0]
+    assert [k[0] for k in m.keys_of(v.id, "exposicao")] == [30.0]
+    assert seen[-1] == 30 and cv.key_sel == {30.0}
+    m.undo()
+    assert [k[0] for k in m.keys_of(v.id, "escala")] == [20.0, 60.0] and m.keys_of(v.id, "exposicao")[0][0] == 20.0
+
+
+def test_timeline_key_multi_select_delete_and_undo():
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    m, v, cv, _seen = _canvas()
+    for t in (10, 30, 50):
+        m.add_key(v.id, "opacidade", t, 1.0)
+    m.add_key(v.id, "rotacao", 30, 5.0)
+    m.select([v.id])
+    _click(cv, _key_point(cv, v, 10))
+    _click(cv, _key_point(cv, v, 30), Qt.KeyboardModifier.ShiftModifier)
+    assert cv.key_sel == {10.0, 30.0}
+    QTest.keyClick(cv, Qt.Key.Key_Delete)
+    assert [k[0] for k in m.keys_of(v.id, "opacidade")] == [50.0] and m.keys_of(v.id, "rotacao") == []
+    assert m.seq.find(v.id) is not None, "Delete com chaves selecionadas não apaga o clipe"
+    m.undo()
+    assert len(m.keys_of(v.id, "opacidade")) == 3 and len(m.keys_of(v.id, "rotacao")) == 1
+    QTest.keyClick(cv, Qt.Key.Key_Delete)                  # sem chaves selecionadas: o clipe vai embora
+    assert m.seq.find(v.id) is None
+
+
+def test_timeline_key_drag_snaps_and_stays_inside_the_clip():
+    from PySide6.QtCore import QPoint
+    m, v, cv, _seen = _canvas()
+    m.add_key(v.id, "brilho", 5, 0.0)
+    m.add_key(v.id, "brilho", 100, 1.0)
+    m.select([v.id])
+    cv.set_playhead(120)
+    a = _key_point(cv, v, 100)
+    _click(cv, a, to=a + QPoint(int(19 * cv.ppf) + 2, 0))  # perto do cursor (120): o ímã gruda nele
+    assert [k[0] for k in m.keys_of(v.id, "brilho")] == [5.0, 120.0]
+    b = _key_point(cv, v, 5)
+    _click(cv, b, to=b - QPoint(int(40 * cv.ppf), 0))      # não sai pela esquerda do clipe
+    assert m.keys_of(v.id, "brilho")[0][0] == float(v.start)
