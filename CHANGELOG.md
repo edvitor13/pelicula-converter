@@ -7,7 +7,26 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.4.0] - 2026-10-27
+
 ### Adicionado
+- **Configurações** numa janela só, com barra lateral e páginas (Geral, Recursos, Componentes,
+  Notificações e Recuperação).
+- **Recursos**: ligue e desligue cada ferramenta do app (Edição, Laboratório, Defeitos, Scan, LUTs,
+  Exportar LUT, medidores de cor, Curva, plugin do DaVinci e as novas desta versão), por perfil
+  (*Simples*, *Criador*, *Cinema* ou *Tudo*) ou uma a uma. No primeiro acesso, depois do idioma, o app
+  pergunta o perfil; instalações antigas continuam com tudo ligado. Os recursos em teste (Beta)
+  começam desligados. Desligar só esconde a ferramenta: um projeto, preset ou LUT que usa um recurso
+  desligado sai igual e mostra um aviso com o botão *Ligar*. Terminal: `pelicula-cli modulos`.
+- **Componentes**: um cartão para cada programa externo (ffmpeg, CorridorKey, DaVinci Resolve) com
+  para que serve, versão, espaço no disco, pasta, fonte oficial, licença, selo *verificado (SHA-256)*,
+  os recursos que o usam e *Baixar*, *Atualizar* e *Remover* com progresso. Mostra também a placa de
+  vídeo e o OpenGL. Os downloads conferem o SHA-256 antes de instalar e passam por uma fila de
+  tarefas que dá para cancelar.
 - Perfis de entrada **HLG** e **PQ / HDR10** (Rec.2100, cinza de referência da BT.2408 em 0,18), também
   no plugin do DaVinci. Ao abrir um vídeo HDR (o padrão do iPhone), o perfil é escolhido sozinho pelos
   metadados do arquivo, com aviso na barra de status; projetos reabertos e presets nunca mudam o perfil.
@@ -54,6 +73,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   licença da Corridor (corridorkey.com).
 
 ### Alterado
+- *Dependências e atualizações…* virou *Componentes…*, uma página das Configurações.
 - Atalhos: no modo Edição, **M** agora põe um marcador, e o som da prévia passa para **Shift+M**, que vale
   nos dois modos. No modo Película, **M** continua ligando e desligando o som. **Shift+↑/↓** pulam entre
   os marcadores.
@@ -72,10 +92,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   agora vale quando o codec tem essa opção.
 - A janela de atualização fechava o app mesmo quando o fechamento era cancelado (projeto não salvo ou
   exportações em andamento). Agora nada é instalado e o app continua aberto.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.3.0] - 2026-10-19
 

@@ -1,3 +1,18 @@
+## Versão 1.4.0 — 27 de outubro de 2026
+
+**Exportação pronta para cada rede, marcadores e capítulos, recorte por IA e um app do seu jeito.**
+
+- 📱 **Pronto para cada rede.** Na exportação, escolha a plataforma (YouTube, Shorts, Reels, Stories, TikTok, Kwai, WhatsApp e outras, 27 ao todo) e o app preenche o quadro, o codec, o som e os limites. Corte, ponha bordas pretas ou fundo desfocado, escolha o tamanho do arquivo e o volume. A prévia mostra a área segura, onde os botões da rede cobrem o vídeo.
+- 📍 **Marcadores e capítulos.** No modo Edição, a tecla M põe um marcador, com cor, nome e nota. Os que você marcar como capítulo viram o texto pronto para a descrição do YouTube e entram no arquivo MP4, MOV ou MKV.
+- ⌨️ **O som da prévia mudou de tecla.** Agora é **Shift+M**, nos dois modos. No modo Película, o M continua funcionando como antes.
+- 🔊 **Som caprichado.** Medidor de som ao lado da prévia (picos e volume em LUFS), transição suave de som entre clipes e emendas sem estalos.
+- ✂️ **Recorte por IA (Beta).** Tire o fundo verde ou azul de um vídeo com o CorridorKey, da Corridor Digital. Começa desligado: ligue em Configurações → Recursos, marcando *Mostrar recursos em teste*. É um download à parte de cerca de 7,6 GB e precisa de placa NVIDIA RTX série 30 ou mais nova.
+- 🧩 **Um app do seu jeito.** Em Configurações → Recursos, deixe ligadas só as ferramentas que você usa, uma a uma ou por perfil (Simples, Criador, Cinema ou Tudo). Desligar só esconde: seus projetos continuam saindo iguais. Em Componentes você vê, baixa, atualiza e remove os programas extras, como o ffmpeg.
+- 🔔 **Avisos e recuperação.** O app avisa quando uma exportação termina, mesmo com a janela minimizada. Se ele fechar de repente, ao abrir de novo oferece recuperar o projeto e a fila de exportação.
+- 📷 **HDR do celular.** Vídeos HDR (HLG e PQ, como os do iPhone) são reconhecidos e convertidos sozinhos.
+- 🎨 **S-Log3, V-Log e N-Log com a exposição certa.** Esses perfis liam o vídeo na escala errada. Agora estão corretos, também no plugin do DaVinci, e por isso projetos antigos com eles podem sair um pouco diferentes (até cerca de ⅓ de stop).
+- 🛠️ **Correções.** Vídeo vertical não encolhe mais nas qualidades prontas; uma exportação interrompida não deixa arquivo quebrado nem apaga o antigo; *Otimizar o codificador para grão* voltou a valer; e cancelar o fechamento na janela de atualização não fecha mais o app.
+
 ## Versão 1.3.0 — 19 de outubro de 2026
 
 **Modo Edição, Laboratório de película e plugin para o DaVinci Resolve.**
