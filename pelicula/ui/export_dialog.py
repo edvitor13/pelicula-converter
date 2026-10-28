@@ -222,6 +222,7 @@ class ExportDialog(QDialog):
         form.addRow(_("Codec"), self.codec)
         form.addRow(_("Recipiente"), self.container)
         form.addRow(_("Formato de cor"), self.pix)
+        self._alpha_rows(form)
         form.addRow(self.qlabel, self.qval)
         form.addRow(_("Taxa de bits"), self.bitrate)
         form.addRow(_("Velocidade"), self.speed)
@@ -325,6 +326,8 @@ class ExportDialog(QDialog):
             w.toggled.connect(self._custom)
         self.res.currentIndexChanged.connect(self._update_mem)
         self.pix.currentIndexChanged.connect(self._update_mem)
+        self.alpha_box.toggled.connect(self._summary)  # independe da qualidade escolhida (não vira "Personalizado")
+        self.alpha_box.toggled.connect(self._update_mem)
         self.frame_box.currentIndexChanged.connect(self._frame_changed)
         for w in (self.fit_box, self.loud):
             w.currentIndexChanged.connect(self._custom)
@@ -606,7 +609,7 @@ class ExportDialog(QDialog):
         if not s.codec:
             return 0
         w, h = export.output_size(self.info, s)
-        return w * h * 3 * (2 if export.high_depth(s) else 1)
+        return w * h * (4 if export.wants_alpha(s) else 3) * (2 if export.high_depth(s) else 1)
 
     def _update_mem(self, *_args):
         fb = self._frame_bytes()
@@ -636,6 +639,8 @@ class ExportDialog(QDialog):
             self.container.addItem("." + e, e)
         self.pix.clear()
         for pf in c["pix"]:
+            if media.pix_has_alpha(pf):
+                continue  # com alfa: "Manter a transparência" (`_alpha_rows`)
             self.pix.addItem(f"{_(PIX_NAMES.get(pf, pf))}  ({pf})", pf)
         rc = c.get("rc")
         self.speed.clear()
@@ -657,6 +662,7 @@ class ExportDialog(QDialog):
         if hasattr(self, "gpu"):
             self.gpu.setEnabled(bool(c.get("gpu")))
         self._res_labels(key)
+        self._sync_alpha()
 
     def _res_labels(self, codec: str) -> None:
         """Cada resolução mostra o tamanho que sai deste arquivo (o número vale para o lado menor)."""
@@ -671,7 +677,9 @@ class ExportDialog(QDialog):
         self._set_combo(self.codec, s.codec)
         self._fill_codec_fields(s.codec)
         self._set_combo(self.container, s.container)
-        self._set_combo(self.pix, s.pix)
+        self._set_combo(self.pix, export.opaque_pix(s.codec, s.pix))
+        if media.pix_has_alpha(s.pix) and export.supports_alpha(s.codec):
+            self.alpha_box.setChecked(True)
         self._set_combo(self.speed, s.preset)
         self._set_combo(self.profile, s.profile)
         if export.CODECS[s.codec].get("rc") in Q_LABELS:
@@ -706,6 +714,10 @@ class ExportDialog(QDialog):
             resolution=self.res.currentData(), fps=self.fps.currentData(), audio=self.audio.currentData(),
             # isHidden e não isVisible: depois de "Adicionar à fila" a janela já fechou e nada mais é visível.
             tune_grain=self.grain.isChecked() and not self.grain.isHidden(), dither=self.dither.isChecked())
+        if self.keeps_alpha():
+            s.pix = export.alpha_pix(s.codec, s.pix)
+            if s.codec == "prores" and s.profile not in ("4", "5"):
+                s.profile = "4"  # só o ProRes 4444 guarda o alfa
         if not self.info.is_image:
             s.platform = self.platform_id()
             s.frame = self.frame_box.currentData() or ""
@@ -813,7 +825,8 @@ class ExportDialog(QDialog):
             size = " • " + _("teto de {taxa} Mb/s").format(taxa=fmt_decimal(s.maxrate, 1))
         self.summary.setText(_("Saída: {w}×{h} • {fps} quadros/s • {duracao} • {quadros} quadros • "
                                "processamento em {bits} bits por canal").format(
-            w=w, h=h, fps=f"{fps:.3f}", duracao=f"{mins}min{secs:04.1f}s", quadros=frames, bits=depth) + size)
+            w=w, h=h, fps=f"{fps:.3f}", duracao=f"{mins}min{secs:04.1f}s", quadros=frames, bits=depth) + size
+            + (" • " + _("com transparência") if export.wants_alpha(s) else ""))
         self._schedule_estimate()
         self._warnings(s, dur)
         self._schedule_preview()
@@ -932,7 +945,8 @@ class ExportDialog(QDialog):
     def _start_preview(self) -> None:
         args = self._preview_args()
         s = args[2]
-        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3])
+        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3],
+               export.wants_alpha(s))
         if key == self._preview_key:
             return
         self._preview_key = key
@@ -948,7 +962,8 @@ class ExportDialog(QDialog):
             self.preview.setPixmap(QPixmap())
             self.preview.setText(_("Prévia indisponível"))
             return
-        arr = np.ascontiguousarray(img if img.dtype == np.uint8 else (img >> 8).astype(np.uint8))
+        from .alphaview import over_checker
+        arr = over_checker(img)  # com transparência: sobre o xadrez (3 canais passam direto, em 8 bits)
         h, w = arr.shape[:2]
         qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         pm = QPixmap.fromImage(qimg).scaled(PREVIEW_BOX - 2, PREVIEW_BOX - 2, Qt.AspectRatioMode.KeepAspectRatio,
@@ -997,6 +1012,41 @@ class ExportDialog(QDialog):
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
                                 sequence=self.sequence, chapters=self.chapter_points(),
                                 look_keys=dict(self.look_keys))
+
+    # ---------------------------------------------------------------- transparência
+    def _alpha_rows(self, form: QFormLayout) -> None:
+        """"Manter a transparência": só com a montagem em "Fundo transparente" e um codec que guarda alfa."""
+        self.alpha_box = QCheckBox(_("Manter a transparência (canal alfa)"))
+        transparent = bool(getattr(self.sequence, "transparent", False))
+        self.alpha_box.setChecked(transparent)
+        self.alpha_note = QLabel()
+        self.alpha_note.setObjectName("Faint")
+        self.alpha_note.setWordWrap(True)
+        form.addRow("", self.alpha_box)
+        form.addRow("", self.alpha_note)
+        if self.info.is_image:
+            form.setRowVisible(self.alpha_box, False)
+            form.setRowVisible(self.alpha_note, False)
+
+    def _sync_alpha(self) -> None:
+        if not hasattr(self, "alpha_box"):
+            return
+        transparent = bool(getattr(self.sequence, "transparent", False))
+        ok = export.supports_alpha(self.codec.currentData() or "")
+        self.alpha_box.setEnabled(transparent and ok)
+        if not transparent:
+            text = _("Para exportar com transparência, ligue \"Fundo transparente\" em Configurar a sequência.")
+        elif not ok:
+            text = _("Este formato não guarda transparência: o fundo sai na cor da sequência. Use ProRes 4444, "
+                     "WebM VP9 ou uma sequência PNG ou TIFF.")
+        else:
+            text = _("Onde nada cobre a tela, o vídeo sai transparente.")
+        self.alpha_note.setText(text)
+
+    def keeps_alpha(self) -> bool:
+        """A exportação vai sair com transparência (opção marcada e disponível)."""
+        return (hasattr(self, "alpha_box") and self.alpha_box.isChecked() and self.alpha_box.isEnabled()
+                and not self.info.is_image)
 
     # ---------------------------------------------------------------- capítulos
     def _chapters_box(self) -> QCheckBox:

@@ -527,8 +527,10 @@ def cmd_frame(a) -> int:
         _gui_app()
     w, h = info.width, info.height
     # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
+    # "Fundo transparente" da montagem: PNG e TIFF guardam a transparência (como "Salvar quadro" na janela).
+    alpha = seq is not None and seq.transparent and ext in export.STILL_ALPHA_ARGS
     recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
-                               keys=look_keys(proj, a.preset, a.set))
+                               keys=look_keys(proj, a.preset, a.set), alpha=alpha)
     engine = Engine()
     try:
         if seq is not None:

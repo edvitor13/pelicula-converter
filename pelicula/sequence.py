@@ -112,10 +112,20 @@ def render_source(seq: timeline.Sequence, clip: timeline.Clip, frame: int, w: in
     return _as_layer(fn(seq, clip, int(frame), int(w), int(h), int(depth)), int(w), int(h), depth, src.kind)
 
 
-def source_thumbnail(src: timeline.Source, w: int, h: int) -> np.ndarray:
-    """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0, sobre preto."""
+# Quadro da fonte que a miniatura mostra, por tipo (padrão 0): um título que surge aos poucos mostra o texto inteiro.
+THUMBNAIL_FRAME: dict[str, Callable[[timeline.Source], int]] = {}
+
+
+def source_thumbnail(src: timeline.Source, w: int, h: int, rgba: bool = False) -> np.ndarray:
+    """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0 (ou o de
+    `THUMBNAIL_FRAME`), sobre preto. `rgba`: a imagem do gerador (RGBA pré-multiplicado), para mostrar sobre o
+    xadrez (`ui/alphaview.py`)."""
     seq = timeline.Sequence.for_source(src)
-    img = render_source(seq, seq.clips[0], 0, w, h, 8)
+    pick = THUMBNAIL_FRAME.get(src.kind)
+    frame = max(0, int(pick(src))) if pick is not None else 0
+    img = render_source(seq, seq.clips[0], frame, w, h, 8)
+    if rgba and img.shape[2] == 4:
+        return np.ascontiguousarray(img)
     return np.ascontiguousarray(img[..., :3])  # pré-multiplicado sobre preto = o próprio RGB
 
 
@@ -417,3 +427,4 @@ def missing_sources(seq: timeline.Sequence) -> list[str]:
     """Arquivos usados pela sequência que não existem mais no disco (clipes sem arquivo não contam)."""
     used = {c.src for c in seq.clips} & _file_sources(seq)
     return sorted(p for p in used if not present(seq.sources[p]))
+

@@ -73,6 +73,9 @@ def open_filter() -> str:
 
 def qimage_from(arr: np.ndarray) -> QImage:
     h, w = arr.shape[:2]
+    if arr.ndim == 3 and arr.shape[2] == 4:  # transparência: sobre o xadrez (só para ver)
+        from .alphaview import over_checker
+        arr = over_checker(arr)
     if arr.dtype != np.uint8:
         arr = (arr >> 8).astype(np.uint8)
     arr = np.ascontiguousarray(arr)
@@ -1131,11 +1134,12 @@ class MainWindow(QMainWindow):
                 out.append(sequence.LayerImage(layer, li.image))
         return sequence.FrameLayers(fl.frame, out)
 
-    def frame_recipe(self, depth: int = 8, full: bool = False) -> Recipe:
+    def frame_recipe(self, depth: int = 8, full: bool = False, alpha: bool | None = None) -> Recipe:
         """A receita do quadro da janela (`frame.Recipe`, a mesma da exportação): a prévia em 8 bits, no tamanho
         reduzido e com o pontilhado do look; `depth=16, full=True` é a do "Salvar quadro" (tamanho do arquivo,
         sem pontilhado e com o look que vai para a exportação). No modo Edição sem película, a prévia é só a
-        montagem (`values` None); em 8 bits o look "Original" da exportação devolve a mesma imagem."""
+        montagem (`values` None); em 8 bits o look "Original" da exportação devolve a mesma imagem.
+        `alpha`: saída RGBA (padrão: na prévia, quando a montagem tem "Fundo transparente"; no quadro cheio, não)."""
         info = self.info
         fps = info.fps if info is not None else 24.0
         seq = self.model.seq if self.src_seq is not None else None
@@ -1145,8 +1149,10 @@ class MainWindow(QMainWindow):
         else:
             size = self.preview_size() if info is not None else None
             values = None if (self.mode == "edicao" and not self.edit_film) else self.store.values
+        if alpha is None:
+            alpha = not full and seq is not None and seq.transparent
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
-                                 size=size, keys=self._export_keys())
+                                 size=size, keys=self._export_keys(), alpha=bool(alpha) and seq is not None)
 
     def _compose_current(self) -> bool:
         """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
@@ -1475,10 +1481,13 @@ class MainWindow(QMainWindow):
                 tw = 192
                 th = max(2, int(round(tw * src.height / max(1, src.width))))
                 if not src.is_file:  # clipe sem arquivo: o próprio gerador, no começo
-                    img = sequence.source_thumbnail(src, tw, th)
+                    img = sequence.source_thumbnail(src, tw, th, rgba=src.has_alpha)
                 else:
                     f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
-                    img = media.grab_frame(src.to_info(), f, tw, th, 8)
+                    img = media.grab_frame(src.to_info(), f, tw, th, 8, alpha=src.has_alpha)
+                if img.ndim == 3 and img.shape[2] == 4:  # transparência sobre o xadrez (RGBA pré-multiplicado)
+                    from .alphaview import over_checker
+                    img = over_checker(img, premultiplied=True)
             except Exception:  # noqa: BLE001
                 return
             self._mix_bridge.thumb.emit(src.path, qimage_from(img))
@@ -1642,7 +1651,7 @@ class MainWindow(QMainWindow):
                     if os.path.isdir(p):  # pasta como imagens separadas: cada quadro do trecho
                         out += [found.file(n) for n in range(found.first, found.last + 1)]
                         continue
-                if os.path.isfile(p):
+                if not os.path.isdir(p):  # o resto segue como antes (quem chama confere o arquivo)
                     out.append(p)
                 continue
             done[found.pattern] = choice
@@ -1697,7 +1706,8 @@ class MainWindow(QMainWindow):
         dlg = SequenceDialog(self, self.model.seq)
         if dlg.exec():
             w, h, fps, bg = dlg.values()
-            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic())
+            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic(),
+                                    transparent=dlg.transparent())
 
     def auto_adjust_clip(self, cid: str) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
@@ -2541,7 +2551,10 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            out = self.still_frame(self.frame_idx)
+            # "Fundo transparente": PNG e TIFF guardam a transparência; JPEG sai sobre a cor do fundo.
+            alpha = (self.src_seq is not None and self.model.seq.transparent
+                     and Path(path).suffix.lower() in export.STILL_ALPHA_ARGS)
+            out = self.still_frame(self.frame_idx, alpha=alpha)
             export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
         except Exception as exc:  # noqa: BLE001
             QApplication.restoreOverrideCursor()
@@ -2551,15 +2564,16 @@ class MainWindow(QMainWindow):
         self.render_now()
         self.statusBar().showMessage(_("Quadro salvo: {caminho}").format(caminho=path), 8000)
 
-    def still_frame(self, frame: int):
-        """O quadro `frame` em 16 bits no tamanho do arquivo, como sai na exportação ("Salvar quadro")."""
+    def still_frame(self, frame: int, alpha: bool = False):
+        """O quadro `frame` em 16 bits no tamanho do arquivo, como sai na exportação ("Salvar quadro"); `alpha`:
+        RGBA com a transparência da montagem (como numa exportação com alfa)."""
         w, h = self.info.width, self.info.height
         if self.src_seq is not None:
             img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
         else:
             img = media.grab_frame(self.info, frame, w, h, 16, hq=True)
         self._uploaded = None
-        return self.frame_recipe(16, full=True).render(self.engine, img, frame)
+        return self.frame_recipe(16, full=True, alpha=alpha).render(self.engine, img, frame)
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:
@@ -2568,7 +2582,7 @@ class MainWindow(QMainWindow):
         Marcadores contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
         if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
-                             and not seq.markers and not self.file_info.is_sequence):
+                             and not seq.markers and not getattr(self.file_info, "is_sequence", False)):
             return None  # sequência de imagens: a montagem guarda a velocidade escolhida ao importar
         return seq.to_json()
 

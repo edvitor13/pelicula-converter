@@ -138,3 +138,85 @@ def test_film_mode_opens_a_sequence_through_the_montage(win, answer):
     assert win.src_seq is not None  # pela montagem (a velocidade fica na fonte)
     assert win._seq_json() is not None and "sequencia_imagens" in win.model.seq.features()
     assert "cena_[0001-0005].png" in win._media_label
+
+
+# ------------------------------------------------------------------ fundo transparente
+def test_sequence_dialog_has_the_transparent_background():
+    from pelicula.ui.sequence_dialog import SequenceDialog
+    seq = tl.Sequence(width=64, height=36)
+    dlg = SequenceDialog(None, seq)
+    assert dlg.transp.text() == "Fundo transparente" and not dlg.transparent()
+    dlg.transp.setChecked(True)
+    assert dlg.transparent()
+    seq.transparent = True
+    assert SequenceDialog(None, seq).transparent()
+
+
+def _export_dialog(seq):
+    from pelicula.ui.export_dialog import ExportDialog
+    info = media.MediaInfo(path=os.path.join(tempfile.gettempdir(), "montagem.mov"), width=64, height=36, fps=24.0,
+                           fps_str="24/1", frames=48, duration=2.0, pix_fmt="rgb48le", bit_depth=16, codec="rawvideo",
+                           profile="", bitrate=0, color_space="bt709", color_range="pc", color_transfer="bt709",
+                           color_primaries="bt709", has_audio=False, audio_codec="", container="mov", is_image=False)
+    dlg = ExportDialog(None, info, {}, "Teste", None, last_dir=tempfile.gettempdir(), sequence=seq)
+    dlg._est_timer.stop()
+    dlg._preview_timer.stop()
+    return dlg
+
+
+def _pick_codec(dlg, codec):
+    i = dlg.codec.findData(codec)
+    assert i >= 0, codec
+    dlg.codec.setCurrentIndex(i)
+
+
+def test_export_dialog_keeps_alpha_only_where_it_can():
+    if not media.configure():
+        pytest.skip("ffmpeg indisponível")
+    seq = tl.Sequence(width=64, height=36, transparent=True)
+    dlg = _export_dialog(seq)
+    _pick_codec(dlg, "prores")
+    assert dlg.alpha_box.isEnabled() and dlg.alpha_box.isChecked() and dlg.keeps_alpha()
+    assert all(not media.pix_has_alpha(dlg.pix.itemData(i)) for i in range(dlg.pix.count()))
+    s = dlg.settings()
+    assert s.pix == "yuva444p10le" and s.profile in ("4", "5")
+    assert "com transparência" in dlg.summary.text()
+    if dlg.codec.findData("png_seq") >= 0:
+        _pick_codec(dlg, "png_seq")
+        assert dlg.settings().pix in ("rgba64be", "rgba")
+    _pick_codec(dlg, "x264")
+    assert not dlg.alpha_box.isEnabled() and not dlg.keeps_alpha()
+    assert "ProRes 4444" in dlg.alpha_note.text() and dlg.settings().pix == "yuv420p"
+    dlg.alpha_box.setChecked(False)
+    _pick_codec(dlg, "prores")
+    assert dlg.settings().pix == "yuv422p10le"  # desmarcado: o ProRes de sempre
+    opaque = _export_dialog(tl.Sequence(width=64, height=36))
+    _pick_codec(opaque, "prores")
+    assert not opaque.alpha_box.isEnabled() and "Fundo transparente" in opaque.alpha_note.text()
+    assert not media.pix_has_alpha(opaque.settings().pix)
+
+
+def test_preview_shows_the_transparency_over_a_checkerboard(win):
+    from pelicula.ui import alphaview
+    win.new_project()
+    win.set_mode("edicao")
+    d = Path(tempfile.mkdtemp(prefix="pelicula_alfa_ui_"))
+    write_png(d / "quadrado.png", np.full((36, 36, 3), 200, np.uint8))
+    win.import_paths([str(d / "quadrado.png")])
+    assert pump(lambda: bool(win.model.seq.clips))
+    seq = win.model.seq
+    win.model.set_settings(64, 36, seq.fps_str, (1.0, 0.0, 0.0), transparent=True)
+    assert win.model.seq.transparent and "fundo_transparente" in win.model.seq.features()
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None and win.cur.shape[2] == 4), "a prévia não ficou RGBA"
+    APP.processEvents()
+    win.render_now()
+    img = win.viewer.proc
+    assert img is not None and img.width() == 64
+    left = img.pixelColor(2, 18)  # barra do "Mostrar inteiro": transparente → xadrez, não o vermelho do fundo
+    assert (left.red(), left.green(), left.blue()) in ((alphaview.LIGHT,) * 3, (alphaview.DARK,) * 3)
+    mid = img.pixelColor(32, 18)
+    assert mid.red() == mid.green() == mid.blue() and mid.red() > 150
+    win.model.undo()  # desfazer volta ao fundo opaco
+    assert not win.model.seq.transparent

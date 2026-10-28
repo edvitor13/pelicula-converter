@@ -487,7 +487,8 @@ def test_high_depth_nv12_is_8bit(codec):
 
 PIX_BITS = {"yuv420p": 8, "yuv422p": 8, "yuv444p": 8, "yuvj444p": 8, "nv12": 8, "pal8": 8, "rgb24": 8,
             "yuv420p10le": 10, "yuv422p10le": 10, "yuv444p10le": 10, "p010le": 10, "yuv420p12le": 12,
-            "yuv444p16le": 16, "rgb48le": 16, "rgb48be": 16}
+            "yuv444p16le": 16, "rgb48le": 16, "rgb48be": 16, "rgba": 8, "rgba64be": 16, "rgba64le": 16,
+            "yuva420p": 8, "yuva444p10le": 10}
 
 
 @pytest.mark.parametrize("pix", sorted({p for c in CODECS.values() for p in c["pix"]}))

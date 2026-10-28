@@ -90,6 +90,13 @@ class SequenceDialog(QDialog):
         self.bg.color = QColor.fromRgbF(*[min(max(float(c), 0.0), 1.0) for c in seq.background])
         self.bg.clicked.connect(self._pick_bg)
         form.addRow(_("Cor do fundo"), self.bg)
+        self.transp = QCheckBox(_("Fundo transparente"))
+        self.transp.setChecked(bool(getattr(seq, "transparent", False)))
+        self.transp.setToolTip(_("Onde nenhum clipe cobre a tela, o vídeo fica transparente em vez da cor do fundo: a "
+                                 "prévia mostra um xadrez, \"Salvar quadro\" em PNG ou TIFF guarda a transparência e "
+                                 "a exportação a mantém em ProRes 4444, WebM VP9 e sequências PNG ou TIFF. Nos "
+                                 "outros formatos o fundo sai na cor escolhida."))
+        form.addRow("", self.transp)
         self.micro = QCheckBox(_("Fades curtos nas emendas de som"))
         self.micro.setChecked(bool(seq.micro_fade))
         self.micro.setToolTip(_("Um fade de 5 ms onde um clipe de som começa ou termina no meio do arquivo, "
@@ -154,6 +161,9 @@ class SequenceDialog(QDialog):
 
     def magnetic(self) -> bool:
         return self.magnet.isChecked()
+
+    def transparent(self) -> bool:
+        return self.transp.isChecked()
 
 
 __all__ = ["SequenceDialog", "RESOLUTIONS", "fps_label"]

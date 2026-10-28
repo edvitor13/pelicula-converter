@@ -428,6 +428,9 @@ class Sequence:
     markers: list[Marker] = field(default_factory=list)
     micro_fade: bool = False  # fades curtos nas emendas de som (sequências novas ligam; projeto antigo = sem)
     magnetic: bool = False    # faixa principal (V1) magnética: sem buracos (padrão desligado, também em projetos novos)
+    # "Fundo transparente": a tela começa transparente em vez da cor do fundo; vale na prévia (xadrez), no "Salvar
+    # quadro" em PNG/TIFF e nas exportações com alfa (`export.wants_alpha`). "fundo_transparente" no JSON, só ligado.
+    transparent: bool = False
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -1570,6 +1573,8 @@ class Sequence:
             return None
         if not src.is_file:  # clipe sem arquivo (gerador, texto…): não há o que ler direto
             return None
+        if self.transparent:  # "Fundo transparente" é uma escolha da montagem (o projeto precisa guardá-la)
+            return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
             return None
         if not src.is_image and v.dur != src.frames:
@@ -1627,6 +1632,8 @@ class Sequence:
             out["micro_fades"] = True
         if self.magnetic:
             out["faixa_magnetica"] = True
+        if self.transparent:
+            out["fundo_transparente"] = True
         return out
 
     @classmethod
@@ -1647,7 +1654,7 @@ class Sequence:
         tracks = [t for t in (Track.from_json(x) for x in d.get("faixas") or [] if isinstance(x, dict)) if t]
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
                   background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True,
-                  magnetic=d.get("faixa_magnetica") is True)
+                  magnetic=d.get("faixa_magnetica") is True, transparent=d.get("fundo_transparente") is True)
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)
@@ -1712,6 +1719,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
     "sequencia_imagens": lambda seq: any(s.is_sequence for s in seq.used_sources()),
+    "fundo_transparente": lambda seq: seq.transparent,
 }
 
 

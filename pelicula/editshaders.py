@@ -323,6 +323,14 @@ void main() {
     }
     if (u_fade.w > 0.0) c = mix(c, u_fade.rgb, u_fade.w);
     vec3 res = blend(dst.rgb, c);
+    if (dst.a < 1.0) {
+        // Tela transparente ("Fundo transparente"): "sobre" com cor direta; o modo de mesclagem só vale onde
+        // há algo embaixo (a cor do clipe pesa onde a tela é transparente).
+        float oa = a + dst.a * (1.0 - a);
+        vec3 s = mix(c, res, dst.a);
+        f_out = vec4((s * a + dst.rgb * (dst.a * (1.0 - a))) / max(oa, 1e-6), oa);
+        return;
+    }
     if (a >= 1.0) f_out = vec4(res, 1.0);
     else f_out = vec4(mix(dst.rgb, res, a), 1.0);
 }
