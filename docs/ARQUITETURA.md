@@ -28,6 +28,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 20. [Recuperação automática e relatórios de erro (`recovery.py`, `crashlog.py`)](#20-recuperação-automática-e-relatórios-de-erro-recoverypy-crashlogpy)
 21. [Componentes de IA: receitas com o uv e o CorridorKey](#21-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
 22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
+23. [Texto, legendas e transcrição](#23-texto-legendas-e-transcrição)
 
 ---
 
@@ -107,8 +108,13 @@ Três ideias guiam o projeto:
 | `pelicula/loudnorm.py` | Volume alvo da exportação: medida (`measure`) e filtro da 2ª passada (`filter_for`) do `loudnorm` do ffmpeg (seção 9.8). |
 | `pelicula/deps.py` | Versão do ffmpeg, download verificado (gyan.dev / BtbN), extração segura (`extract_archive`, `safe_member`), pasta do app, pacotes Python, `pip_install()`. |
 | `pelicula/tools.py` | Componentes externos: registro `TOOLS` (versão, URL e SHA-256 fixos), `download()` com troca atômica, `remove()`, `status()`, `disk_usage()`, detecção de programas do sistema (seção 17); receitas de IA (código + ambiente Python pelo uv + modelos): `Recipe`, `build_env()`, `fetch_file()` retomável, `install_recipe()`, `run_process()` (seção 21). |
+| `pelicula/fontfile.py` | Leitor de TrueType (métricas, `cmap`, contornos da `glyf`, nomes) e cópia com nome de família único para o banco de fontes do Qt (seção 23.1). |
+| `pelicula/textrender.py` | Texto em RGBA igual em qualquer sistema: catálogo das fontes OFL de `data/fontes`, `TextStyle`, `layout()`, `render()` (contorno, sombra, caixa, destaque por palavra; 8/16 bits, alfa direto), `paste()` (seção 23.1). |
+| `pelicula/subtitles.py` | Legendas: `Word`, `Cue`, `Subtitles` (presas ao arquivo ou da sequência), `map_cues` pela montagem, `cues_from_words`, SRT/WebVTT, estilos prontos (`STYLES`), faixa na exportação (`export_file`, `encoder_args`) e `overlay` gravado no vídeo. Sem Qt (seção 23.2). |
+| `pelicula/transcribe.py` | Transcrição local pelo whisper.cpp (módulo Beta `legendas_auto`): WAV 16 kHz, linha de comando, progresso, volta para a CPU, leitura do JSON, `transcribe_file`/`transcribe_sequence`, `make_job`. Sem Qt (seção 23.3). |
+| `pelicula/silences.py` | Silêncios (níveis RMS/pico por janela, limiar relativo, duração mínima, folga) e "Cortar pelo texto" (palavras escolhidas → trechos do arquivo). Sem Qt (seção 23.4). |
 | `pelicula/corridorkey.py` | CorridorKey (módulo Beta `recorte_ia`): requisitos da placa (`nvidia-smi`, capacidade 8.0+), linha de comando e progresso do `infer.py`, `run()` num processo separado com pasta parcial, aviso de entrada (log/HDR/RAW). Sem Qt (seção 21). |
-| `pelicula/data/` | Dados lidos em tempo de execução: listas travadas com hash e manifestos de código das receitas (`corridorkey/`). Gerados por `uv pip compile` e `tools/gerar_manifesto.py`. |
+| `pelicula/data/` | Dados lidos em tempo de execução: listas travadas com hash e manifestos de código das receitas (`corridorkey/`); fontes OFL (`fontes/`, com `SOURCE.txt`). Gerados por `uv pip compile` e `tools/gerar_manifesto.py`. |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
 | `pelicula/notify.py` | Notificações do sistema sem Qt: tipos (`KINDS`), preferências `notificacoes/…`, `decide()` (avisar, tocar som, piscar), textos (`Notice`) e o resumo da fila (`queue_notices`) (seção 19). |
 | `pelicula/recovery.py` | Recuperação depois de um travamento, sem Qt: marcador da sessão (pid + hora de início), cópias automáticas com rodízio, fila de exportação guardada, `scan()` das sessões que travaram (seção 20). |
@@ -1129,7 +1135,7 @@ Registro dos programas externos que o app usa, mostrado em **Configurações ›
 
 | Tipo | O que o app faz | Exemplos |
 |---|---|---|
-| `BAIXADO` | baixa da fonte oficial, confere o SHA-256 fixo no código e instala na pasta do app | ffmpeg (exceção, veja abaixo); uv; CorridorKey (receita, seção 21) |
+| `BAIXADO` | baixa da fonte oficial, confere o SHA-256 fixo no código e instala na pasta do app | ffmpeg (exceção, veja abaixo); uv; CorridorKey (receita, seção 21); whisper.cpp (compilado no CI), modelos de fala e Silero VAD (seção 23.3) |
 | `SISTEMA` | só detecta (`DETECTORS`, leitura), nunca baixa nem instala | DaVinci Resolve (agora), Blender (depois) |
 
 `Tool`: id ASCII (é o nome da pasta; nunca muda), nome, descrição, ícone de `ui/icons.py`, site
@@ -1809,3 +1815,206 @@ formato vêm do primeiro arquivo) e `legal_range` (contam como imagem: só numa 
 `"gerado"`), o "localizar arquivo" ao abrir um projeto, o arquivo do projeto (`_make_project`) e o perfil de
 câmera do primeiro clipe. `MainWindow.adopt_source(src)` põe uma fonte (arquivo ou gerada) na Mídia uma vez só;
 inserir continua sendo `model.insert_media(src, …)` ou arrastar da Mídia.
+
+## 23. Texto, legendas e transcrição
+
+Núcleo sem interface da 1.5 (issue #37): desenhar texto igual em qualquer computador, guardar e
+exportar legendas que acompanham a montagem, transcrever a fala no próprio computador e achar
+silêncios. A interface (editor de legendas, títulos, painel de transcrição) usa estes módulos e não
+reimplementa nada deles.
+
+### 23.1 Fontes e renderizador de texto (`fontfile.py`, `textrender.py`)
+
+**Fontes**: `pelicula/data/fontes/` traz 11 famílias SIL OFL 1.1 do repositório google/fonts, commit
+`ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b` (37 arquivos `.ttf` + o `OFL.txt` de cada família, 3,08 MB):
+Atkinson Hyperlegible (padrão, feita para leitura fácil), Poppins, Barlow Condensed, Bebas Neue, Anton,
+Archivo Black, DM Serif Display, Crimson Text, Courier Prime, Patrick Hand e Pacifico. O `SOURCE.txt`
+lista a origem e o SHA-256 de cada arquivo; `tests/test_textrender.py` confere os hashes, que todo
+`.ttf` tem a licença ao lado e que o catálogo (`FAMILIES`) só aponta para arquivos que existem. Os
+`.ttf` são binários no `.gitattributes` (sem conversão de fim de linha). Só fontes que vêm com o app: um
+projeto sai igual em qualquer máquina e nada depende das fontes instaladas no sistema.
+
+**Por que não `QPainter.drawText`**: o motor de fontes do sistema (DirectWrite no Windows, FreeType no
+Linux) arredonda posições, *hinting* e curvas de jeitos diferentes, e um título não pode mudar de um
+pixel entre a prévia no Windows e a exportação no Linux. Então:
+
+1. `fontfile.FontFile` lê o `.ttf` (métricas `head`/`hhea`/`OS/2`, `cmap` 4/12, contornos simples e
+   compostos da `glyf`, nomes) e gera uma cópia com nome de família único (`renamed`), registrada no
+   `QFontDatabase` do Qt — uma fonte do sistema de mesmo nome nunca entra (`NoFontMerging`);
+2. o *shaping* (kerning, ligaduras, acentos combinados) é do `QTextLayout` (HarfBuzz) num tamanho de
+   1 em = unidades da fonte, sem *hinting*, com as posições arredondadas para unidades inteiras;
+3. os contornos vêm do nosso leitor da `glyf` e são preenchidos pelo rasterizador de caminhos do Qt
+   (`QPainter` em `QImage` ARGB32 pré-multiplicada, software); o alfa é a cobertura;
+4. contorno (`QPainterPathStroker`), sombra (desfoque de caixa com somas inteiras) e caixa atrás do
+   texto (por linha ou por bloco, cantos arredondados) são compostos em numpy float32.
+
+O CI (Windows e Linux, `QT_QPA_PLATFORM=offscreen`) gera exatamente os mesmos hashes que a máquina de
+desenvolvimento (Windows, DirectWrite) para os 7 casos de `tests/test_textrender.py` (texto simples,
+efeitos, estilo Reels, serifa, script, destaque por palavra, 4K em 16 bits).
+
+**API** (sem widgets; segura em threads de trabalho; resultados em `lru_cache`, matrizes só de
+leitura):
+
+- `TextStyle` (congelado): fonte, peso, itálico, tamanho, cor, opacidade, alinhamento, entrelinha,
+  espaçamento, largura máxima (quebra de linha), maiúsculas, contorno, sombra, caixa. JSON com chaves
+  sem acento (`fonte`, `peso`, `tamanho`, `cor`, `contorno`, `sombra_desfoque`, `caixa_modo`…),
+  `from_json` limpa valores fora da faixa (`sanitized`). Padrões neutros: sem contorno, sem sombra, sem
+  caixa.
+- `layout(texto, estilo, altura) → Layout` (linhas, caixas de cada palavra, tinta) e `measure()`;
+- `render(texto, estilo, altura, overrides=None, depth=8, offset=(0, 0)) → TextImage(rgba, left, top,
+  layout)`: `overrides` muda cor, escala e caixa de palavras específicas (`WordOverride`, o destaque da
+  palavra falada); `depth` 8 ou 16 bits;
+- `paste(destino, imagem, x, y)` compõe sobre um quadro; `parse_color`/`color_hex`; `credits()` (para o
+  README e o "Sobre"); `missing_chars()` avisa de caracteres que a fonte não tem.
+
+Convenções: tamanhos e distâncias em **px@1080** (× `altura / 1080`); cores são códigos RGB 0–1 do vídeo
+(já codificados); a saída é **RGBA com alfa direto** (não pré-multiplicado), e onde o alfa é 0 a cor
+também é 0; linha 0 = topo. Precisa de uma `QGuiApplication` (`ensure_app()` cria uma no terminal e nos
+testes).
+
+### 23.2 Legendas (`subtitles.py`)
+
+Sem Qt; tudo puro e determinístico.
+
+- `Word(start, end, text)` (JSON `[ini, fim, texto]`) e `Cue(start, end, text, words, italic, bold)`
+  (JSON `inicio`, `fim`, `texto`, `palavras`, `italico`, `negrito`).
+- `Subtitles`: `sources` (legendas **presas a um arquivo**, em segundos do arquivo, como
+  `Clip.src_in` — o que a transcrição e a importação produzem), `cues` (legendas **da sequência**, em
+  segundos da sequência), `language`, `style` (`SubStyle`: um pronto ou ajustado), `burn` (`"nao"`, `"copia"`,
+  `"digital"`) e `embed` (pôr a faixa de legenda no arquivo exportado). JSON:
+  `{"versao": 1, "idioma", "estilo", "gravar", "faixa", "fontes": {caminho: [legendas]}, "sequencia":
+  [legendas]}`. `relink` acompanha arquivos que mudaram de lugar.
+- **Tempo pela montagem**: `map_cues(seq, caminho, legendas)` leva cada legenda presa ao arquivo para
+  todos os clipes que mostram aquele trecho (`Sequence.src_time` de cada clipe; os clipes de som do
+  arquivo, ou os de vídeo não congelados quando o arquivo não tem som na sequência). Uma palavra fica
+  quando o meio dela cai dentro do clipe; o texto é refeito com as palavras que ficaram; pedaços
+  cortados com menos de 0,25 s somem; repetições somem. `timeline_cues(seq)` junta as presas e as da
+  sequência em tempo da sequência: é o que a exportação, o `.srt` exportado e o desenho usam.
+- `cues_from_words(palavras)` agrupa a transcrição em legendas (pausa longa, fim de frase, 2 linhas de
+  42 caracteres, 7 s; pelo menos 0,8 s na tela) e `balance_lines` divide em linhas parecidas.
+- **Arquivos**: `parse`/`load` leem SRT e WebVTT (BOM UTF-8/UTF-16, CP-1252 de reserva, CRLF,
+  numeração faltando, `<i>`/`<b>`, tags de cor e `{\an8}` ignoradas, blocos NOTE/STYLE/REGION, tempos
+  por palavra do VTT); `to_srt`/`to_vtt`/`save` gravam UTF-8; `relative` recorta e desloca para o
+  trecho exportado.
+- **Estilos prontos** (`STYLES`, `SubStyle` = `TextStyle` + posição, margem, largura, palavras por
+  tela e destaque): `youtube` (Atkinson com caixa escura, embaixo), `reels` (Poppins Black em
+  maiúsculas, contorno, 3 palavras por tela, palavra falada em amarelo e um pouco maior, no meio) e
+  `cinema` (Atkinson clara com sombra suave, embaixo). Ids e chaves nunca mudam.
+- **Faixa na exportação**: `job_payload(legendas, idioma)` vai no `ExportJob` (chave `"legendas"`);
+  `run_job` chama `export_file(...)`, que grava o trecho exportado num `.vtt` temporário (apagado no
+  fim), e `export.build_encoder_cmd(..., subtitles=Embed)` acrescenta `-f webvtt -i <arquivo>` antes
+  do primeiro `-map` e `-map N:s:0 -c:s <codec> -metadata:s:s:0 language=<ISO 639-2>` no fim
+  (`EMBED_CODECS`: `mov_text` no MP4/MOV, `srt` no MKV, `webvtt` no WebM; na 1ª passada do tamanho
+  alvo não entra). O intermediário é sempre WebVTT porque o leitor de SRT do ffmpeg come texto entre
+  `<` e `>`; limitação conhecida do ffmpeg: os codificadores `srt` e `webvtt` não escapam `<`/`&`.
+- **Gravada no vídeo**: `overlay(legendas, quadro, fps, estilo, largura, altura, depth)` devolve a
+  imagem (via `textrender`) e a posição da legenda ativa, com paginação por `palavras_por_tela` e o
+  destaque da palavra falada; `"copia"` compõe antes do look (a legenda passa pelo grão e pela cor),
+  `"digital"` depois (nítida). A composição em si fica na integração com o render.
+- O bloco `"legendas"` do projeto marca o formato 3 do `.plc` (`FEATURE_ID = "legendas"`).
+
+### 23.3 Transcrição local (`transcribe.py`) e o whisper.cpp compilado no CI
+
+Módulo Beta `legendas_auto` (grupo Edição, começa desligado). **Nada sai do computador**: o som é
+transcrito pelo [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) com um modelo baixado uma
+vez. Componentes (`tools.TOOLS`, Configurações › Componentes):
+
+| id | O quê | Tamanho | Origem (fixa) | Licença |
+|---|---|---|---|---|
+| `whisper_cpp` | `whisper-cli` + bibliotecas ggml, CPU e Vulkan | 18 MB (Windows) / 21 MB (Linux); 59/65 MB instalado | release `componente-whisper-cpp-1.9.5` deste repositório, compilada pelo CI | MIT |
+| `whisper_small` | modelo `ggml-small-q8_0.bin` | 264 MB | HF `ggerganov/whisper.cpp` @ `5359861c` | MIT (pesos do Whisper, OpenAI) |
+| `whisper_turbo` | modelo `ggml-large-v3-turbo-q5_0.bin` | 574 MB | HF `ggerganov/whisper.cpp` @ `5359861c` | MIT (pesos do Whisper, OpenAI) |
+| `silero_vad` | `ggml-silero-v6.2.0.bin` | 0,9 MB | HF `ggml-org/whisper-vad` @ `9ffd54a1` | MIT |
+
+Escolhas: o small em q8_0 tem quase o mesmo acerto do f16 com metade do tamanho; o turbo em q5_0 é o
+mais preciso que ainda cabe numa placa de 4 GB e roda na CPU (o q8_0 tem 874 MB e quase nenhum ganho).
+O VAD é o arquivo oficial que o `models/download-vad-model.sh` do whisper.cpp baixa.
+
+**Por que compilar no CI**: o whisper.cpp publica binários só para Windows, sem checksums, e nenhum para
+Linux. A regra do AGENTS.md ("Nova ferramenta externa") manda compilar do código
+oficial no nosso CI e publicar numa release do projeto com `SHA256SUMS.txt`. O workflow
+`.github/workflows/componentes.yml`:
+
+- entrada manual (`workflow_dispatch`): componente, versão (`1.9.5`), commit esperado
+  (`d1be6fde11ac6e0407606b4e42fe72d34add8037`) e `publicar`; um push que muda o próprio workflow roda
+  só a compilação (teste, sem publicar);
+- matriz Windows (windows-2022, MSVC com runtime estático: nada de "Visual C++ Redistributable") e Linux
+  (ubuntu-22.04, glibc 2.35, `RPATH=$ORIGIN`) × variantes `vulkan` e `cpu`; o Vulkan SDK 1.4.363.0 vem
+  do LunarG com SHA-256 conferido;
+- CMake: `BUILD_SHARED_LIBS=ON`, `GGML_BACKEND_DL=ON` (cada *backend* é uma biblioteca carregada na
+  hora), `GGML_CPU_ALL_VARIANTS=ON` (uma versão da CPU por geração de processador, escolhida na hora:
+  SSE4.2 até AVX-512/AMX), `GGML_NATIVE=OFF`, `GGML_OPENMP=OFF`;
+- confere o commit da tag, que o Windows não importa o runtime do Visual C++ (`dumpbin`) e transcreve
+  um áudio de exemplo com o modelo tiny e o VAD (o Linux Vulkan também roda no lavapipe, só como
+  diagnóstico); empacota com o `LICENSE` e um `ORIGEM.txt` (versão, commit, opções);
+- com `publicar=true`: junta os pacotes, gera o `SHA256SUMS.txt` e cria a release
+  `componente-whisper-cpp-<versão>` como **pre-release** e **não latest** (recusa se já existir). A tag
+  não começa com `v`: o `build.yml` (tags `v*`) e o atualizador do app (`releases/latest`, que nunca
+  devolve pre-release) não a veem.
+
+O app baixa a variante `vulkan` (que também tem todas as de CPU): sem driver Vulkan, o `ggml-vulkan`
+não carrega e o whisper.cpp roda na CPU sozinho. A variante `cpu` fica publicada como reserva.
+
+**Caminho da transcrição** (`transcribe.py`, sem Qt):
+
+1. `engine(modelo)` acha o `whisper-cli`, o modelo e o VAD (`tools.executable`); faltando algo,
+   `TranscribeError` diz o que baixar em Componentes (`missing()`/`available()`/`installed_models()`);
+2. o som vira WAV 16 kHz mono 16 bits pelo ffmpeg: `transcribe_file(caminho, opções, início, fim)`
+   (trecho do arquivo; tempos do arquivo → legendas presas a ele, que acompanham a montagem) ou
+   `transcribe_sequence(seq, opções, início, fim)` (mixagem da sequência pelo `audiomix.render_mix`,
+   depois reamostrada; tempos da sequência);
+3. `command()`: `whisper-cli -m <modelo> -f <wav> -of <base> -oj -l <idioma> -t <threads> -ml 1 -sow
+   -sns -pp --vad -vm <vad> [-ng]` — uma palavra por segmento (`-ml 1 -sow`: os tempos já vêm
+   corrigidos pelo VAD para o tempo original), sem sons como "[música]" (`-sns`), progresso em
+   "progress = N%" (`-pp`); idioma `auto`, `pt`, `en`, `es` (ou outro código do whisper);
+4. roda por `tools.run_process` (cancelar encerra a árvore de processos); se a tentativa com a placa
+   falhar (driver com defeito, memória), recomeça uma vez no processador (`-ng` e
+   `GGML_VK_VISIBLE_DEVICES` vazio: o módulo Vulkan não abre nenhuma placa) e avisa no progresso;
+5. `parse_output()` lê o JSON: pontuação solta vai para a palavra de antes, a que abre ("¿") para a
+   seguinte; marcadores como `[BLANK_AUDIO]` saem; um segmento com espaços é dividido pelo tamanho das
+   palavras; tempos cortados no fim do trecho;
+6. `Result(words, cues, language, device, path, start, end)`: palavras em tempo do arquivo (ou da
+   sequência), legendas por `subtitles.cues_from_words`, idioma reconhecido e onde rodou (`gpu`/`cpu`);
+   `merge(doc, result)` põe no `Subtitles` trocando só o trecho transcrito.
+
+`make_job(opções, título, path=… | seq=…)` monta o `jobs.Job` (chave `legendas_auto`): tipo `GPU` quando
+há o carregador do Vulkan no sistema (`vulkan_available()`: `vulkan-1.dll` / `libvulkan.so.1`), senão
+`CPU`. No Windows o `whisper-cli` recebe a linha de comando na página de código do sistema: caminhos com
+acentos vão pelo nome curto 8.3 (`corridorkey.short_path`); a pasta de trabalho é
+`<pasta do app>/cache/transcricao/t-*`, apagada no fim.
+
+Erros para o usuário (PT-BR): componentes faltando, arquivo sem som, sequência sem som no trecho, falta
+de memória (sugere o modelo Rápido), falha com as últimas linhas do motor.
+
+**Testes**: `tests/test_transcribe.py` usa um `whisper-cli` falso em Python (`tests/whisper_falso.py`:
+mesmos argumentos, progresso e JSON do verdadeiro; modos falha da placa, falha, memória, lento, mudo e
+marcadores), sem rede nem modelo: comando, progresso, leitura do JSON, volta para o processador,
+cancelamento, erros, mensagem de componentes faltando, fila, arquivo e sequência com som de verdade pelo
+ffmpeg. O teste com o whisper.cpp de verdade só roda com `PELICULA_TESTE_WHISPER=1` e
+`PELICULA_TESTE_WHISPER_ARQUIVO=<vídeo com fala>` (baixa motor, small e VAD numa pasta temporária).
+
+### 23.4 Silêncios e "Cortar pelo texto" (`silences.py`)
+
+Sem Qt; devolve trechos **em segundos do arquivo** (como `Clip.src_in`); aplicar na linha do tempo é com
+a montagem.
+
+- `levels(caminho, início, duração)`: o ffmpeg decodifica mono 16 kHz em float32 por um *pipe*, lido em
+  blocos de 20 s (a memória não cresce com a duração); `Levels` guarda RMS e pico em dBFS por janela de
+  10 ms (`levels_from_samples` faz o mesmo de amostras na memória, para testes e para o som já
+  decodificado).
+- `detect(níveis, threshold=-30, min_duration=0.5, padding=0.1, relative=True, bridge=0.06)`: janela
+  silenciosa = RMS abaixo do limiar; o limiar é **relativo ao volume do trecho** (percentil 95 das
+  janelas com som: a mesma regulagem serve para gravação baixa e alta) ou absoluto em dBFS. Estalos de
+  até `bridge` dentro de um silêncio não o quebram; silêncios menores que `min_duration` ficam; cada
+  silêncio encolhe `padding` do lado que encosta na fala (o começo e o fim do trecho não). `Silence(start,
+  end, level)` com o RMS médio. `find_silences()` = `levels` + `detect`.
+- **Cortar pelo texto**: `transcript(palavras)` é o texto que o editor mostra; `indices_for_text(palavras,
+  trechos)` converte seleções de texto em palavras inteiras; `text_cut_ranges(palavras, índices,
+  padding=0.03, merge_gap=0.15)` dá os trechos a remover — cada sequência de palavras escolhidas vai do
+  fim da palavra de antes (+ folga, sem entrar na escolhida) até o começo da de depois (− folga, sem
+  entrar nela), os vãos vão junto e trechos a menos de `merge_gap` viram um só; `remaining_words()` diz
+  o que sobra.
+
+**Testes**: `tests/test_silences.py` com som sintético determinístico (senos e ruído com semente):
+níveis, limiar relativo igual com ganho diferente, absoluto diferente, duração mínima, folga, estalo,
+tudo mudo, leitura pelo ffmpeg igual à da memória, arquivo sem som, cancelar e os cortes pelo texto.

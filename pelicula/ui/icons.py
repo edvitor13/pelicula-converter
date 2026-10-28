@@ -473,6 +473,14 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         p.setBrush(QBrush(c))
         for y in (6, 12, 18):
             p.drawRect(QRectF(4, y - 1.7, 3.4, 3.4))
+    elif name == "captions":
+        # Legendas: tela com duas linhas de texto embaixo.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3, 5, 18, 14), 2.5, 2.5)
+        p.drawLine(QPointF(7, 12.5), QPointF(13, 12.5))
+        p.drawLine(QPointF(15.5, 12.5), QPointF(17, 12.5))
+        p.drawLine(QPointF(7, 15.5), QPointF(10, 15.5))
+        p.drawLine(QPointF(12.5, 15.5), QPointF(17, 15.5))
     elif name == "dot":
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(c))

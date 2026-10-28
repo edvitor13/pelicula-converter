@@ -68,7 +68,18 @@ pelicula/
                              travada + modelos retomáveis), build_env(), fetch_file(), run_process()
   corridorkey.py             CorridorKey (módulo Beta recorte_ia, sem Qt): placa NVIDIA 8.0+ (nvidia-smi),
                              linha de comando e progresso do infer.py, run() num processo separado
-  data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/)
+  data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/);
+                             fontes/ (fontes SIL OFL do app, com OFL.txt e SOURCE.txt: origem e SHA-256)
+  fontfile.py                leitor de TrueType (métricas, cmap, contornos da glyf) e cópia com nome único
+  textrender.py              texto em RGBA igual em qualquer sistema: FAMILIES (fontes do app), TextStyle, layout(),
+                             render() (contorno, sombra, caixa, destaque por palavra; 8/16 bits, alfa direto), paste()
+  subtitles.py               legendas (sem Qt): Word, Cue, Subtitles (presas ao arquivo ou da sequência), map_cues()
+                             pela montagem, cues_from_words(), SRT/WebVTT, STYLES, faixa na exportação, overlay()
+  transcribe.py              transcrição local pelo whisper.cpp (módulo Beta legendas_auto, sem Qt): WAV 16 kHz,
+                             whisper-cli com VAD e tempo por palavra, volta para a CPU, transcribe_file/_sequence,
+                             make_job()
+  silences.py                silêncios (RMS/pico por janela, limiar relativo, duração mínima, folga) e "Cortar pelo
+                             texto" (palavras escolhidas → trechos do arquivo a remover), sem Qt
   jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
   notify.py                  notificações do sistema (sem Qt): tipos KINDS, preferências notificacoes/…, decide(),
                              textos (Notice), resumo da fila
@@ -135,6 +146,8 @@ packaging/
   linux/                     build_deb.sh, verificar_deb.sh, .desktop, tipo MIME (*.plc), debian/postinst|postrm
   macos/                     build_dmg.sh (macOS desativado)
 .github/workflows/build.yml  CI: testes sempre; pacotes no main/master, tags v* e manual; release em tags
+.github/workflows/componentes.yml  componentes compilados no CI (whisper.cpp): manual, publica a pre-release
+                             componente-<nome>-<versão> com SHA256SUMS.txt
 build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou .tar.gz/.deb (Linux)
 ```
 
@@ -318,6 +331,15 @@ do app vai para uma pasta temporária via `LOCALAPPDATA`/`XDG_DATA_HOME`):
 | `tests/test_ambiente.py` | receita de ambiente Python com o uv falso (`tests/uv_falso.py`): dois ambientes que não se tocam, retomada depois de cair, download com `Range`, SHA-256 errado, cancelar, código conferido por manifesto, instalação inteira e troca de pasta |
 | `tests/test_corridorkey.py` / `test_corridorkey_ui.py` | requisitos pelo `nvidia-smi` falso, instalação falsa no formato do CorridorKey, recorte com `infer.py` falso num processo de verdade (PATH, pasta parcial, cancelar, erros), janela do recorte |
 | `tests/test_corridorkey_real.py` | **manual**: `PELICULA_TESTE_CORRIDORKEY=1` (e `PELICULA_TEST_TIMEOUT=0`) baixa ~7,6 GB das fontes oficiais em `PELICULA_TESTE_CORRIDORKEY_DIR` e recorta um clipe 1080p na placa NVIDIA |
+| `tests/test_transcribe.py` | transcrição com o `whisper-cli` falso (`tests/whisper_falso.py`): comando, progresso, JSON → palavras, volta para o processador quando a placa falha, cancelar, erros em PT-BR, componentes faltando, fila; **manual**: `PELICULA_TESTE_WHISPER=1` + `PELICULA_TESTE_WHISPER_ARQUIVO=<vídeo com fala>` baixa o whisper.cpp, o modelo small e o VAD numa pasta temporária e transcreve |
+
+Texto, legendas e silêncios:
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_textrender.py` | fontes do app (SHA-256 do `SOURCE.txt`, licença ao lado, catálogo), leitor de TrueType, estilo em JSON, quebra de linha, acentos, e **hashes fixos das imagens** (iguais no Windows e no Linux: mudou o desenho de propósito, atualize os hashes e explique no commit) |
+| `tests/test_subtitles.py` | SRT/WebVTT (ler e gravar), agrupar palavras, tempo pela montagem (cortes, velocidade, congelado), estilos, JSON, faixa na exportação com o ffmpeg de verdade (MP4, MOV, MKV, WebM), desenho no quadro |
+| `tests/test_silences.py` | silêncios em som sintético (limiar relativo, duração mínima, folga, estalo), leitura pelo ffmpeg, cancelar, "Cortar pelo texto" |
 
 Notificações e recuperação (a pasta do app vai para uma pasta temporária; nenhuma notificação de verdade
 aparece: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos):
@@ -664,6 +686,36 @@ downloads separados, com um cartão em Configurações › Componentes.
 8. Textos novos em PT-BR + `tools/i18n_extract.py --update` + en/es; README (componentes e
    privacidade) e `CHANGELOG.md`.
 
+Componente compilado no CI (sem binário oficial verificável): veja a receita seguinte.
+
+### Componente compilado no CI (publicar ou atualizar)
+
+Exemplo: o whisper.cpp (`.github/workflows/componentes.yml`, `tools.WHISPER_CPP`). Só o dono do projeto
+autoriza publicar; a release é do próprio repositório e nunca é a "latest".
+
+1. **Workflow**: um job por componente em `componentes.yml`, com a versão **e o commit** da fonte
+   oficial como entradas (o job confere que a tag aponta para o commit), dependências de compilação
+   baixadas com SHA-256 conferido, opções que não dependem da máquina do CI (nada de `-march=native`;
+   runtime estático no Windows; `RPATH=$ORIGIN` e a glibc mais antiga suportada no Linux), um teste que
+   roda o programa compilado, e o pacote com a licença do autor e um `ORIGEM.txt` (versão, commit,
+   opções). Mudar o workflow num push compila tudo sem publicar: use isso para testar.
+2. **Publicar**: `gh workflow run componentes.yml --ref <branch> -f componente=<nome> -f versao=<x.y.z>
+   -f commit=<sha completo> -f publicar=true`. O job `publicar` gera o `SHA256SUMS.txt` e cria a release
+   `componente-<nome>-<versão>` como **pre-release** e **não latest** (`--latest=false`). A tag **não**
+   começa com `v`: o `build.yml` só reage a `v*` e o atualizador (`releases/latest`) nunca vê
+   pre-releases. Release que já existe não é sobrescrita: versão nova = tag nova (para refazer a mesma
+   versão, apague a release e a tag de propósito).
+3. **Conferir**: `gh release download componente-<nome>-<versão>` numa pasta vazia, `sha256sum -c
+   SHA256SUMS.txt`, e `gh api repos/edvitor13/pelicula-converter/releases/tags/componente-<nome>-<versão>`
+   deve mostrar `"prerelease": true`. Rode o pacote no Windows e no Linux (com e sem placa de vídeo).
+4. **Fixar no app**: em `tools.TOOLS`, um `Artifact(..., origin=tools.CI)` por sistema com a URL
+   `https://github.com/edvitor13/pelicula-converter/releases/download/componente-<nome>-<versão>/<pacote>`,
+   o SHA-256 e o tamanho **do arquivo baixado** (não do log do CI), o tamanho extraído e os executáveis;
+   o `Tool` leva `source_url` (a árvore da tag oficial) e a licença do autor. `test_registry_is_consistent`
+   exige o `source_url` e a URL nesta release.
+5. Atualizar a versão = repetir 2–4 com a versão nova (a antiga continua publicada para quem ainda não
+   atualizou o app) e mencionar no `CHANGELOG.md`.
+
 Programa do sistema (instalado pelo usuário, como o DaVinci Resolve): `kind=tools.SISTEMA`, sem
 `artifacts`, e uma função em `tools.DETECTORS` que só lê (pastas padrão, lista de desinstalação do
 Windows) — o app não instala nem baixa nada. O ffmpeg (`backend="ffmpeg"`) é a exceção documentada
@@ -786,6 +838,9 @@ A pasta do PyInstaller (`dist/PeliculaConverter/`, com `PeliculaConverter[.exe]`
 ### CI e Discord
 
 - Todo push e PR: só o job `testes` (Windows e Linux).
+- `componentes.yml`: compila componentes externos a partir do código oficial (hoje o whisper.cpp) e,
+  quando pedido à mão com `publicar=true`, publica a pre-release `componente-<nome>-<versão>` (receita
+  "Componente compilado no CI").
 - Push no `main`/`master`, tags `v*` e `workflow_dispatch`: o job `build` também gera, testa e
   envia os pacotes como artefatos. Para validar uma branch:
   `gh workflow run build.yml --ref <branch>`.
