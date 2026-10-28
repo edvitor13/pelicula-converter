@@ -212,6 +212,17 @@ class TimelineModel(QObject):
         self._delete(ids, ripple)
         self._done("structure")
 
+    def remove_ranges(self, frames: Iterable[tuple[int, int]]) -> int:
+        """Tira trechos de tempo (quadros [a, b)) de todas as faixas destravadas e encosta o resto, num passo de
+        desfazer ("Remover silêncios…", "Cortar pelo texto"; `rangecut.remove_ranges`). Devolve os quadros tirados."""
+        from .. import rangecut
+        with self.seq.keep_main():
+            n = rangecut.remove_ranges(self.seq, frames)
+        if n:
+            self._filter_selection(emit=True)
+            self._done("structure")
+        return n
+
     def move_clip(self, cid: str, start: int, track: int | None = None, insert: bool = False) -> int:
         """Move o clipe (e os ligados); `insert` abre espaço no destino em vez de sobrescrever."""
         c = self.seq.find(cid)

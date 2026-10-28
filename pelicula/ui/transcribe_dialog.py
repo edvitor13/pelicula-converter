@@ -368,8 +368,10 @@ class TranscribeDialog(QDialog):
         where = _("na placa de vídeo") if all(r.device == "gpu" for r in results) else _("no processador")
         lang = results[0].language
         label = subauto.languages().get(lang)
-        return _("{n} legendas geradas ({idioma}, {onde}).").format(
-            n=fmt_int(n), idioma=_(label) if label else lang, onde=where), "ok"
+        idioma = _(label) if label else lang
+        if n == 1:
+            return _("1 legenda gerada ({idioma}, {onde}).").format(idioma=idioma, onde=where), "ok"
+        return _("{n} legendas geradas ({idioma}, {onde}).").format(n=fmt_int(n), idioma=idioma, onde=where), "ok"
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if not self.busy:

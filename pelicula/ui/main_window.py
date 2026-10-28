@@ -2953,6 +2953,7 @@ class MainWindow(QMainWindow):
             "medidor_som": [self.meter],
             "davinci": [self.act_resolve_sep, self.act_resolve],
             "legendas": [self.btn_subs],  # e o painel e a faixa (SubtitlesUI.apply_modules)
+            "silencios": [self.tl_editor.btn_silences],
         }
 
     def apply_modules(self) -> None:

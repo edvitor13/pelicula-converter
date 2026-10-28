@@ -1403,6 +1403,11 @@ class TimelineEditor(QWidget):
         self.btn_add_a.clicked.connect(lambda: m.add_track(AUDIO))
         hl.addWidget(self.btn_add_v)
         hl.addWidget(self.btn_add_a)
+        # "Remover silêncios…" (módulo "silencios"): a janela principal liga e abre a janela (ui/silences_dialog.py)
+        self.btn_silences = self._btn("volume", _("Remover silêncios: acha os trechos sem fala e tira de uma vez"),
+                                      _("Silêncios"))
+        self.btn_silences.setVisible(False)
+        hl.addWidget(self.btn_silences)
         hl.add_stretch()
         zo = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também."))
         zo.clicked.connect(lambda: c.set_ppf(c.ppf * 0.8))

@@ -633,6 +633,110 @@ def test_generate_does_not_touch_another_project(win, fake_whisper, monkeypatch)
         dlg.hide()
 
 
+# ------------------------------------------------------------------ remover silêncios e cortar pelo texto
+@pytest.fixture
+def tone_seq(tmp_path, ffmpeg_ok):
+    """Montagem de um vídeo de 6 s com som: tom 0–2 s, silêncio 2–4 s, tom 4–6 s."""
+    import subprocess
+    import numpy as np
+    from pelicula import media
+    rate = 48000
+    t = np.arange(rate * 6) / rate
+    wave = 0.3 * np.sin(2 * np.pi * 440 * t)
+    wave[(t >= 2.0) & (t < 4.0)] = 0.0
+    raw = tmp_path / "som.f32"
+    raw.write_bytes(wave.astype("<f4").tobytes())
+    out = tmp_path / "tom.mov"
+    subprocess.run([media.ffmpeg(), "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=24:d=6",
+                    "-f", "f32le", "-ar", str(rate), "-ac", "1", "-i", str(raw), "-shortest", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", str(out)], check=True, timeout=60)
+    return tl.Sequence.for_source(tl.Source.from_info(media.probe(str(out))))
+
+
+def test_silences_button_follows_the_module(win):
+    set_module(win, "silencios", False)
+    assert win.tl_editor.btn_silences.isHidden()
+    set_module(win, "silencios", True)
+    assert not win.tl_editor.btn_silences.isHidden()
+
+
+def test_silences_dialog_reviews_and_removes_in_one_step(win, tone_seq):
+    import time
+    from pelicula.ui.silences_dialog import SilencesDialog
+    win.set_mode("edicao")
+    m = TimelineModel()
+    m.set_sequence(tone_seq)
+    load(win, m)
+    total = win.model.seq.duration
+    dlg = SilencesDialog(win)
+    try:
+        dlg.show()
+        assert dlg.scope.count() == 1 and not dlg.btn_apply.isEnabled()
+        job = dlg.analyze()
+        assert job.key == "silencios" and job.wait(60), job.error
+        end = time.monotonic() + 5
+        while not dlg.found and time.monotonic() < end:
+            APP.processEvents()
+        assert job.state == "concluido", job.error
+        assert dlg.table.rowCount() == 1 and dlg.found[0].start == pytest.approx(2.1, abs=0.03)
+        assert "1 de 1" in dlg.summary.text() and dlg.btn_apply.isEnabled()
+        dlg.table.setCurrentCell(0, 1)                         # clicar leva o cursor ao trecho
+        dlg.set_all(False)
+        assert not dlg.btn_apply.isEnabled() and dlg.apply() == 0
+        dlg.table.item(0, 0).setCheckState(Qt.CheckState.Checked)
+        pos = win.model.history._pos
+        n = dlg.apply()
+        assert n == pytest.approx(43, abs=2) and win.model.seq.duration == total - n and dlg.result() == 1
+        assert win.model.history._pos == pos + 1               # um passo de desfazer
+        v = [c for c in win.model.seq.clips if c.kind == VIDEO]
+        a = [c for c in win.model.seq.clips if c.kind == AUDIO]
+        assert sorted((c.start, c.dur) for c in v) == sorted((c.start, c.dur) for c in a)   # em sincronia
+        win.model.undo()
+        assert win.model.seq.duration == total
+    finally:
+        dlg.close()
+        win.set_mode("pelicula")
+
+
+def test_text_cut_marks_words_and_cuts_them_in_one_step(win):
+    ui = win.subs_ui
+    set_module(win, "legendas_auto", True)
+    tabs, idx = ui.panel.tabs, ui.panel.tabs.indexOf(ui.text_cut)
+    load(win, model_with(sentence(1.0, "um éé dois três")))
+    ui.show_panel(True)
+    assert tabs.isTabVisible(idx)
+    tabs.setCurrentIndex(idx)
+    APP.processEvents()
+    tc = ui.text_cut
+    assert tc.text.toPlainText() == "um éé dois três" and not tc.btn_cut.isEnabled()
+    seeks = []
+    ui.ctl.seekRequested.connect(seeks.append)
+    cur = tc.text.textCursor()
+    cur.setPosition(7)                                         # clicar em "dois" leva o cursor até ela
+    tc.text.setTextCursor(cur)
+    assert seeks and seeks[-1] == ui.ctl.frame_of(2.0)
+    tc.select_text(3, 5)
+    assert tc.selected() == [1] and tc.btn_mark.isEnabled()
+    tc.toggle_selection()
+    assert tc.marked == {1} and tc.btn_cut.isEnabled() and "1 palavra marcada" in tc.summary.text()
+    tc.select_text(3, 5)
+    tc.toggle_selection()                                      # de novo: desmarca
+    assert tc.marked == set()
+    tc.select_text(3, 5)
+    tc.toggle_selection()
+    total = win.model.seq.duration
+    pos = win.model.history._pos
+    n = tc.cut()
+    assert n > 0 and win.model.seq.duration == total - n and win.model.history._pos == pos + 1
+    assert [w.text for w in se.words(ui.ctl.items())] == ["um", "dois", "três"]
+    assert tc.text.toPlainText() == "um dois três" and tc.marked == set()
+    win.model.undo()
+    assert [w.text for w in se.words(ui.ctl.items())] == ["um", "éé", "dois", "três"]
+    set_module(win, "legendas_auto", False)
+    assert not tabs.isTabVisible(idx)
+    tabs.setCurrentIndex(0)
+
+
 def test_window_undo_goes_to_the_subtitles_with_the_panel_focused(win):
     ui = win.subs_ui
     win.set_mode("pelicula")

@@ -323,6 +323,11 @@ class SubtitlesUI(QObject):
         self.dock.hide()
         self.dock.visibilityChanged.connect(lambda _v: self._sync())
         self.lane = SubtitleLane(win.tl_editor.canvas, self.ctl)
+        from .text_cut import TextCut
+        self.text_cut = TextCut(self.ctl)     # "Cortar pelo texto" (legendas_auto, com o modo Edição)
+        self.panel.tabs.addTab(self.text_cut, _("Cortar pelo texto"))
+        self.panel.tabs.setTabVisible(self.panel.tabs.indexOf(self.text_cut), False)
+        win.tl_editor.btn_silences.clicked.connect(self.silences_dialog)
         self.ctl.changed.connect(self._sync)
 
         self.menu = QMenu(win)
@@ -399,10 +404,19 @@ class SubtitlesUI(QObject):
             self.dock.hide()
         self.panel.btn_generate.setVisible(self.enabled and self.auto)
         self.act_generate.setVisible(self.enabled and self.auto)
+        tabs = self.panel.tabs
+        tabs.setTabVisible(tabs.indexOf(self.text_cut), self.enabled and self.auto and "edicao" in on)
         dlg = getattr(self.win, "_transcribe_dialog", None)
         if dlg is not None and not (self.enabled and self.auto):
             dlg.hide()            # o trabalho que já está na fila continua e põe as legendas ao terminar
         self._sync()
+
+    def silences_dialog(self) -> int:
+        """"Remover silêncios…" (módulo `silencios`): janela modal; devolve os quadros tirados."""
+        from .silences_dialog import SilencesDialog
+        dlg = SilencesDialog(self.win)
+        dlg.exec()
+        return dlg.removed
 
     def generate_dialog(self):
         """"Gerar legendas pela fala…" (módulo Beta `legendas_auto`): janela não modal, trabalho na fila."""
