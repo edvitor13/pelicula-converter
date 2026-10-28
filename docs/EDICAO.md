@@ -318,6 +318,8 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Esc | Tirar a seleção e voltar para Selecionar |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
+| Ctrl+Shift+L | Painel de legendas (também no modo Película) |
+| Delete / Enter / Esc na faixa Legendas | Apagar / editar / tirar a seleção da legenda escolhida |
 
 **J / K / L** (como no Premiere e no Resolve): **L** reproduz para a frente e **J** para trás; apertar de
 novo no mesmo sentido dobra a velocidade (1×, 2×, 4×, 8×) e o outro sentido volta a 1×. **K** (ou Espaço)
@@ -325,3 +327,78 @@ para. A velocidade aparece ao lado do tempo (por exemplo, *◀◀ 2×*). Para tr
 arquivo: pode ser mais lento e pular quadros, mas o quadro mostrado é sempre o certo e a janela não trava.
 **Fora de 1× para a frente o som fica mudo** (e o medidor de som espera). O **Repetir** passou do L para o
 **Ctrl+L**, porque o L agora é a reprodução para a frente.
+
+## 8. Legendas, transcrição e silêncios
+
+### Legendas
+
+O botão **Legendas** (no topo da janela, nos dois modos) abre o **painel de legendas** (Ctrl+Shift+L) e
+importa ou exporta arquivos **.srt** e **.vtt**. Com legendas no projeto, a linha do tempo ganha a faixa
+**Legendas**, embaixo das faixas de som:
+
+- clique numa legenda para escolher e levar o cursor até ela; arraste para mover; arraste as bordas para
+  acertar o começo e o fim (o ímã gruda nos cortes, no cursor e nas outras legendas; Shift inverte);
+- dois cliques editam o texto; dois cliques num lugar vazio criam uma legenda ali; Delete apaga a escolhida;
+- o botão direito tem **Nova legenda aqui**, **Dividir no cursor**, **Juntar com a próxima** e **Excluir**.
+
+As legendas ficam **presas ao trecho do vídeo** que mostram: cortar, mover, aparar ou mudar a velocidade de um
+clipe leva a fala junto (as escritas num lugar sem clipe ficam no tempo da sequência e aparecem tracejadas).
+
+No painel: a lista com **Buscar** e **Substituir todas**, o texto (aplica ao sair do campo ou com Ctrl+Enter),
+o começo e o fim, itálico e negrito, e o tempo de cada palavra quando a legenda veio da transcrição. Ctrl+Z
+desfaz também no modo Película, com o painel em foco (ou pelos botões do painel).
+
+**Estilo**: comece por **YouTube** (caixa escura embaixo), **Reels** (letras grandes no meio, três palavras
+por vez, a palavra falada em amarelo) ou **Cinema** (letras claras com sombra) e mude fonte, peso, tamanho,
+cores, contorno, caixa, sombra, posição, margem, largura e palavras por vez — a prévia mostra na hora. Se a
+fonte não tiver alguma letra do texto, o painel avisa.
+
+**Gravar no vídeo** e a exportação: em **Exportar**, a linha **Legendas** (só aparece com legendas no projeto)
+escolhe como elas saem:
+
+| Opção | O que faz |
+|---|---|
+| Sem legendas | nada |
+| Faixa de legenda no arquivo | o player liga e desliga (MP4, MOV, MKV e WebM) |
+| Gravada na cópia | entra **antes** do look: ganha grão, halação e tremor, como numa cópia de cinema legendada |
+| Digital | entra **depois** do look, nítida, por cima do quadro final |
+| Arquivo .srt / .vtt ao lado | um arquivo com o mesmo nome do vídeo, no tempo do trecho exportado |
+
+O modo escolhido em **Gravar no vídeo** (no painel) vale para a prévia, o **Salvar quadro** e a exportação.
+Sem gravar, **Ver na prévia** mostra as legendas por cima, como num player, só na tela. No terminal:
+`pelicula-cli exportar projeto.plc --legendas copia` (ou `nao`, `faixa`, `digital`, `srt`, `vtt`; o padrão é o
+que o projeto pede).
+
+### Gerar legendas pela fala (Beta)
+
+Ligue **Legendas automáticas** em Configurações › Recursos. **Gerar…** (no painel) ou **Legendas › Gerar
+legendas pela fala…** transcreve a fala **neste computador**, sem enviar nada para a internet:
+
+- **Ouvir**: o arquivo aberto (modo Película) ou a montagem inteira / os clipes escolhidos (modo Edição);
+- **Idioma** (ou *Detectar o idioma*), **Modelo** — *Rápido (small)* serve para a maioria dos vídeos;
+  *Preciso (turbo)* acerta mais, mas é mais lento sem placa de vídeo — e o tamanho de cada legenda
+  (caracteres por linha e linhas; para vídeos verticais, uns 24 caracteres);
+- na primeira vez, a janela avisa o que falta e abre **Configurações › Componentes** para baixar o
+  whisper.cpp, o modelo e o Silero VAD; nada é baixado sem você pedir.
+
+A transcrição roda na fila de tarefas (a janela pode ser fechada; dá para cancelar). No fim, as legendas
+entram no projeto de uma vez — Ctrl+Z tira todas — trocando as que já existiam nos trechos ouvidos, e
+ficam presas aos arquivos: cortes feitos depois levam a fala junto.
+
+**Cortar pelo texto**: com as legendas geradas, a aba **Cortar pelo texto** do painel mostra a fala como
+texto. Selecione palavras ("éé", uma frase repetida…) e clique em **Marcar** (de novo desmarca); clicar
+numa palavra leva o cursor até ela. **Cortar os marcados** tira esses trechos da montagem de uma vez: o que
+vem depois encosta em todas as faixas, com o som junto da imagem.
+
+### Remover silêncios
+
+O botão **Silêncios** na barra da linha do tempo acha os trechos sem fala no som da montagem (ou só nos
+clipes escolhidos) e tira todos de uma vez:
+
+- **Limiar**: quanto abaixo do volume típico do trecho conta como silêncio (−30 dB tira só o silêncio de
+  verdade; perto de −15 dB tira também respiros e ruído baixo); **Duração mínima** (pausas mais curtas
+  ficam); **Folga** (quanto do silêncio fica encostado na fala, para o corte não ficar seco);
+- **Analisar** mostra a lista: desmarque o que deve ficar e clique num trecho para levar o cursor até ele;
+- **Tirar os marcados** corta todas as faixas destravadas e encosta o resto (som e imagem continuam
+  juntos; marcadores, animações e legendas acompanham). Ctrl+Z desfaz tudo de uma vez. Faixas travadas
+  (o cadeado) não mudam — por exemplo, uma música de fundo.

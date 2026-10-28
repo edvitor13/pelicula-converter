@@ -46,7 +46,8 @@ pelicula/
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
-                             exportação, prévia da exportação, medição de velocidade e linha de comando
+                             exportação, prévia da exportação, medição de velocidade e linha de comando;
+                             legendas gravadas (burn: "copia" antes do look, "digital" depois)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
@@ -80,6 +81,13 @@ pelicula/
                              make_job()
   silences.py                silêncios (RMS/pico por janela, limiar relativo, duração mínima, folga) e "Cortar pelo
                              texto" (palavras escolhidas → trechos do arquivo a remover), sem Qt
+  subedit.py                 edição das legendas no tempo da montagem, guardadas no tempo do arquivo (sem Qt): items(),
+                             Ref/Item/Mapping, set_times/move/split/merge/add/delete, busca e troca, import_cues,
+                             remove_time (legendas da sequência num corte), words()
+  subauto.py                 legendas automáticas da montagem (sem Qt): spans_for() (trechos de cada arquivo com som
+                             que a montagem mostra), make_job() (vários trechos num trabalho da fila), apply()
+  rangecut.py                tirar trechos de tempo de todas as faixas destravadas (sem Qt): remove_ranges(),
+                             to_frames(), find_silences() no som mixado da montagem, text_ranges() (cortar pelo texto)
   jobs.py                    fila de tarefas em segundo plano (sem Qt): CPU/GPU/rede, progresso, cancelar, 1 de GPU
   notify.py                  notificações do sistema (sem Qt): tipos KINDS, preferências notificacoes/…, decide(),
                              textos (Notice), resumo da fila
@@ -119,6 +127,10 @@ pelicula/
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
                              corridorkey_dialog (Recorte por IA, Beta);
+                             legendas: subtitles_ui (SubtitleController, SubtitlesUI: botão, painel e faixa na
+                             janela), subtitle_lane (faixa Legendas da linha do tempo), subtitles_panel (painel),
+                             subtitle_style (StyleEditor), transcribe_dialog (Gerar legendas, Beta), text_cut
+                             (Cortar pelo texto), silences_dialog (Remover silêncios);
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
@@ -340,6 +352,12 @@ Texto, legendas e silêncios:
 | `tests/test_textrender.py` | fontes do app (SHA-256 do `SOURCE.txt`, licença ao lado, catálogo), leitor de TrueType, estilo em JSON, quebra de linha, acentos, e **hashes fixos das imagens** (iguais no Windows e no Linux: mudou o desenho de propósito, atualize os hashes e explique no commit) |
 | `tests/test_subtitles.py` | SRT/WebVTT (ler e gravar), agrupar palavras, tempo pela montagem (cortes, velocidade, congelado), estilos, JSON, faixa na exportação com o ffmpeg de verdade (MP4, MOV, MKV, WebM), desenho no quadro |
 | `tests/test_silences.py` | silêncios em som sintético (limiar relativo, duração mínima, folga, estalo), leitura pelo ffmpeg, cancelar, "Cortar pelo texto" |
+| `tests/test_legendas_projeto.py` | bloco `"legendas"` da montagem, recurso do formato 3, projetos antigos iguais, desfazer, JSON estável no vaivém |
+| `tests/test_subedit.py` | itens = `timeline_cues`, edições pelo `Mapping` (velocidade, aparo), âncora, dividir/juntar, busca e troca, importação, `map_cues` depois de edições e cortes |
+| `tests/test_legendas_gravadas.py` | `Burn`, composição pré-multiplicada, escolhas da exportação e arquivo ao lado; na GPU, "cópia" passa pelo look e "digital" = look + legenda; exportação = prévia = `pelicula-cli quadro`; faixa vista pelo ffprobe e `--legendas srt` |
+| `tests/test_subauto.py` | o que ouvir na montagem (cortes, velocidade, seleção, faixas mudas) e a fila com o `whisper-cli` falso (vários trechos, volta para o processador, cancelar, componentes faltando) |
+| `tests/test_rangecut.py` | tirar trechos de todas as faixas (sincronia, faixa travada, chaves, marcadores, legendas, corte J/L), cortar pelo texto, silêncios de verdade na mixagem (tom, silêncio, tom) |
+| `tests/test_legendas_ui.py` | casos de `legendas_ui_cases.py`: faixa Legendas, painel, estilos, janela de exportação, janela principal, Gerar legendas (fila, um passo de desfazer, erros), Remover silêncios e Cortar pelo texto |
 
 Notificações e recuperação (a pasta do app vai para uma pasta temporária; nenhuma notificação de verdade
 aparece: a `MainWindow` nasce com o backend nulo e os casos usam backends falsos):
@@ -420,6 +438,20 @@ muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de a
 Operação nova que mexe na estrutura: no modelo, rode-a dentro de `with self.seq.keep_main():` para a faixa
 principal magnética valer (sem ela não faz nada) e monte-a com as primitivas (`_cut`, `split`, `trim_*`,
 `move`, `delete`, `_clear_range`, `open_space`); regras em `docs/ARQUITETURA.md`, seção 13.8.
+
+### Legendas (editar, gravar, entregar, tirar tempo)
+
+- Edição de legenda pela interface: uma função em `subedit.py` (sem Qt, no tempo do arquivo pelo `Mapping`) +
+  `SubtitleController.apply` (que chama `TimelineModel.edit_subtitles`, um passo de desfazer). Números do JSON
+  das legendas sempre `float`, senão o desfazer perde o refazer.
+- Desenho no vídeo só por `frame.Recipe.burn` (`subtitles.Burn`): nunca componha legenda fora da receita; a
+  prévia, o "Salvar quadro", a exportação e o terminal precisam dar o mesmo quadro
+  (`tests/test_legendas_gravadas.py`).
+- Nova forma de entregar: acrescente em `subtitles.DELIVERY`, `delivery_fields`, o rótulo de
+  `export_dialog.SUBTITLE_LABELS` e o `choices` de `--legendas` do `cli.py`; campo novo do `ExportJob` só vai
+  para o JSON quando usado.
+- Tirar tempo da montagem (silêncios, texto ou algo novo): `TimelineModel.remove_ranges(quadros)`; os trechos em
+  segundos passam por `rangecut.to_frames` (arredonda para dentro). Detalhes em `docs/ARQUITETURA.md`, seção 27.
 
 ### Novo tipo de clipe sem arquivo
 
