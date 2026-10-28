@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.5.0] - 2026-10-28
+
 ### Adicionado
 - **Transparência (canal alfa)** em todo o caminho do modo Edição: PNG, ProRes 4444, WebM (VP8/VP9) e
   sequências de imagens com alfa aparecem sobre as faixas de baixo, sem a franja escura na borda (o
@@ -56,14 +62,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Alterado
 - **Repetir** passou do L para **Ctrl+L** (o L agora reproduz para a frente).
 - Prévia, *Salvar quadro*, estimativa de tempo, exportação e terminal usam a mesma receita do quadro.
+- As ferramentas novas da 1.5 seguem o perfil de recursos escolhido: no perfil Simples elas chegam
+  desligadas; nos outros, ligadas.
 
 ### Corrigido
 - No Windows, a prévia da janela de exportação às vezes ficava "Prévia indisponível" e a leitura de
   quadros pequenos falhava (o ffmpeg terminava antes de o app conectar ao pipe).
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
+- Em espanhol, a dica do grupo *Proyector* trazia o nome em português.
 
 ## [1.4.0] - 2026-10-27
 

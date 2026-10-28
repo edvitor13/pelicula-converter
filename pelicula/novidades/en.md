@@ -1,3 +1,20 @@
+## Version 1.5.0 — October 28, 2026
+
+**Motion, text and subtitles in Edit mode.**
+
+- 🪟 **Transparency.** Videos and images with a transparent background (PNG, ProRes 4444, WebM and the CorridorKey cutout) show over the tracks below instead of on a black background. You can edit on a *Transparent background* and export with transparency to ProRes 4444, WebM or a PNG or TIFF sequence. Numbered image sequences (shot_0001.png…) come in as a single video.
+- ◆ **Keyframe animation.** Click the diamond next to a setting to set a key where you are: position, scale, rotation, opacity, color, light, volume and the film settings change over time. The keys show on the timeline, where you can drag them.
+- ⏱️ **Clip timing.** A speed ramp with six ready-made shapes (the sound follows without changing pitch), reverse and *Freeze this frame* (Shift+F).
+- 🔤 **Titles and generators.** In Media → *New*: solid color, gradient, a countdown leader with a beep, and titles with 11 built-in fonts, six styles and eight animations.
+- 🎞️ **Film transitions.** Optical dissolve, fade in and out in exposure, film burn, flash splice, leader and iris, plus push, wipe and zoom. Right-click a clip → *Transition*.
+- 💬 **Subtitles.** A panel (Ctrl+Shift+L) and a track on the timeline, tied to the speech even when you cut. YouTube, Reels (word by word) and Cinema styles; import and export .srt and .vtt. When exporting, the subtitles go in the file, burned into the film (with grain and halation), on top of the look or in a file alongside.
+- 🎙️ **Subtitles from speech (Beta).** The app transcribes the video on your computer, without sending anything over the internet, and with the timing of each word you can cut by text. It starts turned off: turn it on in Settings → Features by checking *Show features in testing*, and download the transcriber and a model from Components (about 290 MB with the Fast model, or 600 MB with the Accurate one).
+- 🔇 **Remove silences.** The app finds the silent parts, shows the list for you to review and removes them all at once (one Ctrl+Z undoes it).
+- ✂️ **Cutting tools.** Insert or overwrite when dropping a clip, an optional magnetic main track, Q and W to trim up to the playhead, J and L cuts, and the J, K and L keys to play backward, pause and play forward. **Loop** moved to **Ctrl+L**.
+- 🧩 **In your profile.** The new tools follow the profile in Settings → Features: off in Simple; on in Creator, Cinema and Everything.
+- 📂 **Projects.** A project that uses something new from 1.5 only opens in 1.5 or newer (1.4 warns you instead of opening it wrong). Older projects open and render the same.
+- 🛠️ **Fix.** On Windows, the preview in the export window sometimes showed "Preview unavailable".
+
 ## Version 1.4.0 — October 27, 2026
 
 **Exports ready for every platform, markers and chapters, AI keying and an app your way.**

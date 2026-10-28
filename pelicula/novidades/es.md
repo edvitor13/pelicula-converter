@@ -1,3 +1,20 @@
+## Versión 1.5.0 — 28 de octubre de 2026
+
+**Movimiento, texto y subtítulos en el modo Edición.**
+
+- 🪟 **Transparencia.** Los videos e imágenes con fondo transparente (PNG, ProRes 4444, WebM y el recorte de CorridorKey) aparecen sobre las pistas de abajo, en vez de quedar con fondo negro. Puedes montar con *Fondo transparente* y exportar con transparencia en ProRes 4444, WebM o secuencia de PNG o TIFF. Las secuencias de imágenes numeradas (plano_0001.png…) entran como un solo video.
+- ◆ **Animación con claves.** Haz clic en el rombo junto a un ajuste para grabar una clave en el punto donde estás: posición, escala, rotación, opacidad, color, luz, volumen y los ajustes de la película cambian con el tiempo. Las claves aparecen en la línea de tiempo, donde puedes arrastrarlas.
+- ⏱️ **Tiempo del clip.** Rampa de velocidad con seis formas listas (el sonido la sigue sin cambiar el tono), reversa y *Congelar este fotograma* (Shift+F).
+- 🔤 **Títulos y generadores.** En Medios → *Nuevo*: color sólido, degradado, cola con cuenta regresiva y pitido, y títulos con 11 fuentes integradas, seis estilos y ocho animaciones.
+- 🎞️ **Transiciones de película.** Fundido óptico, aparecer y oscurecer en la exposición, película quemada, empalme con destello, cola e iris, además de empujar, cortinilla y zoom. Clic derecho en un clip → *Transición*.
+- 💬 **Subtítulos.** Panel (Ctrl+Shift+L) y pista en la línea de tiempo, unidos al habla aunque cortes. Estilos YouTube, Reels (palabra por palabra) y Cine; importa y exporta .srt y .vtt. Al exportar, los subtítulos van en el archivo, grabados en la película (con grano y halación), encima del look o en un archivo aparte.
+- 🎙️ **Subtítulos a partir del habla (Beta).** La app transcribe el video en tu computadora, sin enviar nada por internet, y con el tiempo de cada palabra puedes cortar por el texto. Empieza desactivado: actívalo en Configuración → Funciones marcando *Mostrar funciones en prueba* y descarga el transcriptor y un modelo en Componentes (unos 290 MB con el modelo Rápido, o 600 MB con el Preciso).
+- 🔇 **Quitar silencios.** La app encuentra los tramos en silencio, muestra la lista para que la revises y los quita todos de una vez (un Ctrl+Z lo deshace).
+- ✂️ **Herramientas de corte.** Insertar o sobrescribir al soltar un clip, pista principal magnética opcional, Q y W para recortar hasta el cursor, cortes J y L, y las teclas J, K y L para reproducir hacia atrás, pausar y reproducir hacia adelante. **Repetir** pasó a **Ctrl+L**.
+- 🧩 **En tu perfil.** Las herramientas nuevas siguen el perfil de Configuración → Funciones: en Simple llegan desactivadas; en Creador, Cine y Todo, activadas.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.5 solo abre en la 1.5 o posterior (la 1.4 avisa, en vez de abrirlo mal). Los proyectos antiguos abren y salen iguales.
+- 🛠️ **Corrección.** En Windows, la vista previa de la ventana de exportación a veces mostraba "Vista previa no disponible".
+
 ## Versión 1.4.0 — 27 de octubre de 2026
 
 **Exportación lista para cada red, marcadores y capítulos, recorte con IA y una app a tu manera.**
