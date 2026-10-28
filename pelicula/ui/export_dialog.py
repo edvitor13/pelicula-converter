@@ -775,7 +775,7 @@ class ExportDialog(QDialog):
         ext = self.container.currentData() or "mp4"
         cur = self.path.text().strip()
         if not cur:
-            stem = Path(self.info.path).stem + "_pelicula"
+            stem = media.sequence_stem(self.info.path) + "_pelicula"
             cur = str(Path(self.out_dir) / f"{stem}.{ext}")
         else:
             cur = str(Path(cur).with_suffix("." + ext))

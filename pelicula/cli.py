@@ -247,13 +247,19 @@ def _source_and_values(path: str, preset, sets):
         if seq is not None:
             from . import sequence
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
-        if not proj.media_path or not os.path.exists(proj.media_path):
+        if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
         return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
-    if not os.path.exists(path):
+    if not _exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
     return path, values, pid, None, alpha_sequence(path)
+
+
+def _exists(path: str) -> bool:
+    """O arquivo existe? (um padrão de sequência de imagens, plano_%04d.png: algum quadro dele)"""
+    from .media import path_exists
+    return path_exists(path)
 
 
 def alpha_sequence(path: str):
@@ -264,7 +270,7 @@ def alpha_sequence(path: str):
         info = media.probe(path)
     except Exception:  # noqa: BLE001 — quem chamou mostra o erro ao ler o arquivo
         return None
-    if not info.has_alpha:
+    if not info.has_alpha and not info.is_sequence:  # sequência de imagens: também pela montagem
         return None
     return timeline.Sequence.for_source(timeline.Source.from_info(info))
 
@@ -386,7 +392,7 @@ def cmd_export(a) -> int:
         raise CliError(_("Codec indisponível neste computador: {codec}").format(codec=s.codec))
     if s.container not in export.CODECS[s.codec]["exts"]:
         s.container = export.CODECS[s.codec]["exts"][0]
-    out = a.saida or str(Path(src).with_name(Path(src).stem + "_pelicula." + s.container))
+    out = a.saida or str(Path(src).with_name(media.sequence_stem(src) + "_pelicula." + s.container))
     out = str(Path(out).with_suffix("." + s.container))
     if os.path.abspath(out) == os.path.abspath(src):
         raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))

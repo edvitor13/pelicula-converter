@@ -965,7 +965,10 @@ class MainWindow(QMainWindow):
                     self.import_paths([q for q in paths if Path(q).suffix.lower() not in (".cube", ".json")])
                     break
                 if self.confirm_discard():
-                    self.load_media(p, detect=True)
+                    target, fps = self._film_target(p)
+                    if not target:
+                        break
+                    self.load_media(target, detect=True, fps_str=fps)
                     self.project_path = None
                     self._saved_state = self._state()
                     self._update_title()
@@ -999,14 +1002,15 @@ class MainWindow(QMainWindow):
         qimage_from(img).save(path)
         self.load_media(path, label=_("Cena de teste"), detect=True)
 
-    def load_media(self, path: str, label: str | None = None, detect: bool = False) -> None:
+    def load_media(self, path: str, label: str | None = None, detect: bool = False, fps_str: str = "") -> None:
         """Abre um arquivo no modo Película. A edição recomeça com ele inteiro na linha do tempo.
 
         `detect`: o usuário abriu um arquivo novo (não um projeto salvo): um vídeo HDR (HLG/PQ) escolhe
-        sozinho o perfil de entrada, se ele ainda é o padrão (`_detect_profile`).
+        sozinho o perfil de entrada, se ele ainda é o padrão (`_detect_profile`). `fps_str`: velocidade de uma
+        sequência de imagens (`path` = padrão plano_%04d.png).
         """
         try:
-            info = media.probe(path)
+            info = media.probe(path, fps_str)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
@@ -1016,7 +1020,8 @@ class MainWindow(QMainWindow):
             self.store.clear_keys()  # as chaves do look estão no tempo do arquivo anterior
         self.file_info = info
         self.cur = None
-        self._media_label = label or Path(path).name
+        self._media_label = label or (media.sequence_label(path, info.seq_start, info.frames) if info.is_sequence
+                                      else Path(path).name)
         self.settings.setValue("last_dir", str(Path(path).parent))
         src = timeline.Source.from_info(info)
         self._sources = {src.path: src}
@@ -1507,13 +1512,16 @@ class MainWindow(QMainWindow):
 
     def import_paths(self, paths: list[str]) -> None:
         """Importa arquivos para a edição: entram na Mídia e vão para o fim da linha do tempo."""
-        paths = [p for p in paths if p and os.path.isfile(p)]
+        paths = [p for p in paths if p and (os.path.isfile(p) or os.path.isdir(p))]
         if not paths:
             return
         if self.mode != "edicao":
             self.set_mode("edicao")
             if self.mode != "edicao":
                 return  # modo Edição desligado em Configurações › Recursos
+        paths = [p for p in self._offer_sequences(paths) if os.path.isfile(p) or p in self._sources]
+        if not paths:
+            return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             srcs = [s for s in (self._probe_source(p) for p in paths) if s is not None]
@@ -1540,7 +1548,7 @@ class MainWindow(QMainWindow):
         """Arquivos (do sistema ou da Mídia) soltos na linha do tempo: entram no ponto e na faixa do mouse,
         um depois do outro; `insert` empurra o que vem depois (modo inserir ou Ctrl). Devolve o fim do último."""
         pos = max(0, int(frame))
-        for path in paths:
+        for path in self._offer_sequences([str(p) for p in paths]):
             src = self._probe_source(str(path))
             if src is None:
                 continue
@@ -1572,13 +1580,106 @@ class MainWindow(QMainWindow):
 
     def _bin_files(self, paths: list) -> None:
         """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo)."""
+        paths = self._offer_sequences([str(p) for p in paths])
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             for p in paths:
-                if os.path.isfile(str(p)):
+                if os.path.isfile(str(p)) or p in self._sources:
                     self._probe_source(str(p))
         finally:
             QApplication.restoreOverrideCursor()
+
+    # ---------------------------------------------------------------- sequências de imagens numeradas
+    def _ask_sequence(self, path: str, single: bool = True):
+        """Imagem numerada (ou pasta de imagens numeradas): (escolha, sequência, velocidade) ou None se cancelou;
+        ("", None, "") se não há sequência ali. A pergunta é `imageseq_dialog.ask`."""
+        from . import imageseq_dialog
+        if not os.path.isdir(path) and Path(path).suffix.lower() not in media.SEQUENCE_EXT:
+            return "", None, ""
+        found = media.find_sequence(path)
+        if found is None:
+            return "", None, ""
+        fps = self.model.seq.fps_str if self.model.seq.clips else "24/1"
+        ans = imageseq_dialog.ask(self, found, fps, single=single)
+        if ans is None:
+            return None
+        return ans[0], found, ans[1]
+
+    def _sequence_source(self, found, fps: str) -> timeline.Source | None:
+        try:
+            return self.adopt_source(timeline.Source.from_info(media.probe_sequence(found, fps)))
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
+                nome=found.label, erro=exc))
+            return None
+
+    def _offer_sequences(self, paths: list[str]) -> list[str]:
+        """Imagens numeradas (plano_0001.png…) ou uma pasta delas: pergunta se entram como uma sequência; se sim,
+        a fonte vai para a Mídia (na velocidade escolhida) e o caminho dela (o padrão plano_%04d.png) toma o lugar
+        dos arquivos. Uma pergunta por sequência, mesmo com vários quadros dela escolhidos."""
+        from . import imageseq_dialog
+        out: list[str] = []
+        done: dict[str, str] = {}
+        for p in paths:
+            p = str(p)
+            if p in self._sources or p in self.model.seq.sources:
+                out.append(p)
+                continue
+            found = media.find_sequence(p) if (os.path.isdir(p) or Path(p).suffix.lower() in media.SEQUENCE_EXT) \
+                else None
+            if found is not None and found.pattern in done:
+                if done[found.pattern] == imageseq_dialog.IMAGE and os.path.isfile(p):
+                    out.append(p)
+                continue
+            ans = self._ask_sequence(p, single=not os.path.isdir(p)) if found is not None else ("", None, "")
+            if ans is None:
+                done[found.pattern] = ""
+                continue
+            choice, found, fps = ans
+            if found is None or choice != imageseq_dialog.SEQUENCE:
+                if found is not None:
+                    done[found.pattern] = imageseq_dialog.IMAGE
+                    if os.path.isdir(p):  # pasta como imagens separadas: cada quadro do trecho
+                        out += [found.file(n) for n in range(found.first, found.last + 1)]
+                        continue
+                if os.path.isfile(p):
+                    out.append(p)
+                continue
+            done[found.pattern] = choice
+            src = self._sequence_source(found, fps)
+            if src is not None:
+                out.append(src.path)
+        return out
+
+    def _film_target(self, path: str) -> tuple[str, str]:
+        """Modo Película: o que abrir para `path` — (padrão, velocidade) de uma sequência de imagens, (path, "")
+        para um arquivo comum, ("", "") se o usuário cancelou ou a pasta não tem imagens numeradas."""
+        from . import imageseq_dialog
+        ans = self._ask_sequence(path)
+        if ans is None:
+            return "", ""
+        choice, found, fps = ans
+        if found is not None and choice == imageseq_dialog.SEQUENCE:
+            return found.pattern, fps
+        if os.path.isdir(path):
+            if found is None:
+                QMessageBox.information(self, APP_NAME, _("A pasta não tem imagens numeradas para abrir como "
+                                                          "sequência."))
+            return "", ""
+        return path, ""
+
+    def _relink(self, seq: timeline.Sequence, path: str, new: str) -> None:
+        """Relocaliza um arquivo da montagem; numa sequência de imagens, `new` é um quadro dela na pasta nova."""
+        src = seq.sources.get(path)
+        if src is not None and src.is_sequence:
+            found = media.find_sequence(new)
+            if found is None:
+                QMessageBox.warning(self, _("Abrir projeto"), _("O arquivo escolhido não faz parte de uma sequência "
+                                                                 "de imagens numeradas."))
+                return
+            seq.relink(path, found.pattern, seq_start=found.first)
+            return
+        seq.relink(path, new)
 
     def _bin_remove(self, path: str) -> None:
         if any(c.src == path for c in self.model.seq.clips):
@@ -2431,7 +2532,7 @@ class MainWindow(QMainWindow):
     def save_frame(self) -> None:
         if self.info is None:
             return
-        stem = Path(self.info.path).stem or "quadro"
+        stem = media.sequence_stem(self.info.path) or "quadro"
         tc = timecode(self.frame_idx, self.info.fps).replace(":", "-")
         d = str(self.settings.value("export_dir", str(Path(self.info.path).parent)))
         path, flt = QFileDialog.getSaveFileName(self, _("Salvar quadro"), str(Path(d) / f"{stem}_{tc}.png"),
@@ -2467,8 +2568,8 @@ class MainWindow(QMainWindow):
         Marcadores contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
         if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
-                             and not seq.markers):
-            return None
+                             and not seq.markers and not self.file_info.is_sequence):
+            return None  # sequência de imagens: a montagem guarda a velocidade escolhida ao importar
         return seq.to_json()
 
     def _state(self) -> dict:
@@ -2620,7 +2721,7 @@ class MainWindow(QMainWindow):
             self._open_sequence_project(p, remember)
             return
         mediapath = p.media_path
-        if mediapath and not os.path.exists(mediapath):
+        if mediapath and not media.path_exists(mediapath):
             r = QMessageBox.question(self, _("Abrir projeto"),
                                      _("O vídeo deste projeto não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
                                      .format(caminho=mediapath))
@@ -2662,7 +2763,7 @@ class MainWindow(QMainWindow):
         seq = timeline.Sequence.from_json(p.sequence)
         changed = False
         for path in list(seq.sources):
-            if not seq.sources[path].is_file or os.path.exists(path):
+            if not seq.sources[path].is_file or sequence.present(seq.sources[path]):
                 continue  # clipes sem arquivo não têm o que localizar
             r = QMessageBox.question(self, _("Abrir projeto"),
                                      _("Um arquivo da edição não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
@@ -2672,14 +2773,16 @@ class MainWindow(QMainWindow):
             new, _f = QFileDialog.getOpenFileName(self, _("Localizar o arquivo"), str(Path(p.path or path).parent),
                                                   import_filter())
             if new:
-                seq.relink(path, new)
+                self._relink(seq, path, new)
                 changed = True
         self.stop_play()
         self.file_info = None
-        if p.media_path and os.path.exists(p.media_path):
+        if p.media_path and media.path_exists(p.media_path):
             try:
-                self.file_info = media.probe(p.media_path)
-                self._media_label = Path(p.media_path).name
+                known = seq.sources.get(p.media_path)  # sequência de imagens: com a velocidade escolhida
+                self.file_info = known.to_info() if known is not None and known.is_sequence else \
+                    media.probe(p.media_path)
+                self._media_label = known.name if known is not None else Path(p.media_path).name
             except Exception:  # noqa: BLE001
                 self.file_info = None
         self._sources = dict(seq.sources)

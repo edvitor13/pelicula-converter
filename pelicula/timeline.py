@@ -111,11 +111,19 @@ class Source:
     # Parâmetros de uma fonte sem arquivo (o que o gerador desenha: cor, texto…); "dados" no JSON, só quando há.
     # Só valores de JSON; chaves sem acento. "nome" é o nome mostrado na Mídia e no clipe.
     data: dict[str, Any] = field(default_factory=dict)
+    # Sequência de imagens numeradas: `path` é o padrão do ffmpeg (plano_%04d.png) e este é o número do primeiro
+    # quadro (`media.find_sequence`); -1 = arquivo comum. "sequencia" no JSON, só quando é uma sequência.
+    seq_start: int = -1
 
     @property
     def is_file(self) -> bool:
         """Fonte que é um arquivo de mídia (as outras são desenhadas por `sequence.RENDERERS`)."""
         return self.kind == SOURCE_FILE
+
+    @property
+    def is_sequence(self) -> bool:
+        """Sequência de imagens numeradas (um arquivo por quadro, lidos como um vídeo)."""
+        return self.seq_start >= 0
 
     @classmethod
     def virtual(cls, kind: str, width: int, height: int, fps_str: str = "24/1", seconds: float | None = None,
@@ -155,6 +163,9 @@ class Source:
     def name(self) -> str:
         if not self.is_file:
             return str(self.data.get("nome") or self.kind)
+        if self.is_sequence:
+            from .media import sequence_label
+            return sequence_label(self.path, self.seq_start, self.frames)
         return os.path.basename(self.path)
 
     @classmethod
@@ -166,7 +177,7 @@ class Source:
                    profile=info.profile, bitrate=info.bitrate, color_space=info.color_space,
                    color_range=info.color_range, color_transfer=info.color_transfer,
                    color_primaries=info.color_primaries, audio_codec=info.audio_codec, container=info.container,
-                   has_alpha=bool(getattr(info, "has_alpha", False)))
+                   has_alpha=bool(getattr(info, "has_alpha", False)), seq_start=int(getattr(info, "seq_start", -1)))
 
     def to_info(self):
         """`media.MediaInfo` equivalente (para o FrameReader e o grab_frame)."""
@@ -177,7 +188,7 @@ class Source:
             codec=self.codec, profile=self.profile, bitrate=self.bitrate, color_space=self.color_space,
             color_range=self.color_range, color_transfer=self.color_transfer, color_primaries=self.color_primaries,
             has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image,
-            has_alpha=self.has_alpha)
+            has_alpha=self.has_alpha, seq_start=self.seq_start)
 
     def to_json(self) -> dict[str, Any]:
         out = {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
@@ -195,6 +206,8 @@ class Source:
             out["tipo"] = self.kind
         if self.data:
             out["dados"] = copy.deepcopy(self.data)
+        if self.is_sequence:
+            out["sequencia"] = {"inicio": self.seq_start}
         return out
 
     @classmethod
@@ -220,7 +233,17 @@ class Source:
                    color_primaries=str(d.get("cor_primarias") or ""), audio_codec=str(d.get("codec_audio") or ""),
                    container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
                    kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
-                   data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {})
+                   data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {},
+                   seq_start=_seq_start(d.get("sequencia")))
+
+
+def _seq_start(value) -> int:
+    """"sequencia" do JSON da fonte ({"inicio": n}) → número do primeiro quadro; -1 = não é sequência."""
+    try:
+        n = int(value.get("inicio")) if isinstance(value, dict) else -1
+    except (TypeError, ValueError):
+        return -1
+    return n if n >= 0 else -1
 
 
 # ------------------------------------------------------------------ clipes e faixas
@@ -1570,7 +1593,9 @@ class Sequence:
         arquivo com alfa sem mudanças continua "sem edição" para o projeto (`is_trivial`)."""
         path = self.is_trivial()
         src = self.sources.get(path) if path else None
-        return path if src is not None and not src.has_alpha else None
+        # Sequência de imagens também passa pela montagem: a velocidade dela (escolhida ao importar) só existe na
+        # fonte da montagem, não no arquivo.
+        return path if src is not None and not src.has_alpha and not src.is_sequence else None
 
     def copy(self) -> "Sequence":
         return Sequence.from_json(self.to_json())
@@ -1645,10 +1670,15 @@ class Sequence:
             seq.markers.append(mk)
         return seq
 
-    def relink(self, old: str, new: str) -> None:
+    def relink(self, old: str, new: str, seq_start: int | None = None) -> None:
         """Troca o caminho de um arquivo (projeto aberto em outro computador ou pasta). Fontes sem arquivo
-        (`Source.is_file` falso) não mudam."""
-        if old == new or old not in self.sources or not self.sources[old].is_file:
+        (`Source.is_file` falso) não mudam. Numa sequência de imagens, `new` é o padrão novo e `seq_start` o
+        número do primeiro quadro na pasta nova (None = o mesmo)."""
+        if old not in self.sources or not self.sources[old].is_file:
+            return
+        if seq_start is not None and self.sources[old].is_sequence:
+            self.sources[old].seq_start = max(0, int(seq_start))
+        if old == new:
             return
         src = self.sources.pop(old)
         src.path = new
@@ -1681,6 +1711,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
     "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
+    "sequencia_imagens": lambda seq: any(s.is_sequence for s in seq.used_sources()),
 }
 
 
