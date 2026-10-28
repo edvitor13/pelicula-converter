@@ -29,15 +29,22 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-from . import editparams
-from .i18n import N_
+from . import editparams, keyframes
+from .i18n import N_, _
 
 VIDEO = "video"
 AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
-FORMAT = 1               # versão do bloco "edicao" dentro do projeto .plc
+# Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
+# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes). Veja `features()` e `migrate()`.
+FORMAT = 2
+FORMAT_BASE = 1
+# Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
+# ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
+SOURCE_FILE = "arquivo"
+SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste")
 IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
 EPS = 1e-6
@@ -92,6 +99,41 @@ class Source:
     color_primaries: str = ""
     audio_codec: str = ""
     container: str = ""
+    has_alpha: bool = False   # imagem com transparência (canal alfa); "alfa" no JSON, só quando ligado
+    kind: str = SOURCE_FILE   # SOURCE_KINDS; "tipo" no JSON, só quando não é "arquivo"
+    # Parâmetros de uma fonte sem arquivo (o que o gerador desenha: cor, texto…); "dados" no JSON, só quando há.
+    # Só valores de JSON; chaves sem acento. "nome" é o nome mostrado na Mídia e no clipe.
+    data: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_file(self) -> bool:
+        """Fonte que é um arquivo de mídia (as outras são desenhadas por `sequence.RENDERERS`)."""
+        return self.kind == SOURCE_FILE
+
+    @classmethod
+    def virtual(cls, kind: str, width: int, height: int, fps_str: str = "24/1", seconds: float | None = None,
+                data: dict[str, Any] | None = None, alpha: bool = True) -> "Source":
+        """Fonte sem arquivo (clipe gerado: título, cor, contagem…), desenhada por `sequence.RENDERERS[kind]`.
+
+        O caminho é um id (`"<tipo>:<hex>"`, nunca um arquivo): é a chave em `Sequence.sources` e `Clip.src`.
+        `seconds=None` = sem fim (como uma imagem: entra com `IMAGE_SECONDS` e pode ser esticada até
+        `MAX_HOLD_SECONDS`), mas o quadro anda com o tempo (`src_frame`), para geradores animados. `alpha`: o
+        gerador desenha com transparência (RGBA); False = opaco. Sem som."""
+        if kind not in SOURCE_KINDS or kind == SOURCE_FILE:
+            raise ValueError(f"tipo de fonte sem arquivo desconhecido: {kind!r}")
+        fr = parse_fps(fps_str)
+        secs = MAX_HOLD_SECONDS if seconds is None else max(1.0 / float(fr), float(seconds))
+        frames = max(1, int(math.floor(secs * float(fr) + EPS)))
+        return cls(path=f"{kind}:{uuid.uuid4().hex[:12]}", width=max(2, int(width)), height=max(2, int(height)),
+                   fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}", frames=frames,
+                   duration=frames / float(fr), has_video=True, has_audio=False, pix_fmt="rgba" if alpha else "rgb24",
+                   color_space="gbr", color_range="pc", color_transfer="iec61966-2-1", color_primaries="bt709",
+                   has_alpha=bool(alpha), kind=kind, data=copy.deepcopy(dict(data or {})))
+
+    @property
+    def unbounded(self) -> bool:
+        """Fonte sem fim natural: imagem parada ou gerador sem duração (`virtual(seconds=None)`)."""
+        return self.is_image or (not self.is_file and self.length >= MAX_HOLD_SECONDS - 1e-3)
 
     @property
     def length(self) -> float:
@@ -104,6 +146,8 @@ class Source:
 
     @property
     def name(self) -> str:
+        if not self.is_file:
+            return str(self.data.get("nome") or self.kind)
         return os.path.basename(self.path)
 
     @classmethod
@@ -114,7 +158,8 @@ class Source:
                    has_audio=info.has_audio, pix_fmt=info.pix_fmt, bit_depth=info.bit_depth, codec=info.codec,
                    profile=info.profile, bitrate=info.bitrate, color_space=info.color_space,
                    color_range=info.color_range, color_transfer=info.color_transfer,
-                   color_primaries=info.color_primaries, audio_codec=info.audio_codec, container=info.container)
+                   color_primaries=info.color_primaries, audio_codec=info.audio_codec, container=info.container,
+                   has_alpha=bool(getattr(info, "has_alpha", False)))
 
     def to_info(self):
         """`media.MediaInfo` equivalente (para o FrameReader e o grab_frame)."""
@@ -124,15 +169,26 @@ class Source:
             frames=max(1, self.frames), duration=self.duration, pix_fmt=self.pix_fmt, bit_depth=self.bit_depth,
             codec=self.codec, profile=self.profile, bitrate=self.bitrate, color_space=self.color_space,
             color_range=self.color_range, color_transfer=self.color_transfer, color_primaries=self.color_primaries,
-            has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image)
+            has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image,
+            has_alpha=self.has_alpha)
 
     def to_json(self) -> dict[str, Any]:
-        return {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
-                "quadros": self.frames, "duracao": round(self.duration, 6), "imagem": self.is_image,
-                "tem_video": self.has_video, "tem_audio": self.has_audio, "pix_fmt": self.pix_fmt,
-                "bits": self.bit_depth, "codec": self.codec, "perfil": self.profile, "taxa": self.bitrate,
-                "cor_matriz": self.color_space, "cor_faixa": self.color_range, "cor_transferencia": self.color_transfer,
-                "cor_primarias": self.color_primaries, "codec_audio": self.audio_codec, "recipiente": self.container}
+        out = {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
+               "quadros": self.frames, "duracao": round(self.duration, 6), "imagem": self.is_image,
+               "tem_video": self.has_video, "tem_audio": self.has_audio, "pix_fmt": self.pix_fmt,
+               "bits": self.bit_depth, "codec": self.codec, "perfil": self.profile, "taxa": self.bitrate,
+               "cor_matriz": self.color_space, "cor_faixa": self.color_range, "cor_transferencia": self.color_transfer,
+               "cor_primarias": self.color_primaries, "codec_audio": self.audio_codec, "recipiente": self.container}
+        # Campos da 1.5: só quando usados (a fonte de uma montagem antiga grava igual). "alfa" também sai quando
+        # o formato de pixel tem alfa e a fonte não usa (a migração do formato 1 deduz pelo formato de pixel).
+        from .media import pix_has_alpha
+        if self.has_alpha or pix_has_alpha(self.pix_fmt):
+            out["alfa"] = self.has_alpha
+        if self.kind != SOURCE_FILE:
+            out["tipo"] = self.kind
+        if self.data:
+            out["dados"] = copy.deepcopy(self.data)
+        return out
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Source":
@@ -155,7 +211,9 @@ class Source:
                    color_space=str(d.get("cor_matriz") or ""), color_range=str(d.get("cor_faixa") or ""),
                    color_transfer=str(d.get("cor_transferencia") or ""),
                    color_primaries=str(d.get("cor_primarias") or ""), audio_codec=str(d.get("codec_audio") or ""),
-                   container=str(d.get("recipiente") or ""))
+                   container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
+                   kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
+                   data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {})
 
 
 # ------------------------------------------------------------------ clipes e faixas
@@ -171,9 +229,27 @@ class Clip:
     link: str = ""           # clipes com o mesmo link andam juntos ("" = sozinho)
     name: str = ""
     values: dict[str, Any] = field(default_factory=dict)
+    # Chaves de animação ({ajuste: [keyframes.Key]}), no tempo do clipe τ = t − start + key_off (quadros da
+    # sequência; `Sequence.clip_time`). Aparar o começo e dividir mexem só em `key_off` (`shift_head`).
+    keys: dict[str, list] = field(default_factory=dict)
+    key_off: int = 0
 
     def __post_init__(self) -> None:
-        self.values = editparams.SCHEMAS[self.kind].sanitize(self.values)
+        schema = editparams.SCHEMAS[self.kind]
+        self.values = schema.sanitize(self.values)
+        self.keys = keyframes.clean_keys(schema, self.keys)
+        self.key_off = int(self.key_off)
+
+    def shift_head(self, delta: int) -> None:
+        """O começo do clipe andou `delta` quadros com a imagem parada no lugar (aparar o começo, sobrescrever,
+        dividir): as chaves ficam onde estavam em relação à imagem."""
+        self.key_off += int(delta)
+
+    def rescale_keys(self, ratio: float) -> None:
+        """O tempo do clipe esticou `ratio` vezes (velocidade ou fps): as chaves acompanham a imagem."""
+        if self.keys:
+            self.keys = keyframes.rescale(self.keys, self.key_off, ratio)
+        self.key_off = 0
 
     @property
     def end(self) -> int:
@@ -189,9 +265,14 @@ class Clip:
         return bool(self.values.get("congelar", False)) and self.kind == VIDEO
 
     def to_json(self) -> dict[str, Any]:
-        return {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
-                "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
-                "valores": copy.deepcopy(self.values)}
+        out = {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
+               "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
+               "valores": copy.deepcopy(self.values)}
+        if self.keys:  # só com animação (o clipe de uma montagem antiga grava igual)
+            out["chaves"] = keyframes.to_json(self.keys)
+            if self.key_off:
+                out["chaves_ref"] = self.key_off
+        return out
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Clip | None":
@@ -203,8 +284,10 @@ class Clip:
                        track=max(0, int(d.get("faixa", 0))), start=max(0, int(d.get("inicio", 0))),
                        dur=max(1, int(d.get("duracao", 1))), src_in=max(0.0, float(d.get("entrada", 0.0))),
                        link=str(d.get("ligacao") or ""), name=str(d.get("nome") or ""),
-                       values=d.get("valores") if isinstance(d.get("valores"), dict) else {})
-        except (TypeError, ValueError):
+                       values=d.get("valores") if isinstance(d.get("valores"), dict) else {},
+                       keys=d.get("chaves") if isinstance(d.get("chaves"), dict) else {},
+                       key_off=int(d.get("chaves_ref", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
             return None
 
 
@@ -243,6 +326,7 @@ class Layer:
     fade_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     fade: float = 0.0         # 0 = imagem; 1 = só a cor do fade (surgir/sumir no preto ou branco)
     extension: bool = False   # True = cauda do clipe anterior mostrada por baixo de um "dissolver"
+    values: dict[str, Any] | None = None  # ajustes neste quadro (`Sequence.values_at`); None = os do clipe
 
 
 # ------------------------------------------------------------------ marcadores
@@ -412,7 +496,7 @@ class Sequence:
         return max(1, int(math.floor(left / clip.speed * self.fps + EPS)))
 
     def default_dur(self, src: Source) -> int:
-        if src.is_image:
+        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS
             return self.frames_for(IMAGE_SECONDS)
         return self.frames_for(src.length)
 
@@ -493,7 +577,8 @@ class Sequence:
                 if v["entrada_tipo"] == "dissolver":
                     prev = self.previous_on_track(c)
                     if prev is not None:
-                        out.append(Layer(prev, self.src_frame(prev, t), 1.0, extension=True))
+                        out.append(Layer(prev, self.src_frame(prev, t), 1.0, extension=True,
+                                         values=self.values_at(prev, t)))
                     alpha = k
                 else:
                     fade = 1.0 - k
@@ -506,7 +591,7 @@ class Sequence:
                 else:
                     color = (1.0, 1.0, 1.0) if v["saida_tipo"] == "branco" else (0.0, 0.0, 0.0)
                     fade = max(fade, 1.0 - k)
-            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade))
+            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade, values=self.values_at(c, t)))
         return out
 
     def audio_clips(self) -> list[Clip]:
@@ -574,11 +659,12 @@ class Sequence:
                 c.src_in = self.src_time(c, b)
                 c.start = b
                 c.dur -= cut
+                c.shift_head(cut)
 
     def _cut(self, c: Clip, t: int) -> Clip:
         """Divide o clipe no quadro t; devolve a parte da direita (já na sequência)."""
         right = Clip(new_id(), c.kind, c.src, c.track, t, c.end - t, self.src_time(c, t), "", c.name,
-                     copy.deepcopy(c.values))
+                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start))
         c.dur = t - c.start
         # A transição de entrada fica só na parte da esquerda; a de saída, só na da direita.
         if c.kind == VIDEO:
@@ -659,6 +745,7 @@ class Sequence:
                 c.src_in = max(0.0, self.src_time(c, c.start + delta))
             c.start += delta
             c.dur -= delta
+            c.shift_head(delta)
         keep = {c.id for c in group}
         for c in group:
             self._clear_range(c.kind, c.track, c.start, c.end, keep)
@@ -698,6 +785,8 @@ class Sequence:
             new_durs.append(nd)
         nd = min(new_durs)
         for c in group:
+            if abs(c.speed - speed) > 1e-12:
+                c.rescale_keys(c.speed / speed)  # a animação acompanha a imagem
             c.values["velocidade"] = speed
             c.dur = max(1, min(nd, self.max_dur(c)))
 
@@ -822,6 +911,101 @@ class Sequence:
                 self.move(c.id, pos)
             pos = c.end
 
+    # -------------------------------------------------------- chaves de animação (keyframes.py)
+    def clip_time(self, clip: Clip, t: float) -> float:
+        """Tempo das chaves do clipe no quadro t da sequência (τ = t − start + key_off)."""
+        return t - clip.start + clip.key_off
+
+    def seq_time(self, clip: Clip, tau: float) -> float:
+        """Quadro da sequência de um tempo de chave do clipe (o inverso de `clip_time`)."""
+        return tau - clip.key_off + clip.start
+
+    def values_at(self, clip: Clip, t: float) -> dict[str, Any]:
+        """Ajustes do clipe no quadro t: o único lugar onde as chaves viram valores (imagem e som).
+        Sem chaves, devolve o próprio `clip.values`."""
+        if not clip.keys:
+            return clip.values
+        return keyframes.values_at(editparams.SCHEMAS[clip.kind], clip.values, clip.keys, self.clip_time(clip, t))
+
+    def keys_of(self, clip: Clip, key: str) -> list[tuple[float, Any, str]]:
+        """Chaves de um ajuste do clipe em quadros da sequência: [(quadro, valor, curva)]."""
+        return [(self.seq_time(clip, k.t), keyframes._copy(k.v), k.e) for k in clip.keys.get(key, [])]
+
+    def _animatable(self, clip: Clip, key: str):
+        p = keyframes.animatable(editparams.SCHEMAS[clip.kind]).get(key)
+        if p is None:
+            raise KeyError(key)
+        return p
+
+    def set_key(self, cid: str, key: str, t: float, value: Any = None, easing: str = keyframes.LINEAR) -> bool:
+        """Chave no quadro t da sequência (`value` None = o valor que o ajuste tem ali). True se mudou."""
+        from .params import _clean
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        p = self._animatable(c, key)
+        if value is None:
+            value = self.values_at(c, t)[key]
+        track = keyframes.set_key(c.keys.get(key), float(self.clip_time(c, t)), _clean(p, value), easing)
+        return self._set_track(c, key, track)
+
+    def remove_key(self, cid: str, key: str, t: float) -> bool:
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        return self._set_track(c, key, keyframes.remove_key(c.keys.get(key), float(self.clip_time(c, t))))
+
+    def move_key(self, cid: str, key: str, t_from: float, t_to: float) -> bool:
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        track = keyframes.move_key(c.keys.get(key), float(self.clip_time(c, t_from)), float(self.clip_time(c, t_to)))
+        return self._set_track(c, key, track)
+
+    def clear_keys(self, cid: str, key: str | None = None) -> bool:
+        """Tira as chaves de um ajuste (ou todas, com `key` None); o valor fixo do ajuste volta a valer."""
+        c = self.find(cid)
+        if c is None or self.locked(c) or not c.keys:
+            return False
+        if key is None:
+            c.keys = {}
+        elif key in c.keys:
+            c.keys = {k: v for k, v in c.keys.items() if k != key}
+        else:
+            return False
+        return True
+
+    def _set_track(self, c: Clip, key: str, track: list) -> bool:
+        if track == c.keys.get(key, []):
+            return False
+        keys = dict(c.keys)
+        if track:
+            keys[key] = track
+        else:
+            keys.pop(key, None)
+        c.keys = keys
+        return True
+
+    def local_keys(self, clip: Clip, names: Iterable[str] | None = None) -> dict[str, list]:
+        """Chaves no tempo a partir do começo do clipe (para copiar para outro clipe: `paste_keys`)."""
+        keys = clip.keys if names is None else keyframes.keys_in(clip.keys, names)
+        return keyframes.shift(keys, -clip.key_off)
+
+    def paste_keys(self, cid: str, local: dict[str, list], names: Iterable[str]) -> bool:
+        """Troca as chaves dos ajustes `names` do clipe pelas de `local` (de `local_keys`), presas ao começo
+        deste clipe. Ajustes de `names` sem chave em `local` ficam sem animação."""
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        names = set(names)
+        keys = {k: v for k, v in c.keys.items() if k not in names}
+        keys.update(keyframes.shift(keyframes.keys_in(local, names), c.key_off))
+        keys = keyframes.clean_keys(editparams.SCHEMAS[c.kind], keys)
+        if keys == c.keys:
+            return False
+        c.keys = keys
+        return True
+
     # -------------------------------------------------------- estado
     def is_trivial(self) -> str | None:
         """Caminho do arquivo se a sequência é só "o arquivo inteiro, sem mudanças" (senão None).
@@ -834,7 +1018,9 @@ class Sequence:
             return None
         v = vids[0]
         src = self.sources.get(v.src)
-        if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values):
+        if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values) or v.keys:
+            return None
+        if not src.is_file:  # clipe sem arquivo (gerador, texto…): não há o que ler direto
             return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
             return None
@@ -845,7 +1031,7 @@ class Sequence:
         if auds:
             a = auds[0]
             if (a.src != v.src or a.start != 0 or a.dur != v.dur or a.src_in > EPS
-                    or not editparams.is_neutral(AUDIO, a.values) or not self.has_audio):
+                    or not editparams.is_neutral(AUDIO, a.values) or a.keys or not self.has_audio):
                 return None
             if any(abs(t.volume) > 1e-9 for t in self.kind_tracks(AUDIO)):
                 return None
@@ -853,13 +1039,30 @@ class Sequence:
             return None
         return src.path
 
+    def direct_file(self) -> str | None:
+        """O arquivo que o modo Película lê direto, sem montar: o de `is_trivial`, se ele não tem transparência
+        (com alfa a imagem passa pela montagem e sai sobre o fundo dela; lido direto, o alfa se perderia). Um
+        arquivo com alfa sem mudanças continua "sem edição" para o projeto (`is_trivial`)."""
+        path = self.is_trivial()
+        src = self.sources.get(path) if path else None
+        return path if src is not None and not src.has_alpha else None
+
     def copy(self) -> "Sequence":
         return Sequence.from_json(self.to_json())
+
+    def features(self) -> set[str]:
+        """Recursos da 1.5 que esta montagem usa (`FEATURES`): com algum, o projeto vai para o formato 3."""
+        return {fid for fid, check in FEATURES.items() if check(self)}
+
+    def used_sources(self) -> list[Source]:
+        """As fontes que algum clipe usa (na ordem de `sources`)."""
+        used = {c.src for c in self.clips}
+        return [s for p, s in self.sources.items() if p in used]
 
     def to_json(self) -> dict[str, Any]:
         used = {c.src for c in self.clips}
         out = {
-            "formato": FORMAT,
+            "formato": FORMAT if self.features() else FORMAT_BASE,
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
             "faixas": [t.to_json() for t in self.tracks],
@@ -876,7 +1079,9 @@ class Sequence:
 
     @classmethod
     def from_json(cls, d: dict[str, Any] | None) -> "Sequence":
-        d = d if isinstance(d, dict) else {}
+        """Montagem a partir do JSON de `to_json` (de qualquer formato até `FORMAT`: passa por `migrate`).
+        `FormatError` se o bloco foi gravado por uma versão mais nova."""
+        d = migrate(d if isinstance(d, dict) else {})
         try:
             bg = tuple(min(max(float(x), 0.0), 1.0) for x in list(d.get("fundo") or (0, 0, 0))[:3])
             if len(bg) != 3:
@@ -913,8 +1118,9 @@ class Sequence:
         return seq
 
     def relink(self, old: str, new: str) -> None:
-        """Troca o caminho de um arquivo (projeto aberto em outro computador ou pasta)."""
-        if old == new or old not in self.sources:
+        """Troca o caminho de um arquivo (projeto aberto em outro computador ou pasta). Fontes sem arquivo
+        (`Source.is_file` falso) não mudam."""
+        if old == new or old not in self.sources or not self.sources[old].is_file:
             return
         src = self.sources.pop(old)
         src.path = new
@@ -932,6 +1138,59 @@ class Sequence:
         if with_media:
             seq.insert_media(src, 0)
         return seq
+
+
+# ------------------------------------------------------------------ formato do bloco "edicao" (1.5)
+class FormatError(ValueError):
+    """Montagem gravada por uma versão mais nova do app (o bloco "edicao" tem `formato` maior que `FORMAT`)."""
+
+
+# Recursos da 1.5 que uma montagem pode usar: id ASCII (nunca renomear) → teste. Usar qualquer um grava o
+# bloco "edicao" no formato 2 e o projeto no formato 3 (`project.needed_format`), que as versões antigas
+# recusam com aviso em vez de abrir sem o recurso. Recurso novo: uma linha aqui (ou `FEATURES[id] = teste`
+# no módulo do recurso) e o campo dele no JSON só quando usado.
+FEATURES: dict[str, Callable[[Sequence], bool]] = {
+    "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
+    "chaves": lambda seq: any(c.keys for c in seq.clips),
+    "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
+}
+
+
+def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
+    do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
+    from .media import pix_has_alpha
+    out = dict(d)
+    fontes = []
+    for s in d.get("fontes") or []:
+        if isinstance(s, dict):
+            s = dict(s)
+            s.setdefault("tipo", SOURCE_FILE)
+            s.setdefault("alfa", pix_has_alpha(str(s.get("pix_fmt") or "")))
+        fontes.append(s)
+    out["fontes"] = fontes
+    out["formato"] = 2
+    return out
+
+
+# formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2}
+
+
+def migrate(d: dict[str, Any]) -> dict[str, Any]:
+    """O JSON de uma montagem de qualquer formato até `FORMAT`, levado ao formato atual passo a passo.
+    `FormatError` se ele é de uma versão mais nova."""
+    try:
+        fmt = int(d.get("formato", FORMAT_BASE))
+    except (TypeError, ValueError):
+        fmt = FORMAT_BASE
+    if fmt > FORMAT:
+        raise FormatError(_("A montagem foi salva por uma versão mais nova do app. Atualize o PeliculaConverter."))
+    fmt = max(fmt, FORMAT_BASE)
+    while fmt < FORMAT:
+        d = MIGRATIONS[fmt](d)
+        fmt += 1
+    return d
 
 
 class History:

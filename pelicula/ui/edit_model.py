@@ -46,6 +46,7 @@ class TimelineModel(QObject):
         self.selection: list[str] = []
         self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
+        self.clipboard_keys: dict[str, list] = {}  # chaves da cor copiadas (tempo a partir do começo do clipe)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(400)
@@ -326,6 +327,7 @@ class TimelineModel(QObject):
             for c in seq.clips:
                 c.start = int(round(c.start * ratio))
                 c.dur = max(1, int(round(c.dur * ratio)))
+                c.rescale_keys(ratio)  # chaves de animação no tempo novo
             for c in seq.clips:
                 c.dur = max(1, min(c.dur, seq.max_dur(c)))
             for mk in seq.markers:
@@ -398,12 +400,55 @@ class TimelineModel(QObject):
             self.selectionChanged.emit()
             self._done("markers")
 
+    # ------------------------------------------------------------ chaves de animação (keyframes.py)
+    # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo
+    # para as chaves fica para depois: estas funções são a API dela.
+    def keys_of(self, cid: str, key: str) -> list[tuple[float, Any, str]]:
+        """Chaves de um ajuste do clipe: [(quadro da sequência, valor, curva)]."""
+        c = self.seq.find(cid)
+        return self.seq.keys_of(c, key) if c is not None else []
+
+    def value_at(self, cid: str, key: str, frame: float) -> Any:
+        """O valor do ajuste no quadro (com as chaves; sem elas, o valor fixo do clipe)."""
+        c = self.seq.find(cid)
+        if c is None:
+            raise KeyError(cid)
+        return self.seq.values_at(c, frame)[key]
+
+    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear") -> bool:
+        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave."""
+        if self.seq.set_key(cid, key, frame, value, easing):
+            self._done("values")
+            return True
+        return False
+
+    def move_key(self, cid: str, key: str, frame_from: float, frame_to: float) -> bool:
+        if self.seq.move_key(cid, key, frame_from, frame_to):
+            self._done("values")
+            return True
+        return False
+
+    def remove_key(self, cid: str, key: str, frame: float) -> bool:
+        if self.seq.remove_key(cid, key, frame):
+            self._done("values")
+            return True
+        return False
+
+    def clear_keys(self, cid: str, key: str | None = None) -> bool:
+        """Tira a animação de um ajuste (ou de todos, com `key` None)."""
+        if self.seq.clear_keys(cid, key):
+            self._done("values")
+            return True
+        return False
+
     # ------------------------------------------------------------ copiar ajustes
     def copy_values(self, cid: str) -> bool:
         c = self.seq.find(cid)
         if c is None or c.kind != VIDEO:
             return False
         self.clipboard = {k: copy.deepcopy(c.values[k]) for k in editparams.color_keys()}
+        # A animação da cor vai junto, presa ao começo do clipe (`Sequence.local_keys`).
+        self.clipboard_keys = self.seq.local_keys(c, editparams.color_keys())
         return True
 
     def has_clipboard(self) -> bool:
@@ -420,6 +465,7 @@ class TimelineModel(QObject):
             vals = dict(c.values)
             vals.update(copy.deepcopy(self.clipboard))
             self.seq.set_values(cid, vals)
+            self.seq.paste_keys(cid, self.clipboard_keys, editparams.color_keys())
             n += 1
         if n:
             self._done("values")

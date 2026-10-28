@@ -20,6 +20,7 @@ from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -28,6 +29,9 @@ from . import media, timeline
 
 @dataclass
 class LayerImage:
+    """Imagem de uma camada: h × w × 3 (RGB) ou, de fontes com transparência, h × w × 4 com o RGB
+    **pré-multiplicado** pelo alfa (`media.FrameReader(alpha=True)`), uint8 ou uint16. `editshaders.CLIP`
+    desfaz a multiplicação depois de amostrar e usa o alfa como cobertura."""
     layer: timeline.Layer
     image: np.ndarray
 
@@ -50,12 +54,13 @@ def canvas_size(seq: timeline.Sequence, height: int | None = None) -> tuple[int,
 
 def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> tuple[int, int]:
     """Tamanho em que o clipe é decodificado: a caixa do encaixe na tela (× escala, se ampliado),
-    sem passar da resolução do arquivo."""
-    from . import compositor
+    sem passar da resolução do arquivo. Com a escala animada, a maior escala do clipe (decodifica uma vez só,
+    no tamanho em que ele mais aparece)."""
+    from . import compositor, keyframes
     src = seq.sources[clip.src]
     sw, sh = (src.width or canvas_w), (src.height or canvas_h)
     bw, bh = compositor.fit_box(seq, clip, canvas_w, canvas_h)
-    k = max(1.0, float(clip.values.get("escala", 1.0)))
+    k = max(1.0, keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0))))
     w = min(int(round(bw * k)), sw)
     h = min(int(round(bh * k)), sh)
     return max(2, w), max(2, h)
@@ -63,6 +68,55 @@ def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canv
 
 def _blank(w: int, h: int, depth: int) -> np.ndarray:
     return np.zeros((h, w, 3), dtype=np.uint8 if depth == 8 else np.uint16)
+
+
+# ------------------------------------------------------------------ clipes sem arquivo
+# Geradores das fontes sem arquivo (`timeline.Source.kind` ≠ "arquivo": título, cor, contagem, legenda…):
+#     RENDERERS[tipo] = fn(seq, clip, quadro, largura, altura, profundidade) -> np.ndarray
+# `quadro` é o quadro da fonte (`Layer.src_frame` = `Sequence.src_frame`: já com aparar, velocidade e congelar;
+# em segundos, quadro / fonte.fps); largura × altura é o tamanho de decodificação (`decode_size`, a caixa do
+# clipe na tela). O gerador desenha só o conteúdo (o que está em `src.data`): posição, escala, giro, corte,
+# opacidade, cor e transições do clipe o shader CLIP aplica depois, como em qualquer clipe.
+# Devolve h × w × 4 RGBA **pré-multiplicado** (ou h × w × 3, opaco), uint8 (profundidade 8) ou uint16 (16);
+# uint8 numa profundidade 16 e float 0–1 são convertidos. A mesma função serve `grab` (prévia, "Salvar
+# quadro") e `SequenceReader` (exportação): prévia = exportação. Regras: puro e determinístico (nada de
+# random/time; só seq, clipe, quadro e `src.data`), sem OpenGL e sem widgets — roda na thread de quem lê, às
+# vezes em duas ao mesmo tempo; um QImage/QPainter serve (com a QGuiApplication criada). Cache, se precisar,
+# por conta do gerador. Tipo sem gerador registrado (projeto de uma versão mais nova): camada transparente.
+Renderer = Callable[[timeline.Sequence, timeline.Clip, int, int, int, int], np.ndarray]
+RENDERERS: dict[str, Renderer] = {}
+
+
+def _as_layer(img, w: int, h: int, depth: int, kind: str) -> np.ndarray:
+    arr = np.asarray(img)
+    if arr.ndim != 3 or arr.shape[:2] != (h, w) or arr.shape[2] not in (3, 4):
+        raise ValueError(f"o gerador {kind!r} devolveu {arr.shape}; esperado ({h}, {w}, 4) ou ({h}, {w}, 3)")
+    want = np.uint8 if depth == 8 else np.uint16
+    if arr.dtype == want:
+        return np.ascontiguousarray(arr)
+    if arr.dtype == np.uint8:  # 8 bits numa leitura de 16: ×257 (exato)
+        return arr.astype(np.uint16) * np.uint16(257)
+    if np.issubdtype(arr.dtype, np.floating):
+        mx = 255.0 if depth == 8 else 65535.0
+        return np.clip(np.rint(arr.astype(np.float64) * mx), 0, mx).astype(want)
+    raise ValueError(f"o gerador {kind!r} devolveu {arr.dtype}; esperado uint8/uint16 ou float 0–1")
+
+
+def render_source(seq: timeline.Sequence, clip: timeline.Clip, frame: int, w: int, h: int,
+                  depth: int) -> np.ndarray:
+    """Imagem de um clipe sem arquivo no quadro `frame` da fonte (o gerador de `RENDERERS`, conferido)."""
+    src = seq.sources[clip.src]
+    fn = RENDERERS.get(src.kind)
+    if fn is None:
+        return np.zeros((h, w, 4), dtype=np.uint8 if depth == 8 else np.uint16)
+    return _as_layer(fn(seq, clip, int(frame), int(w), int(h), int(depth)), int(w), int(h), depth, src.kind)
+
+
+def source_thumbnail(src: timeline.Source, w: int, h: int) -> np.ndarray:
+    """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0, sobre preto."""
+    seq = timeline.Sequence.for_source(src)
+    img = render_source(seq, seq.clips[0], 0, w, h, 8)
+    return np.ascontiguousarray(img[..., :3])  # pré-multiplicado sobre preto = o próprio RGB
 
 
 # ------------------------------------------------------------------ acesso direto
@@ -81,13 +135,13 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
         mtime = os.path.getmtime(src.path)
     except OSError:
         mtime = 0.0
-    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq)
+    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq, src.has_alpha)
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
         if hit is not None:
             _CACHE.move_to_end(key)
             return hit
-    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq)
+    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq, alpha=src.has_alpha)
     img.setflags(write=False)
     with _CACHE_LOCK:
         _CACHE[key] = img
@@ -102,9 +156,14 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
     out = []
     for layer in seq.layers_at(frame):
         src = seq.sources.get(layer.clip.src)
-        if src is None or not src.has_video or not os.path.exists(src.path):
+        if src is None or not src.has_video:
             continue
         w, h = decode_size(seq, layer.clip, canvas_w, canvas_h)
+        if not src.is_file:
+            out.append(LayerImage(layer, render_source(seq, layer.clip, layer.src_frame, w, h, depth)))
+            continue
+        if not os.path.exists(src.path):
+            continue
         out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq)))
     return FrameLayers(int(frame), out)
 
@@ -125,7 +184,7 @@ class _ClipStream:
     def _open(self, f: int) -> None:
         self.close()
         self.reader = media.FrameReader(self.src.to_info(), self.w, self.h, self.depth, max(0, f), None,
-                                        hq=self.hq, perf=self.perf)
+                                        hq=self.hq, perf=self.perf, alpha=self.src.has_alpha)
         self.next = max(0, f)
 
     def get(self, f: int, jump: int) -> np.ndarray:
@@ -218,12 +277,21 @@ class SequenceReader:
         img = self._images.get(key)
         if img is None:
             try:
-                img = media.grab_frame(src.to_info(), 0, w, h, self.depth, hq=self.hq)
+                img = media.grab_frame(src.to_info(), 0, w, h, self.depth, hq=self.hq, alpha=src.has_alpha)
             except Exception as exc:  # noqa: BLE001
                 self._errors.append(str(exc))
                 img = _blank(w, h, self.depth)
             self._images[key] = img
         return img
+
+    def _render(self, layer: timeline.Layer) -> np.ndarray:
+        """Clipe sem arquivo: o mesmo gerador de `grab` (`render_source`); um erro vira camada transparente."""
+        w, h = self._size(layer.clip)
+        try:
+            return render_source(self.seq, layer.clip, layer.src_frame, w, h, self.depth)
+        except Exception as exc:  # noqa: BLE001 — a exportação continua; o erro aparece no fim
+            self._errors.append(str(exc))
+            return np.zeros((h, w, 4), dtype=np.uint8 if self.depth == 8 else np.uint16)
 
     def _prefetch(self, t: int) -> None:
         """Abre antes da hora os leitores dos clipes que começam nos próximos quadros."""
@@ -233,7 +301,8 @@ class SequenceReader:
                     or not (t < c.start <= horizon)):
                 continue
             src = self.seq.sources.get(c.src)
-            if src is None or src.is_image or not src.has_video or not os.path.exists(src.path):
+            if (src is None or src.is_image or not src.has_video or not src.is_file
+                    or not os.path.exists(src.path)):
                 continue
             self._pending[c.id] = self._pool.submit(self._new_stream, c, self.seq.src_frame(c, c.start))
 
@@ -251,7 +320,12 @@ class SequenceReader:
         for layer in self.seq.layers_at(t):
             c = layer.clip
             src = self.seq.sources.get(c.src)
-            if src is None or not src.has_video or not os.path.exists(src.path):
+            if src is None or not src.has_video:
+                continue
+            if not src.is_file:
+                out.append(LayerImage(layer, self._render(layer)))
+                continue
+            if not os.path.exists(src.path):
                 continue
             if src.is_image:
                 img = self._image(c)
@@ -279,8 +353,15 @@ class SequenceReader:
 
 
 # ------------------------------------------------------------------ informação virtual
+def _file_sources(seq: timeline.Sequence) -> set[str]:
+    return {p for p, s in seq.sources.items() if s.is_file}
+
+
 def first_video_source(seq: timeline.Sequence) -> timeline.Source | None:
-    vids = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track))
+    """O arquivo do primeiro clipe de vídeo (clipes sem arquivo não contam)."""
+    files = _file_sources(seq)
+    vids = sorted((c for c in seq.clips if c.kind == timeline.VIDEO and c.src in files),
+                  key=lambda c: (c.start, c.track))
     return seq.sources.get(vids[0].src) if vids else None
 
 
@@ -289,13 +370,14 @@ def legal_range(seq: timeline.Sequence) -> bool:
 
     Cada clipe é decodificado com a sua faixa (vídeo YUV de faixa legal chega expandido; imagens e vídeo
     de faixa cheia, como estão) e a tela guarda esses valores; o look lê a tela com um perfil só. Vale a
-    faixa da maioria dos clipes de vídeo (empate: a do primeiro na linha do tempo); imagens paradas só
-    contam numa montagem sem vídeo. Limitação conhecida: clipes log de faixas diferentes na mesma
-    montagem usam uma faixa só (perfil de entrada por clipe fica para depois).
+    faixa da maioria dos clipes de vídeo (empate: a do primeiro na linha do tempo); imagens paradas e
+    clipes sem arquivo (RGB de faixa cheia) só contam numa montagem sem vídeo. Limitação conhecida: clipes
+    log de faixas diferentes na mesma montagem usam uma faixa só (perfil de entrada por clipe fica para depois).
     """
     clips = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track))
     srcs = [seq.sources[c.src] for c in clips if c.src in seq.sources and seq.sources[c.src].has_video]
-    flags = [media.legal_range(s) for s in srcs if not s.is_image] or [media.legal_range(s) for s in srcs]
+    flags = ([media.legal_range(s) for s in srcs if s.is_file and not s.is_image]
+             or [media.legal_range(s) for s in srcs])
     if not flags:
         return True
     legal = sum(flags)
@@ -305,7 +387,8 @@ def legal_range(seq: timeline.Sequence) -> bool:
 def media_info(seq: timeline.Sequence) -> media.MediaInfo:
     """`MediaInfo` da sequência para a exportação (tamanho, fps, duração, som e formato do 1º vídeo)."""
     first = first_video_source(seq)
-    anyp = first.path if first else next(iter(c.src for c in seq.clips), "")
+    files = _file_sources(seq)
+    anyp = first.path if first else next(iter(c.src for c in seq.clips if c.src in files), "")
     base = Path(anyp) if anyp else Path.home() / "sequencia.mp4"
     video = first is not None and not first.is_image
     ext = base.suffix if (video and base.suffix) else ".mp4"
@@ -323,6 +406,6 @@ def media_info(seq: timeline.Sequence) -> media.MediaInfo:
 
 
 def missing_sources(seq: timeline.Sequence) -> list[str]:
-    """Arquivos usados pela sequência que não existem mais no disco."""
-    used = {c.src for c in seq.clips}
+    """Arquivos usados pela sequência que não existem mais no disco (clipes sem arquivo não contam)."""
+    used = {c.src for c in seq.clips} & _file_sources(seq)
     return sorted(p for p in used if not os.path.exists(p))

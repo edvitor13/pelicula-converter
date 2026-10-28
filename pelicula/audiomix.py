@@ -85,8 +85,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
     out = []
     for c in playing:
         src = seq.sources.get(c.src)
-        if src is None or not src.has_audio or not os.path.exists(c.src):
-            continue
+        if src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
+            continue  # clipes sem arquivo (geradores) não têm som
         head, tail = heads.get(c.id), tails.get(c.id)
         pre = head[0] if head else 0.0    # o clipe começa antes (transição com o anterior)
         post = tail[1] if tail else 0.0   # e termina depois (transição com o próximo)
@@ -119,6 +119,11 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "trim_len": trim_len,
             "delay": delay,                                      # posição no trecho
             "gain_db": float(c.values["volume"]) + (tr.volume if tr else 0.0),
+            "track_db": tr.volume if tr else 0.0,
+            # Volume animado: as chaves do clipe no tempo dele (τ = segundos do clipe × fps + key_off).
+            "vol_keys": c.keys.get("volume") or [],
+            "key_off": c.key_off,
+            "fps": fps,
             "pre": pre,                                          # s antes do início do clipe (transição)
             "xf_in": sum(head) if head else 0.0,                 # transição de entrada (começa em 0)
             "xf_out": sum(tail) if tail else 0.0,                # transição de saída...
@@ -139,7 +144,10 @@ def _chain(seg: dict, k: int) -> str:
     v = c.values
     f = [f"[{k + 1}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
     f += _atempo(c.speed)
-    if abs(seg["gain_db"]) > 1e-6:
+    vk = seg.get("vol_keys")
+    if vk:
+        f.append(volume_envelope(vk, seg["pre"], seg["fps"], seg["key_off"], seg["track_db"]))
+    elif abs(seg["gain_db"]) > 1e-6:
         f.append(f"volume={_fmt(seg['gain_db'])}dB")
     if v["voz"]:
         f += ["highpass=f=90", "acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2"]
@@ -180,6 +188,18 @@ def _chain(seg: dict, k: int) -> str:
     if ms > 0:
         f.append(f"adelay={ms}|{ms}")
     return ",".join(f) + f"[a{k}]"
+
+
+def volume_envelope(keys, pre: float, fps: float, key_off: int, track_db: float = 0.0) -> str:
+    """Filtro `volume` do ffmpeg com o volume animado (chaves em dB, `keyframes.ffmpeg_expr`: a mesma conta da
+    imagem), avaliado a cada bloco de som (`eval=frame`). `t` é o tempo da cadeia, que começa `pre` segundos
+    antes do clipe (transição de som); o tempo das chaves é τ = (t − pre) × fps + key_off."""
+    from . import keyframes
+    tau = f"((t-{_fmt(pre)})*{_fmt(fps)}+{int(key_off)})"
+    db = keyframes.ffmpeg_expr(keys, tau)
+    if abs(track_db) > 1e-9:
+        db = f"({db})+{_fmt(track_db)}"
+    return f"volume='pow(10,({db})/20)':eval=frame"
 
 
 def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[list[str], str] | None:

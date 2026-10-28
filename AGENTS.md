@@ -36,20 +36,27 @@ pelicula/
   modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
-  project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
+  project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
+                             (needed_format, FEATURES_V3) e migração passo a passo (MIGRATIONS)
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
                              Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
+  frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
+                             quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
+                             exportação, prévia da exportação, medição de velocidade e linha de comando
+  keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
+                             value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
-  media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
+  media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
+                             transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph)
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
-                             alvo), FramePipeline/preview_frame() (o mesmo caminho na exportação e na prévia dela),
-                             measure_speed(), save_still()
+                             alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
+                             exportação; FramePipeline = frame.Recipe), measure_speed(), save_still()
   platforms.py               exportação por plataforma (sem Qt): PLATFORMS (YouTube, Instagram, TikTok, WhatsApp,
                              Discord… com fonte oficial), settings_for() → ExportSettings, limites, avisos, SAFE_AREAS
   fit.py                     encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): plan() → Fit
@@ -73,14 +80,17 @@ pelicula/
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
-                             de som: micro_fade, audio_crossfade; sem Qt), History
+                             de som: micro_fade, audio_crossfade; sem Qt), History; Source.virtual (clipe sem
+                             arquivo: kind/SOURCE_KINDS, data)
   chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
   loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
-  editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela) e a saída da tela
+  editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
+                             pré-multiplicada, alfa na cobertura) e a saída da tela
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
-                             canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
+                             canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
+                             RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo)
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
                              (som do arquivo para o medidor)
@@ -129,12 +139,19 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
 
 ## Regras que não podem ser quebradas
 
-1. **Prévia e exportação usam o mesmo caminho.** Todo efeito vive em `look.build_plan()` +
-   `shaders.py`/`Engine.render()`. Nunca implemente um efeito só na interface, só na exportação ou
-   só no "Salvar quadro". Prévia, miniaturas, salvar quadro, estimativa e exportação chamam as mesmas
-   funções. No modo Edição vale o mesmo: ajuste de clipe só em `compositor.py` + `editshaders.py` /
-   `Engine.compose()`; qual quadro de qual arquivo aparece só em `timeline.Sequence.src_frame()` /
-   `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem que a exportação grava).
+1. **Prévia e exportação usam o mesmo caminho.** Todo quadro mostrado ou gravado passa pela **receita
+   única** `frame.Recipe` (entrada → `Engine.compose` → valores do look no quadro → `look.build_plan(...,
+   legal=)` → `render`/`render_fit`): a prévia da janela, as miniaturas dos presets, "Salvar quadro", a
+   prévia da exportação, a medição de velocidade, a exportação e `pelicula-cli quadro`/`exportar`. Quem
+   chama só muda os campos (tamanho, profundidade, pontilhado); nunca monte o quadro à mão em outro lugar.
+   Todo efeito vive em `look.build_plan()` + `shaders.py`/`Engine.render()`. Nunca implemente um efeito só
+   na interface, só na exportação ou só no "Salvar quadro". No modo Edição vale o mesmo: ajuste de clipe só
+   em `compositor.py` + `editshaders.py` / `Engine.compose()`; qual quadro de qual arquivo aparece só em
+   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
+   que a exportação grava). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
+   `Layer.values` (imagem e volume do som) e `keyframes.look_values_at()` pela receita (look); nunca leia
+   `clip.values` para desenhar um quadro. Imagem de camada com 4 canais é sempre RGBA **pré-multiplicado**
+   (transparência: `media.FrameReader(alpha=)` e geradores de `sequence.RENDERERS`); com 3 canais, opaca.
 2. **Determinismo por quadro.** Tudo o que muda no tempo deriva do **número do quadro**, do fps e
    das **sementes** (`_hash`/`_vnoise` em `look.py`; `pcg`/`rnd`/`vnoise2` no GLSL). Proibido
    `random`, `np.random`, `time.time()` ou estado acumulado entre quadros no caminho de render. O
@@ -181,11 +198,15 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** Mantenha `project.FORMAT` e a leitura compatível com
-    arquivos antigos; aumente `FORMAT` só com migração. Valores passam por `params.sanitize()`.
-    Projetos com montagem do modo Edição gravam o bloco `"edicao"` (JSON de `timeline.Sequence`) e
-    `"formato": 2`; projetos simples (só o arquivo inteiro, sem mudanças) continuam `"formato": 1`
-    para abrir nas versões antigas.
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (3) é o maior formato que o app lê; o
+    gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
+    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5, listado
+    em `"recursos"`. Recurso novo que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES`
+    (da montagem) ou `project.FEATURES_V3` (do projeto) e o campo dele no JSON só quando usado — assim um
+    projeto que não usa nada novo continua abrindo nas versões antigas, e um que usa é recusado com aviso
+    em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
+    `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 em `tests/data/projetos_1_4/`);
+    aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
     recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
     com os do CI, e cada pacote leva `pelicula-install.json` com o tipo de instalação.
@@ -266,8 +287,12 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
+| `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
+| `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
+| `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
+| `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
@@ -335,6 +360,28 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
    cadeia do clipe.
 3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
+4. Se ele deve aceitar chaves de animação, veja *Tornar um ajuste animável*.
+
+### Tornar um ajuste animável
+
+As chaves (`keyframes.py`, `docs/ARQUITETURA.md` seção 22.3) valem para ajustes marcados com
+`Param.animatable`. Antes de marcar, confira que o ajuste é **contínuo** (número, cor ou roda; escolhas e
+liga/desliga só mudam de degrau e quase nunca fazem sentido animados) e que o valor é lido **por quadro**:
+
+1. **Marque** no esquema: clipe de vídeo em `editparams.ANIMATABLE_VIDEO` (as seções de cor já entram todas),
+   som em `editparams.ANIMATABLE_AUDIO`, look em `params.ANIMATABLE_KINDS` (todo `float`/cor já anima; um
+   `int` ou uma escolha precisaria entrar à mão). Nunca desmarque um ajuste que já anima: projetos gravados
+   têm chaves dele (a leitura descartaria a animação).
+2. **Leia o valor avaliado**: na imagem, use `Layer.values` (`compositor.clip_uniforms` já faz — nunca
+   `clip.values` direto); no look, `build_plan` recebe os valores do quadro pela receita. Se o ajuste muda o
+   **tamanho** da decodificação (como `escala`), use o maior valor das chaves (`keyframes.max_value`, como
+   `sequence.decode_size`). No som, o filtro precisa avaliar por bloco: siga `audiomix.volume_envelope`
+   (`keyframes.ffmpeg_expr` + `eval=frame`) — um filtro do ffmpeg sem expressão por tempo não anima.
+3. **Edições**: nada a fazer; as operações da montagem já mantêm a âncora. Uma operação **nova** que muda o
+   começo do clipe com a imagem parada chama `clip.shift_head(delta)`; uma que estica o tempo do clipe,
+   `clip.rescale_keys(razão)`.
+4. **Teste** em `tests/test_keyframes.py`: o quadro com a chave no meio é bit a bit o de um clipe (ou look)
+   fixo com o valor interpolado, e sem chaves nada muda.
 
 ### Mudar a montagem (timeline)
 
@@ -342,7 +389,30 @@ Toda regra de tempo fica em `timeline.Sequence` (sem Qt): `src_frame()` decide o
 `layers_at()` resolve camadas e transições, `audio_clips()` o que toca. A interface só chama os
 métodos do `ui/edit_model.TimelineModel`, que grava o histórico (instantâneos JSON) e emite
 `changed("structure" | "values" | "settings" | "*")`. A janela reage: `"values"` só remonta o quadro
-atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`.
+atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`. Uma operação nova que
+muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de animação no lugar
+(`Clip.shift_head`/`rescale_keys`, receita *Tornar um ajuste animável*) e ganhar um teste de âncora em
+`tests/test_keyframes.py`.
+
+### Novo tipo de clipe sem arquivo
+
+Título, cor sólida, degradê, contagem regressiva, legenda… (detalhes em `docs/ARQUITETURA.md`, seção 22.5):
+
+1. **Tipo**: use um id reservado de `timeline.SOURCE_KINDS` (`"cor"`, `"gerador"`, `"texto"`, `"legenda"`,
+   `"ajuste"`) ou acrescente um no fim (nunca renomeie). Parâmetros do gerador vão em `Source.data` (chaves
+   sem acento, só valores de JSON; `"nome"` é o nome mostrado). Ajustes que o usuário mexe no clipe
+   (posição, escala, opacidade, cor) continuam em `editparams.py` — o gerador não os aplica.
+2. **Gerador**: `sequence.RENDERERS[tipo] = fn(seq, clip, quadro_da_fonte, w, h, profundidade)` → h × w × 4
+   RGBA pré-multiplicado (uint8 em 8 bits, uint16 em 16). Puro e determinístico (regra 2), sem OpenGL e sem
+   widgets (roda na thread de quem lê, às vezes em duas); `QImage`/`QPainter` serve. Registre onde o recurso
+   é importado; se for opcional, o recurso é um módulo (regra dos módulos), mas o gerador fica registrado
+   mesmo desligado — a renderização nunca consulta `modules` e um projeto salvo sai igual.
+3. **Criar e inserir**: `src = timeline.Source.virtual(tipo, seq.width, seq.height, seq.fps_str, data={…})`;
+   na janela, `MainWindow.adopt_source(src)` (Mídia) e `model.insert_media(src, at=…, vtrack=…)` (ou arrastar
+   da Mídia). Nada mais muda: arquivos que faltam, relocalizar, som, forma de onda e o `.plc` já ignoram a
+   fonte sem arquivo, e o projeto vai para o formato 3 (recurso `"gerador"`).
+4. **Teste**: como `tests/test_virtual_sources.py` — `grab` = `SequenceReader` quadro a quadro, a saída em 8 e
+   16 bits e, na GPU, o clipe gerado sobre um arquivo igual na prévia e na exportação.
 
 ### Adicionar um negativo ou uma cópia do Laboratório
 
@@ -536,6 +606,10 @@ Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem 
 
 - Procura: `media.configure()` (pasta escolhida → `deps.ffmpeg_dir()` → `PATH` → pastas comuns).
   Depois de trocar o ffmpeg chame `media.configure()` (que limpa o cache de codificadores).
+- Transparência: não troque os filtros de `media._alpha_graph` sem rodar `tests/test_alpha.py`. O swscale
+  converte yuva420p de 8 bits errado para formatos com alfa (cores trocadas no VP9 com alfa); por isso a cor
+  vai por `rgb24` e o alfa à parte (`alphaextract`/`alphamerge`). O VP8/VP9 com alfa precisa do `libvpx` antes
+  do `-i` (`alpha_decoder`).
 - Download: `deps.SOURCES` (URL do pacote + URL do hash). Toda fonte nova precisa de hash publicado e
   conferido antes de instalar; nada de executar instaladores, nada de pedir administrador. A extração
   passa por `deps.extract_archive()` (recusa caminhos que saem da pasta).

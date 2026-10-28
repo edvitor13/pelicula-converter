@@ -131,7 +131,7 @@ def test_sequence_roundtrip_and_format(tmp_path):
     p.mode = "edicao"
     project.save(p, str(tmp_path / "ed.plc"))
     data = json.loads((tmp_path / "ed.plc").read_text(encoding="utf-8"))
-    assert data["formato"] == project.FORMAT == 2 and data["modo"] == "edicao"
+    assert data["formato"] == project.FORMAT_EDIT == 2 and data["modo"] == "edicao"
     assert data["edicao"]["fontes"][0]["relativo"] == "video.mp4"
     q = project.load(str(tmp_path / "ed.plc"))
     assert q.mode == "edicao"

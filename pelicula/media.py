@@ -40,9 +40,10 @@ def _candidates() -> list[Path]:
 
 def reset_cache() -> None:
     """Esquece codificadores e acelerações detectados (depois de trocar o ffmpeg)."""
-    global _ENCODERS, _HWACCELS
+    global _ENCODERS, _HWACCELS, _DECODERS
     _ENCODERS = None
     _HWACCELS = None
+    _DECODERS = None
     _WORKING.clear()
 
 
@@ -114,6 +115,7 @@ class MediaInfo:
     audio_codec: str
     container: str
     is_image: bool
+    has_alpha: bool = False  # imagem com transparência (`stream_has_alpha`; WebM com alpha_mode=1; PNG com paleta)
 
     @property
     def ext(self) -> str:
@@ -144,6 +146,56 @@ def pix_depth(pix: str) -> int:
         return 16
     m = re.search(r"(?:p|gray|gbrp|gbrap)(\d{1,2})(le|be)$", pix)
     return int(m.group(1)) if m else 8
+
+
+# Formatos de pixel do ffmpeg com canal alfa (prefixos): yuva420p…/yuva444p10le (ProRes 4444), gbrap*, rgba/bgra/
+# argb/abgr (e rgba64*), ya8/ya16 (cinza com alfa), ayuv/vuya. "pal8" (paleta) pode ter transparência, mas o
+# formato sozinho não diz: só o ffprobe do arquivo (`probe`) decide. "rgb0"/"0rgb"/"bgr0" não têm alfa.
+ALPHA_PIX_PREFIXES = ("yuva", "gbrap", "rgba", "bgra", "argb", "abgr", "ya8", "ya16", "ayuv", "vuya")
+
+
+def pix_has_alpha(pix: str) -> bool:
+    """O formato de pixel tem canal alfa? (yuva444p10le → True, yuv420p → False)"""
+    return (pix or "").lower().startswith(ALPHA_PIX_PREFIXES)
+
+
+def stream_has_alpha(vs: dict) -> bool:
+    """O fluxo de vídeo do ffprobe tem transparência: formato de pixel com alfa, ou VP8/VP9 no WebM com a
+    marca `alpha_mode=1` (o ffprobe mostra yuv420p porque o decodificador nativo descarta o alfa)."""
+    if pix_has_alpha(vs.get("pix_fmt", "")):
+        return True
+    tags = {str(k).lower(): str(v).strip() for k, v in (vs.get("tags") or {}).items()}
+    return vs.get("codec_name") in ("vp8", "vp9") and tags.get("alpha_mode") == "1"
+
+
+ALPHA_DECODERS = {"vp9": "libvpx-vp9", "vp8": "libvpx"}
+
+
+def alpha_decoder(codec: str) -> list[str]:
+    """Decodificador que entrega o alfa, para pôr antes do `-i`: o VP8/VP9 nativo do ffmpeg descarta o alfa do
+    WebM; o libvpx não. [] para os outros formatos (ou se esta compilação do ffmpeg não tem o libvpx)."""
+    name = ALPHA_DECODERS.get(codec or "")
+    return ["-c:v", name] if name and name in decoders() else []
+
+
+def decodes_alpha(info: MediaInfo) -> bool:
+    """A leitura entrega a transparência deste arquivo? (`has_alpha`; o VP8/VP9 só com o libvpx nesta compilação
+    do ffmpeg — sem ele o clipe sai opaco, como antes)."""
+    if not getattr(info, "has_alpha", False):
+        return False
+    return info.codec not in ALPHA_DECODERS or bool(alpha_decoder(info.codec))
+
+
+def _palette_alpha(path: str) -> bool:
+    """Imagem com paleta (pal8: PNG, GIF) tem transparência? O formato não diz: decodifica e olha o alfa."""
+    try:
+        res = subprocess.run([ffmpeg(), "-v", "error", "-nostdin", "-i", path, "-frames:v", "1", "-f", "rawvideo",
+                              "-pix_fmt", "rgba", "pipe:1"], capture_output=True, creationflags=NO_WINDOW,
+                             timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    alpha = res.stdout[3::4]
+    return res.returncode == 0 and bool(alpha) and min(alpha) < 255
 
 
 def _depth(pix: str, raw: str | None) -> int:
@@ -229,6 +281,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
     if is_image:
         frames, dur = 1, 0.0
     pix = vs.get("pix_fmt", "")
+    alpha = stream_has_alpha(vs) or (is_image and pix == "pal8" and _palette_alpha(path))
     return MediaInfo(
         path=path, width=w, height=h, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
         frames=max(frames, 1), duration=dur, pix_fmt=pix, bit_depth=_depth(pix, vs.get("bits_per_raw_sample")),
@@ -237,7 +290,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         color_space=vs.get("color_space", "") or "", color_range=vs.get("color_range", "") or "",
         color_transfer=vs.get("color_transfer", "") or "", color_primaries=vs.get("color_primaries", "") or "",
         has_audio=aus is not None, audio_codec=(aus or {}).get("codec_name", ""),
-        container=fmt.get("format_name", ""), is_image=is_image,
+        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha),
     )
 
 
@@ -394,23 +447,38 @@ class FrameReader:
 
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
+
+    `alpha` (pede a transparência; vale só se `decodes_alpha(info)`, senão saem os 3 canais de sempre): quadros
+    RGBA **pré-multiplicados** (h × w × 4, uint8 ou uint16). O ffmpeg entrega o alfa direto (*straight*); a cor
+    vira RGB com a matriz do arquivo no tamanho original, é multiplicada pelo alfa (`premultiply`) e só então
+    redimensionada — assim a borda não puxa a cor dos pixels transparentes (sem franja escura). O WebM VP8/VP9
+    usa o libvpx (`alpha_decoder`). Sem `alpha`, nada muda (3 canais, os mesmos bits). Veja `_alpha_graph`.
     """
 
     def __init__(self, info: MediaInfo, width: int, height: int, depth: int = 8, start_frame: int = 0,
                  max_frames: int | None = None, fps_out: str | None = None, hq: bool = False,
-                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None):
+                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
         perf = perf or Perf()
+        alpha = alpha and decodes_alpha(info)
         self.w, self.h, self.depth = width, height, depth
-        self.pix = "rgb24" if depth == 8 else "rgb48le"
-        self.dtype = np.uint8 if depth == 8 else np.uint16
-        self.frame_bytes = width * height * 3 * (1 if depth == 8 else 2)
+        self.channels = 4 if alpha else 3
+        # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
+        self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
+        if alpha:
+            self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
+        else:
+            self.pix = "rgb24" if depth == 8 else "rgb48le"
+        self.dtype = np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
+        self.frame_bytes = width * height * self.channels * (1 if self.dtype == np.uint8 else 2)
         args = [ffmpeg(), "-v", "error", "-nostdin", "-hide_banner"]
-        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image:
+        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha:
             args += ["-hwaccel", perf.hwaccel]
         if perf.threads > 0:
             args += ["-threads", str(perf.threads)]
         if not info.is_image and start_frame > 0:
             args += ["-ss", f"{max(0.0, (start_frame - 0.45) / info.fps):.6f}"]
+        if alpha:
+            args += alpha_decoder(info.codec)
         args += ["-i", info.path, "-map", "0:v:0", "-an", "-sn", "-dn"]
         flags = "lanczos+accurate_rnd+full_chroma_int" if hq else "bicubic+full_chroma_int"
         vf = []
@@ -419,9 +487,13 @@ class FrameReader:
             vf.append(f"crop={cw}:{ch}:{cx}:{cy}:exact=1")
         if fps_out:
             vf.append(f"fps={fps_out}")
-        vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
-                  f":in_range={_in_range(info)}:threads={max(0, perf.threads)}")
-        vf.append(f"format={self.pix}")
+        th = max(0, perf.threads)
+        if alpha:
+            vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
+        else:
+            vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
+                      f":in_range={_in_range(info)}:threads={th}")
+            vf.append(f"format={self.pix}")
         args += ["-vf", ",".join(vf)]
         if perf.threads > 0:
             args += ["-filter_threads", str(perf.threads)]
@@ -473,7 +545,8 @@ class FrameReader:
             if not n:
                 return None
             got += n
-        return np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, 3)
+        img = np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, self.channels)
+        return img.astype(np.uint16) * np.uint16(257) if self._widen else img
 
     def close(self) -> None:
         try:
@@ -492,14 +565,34 @@ class FrameReader:
                 pass
 
 
+def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: int, pix: str) -> str:
+    """Filtros da leitura com transparência: cor em RGB com a matriz do arquivo (no tamanho dele), alfa intacto,
+    pré-multiplicação e só então o tamanho pedido; sai em `pix` (`rgba` ou `rgba64le`).
+
+    Arquivo de 8 bits: a cor vai pelo mesmo caminho da leitura sem alfa (`rgb24`) e o alfa é copiado à parte
+    (`alphaextract`/`alphamerge`) — o swscale converte yuva420p de 8 bits errado para formatos com alfa (cores
+    trocadas no VP9 com alfa, conforme os filtros). Paleta (pal8) e cinza com alfa viram `rgba` antes (exato; o
+    `alphaextract` direto na paleta derruba o ffmpeg). Mais de 8 bits (ProRes 4444, yuva…p10/12/16): direto em
+    `gbrap16le`, que converte certo e guarda a precisão do arquivo."""
+    color = f"scale=flags={flags}:in_color_matrix={_in_matrix(info)}:in_range={_in_range(info)}:threads={threads}"
+    resize = f"scale={width}:{height}:flags={flags}:threads={threads}"
+    if info.bit_depth > 8:
+        return f"{color},format=gbrap16le,premultiply=inplace=1,{resize},format={pix}"
+    decoded = "yuva420p" if info.codec in ALPHA_DECODERS else (info.pix_fmt or "")  # o libvpx entrega yuva420p
+    pre = "" if decoded.startswith(("yuva", "gbrap", "rgba", "bgra", "argb", "abgr")) else "format=rgba,"
+    return (f"{pre}split[c][a];[c]{color},format=rgb24,format=rgba[cc];[a]alphaextract,format=gray[aa];"
+            f"[cc][aa]alphamerge,premultiply=inplace=1,{resize},format={pix}")
+
+
 def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False,
-               crop: tuple[int, int, int, int] | None = None):
-    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop)
+               crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
+    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado, veja `FrameReader`)."""
+    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha)
     try:
         img = r.read()
         if img is None and frame > 0:
             r.close()
-            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop)
+            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha)
             img = r.read()
         if img is None:
             raise RuntimeError(r.error or _("Falha ao ler o quadro."))
@@ -510,6 +603,25 @@ def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int 
 
 _ENCODERS: set[str] | None = None
 _WORKING: dict[str, bool] = {}
+_DECODERS: set[str] | None = None
+
+
+def decoders() -> set[str]:
+    """Decodificadores de vídeo desta compilação do ffmpeg (para o libvpx do WebM com alfa)."""
+    global _DECODERS
+    if _DECODERS is None:
+        try:
+            res = subprocess.run([ffmpeg(), "-hide_banner", "-decoders"], capture_output=True, creationflags=NO_WINDOW)
+            lines = res.stdout.decode("utf-8", "replace").splitlines()
+        except OSError:
+            lines = []
+        names = set()
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2 and len(parts[0]) == 6 and parts[0][0] in "VAS" and parts[1] != "=":
+                names.add(parts[1])
+        _DECODERS = names
+    return _DECODERS
 
 
 def encoders() -> set[str]:

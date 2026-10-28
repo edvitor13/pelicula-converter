@@ -167,6 +167,20 @@ VIDEO = Schema(VIDEO_SECTIONS)
 AUDIO = Schema(AUDIO_SECTIONS)
 SCHEMAS = {"video": VIDEO, "audio": AUDIO}
 
+COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
+
+# Ajustes que aceitam chaves de animação (`keyframes.py`, `Clip.keys`): enquadramento e opacidade, todo ajuste
+# numérico de cor, luz, detalhe e efeitos (e as rodas) e o volume do som. Escolhas, liga/desliga, corte,
+# velocidade e transições ficam de fora. Receita "Tornar um ajuste animável" no AGENTS.md.
+ANIMATABLE_VIDEO = ("pos_x", "pos_y", "escala", "rotacao", "opacidade",
+                    *(p.key for s in VIDEO_SECTIONS if s.key in COLOR_SECTIONS for p in s.params
+                      if p.kind in ("float", "int", "wheel")))
+ANIMATABLE_AUDIO = ("volume",)
+for _schema, _keys in ((VIDEO, ANIMATABLE_VIDEO), (AUDIO, ANIMATABLE_AUDIO)):
+    for _k in _keys:
+        _schema.params[_k].animatable = True
+del _schema, _keys, _k
+
 # Ajustes rápidos do inspetor: valores que substituem os da seção de cor e luz (o resto fica).
 QUICK_LOOKS: list[tuple[str, str, dict[str, Any]]] = [
     ("vivo", N_("Mais vivo"), dict(contraste=0.15, vibracao=0.35, saturacao=0.05, clareza=0.15)),
@@ -179,9 +193,6 @@ QUICK_LOOKS: list[tuple[str, str, dict[str, Any]]] = [
 ]
 
 # Chaves zeradas por "Restaurar cor" (tudo que não é enquadramento, tempo nem transição).
-COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
-
-
 def color_keys() -> list[str]:
     return [p.key for s in VIDEO_SECTIONS if s.key in COLOR_SECTIONS for p in s.params]
 

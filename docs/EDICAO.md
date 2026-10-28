@@ -51,6 +51,13 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 Colocar um clipe por cima de outro na mesma faixa **substitui** a parte coberta (como em qualquer editor).
 Para sobrepor sem apagar, use outra faixa (V2).
 
+**Transparência**: vídeos e imagens com canal alfa — ProRes 4444 (como o recorte `_cutout.mov` do
+CorridorKey), PNG com transparência (inclusive com paleta) e WebM VP8/VP9 com alfa — deixam ver o que está
+nas faixas de baixo, ou a cor de fundo da sequência. A opacidade, o corte, as transições e os modos de
+mesclagem respeitam o recorte, e a borda continua limpa ao reduzir, girar ou ampliar. Aberto direto no modo
+Película, um arquivo assim sai sobre a cor de fundo da sequência (preto, se você não mudou). O vídeo
+exportado não tem transparência (sai sempre com a cor por baixo), e sequências de imagens ainda não entram.
+
 ### Mexer nos clipes
 
 | Ação | Como |

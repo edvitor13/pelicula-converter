@@ -24,7 +24,8 @@ from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, edi
                loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, timeline,
                updater)
 from ..i18n import N_, _
-from ..engine import Engine, lut_info
+from ..engine import Engine
+from ..frame import Recipe
 from . import icons, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
@@ -997,6 +998,7 @@ class MainWindow(QMainWindow):
         self.stop_play()
         if detect:
             self._detect_profile(info)
+            self.store.clear_keys()  # as chaves do look estão no tempo do arquivo anterior
         self.file_info = info
         self.cur = None
         self._media_label = label or Path(path).name
@@ -1104,20 +1106,37 @@ class MainWindow(QMainWindow):
         out = []
         for li in fl.layers:
             clip = seq.find(li.layer.clip.id)
-            if clip is not None:
-                out.append(sequence.LayerImage(dataclasses.replace(li.layer, clip=clip), li.image))
+            if clip is not None:  # com as chaves de animação do clipe atual avaliadas neste quadro
+                layer = dataclasses.replace(li.layer, clip=clip, values=seq.values_at(clip, fl.frame))
+                out.append(sequence.LayerImage(layer, li.image))
         return sequence.FrameLayers(fl.frame, out)
+
+    def frame_recipe(self, depth: int = 8, full: bool = False) -> Recipe:
+        """A receita do quadro da janela (`frame.Recipe`, a mesma da exportação): a prévia em 8 bits, no tamanho
+        reduzido e com o pontilhado do look; `depth=16, full=True` é a do "Salvar quadro" (tamanho do arquivo,
+        sem pontilhado e com o look que vai para a exportação). No modo Edição sem película, a prévia é só a
+        montagem (`values` None); em 8 bits o look "Original" da exportação devolve a mesma imagem."""
+        info = self.info
+        fps = info.fps if info is not None else 24.0
+        seq = self.model.seq if self.src_seq is not None else None
+        if full:
+            size = (info.width, info.height)
+            values = self._export_look()[0]
+        else:
+            size = self.preview_size() if info is not None else None
+            values = None if (self.mode == "edicao" and not self.edit_film) else self.store.values
+        return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
+                                 size=size, keys=self._export_keys())
 
     def _compose_current(self) -> bool:
         """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
         if self.cur_layers is None:
             return False
         live = self._live_layers(self.cur_layers)
-        w, h = self.preview_size()
+        recipe = self.frame_recipe()
         try:
-            img = self.engine.compose(live, self.model.seq, w, h, 8)
-            neutral = (self.engine.compose(live, self.model.seq, w, h, 8, neutral=True)
-                       if self.mode == "edicao" else None)
+            img = recipe.montage(self.engine, live)
+            neutral = recipe.montage(self.engine, live, neutral=True) if self.mode == "edicao" else None
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro ao montar o quadro: {erro}").format(erro=exc), 8000)
             return False
@@ -1190,7 +1209,7 @@ class MainWindow(QMainWindow):
             return False
         if self.mode == "edicao" or self.file_info is None:
             return True
-        return seq.is_trivial() != self.file_info.path
+        return seq.direct_file() != self.file_info.path  # arquivo com transparência: sempre pela montagem
 
     def _refresh_source(self, reset: bool = False) -> None:
         """Escolhe a fonte da prévia (arquivo ou montagem) e atualiza linha do tempo, rótulos e som."""
@@ -1381,6 +1400,9 @@ class MainWindow(QMainWindow):
         """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
         if path in self._peaks:
             return self._peaks[path]
+        src = self.model.seq.sources.get(path)
+        if src is not None and not src.is_file:
+            return None  # clipe sem arquivo: sem som
         if path not in self._peaks_pending:
             self._peaks_pending.add(path)
 
@@ -1412,11 +1434,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
                     nome=Path(path).name, erro=exc))
                 return None
-        if path not in self._sources:
-            self._sources[path] = src
+        return self.adopt_source(src)
+
+    def adopt_source(self, src: timeline.Source) -> timeline.Source:
+        """Põe uma fonte na Mídia (uma vez só), com miniatura: arquivo aberto ou clipe sem arquivo
+        (`timeline.Source.virtual`, desenhado por `sequence.RENDERERS`). Inserir na linha do tempo continua
+        sendo `model.insert_media(src, …)` (ou arrastar da Mídia)."""
+        if src.path not in self._sources:
+            self._sources[src.path] = src
             self.bin.add_source(src)
             self._request_thumb(src)
-        return src
+        return self._sources[src.path]
 
     def _request_thumb(self, src: timeline.Source) -> None:
         if not src.has_video:
@@ -1426,8 +1454,11 @@ class MainWindow(QMainWindow):
             try:
                 tw = 192
                 th = max(2, int(round(tw * src.height / max(1, src.width))))
-                f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
-                img = media.grab_frame(src.to_info(), f, tw, th, 8)
+                if not src.is_file:  # clipe sem arquivo: o próprio gerador, no começo
+                    img = sequence.source_thumbnail(src, tw, th)
+                else:
+                    f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
+                    img = media.grab_frame(src.to_info(), f, tw, th, 8)
             except Exception:  # noqa: BLE001
                 return
             self._mix_bridge.thumb.emit(src.path, qimage_from(img))
@@ -1441,7 +1472,7 @@ class MainWindow(QMainWindow):
             return
         ref = timeline.Sequence.for_source(src, with_media=False)
         self.model.set_settings(ref.width, ref.height, ref.fps_str)
-        if not src.is_image:
+        if not src.is_image and src.is_file:  # clipe sem arquivo não tem metadados de câmera
             self._detect_profile(src)
 
     def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0):
@@ -1561,7 +1592,8 @@ class MainWindow(QMainWindow):
         if self.cur is None:
             return
         h, w = self.cur.shape[:2]
-        if self.mode == "edicao" and not self.edit_film:
+        recipe = self.frame_recipe()
+        if recipe.values is None:
             # Só a edição: o quadro montado já é o resultado.
             self.viewer.set_images(self.cur_q, self.cur_neutral_q or self.cur_q)
             self.hist.set_image(self.cur)
@@ -1569,16 +1601,12 @@ class MainWindow(QMainWindow):
             self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
             self.st_render.setText("")
             return
-        if self._uploaded is not self.cur:
-            self.engine.set_input(self.cur)
-            self._uploaded = self.cur
+        upload = self._uploaded is not self.cur  # só os ajustes mudaram: a imagem já está na GPU
+        self._uploaded = self.cur
         v = self.store.values
-        info = lut_info(v["lut_arquivo"]) if v["lut_on"] and v["lut_arquivo"] else None
         t0 = time.perf_counter()
         try:
-            plan = look.build_plan(v, w, h, self.cur_frame, self.info.fps if self.info else 24.0, info,
-                                   legal=self._source_legal())
-            out = self.engine.render(plan, 8)
+            out = recipe.look(self.engine, self.cur, self.cur_frame, upload=upload)
         except Exception as exc:  # noqa: BLE001
             self.statusBar().showMessage(_("Erro na renderização: {erro}").format(erro=exc), 8000)
             return
@@ -1589,7 +1617,7 @@ class MainWindow(QMainWindow):
         self.edit_scopes.set_image(out)
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
-        if v["lut_on"] and v["lut_arquivo"] and info is None:
+        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None:
             self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
     def _render_thumbs(self) -> None:
@@ -1611,9 +1639,8 @@ class MainWindow(QMainWindow):
         images = {}
         for item in self._all_presets():
             v = presets.with_source(item["valores"], current)
-            info = lut_info(v["lut_arquivo"]) if v.get("lut_on") and v.get("lut_arquivo") else None
-            try:
-                out = self.thumb_engine.render(look.build_plan(v, tw, th, 3, 24.0, info, dither=False, legal=legal), 8)
+            try:  # a mesma receita do quadro, na imagem já enviada (quadro 3 a 24 quadros/s, sem pontilhado)
+                out = Recipe.for_source(v, 24.0, 8, legal=legal).look(self.thumb_engine, src, 3, upload=False)
             except Exception:  # noqa: BLE001
                 continue
             images[item["id"]] = qimage_from(out)
@@ -2206,7 +2233,7 @@ class MainWindow(QMainWindow):
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
                            perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
                            last_platform=str(self.settings.value("export_platform", "")),
-                           chapters=self._export_chapters())
+                           chapters=self._export_chapters(), look_keys=self._export_keys())
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2223,6 +2250,12 @@ class MainWindow(QMainWindow):
         if self.mode == "edicao" and not self.edit_film:
             return presets.builtin_values("original"), _("Sem película (só a edição)")
         return self.store.snapshot(), self.preset_name(self.preset_id)
+
+    def _export_keys(self) -> dict:
+        """As chaves de animação do look que vão com `_export_look` ({} no modo Edição sem película)."""
+        if self.mode == "edicao" and not self.edit_film:
+            return {}
+        return self.store.keys_json()
 
     def show_queue(self) -> None:
         if self.queue_dialog is None:
@@ -2272,21 +2305,7 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            w, h = self.info.width, self.info.height
-            if self.src_seq is not None:
-                fl = sequence.grab(self.src_seq, self.frame_idx, w, h, 16, hq=True)
-                img = self.engine.compose(self._live_layers(fl), self.model.seq, w, h, 16)
-            else:
-                img = media.grab_frame(self.info, self.frame_idx, w, h, 16, hq=True)
-            self._uploaded = None
-            v, _name = self._export_look()
-            if self.mode == "edicao" and not self.edit_film:
-                out = img
-            else:
-                self.engine.set_input(img)
-                info = lut_info(v["lut_arquivo"]) if v["lut_on"] else None
-                out = self.engine.render(look.build_plan(v, w, h, self.frame_idx, self.info.fps, info, dither=False,
-                                                         legal=self._source_legal()), 16)
+            out = self.still_frame(self.frame_idx)
             export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
         except Exception as exc:  # noqa: BLE001
             QApplication.restoreOverrideCursor()
@@ -2295,6 +2314,16 @@ class MainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self.render_now()
         self.statusBar().showMessage(_("Quadro salvo: {caminho}").format(caminho=path), 8000)
+
+    def still_frame(self, frame: int):
+        """O quadro `frame` em 16 bits no tamanho do arquivo, como sai na exportação ("Salvar quadro")."""
+        w, h = self.info.width, self.info.height
+        if self.src_seq is not None:
+            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
+        else:
+            img = media.grab_frame(self.info, frame, w, h, 16, hq=True)
+        self._uploaded = None
+        return self.frame_recipe(16, full=True).render(self.engine, img, frame)
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:
@@ -2310,7 +2339,7 @@ class MainWindow(QMainWindow):
     def _state(self) -> dict:
         seq = self._seq_json()
         return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
-                "preset": self.preset_id, "in": self.inp, "out": self.outp,
+                "keys": self.store.keys_json(), "preset": self.preset_id, "in": self.inp, "out": self.outp,
                 "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
     def is_dirty(self) -> bool:
@@ -2367,13 +2396,15 @@ class MainWindow(QMainWindow):
         if not backup:
             self.store.commit()
         seq = self._seq_json()
-        media_path = self.file_info.path if self.file_info else next(iter(self.model.seq.sources), "")
+        media_path = self.file_info.path if self.file_info else next(
+            (p for p, s in self.model.seq.sources.items() if s.is_file), "")
         return project.Project(
             media_path=media_path, values=self.store.snapshot(), preset_id=self.preset_id,
             frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
             preview=self.preview_q, export_quality=str(self.settings.value("export_quality", "")),
             name=Path(self.project_path).stem if self.project_path else "",
-            thumbnail_jpeg=b"" if backup else self._thumbnail(), sequence=seq, mode=self.mode)
+            thumbnail_jpeg=b"" if backup else self._thumbnail(), sequence=seq, mode=self.mode,
+            look_keys=self.store.keys_json())
 
     def save_project(self) -> bool:
         if self.info is None:
@@ -2468,7 +2499,7 @@ class MainWindow(QMainWindow):
             self.load_media(mediapath)
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
-        self.store.set_all(p.values)
+        self.store.set_all(p.values, keys=p.look_keys)
         self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
         self.preset_combo.blockSignals(False)
@@ -2496,8 +2527,8 @@ class MainWindow(QMainWindow):
         seq = timeline.Sequence.from_json(p.sequence)
         changed = False
         for path in list(seq.sources):
-            if os.path.exists(path):
-                continue
+            if not seq.sources[path].is_file or os.path.exists(path):
+                continue  # clipes sem arquivo não têm o que localizar
             r = QMessageBox.question(self, _("Abrir projeto"),
                                      _("Um arquivo da edição não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
                                      .format(caminho=path))
@@ -2528,7 +2559,7 @@ class MainWindow(QMainWindow):
             self._loading = False
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
-        self.store.set_all(p.values)
+        self.store.set_all(p.values, keys=p.look_keys)
         self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
         self.preset_combo.blockSignals(False)

@@ -7,6 +7,10 @@ Mesmas convenções de `shaders.py`: coordenadas de imagem com y para baixo (lin
   enquadramento e mistura com a tela anterior (`t_dst`, RGBA f4) segundo o modo de mesclagem.
   Com `u_cc_on = 0`, `u_det_on = 0`, opacidade 1 e enquadramento identidade (`u_exact = 1`), a
   saída é exatamente o pixel de entrada.
+  Transparência (`u_tex_alpha = 1`): a textura é RGBA **pré-multiplicada** (`sequence.LayerImage`); a
+  filtragem (bilinear e mipmaps) é feita assim, sem franja escura na borda. Depois de amostrar, a cor volta a
+  ser a do clipe (dividida pelo alfa), a cor e o detalhe do clipe agem nela e o alfa entra na cobertura,
+  junto com a opacidade, o corte e a transição; cada modo de mesclagem mistura com a tela por essa cobertura.
 - `OUT`: converte a tela (f4) para inteiros de 8 ou 16 bits (arredondamento exato) lidos de volta; com
   `u_offset` lê só um recorte da tela (exportação num quadro de outra proporção com "cortar", `fit.py`).
 
@@ -31,6 +35,7 @@ uniform vec2 u_px_per_uv;       // px da tela por unidade de uv (antisserrilhado
 uniform int u_exact;            // 1 = mapeamento identidade (texelFetch, saída bit a bit)
 uniform vec4 u_crop;            // esquerda, topo, direita, base (fração do clipe)
 uniform float u_alpha;          // opacidade final (clipe x transição)
+uniform int u_tex_alpha;        // 1 = textura RGBA pré-multiplicada (fonte com transparência)
 uniform int u_blend;            // 0 normal, 1 tela, 2 multiplicar, 3 sobrepor, 4 adicionar, 5 clarear, 6 escurecer
 uniform vec4 u_fade;            // cor e força do fade (surgir/sumir no preto ou branco)
 
@@ -65,8 +70,28 @@ uniform float u_fadeblk;        // desbotar
 
 const float HUES[8] = float[8](0.0, 30.0, 60.0, 120.0, 180.0, 225.0, 270.0, 315.0);
 
+// Cor do clipe sem a multiplicação pelo alfa (texturas com transparência); um pixel transparente fica preto.
+vec3 unpremul(vec4 s) {
+    if (u_tex_alpha == 0) return s.rgb;
+    return s.a > 0.0 ? s.rgb / s.a : vec3(0.0);
+}
+
 vec3 fetchClip(vec2 uv) {
-    return texture(t_clip, uv).rgb;
+    if (u_tex_alpha == 0) return texture(t_clip, uv).rgb;
+    return unpremul(texture(t_clip, uv));
+}
+
+vec3 fetchLod(vec2 uv, float lod) {
+    if (u_tex_alpha == 0) return textureLod(t_clip, uv, lod).rgb;
+    return unpremul(textureLod(t_clip, uv, lod));
+}
+
+// Alfa da textura com as pontas firmes: menos de 1/256 de 0 ou de 1 vira 0 ou 1. As conversões de formato do
+// ffmpeg deixam o "opaco" em 0,996 a 0,9998 e o "transparente" em até 0,002 (e o ProRes 4444 gravado pelo
+// ffmpeg guarda o opaco como 4083/4095); sem isso o fundo vazaria ~0,3% onde o clipe é opaco.
+float clipAlpha(float a) {
+    const float E = 1.0 / 256.0;
+    return clamp((a - E) / (1.0 - 2.0 * E), 0.0, 1.0);
 }
 
 vec3 rgb2hsv(vec3 c) {
@@ -120,16 +145,28 @@ vec3 detail(vec2 uv, vec3 c) {
         // Desfoque gaussiano aproximado: anéis de amostras no nível de mipmap do raio.
         float lod = max(0.0, log2(u_blur / 3.0));
         vec2 r = u_blur / u_clip_px;
-        vec3 acc = textureLod(t_clip, uv, lod).rgb * 0.2;
-        float ws = 0.2;
-        for (int k = 0; k < 12; k++) {
-            float a = float(k) * 0.5235988 + (k >= 6 ? 0.2617994 : 0.0);
-            float rr = k < 6 ? 0.45 : 0.95;
-            float w = k < 6 ? 0.1 : 0.0333;
-            acc += textureLod(t_clip, uv + vec2(cos(a), sin(a)) * r * rr, lod).rgb * w;
-            ws += w;
+        if (u_tex_alpha == 0) {
+            vec3 acc = textureLod(t_clip, uv, lod).rgb * 0.2;
+            float ws = 0.2;
+            for (int k = 0; k < 12; k++) {
+                float a = float(k) * 0.5235988 + (k >= 6 ? 0.2617994 : 0.0);
+                float rr = k < 6 ? 0.45 : 0.95;
+                float w = k < 6 ? 0.1 : 0.0333;
+                acc += textureLod(t_clip, uv + vec2(cos(a), sin(a)) * r * rr, lod).rgb * w;
+                ws += w;
+            }
+            c = acc / ws;
+        } else {
+            // Pré-multiplicado: a média ignora a cor dos pixels transparentes (sem escurecer a borda).
+            vec4 acc = textureLod(t_clip, uv, lod) * 0.2;
+            for (int k = 0; k < 12; k++) {
+                float a = float(k) * 0.5235988 + (k >= 6 ? 0.2617994 : 0.0);
+                float rr = k < 6 ? 0.45 : 0.95;
+                float w = k < 6 ? 0.1 : 0.0333;
+                acc += textureLod(t_clip, uv + vec2(cos(a), sin(a)) * r * rr, lod) * w;
+            }
+            if (acc.a > 0.0) c = acc.rgb / acc.a;
         }
-        c = acc / ws;
     }
     if (u_sharp > 0.0) {
         vec3 b = (fetchClip(uv + vec2(tx.x, 0.0)) + fetchClip(uv - vec2(tx.x, 0.0))
@@ -139,11 +176,11 @@ vec3 detail(vec2 uv, vec3 c) {
     if (u_clarity != 0.0) {
         // Contraste local: diferença para uma versão bem desfocada (mipmap), mais forte nos tons médios.
         vec2 r = exp2(u_clarity_lod) / u_clip_px;
-        vec3 base = textureLod(t_clip, uv, u_clarity_lod).rgb * 0.4
-                  + (textureLod(t_clip, uv + vec2(r.x, 0.0), u_clarity_lod).rgb
-                  + textureLod(t_clip, uv - vec2(r.x, 0.0), u_clarity_lod).rgb
-                  + textureLod(t_clip, uv + vec2(0.0, r.y), u_clarity_lod).rgb
-                  + textureLod(t_clip, uv - vec2(0.0, r.y), u_clarity_lod).rgb) * 0.15;
+        vec3 base = fetchLod(uv, u_clarity_lod) * 0.4
+                  + (fetchLod(uv + vec2(r.x, 0.0), u_clarity_lod)
+                  + fetchLod(uv - vec2(r.x, 0.0), u_clarity_lod)
+                  + fetchLod(uv + vec2(0.0, r.y), u_clarity_lod)
+                  + fetchLod(uv - vec2(0.0, r.y), u_clarity_lod)) * 0.15;
         float L = dot(c, W709);
         float mid = 1.0 - pow(abs(clamp(L, 0.0, 1.0) * 2.0 - 1.0), 2.0);
         c = c + (dot(c, W709) - dot(base, W709)) * u_clarity * 0.9 * mid;
@@ -259,8 +296,18 @@ void main() {
         return;
     }
     vec3 c;
-    if (u_exact == 1) c = texelFetch(t_clip, ip, 0).rgb;
-    else c = texture(t_clip, uv).rgb;
+    if (u_tex_alpha == 0) {
+        if (u_exact == 1) c = texelFetch(t_clip, ip, 0).rgb;
+        else c = texture(t_clip, uv).rgb;
+    } else {
+        vec4 s = u_exact == 1 ? texelFetch(t_clip, ip, 0) : texture(t_clip, uv);
+        a *= clipAlpha(s.a);
+        if (a <= 0.0) {
+            f_out = dst;
+            return;
+        }
+        c = s.rgb / max(s.a, 1e-6);
+    }
     if (u_det_on == 1) c = detail(uv, c);
     if (u_cc_on == 1) {
         c = colorCorrect(c);

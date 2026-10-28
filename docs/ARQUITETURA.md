@@ -27,6 +27,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 19. [Notificações do sistema (`notify.py`)](#19-notificações-do-sistema-notifypy)
 20. [Recuperação automática e relatórios de erro (`recovery.py`, `crashlog.py`)](#20-recuperação-automática-e-relatórios-de-erro-recoverypy-crashlogpy)
 21. [Componentes de IA: receitas com o uv e o CorridorKey](#21-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
+22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
 
 ---
 
@@ -95,10 +96,12 @@ Três ideias guiam o projeto:
 | `pelicula/look.py` | Tabelas de bitolas (`GAUGES`), cópias (`PRINTS`), scan (`SCAN_FORMATS`), filtros P&B, viragens, primárias e matrizes de gamut; Laboratório (negativos, cópias, processos, calibração `lab_paths`); `build_plan()` → `Plan`. |
 | `pelicula/shaders.py` | GLSL: `VERT`, `COMMON` (curvas, transferências log, look, cópia, LUT), `BASE`, `EXTRACT`, `BLUR`, `NOISE`, `FINAL`, `BAKE`. |
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
+| `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
+| `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
 | `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
-| `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
-| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `FramePipeline`/`preview_frame()` (o mesmo caminho na exportação e na prévia dela), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
+| `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels; transparência (`has_alpha`, `decodes_alpha`, leitura RGBA pré-multiplicada, seção 22.4). |
+| `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `frame_pipeline()`/`preview_frame()` (a receita de `frame.py` com os ajustes da exportação), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
 | `pelicula/platforms.py` | Exportação por plataforma: `PLATFORMS` (YouTube, Instagram, TikTok, WhatsApp, Discord…, com fonte oficial), `settings_for()` → `ExportSettings`, `limits_text()`, `warnings()`, áreas seguras (`SAFE_AREAS`). Sem Qt (seção 9.5). |
 | `pelicula/fit.py` | Encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): `plan()` → `Fit`, a geometria usada pela exportação e pela prévia dela (seção 9.6). |
 | `pelicula/loudnorm.py` | Volume alvo da exportação: medida (`measure`) e filtro da 2ª passada (`filter_for`) do `loudnorm` do ffmpeg (seção 9.8). |
@@ -118,7 +121,7 @@ Três ideias guiam o projeto:
 | `pelicula/loudness.py` | Loudness ITU-R BS.1770-4 / EBU R128 em numpy: ponderação K, momentânea, curto prazo, integrada (portões), LRA, pico e true peak (`LoudnessMeter`, `measure`). Sem Qt. |
 | `pelicula/editparams.py` | Esquemas dos ajustes por clipe (`VIDEO`, `AUDIO`), cores do HSL, ajustes rápidos. |
 | `pelicula/compositor.py` | Ajustes do clipe → uniforms do `CLIP` (`clip_uniforms`), enquadramento (`fit_box`, `transform`), `auto_adjust`. |
-| `pelicula/editshaders.py` | GLSL do modo Edição: `CLIP` (uma camada sobre a tela) e `OUT` (tela → 8/16 bits inteiros). |
+| `pelicula/editshaders.py` | GLSL do modo Edição: `CLIP` (uma camada sobre a tela; com `u_tex_alpha`, textura RGBA pré-multiplicada) e `OUT` (tela → 8/16 bits inteiros). |
 | `pelicula/resolve.py` | Plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor e os de cada preset), os LUTs e o `LEIA-ME`; instala na pasta de LUTs do Resolve. |
 | `pelicula/modules.py` | Módulos (recursos que o usuário liga e desliga): `MODULES`, `GROUPS`, `PROFILES`, `is_enabled()`, `apply_profile()`, `current_profile()`, `used_by()`. Sem Qt (veja a seção 16). |
 | `pelicula/ui/settings_dialog.py` / `ui/pages/` | Janela de Configurações: páginas numa barra lateral (`Page(dialog)` por arquivo); `pages/recursos.py` liga e desliga os módulos. |
@@ -131,7 +134,7 @@ Três ideias guiam o projeto:
 | `pelicula/ui/scopes.py` | Medidores: histograma, forma de onda, parada RGB e vetorscópio. |
 | `pelicula/ui/sequence_dialog.py` / `resolve_dialog.py` | Resolução e fps da sequência; instalação do plugin do DaVinci. |
 | `pelicula/ui/corridorkey_dialog.py` | Janela não modal "Recorte por IA (CorridorKey)": arquivo, opções e o trabalho GPU na fila (seção 21). |
-| `pelicula/sequence.py` | Quadros da sequência: `grab` (acesso direto), `SequenceReader` (em ordem, com pré-abertura), `media_info`. |
+| `pelicula/sequence.py` | Quadros da sequência: `grab` (acesso direto), `SequenceReader` (em ordem, com pré-abertura), `media_info`; geradores dos clipes sem arquivo (`RENDERERS`, `render_source`, seção 22.5). |
 | `pelicula/audiomix.py` | Mixagem do som da sequência com o ffmpeg (`render_mix`), fades nas emendas e transição de som, chave da prévia (`mix_key`), forma de onda (`peaks`), som do arquivo para o medidor (`decode_wav`, `WavReader`). |
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
 | `pelicula/ui/store.py` | `ParamStore`: valores atuais, sinal `changed`, desfazer/refazer (agrupado por 400 ms, até 300 passos). |
@@ -799,13 +802,15 @@ flowchart LR
   engasgarem. Com `fps_out`, o quadro i da saída é `start + floor(i · fps_seq / fps_out)`.
 - O leitor devolve só imagens (`FrameLayers`); a montagem é feita na thread da GPU.
 - `media.probe_source()` abre vídeos, imagens e arquivos só de som (`media.AUDIO_EXT`).
+- Fontes com transparência (`Source.has_alpha`) leem RGBA pré-multiplicado (4 canais); as outras, RGB como
+  sempre (seção 22.4).
 
 ### 13.3 Montagem na GPU (`compositor.py`, `editshaders.py`, `Engine.compose`)
 
 | Passo | Como |
 |---|---|
 | Tela | Dois alvos RGBA f4 (`canvas_a`/`canvas_b`) alternados; começa com a cor de fundo da sequência. |
-| Camada | `CLIP` lê o clipe (`t_clip`) e a tela anterior (`t_dst`), aplica detalhe → cor → vinheta/desbotar → fade e mistura (normal, tela, multiplicar, sobrepor, adicionar, clarear, escurecer) com a opacidade. |
+| Camada | `CLIP` lê o clipe (`t_clip`) e a tela anterior (`t_dst`), aplica detalhe → cor → vinheta/desbotar → fade e mistura (normal, tela, multiplicar, sobrepor, adicionar, clarear, escurecer) com a opacidade (vezes o alfa do clipe, se ele tem transparência: seção 22.4). |
 | Enquadramento | `u_xf` (mat3) leva o pixel da tela ao uv do clipe: caixa do encaixe, escala, rotação (positivo = horário), posição (fração da tela, y para baixo) e espelhos. A borda do corte tem antisserrilhado analítico (distância em px). |
 | Exatidão | Clipe neutro com o tamanho da tela usa `texelFetch` (`u_exact`) e a saída `OUT` arredonda para inteiros (`u1`/`u2`): o resultado é **bit a bit** o arquivo, em 8 e 16 bits. |
 | Cor | Exposição e balanço de branco em luz (código^2,2); tons por canal (pontos preto/branco, realces/sombras, curva de 4 faixas, brilho, contraste em S); levantar/gama/ganho das rodas; saturação, vibração, matiz e HSL de 8 faixas. |
@@ -863,8 +868,8 @@ de onda (com cache por arquivo).
   que já valia no começo do trecho passa a começar em 0) e o apaga no fim; `build_encoder_cmd(...,
   chapters_path=…)` põe `-f ffmetadata -i <arquivo>` antes do primeiro `-map` e `-map_chapters <n>` no fim.
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
-  como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
-  continuam `1` e abrem nas versões antigas.
+  como a mídia principal) e o modo em `"modo"`. O formato gravado é o menor que o projeto precisa: `1` sem
+  sequência, `2` com sequência, `3` com algum recurso da 1.5 (seção 22.2).
 - Terminal: `exportar`/`quadro` de um `.plc` com edição renderizam a montagem (`cli.project_sequence`); o
   comando `resolve` (`davinci`) instala ou grava o plugin do DaVinci Resolve.
 
@@ -1469,3 +1474,268 @@ hash errado, cancelar, instalação inteira e troca de pasta), `test_corridorkey
 verdade), `corridorkey_ui_cases.py` e casos em `componentes_ui_cases.py`/`modules_ui_cases.py`. O teste
 de ponta a ponta de verdade (`test_corridorkey_real.py`, ~7,6 GB) só roda com
 `PELICULA_TESTE_CORRIDORKEY=1` e instala em `PELICULA_TESTE_CORRIDORKEY_DIR`.
+
+## 22. Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo
+
+### 22.1 A receita única do quadro (`frame.py`)
+
+Todo lugar que mostra ou grava um quadro usa `frame.Recipe`; ninguém monta o quadro à mão:
+
+```
+entrada (imagem h × w × 3 ou sequence.FrameLayers)
+  → Recipe.montage      Engine.compose no tamanho da receita (neutral = sem a cor dos clipes; recorte do encaixe)
+  → Recipe.look_values  ajustes do look com as chaves avaliadas no quadro (22.3); sem chaves, os próprios ajustes
+  → Recipe.plan         look.build_plan(..., legal=, dither, LUT, net_grain)
+  → Recipe.look         Engine.render, ou Engine.render_fit quando o encaixe compõe o quadro
+```
+
+| Campo | O que é |
+|---|---|
+| `values` | ajustes do look; `None` = só a montagem (modo Edição sem película, na prévia) |
+| `fps` / `src_fps` | fps da saída (o tempo do look é `index / fps`) e da fonte (as chaves do look estão nos quadros da fonte) |
+| `depth`, `dither` | 8 ou 16 bits; pontilhado só em 8 bits |
+| `legal`, `lut` | faixa da fonte (`media.legal_range`/`sequence.legal_range`) e `engine.lut_info` do LUT ligado |
+| `seq`, `fit`, `size` | a montagem; o encaixe da exportação (`fit.Fit`); sem encaixe, o tamanho da montagem (a prévia reduzida) |
+| `net_grain`, `keys` | "Grão para redes"; chaves de animação do look |
+
+Quem chama e com quais campos:
+
+| Quem | Como monta a receita | Campos que mudam |
+|---|---|---|
+| prévia da janela (Película e Edição) | `MainWindow.frame_recipe()` | tamanho da prévia, 8 bits, pontilhado do look; decodifica sem `hq` (rápido) e reaproveita o envio da imagem enquanto só os ajustes mudam (`look(upload=False)`) |
+| miniaturas dos presets | `Recipe.for_source(v, 24, 8)` | quadro 3 a 24 quadros/s, sem pontilhado |
+| "Salvar quadro" | `MainWindow.frame_recipe(16, full=True)` → `still_frame()` | tamanho do arquivo, 16 bits, look da exportação (`_export_look`) |
+| exportação, medição de velocidade, `pelicula-cli exportar` | `export.frame_pipeline()` em `_encode` | tamanho, profundidade e fps da saída, encaixe |
+| prévia da janela de exportação | `export.preview_frame()` | o mesmo de `_encode`, reduzido por `scale` |
+| `pelicula-cli quadro` | `Recipe.for_source(values, fps, 16, size=original)` | tamanho do arquivo, 16 bits |
+
+Com os mesmos campos o quadro é o mesmo bit a bit: `tests/test_frame.py` exporta em FFV1 16 bits e confere a
+prévia da exportação, a receita aplicada à mão e `pelicula-cli quadro` (um arquivo e uma montagem);
+`fundacao_ui_cases.py` confere "Salvar quadro" da janela contra a exportação nos modos Película e Edição (com e
+sem película). O "Salvar quadro" do modo Edição sem película passou a usar o look "Original", como a exportação
+(antes gravava a montagem crua; em 16 bits o "Original" difere da montagem em até ~70/65535). Em 8 bits sem
+pontilhado o "Original" devolve a mesma imagem, por isso a prévia sem película mostra a montagem direto.
+
+Armadilha: o JSON da montagem grava `entrada` (início no arquivo) com 6 casas. Um clipe cortado em 8/24 s volta
+como 0,333333 s e o primeiro quadro de origem dele é o 7, não o 8. A prévia, a exportação, os projetos e a fila
+usam sempre uma cópia por JSON (`Sequence.copy()`), então concordam entre si; não compare uma montagem "viva"
+com a exportação dela (a exportação copia). Mudar isso mudaria quadros de projetos antigos.
+
+### 22.2 Formato 3 do `.plc` e migração (`project.py`, `timeline.py`)
+
+O app **lê** até `project.FORMAT` = 3 e **grava o menor formato** que o projeto precisa
+(`project.needed_format`), para o arquivo abrir nas versões antigas sempre que der:
+
+| `"formato"` | Quando | Quem abre |
+|---|---|---|
+| 1 | só o arquivo inteiro, sem montagem | todas as versões |
+| 2 | com o bloco `"edicao"` (montagem) e nada da 1.5 | 1.3 em diante |
+| 3 | usa algum recurso da 1.5, listado em `"recursos"` (ex.: `["alfa", "chaves"]`) | 1.5 em diante |
+
+Os recursos vêm de dois registros, cada um `id ASCII → teste`:
+
+- `timeline.FEATURES` (da montagem; `Sequence.features()`): `"alfa"` (alguma fonte usada com transparência),
+  `"gerador"` (alguma fonte que não é arquivo, seção 22.5), `"chaves"` (algum clipe com chaves de animação,
+  seção 22.3);
+- `project.FEATURES_V3` (do projeto; `Project.features()` junta os dois): `"chaves_look"` (chaves de animação
+  do look, seção 22.3).
+
+Uma frente nova (texto, legendas, gerador…) acrescenta **uma linha** num desses registros — por exemplo
+`timeline.FEATURES["legendas"] = lambda seq: any(s.kind == "legenda" for s in seq.used_sources())` — e grava o
+campo dela no JSON **só quando usado**. Com isso, um projeto que não usa nada novo continua no formato 1 ou 2
+(e a 1.4 abre), e um que usa vai para o 3 e a 1.4 recusa com "O projeto foi salvo por uma versão mais nova do
+app" em vez de abrir sem o recurso. O bloco `"edicao"` tem o próprio `"formato"` (`timeline.FORMAT` = 2 quando a
+montagem usa um recurso; `FORMAT_BASE` = 1 sem nada novo), conferido por `Sequence.from_json` (`FormatError`
+quando é mais novo; o projeto transforma em `ProjectError`) — vale também para a fila de exportação guardada
+pela recuperação, que leva só a montagem.
+
+**Abrir um formato antigo** passa por passos puros (recebem e devolvem um dicionário novo), um por formato:
+
+| Passo | O que faz |
+|---|---|
+| `project._v1_to_v2` | modo válido (`"pelicula"` quando falta, como nos projetos até a 1.2); bloco `"edicao"` quebrado sai |
+| `project._v2_to_v3` | o bloco `"edicao"` vai para o formato atual (`timeline.migrate`); `"recursos"` começa vazio |
+| `timeline._seq_v1_to_v2` | cada fonte ganha `"tipo": "arquivo"` e `"alfa"` deduzido do `pix_fmt` gravado (`media.pix_has_alpha`; a 1.4 não guardava) |
+
+`project.migrate`/`timeline.migrate` aplicam os passos do formato do arquivo até o atual. Os projetos gravados
+pela 1.4.0 em `tests/data/projetos_1_4/` (um simples e uma montagem com cortes, transições, velocidade, quadro
+congelado, imagem, fades e transição de som, marcadores e volume de faixa) e o que a 1.4 fez ao abri-los
+(`referencia.json`: valores, camadas e uniforms de cada quadro, planos do look, grafo do som e JSON da montagem)
+são conferidos por `tests/test_project_migration.py`. O único efeito visível da migração em projetos antigos é
+o de propósito: uma fonte com alfa (ProRes 4444, PNG com transparência…) passa a ser composta com a
+transparência (seção 22.4); em 1.4 ela cobria o fundo com preto.
+
+A cópia da recuperação automática guarda o JSON do projeto dentro do envelope dela (`recovery.FORMAT` continua
+1): o formato do projeto vai junto e a leitura passa pela mesma migração.
+
+### 22.3 Chaves de animação (`keyframes.py`)
+
+Uma **chave** é `(tempo, valor, curva)` (`keyframes.Key`). Entre duas chaves o valor é interpolado com a curva da
+chave **da esquerda**; antes da primeira e depois da última vale a ponta. São exatamente quatro curvas (ids ASCII
+gravados nos projetos, nunca renomear): `linear`, `suavizar_entrada` (s²), `suavizar_saida` (1 − (1 − s)²) e
+`suavizar` (3s² − 2s³). Números, cores `[r, g, b]` e rodas `[x, y]` interpolam componente a componente; escolhas
+e liga/desliga mudam de degrau (não precisamos de uma curva "constante").
+
+**Quem anima** é marcado no esquema (`Param.animatable`, padrão `False`):
+
+| Esquema | Ajustes animáveis |
+|---|---|
+| clipe de vídeo (`editparams.ANIMATABLE_VIDEO`) | `pos_x`, `pos_y`, `escala`, `rotacao`, `opacidade` e todo ajuste numérico ou roda das seções de cor (`COLOR_SECTIONS`: luz, cor, rodas, curva, HSL, detalhe, efeitos) |
+| clipe de som (`editparams.ANIMATABLE_AUDIO`) | `volume` |
+| look (`params.ANIMATABLE_KINDS`) | todo `float` e toda cor; escolhas (bitola, negativo…), liga/desliga, inteiros (sementes, eixos) e arquivos não |
+
+**JSON** (compacto, limpo pelo esquema na leitura, `keyframes.clean_keys`): `{"ajuste": [[tempo, valor],
+[tempo, valor, "curva"], …]}` — a curva só aparece quando não é `linear`, tempos inteiros saem inteiros, valores
+fora da faixa são limitados, entradas inválidas e ajustes que não animam são descartados e tempos repetidos ficam
+com a última chave. No clipe: `"chaves"` e `"chaves_ref"` (o `key_off`, só quando não é 0); no projeto, `"chaves"`
+no topo (look). Os dois só aparecem quando há chaves (registros `"chaves"` e `"chaves_look"`, seção 22.2).
+
+**Âncora das chaves do clipe**: tempo do clipe `τ = t − clip.start + clip.key_off`, em quadros da sequência
+(`Sequence.clip_time`/`seq_time`). Como `start` e `key_off` são inteiros, as edições comuns mudam τ só por soma de
+inteiros e a avaliação continua exata:
+
+| Edição | O que acontece com as chaves | Por quê |
+|---|---|---|
+| mover (`move`, `close_gaps`, apagar com ripple) | nada | τ anda com `start`: a animação vai junto |
+| aparar o começo (`trim_start`, corte da cabeça em `_clear_range`) | `key_off += delta` (`Clip.shift_head`) | a imagem fica no mesmo quadro da sequência; a animação também |
+| aparar o fim (`trim_end`) | nada | |
+| dividir (`_cut`/`split`, sobrescrever no meio) | as duas metades levam as chaves; a da direita com `key_off + (t − start)` | cada quadro avalia exatamente como antes |
+| velocidade (`set_speed`, e `set_values` quando muda a velocidade) | `τ' = (τ_chave − key_off) × v_antiga / v_nova`, `key_off = 0` (`Clip.rescale_keys`) | a animação acompanha a imagem (o mesmo instante do arquivo tem o mesmo valor) |
+| fps da sequência (`TimelineModel.set_settings`) | `rescale_keys(fps_novo / fps_antigo)` | o tempo em segundos fica |
+| relocalizar (`relink`), apagar | nada (as chaves vão com o clipe) | |
+| copiar/colar a cor (`copy_values`/`paste_values`) | as chaves das seções de cor vão presas ao começo do clipe (`local_keys`/`paste_keys`); colar sem animação tira a da cor do destino | |
+| desfazer/refazer | o histórico guarda o JSON da sequência, com as chaves | |
+
+Quadro congelado: τ continua andando (a imagem para; a animação, não). Uma operação nova que muda o começo de um
+clipe com a imagem parada no lugar chama `shift_head(delta)`; uma que estica o tempo do clipe chama
+`rescale_keys(ratio)`.
+
+**Avaliação, num lugar só**:
+
+- imagem: `Sequence.values_at(clip, t)` (sem chaves devolve o próprio `clip.values`) → `Layer.values`, preenchido
+  por `layers_at` (também na cauda do "dissolver") e lido por `compositor.clip_uniforms`/`transform`/`fit_box`/
+  `is_identity`; a prévia refaz `Layer.values` com o clipe atual (`MainWindow._live_layers`);
+- som: `audiomix._chain` troca `volume=XdB` por `volume='pow(10,(EXPR)/20)':eval=frame`, com `EXPR =
+  keyframes.ffmpeg_expr(chaves, τ)` (a mesma conta de `value_at`, escrita em `if(lt(…))` aninhados) e
+  `τ = (t − pre) × fps + key_off` (`t` é o tempo da cadeia do clipe, que começa `pre` segundos antes por causa da
+  transição de som); o volume da faixa soma em dB. A prévia e a exportação usam o mesmo grafo
+  (`build_graph`), e `mix_key` muda com as chaves (o JSON do clipe as inclui). `eval=frame` avalia a cada bloco de
+  som (~21 ms a 48 kHz);
+- look: `keyframes.look_values_at(values, keys, quadro)`, chamado por `frame.Recipe.look_values(index)` com o
+  quadro da fonte `index × src_fps / fps` (com troca de fps na exportação, o quadro da saída volta para o tempo da
+  fonte). As chaves do look estão em quadros do arquivo (modo Película) ou da montagem (modo Edição com película).
+
+`sequence.decode_size` decodifica o clipe na **maior** escala das chaves (`keyframes.max_value`): o tamanho não
+muda no meio do clipe.
+
+**Neutralidade**: sem chaves nada muda — `values_at` devolve o mesmo dicionário, o grafo do som é o mesmo texto,
+o JSON é o mesmo e os quadros são os mesmos bit a bit (`tests/test_keyframes.py`, `test_project_migration.py`).
+
+**Onde ficam e quem chama (sem interface ainda)**: as chaves do look vivem em `ParamStore.keys` (o mesmo passo de
+desfazer guarda valores e chaves), vão para `Project.look_keys`, `ExportJob.look_keys` (`"chaves"` na fila
+guardada), `export.frame_pipeline/preview_frame/measure_speed(..., keys=)`, a janela de exportação
+(`look_keys=`) e a linha de comando (`cli.look_keys`: um `--preset` tira a animação; um `--set` fixa o ajuste dado).
+Abrir outro arquivo (não um projeto) tira as chaves do look (estavam no tempo do arquivo anterior). A frente da
+interface (losangos na linha do tempo, botão de chave no inspetor) só desenha e chama:
+
+| Onde | API (tempos em quadros da sequência/do arquivo; cada mudança é um passo do desfazer) |
+|---|---|
+| `ui/edit_model.TimelineModel` | `add_key(cid, ajuste, quadro, valor=None, curva="linear")` (valor None = o valor que o ajuste tem ali; mesmo quadro troca a chave), `move_key(cid, ajuste, de, para)`, `remove_key(cid, ajuste, quadro)`, `clear_keys(cid, ajuste=None)`, `keys_of(cid, ajuste)` → `[(quadro, valor, curva)]`, `value_at(cid, ajuste, quadro)`; emitem `changed("values")` |
+| `ui/store.ParamStore` (look) | `add_key(ajuste, quadro, valor=None, curva)`, `move_key`, `remove_key`, `clear_keys`, `keys_of`, `value_at`, `values_at(quadro)`, `keys_json()`, `set_all(valores, keys=…)`; emitem `changed(ajuste)` |
+| `timeline.Sequence` | as mesmas operações sem histórico (`set_key`, `move_key`, `remove_key`, `clear_keys`, `keys_of`, `values_at`, `local_keys`, `paste_keys`) |
+
+Enquanto um ajuste tem chaves, o valor fixo dele (o do inspetor) não aparece; a frente da interface decide se
+mexer no controle cria ou troca a chave do quadro atual.
+
+### 22.4 Transparência (canal alfa)
+
+O defeito que motivou: o `_cutout.mov` do CorridorKey (ProRes 4444 com alfa) aparecia sobre fundo **preto** — o
+alfa era jogado fora na decodificação (`rgb24`/`rgb48le`). Agora um clipe com transparência deixa ver as faixas
+de baixo (ou o fundo da sequência), com opacidade, corte, transições e todos os modos de mesclagem.
+
+**Detecção** (`media.stream_has_alpha`, guardada em `MediaInfo.has_alpha` e `Source.has_alpha`, `"alfa"` no
+`.plc`, recurso `"alfa"` do formato 3): formato de pixel com alfa (`yuva*` — o ProRes 4444 sai yuva444p12le —,
+`gbrap*`, `rgba`/`bgra`/`argb`/`abgr`, `rgba64*`, `ya8`/`ya16`, `ayuv`/`vuya`); VP8/VP9 com a marca
+`alpha_mode=1` (o ffprobe mostra yuv420p porque o decodificador nativo descarta o alfa); PNG com paleta
+(`pal8`) só se a paleta tem transparência de fato (`_palette_alpha` decodifica o quadro e olha o alfa). Fila de
+exportação e projetos antigos, sem o campo, abrem como opacos.
+
+**Decodificação** (`media.FrameReader(..., alpha=True)` / `grab_frame(..., alpha=True)`; `sequence.grab` e
+`SequenceReader` pedem `alpha=src.has_alpha`): só as fontes com alfa leem 4 canais — as outras continuam com os
+mesmos bits de antes. `media.decodes_alpha(info)` decide: o VP8/VP9 precisa do `libvpx`/`libvpx-vp9` antes do
+`-i` (`alpha_decoder`); sem ele nesta compilação do ffmpeg o clipe sai opaco, sem erro. Sem `-hwaccel` com alfa.
+Os filtros (`media._alpha_graph`):
+
+| Arquivo | Caminho |
+|---|---|
+| 8 bits (PNG, VP9, yuva420p…) | `split` → cor pelo mesmo `scale` da leitura normal até `rgb24`; alfa copiado à parte (`alphaextract`) → `alphamerge` → `premultiply` → tamanho pedido → `rgba`. A 16 bits, `read()` amplia ×257 (exato). Paleta e cinza com alfa viram `rgba` antes. |
+| Mais de 8 bits (ProRes 4444, yuva…p10/12/16) | `scale` com a matriz do arquivo → `gbrap16le` → `premultiply` → tamanho pedido → `rgba64le`/`rgba`. |
+
+Por que assim (medido no ffmpeg 9): o swscale converte yuva420p de **8 bits** errado para os formatos com alfa
+(`gbrap`, `rgba64le` e, com `accurate_rnd`, até `rgba`): cores trocadas de até 140/255 no VP9 com alfa. A cor
+pelo caminho `rgb24` e o alfa copiado plano a plano saem certos com qualquer filtro. A pré-multiplicação vem
+**antes** do redimensionamento: a borda reduzida não puxa a cor dos pixels transparentes (sem franja escura).
+
+**Convenção**: toda `LayerImage` de 4 canais (e o que um gerador de `RENDERERS` devolve, 22.5) é RGBA
+**pré-multiplicado**, uint8 ou uint16. `Engine._clip_texture` cria a textura com 4 componentes (refaz se o
+número muda) e passa `u_tex_alpha = 1`. O `CLIP` (`editshaders.py`) filtra pré-multiplicado (bilinear, mipmaps,
+desfoque) e devolve a cor do clipe dividindo pelo alfa antes da cor e do detalhe; o alfa entra na cobertura:
+`a = corte × opacidade × transição × alfa`, e cada modo de mesclagem mistura com a tela por `a` (como já fazia
+com a opacidade). A saída da tela continua RGB.
+
+**Pontas firmes** (`clipAlpha` no shader): alfa a menos de 1/256 de 0 ou de 1 vira 0 ou 1 (o meio é esticado
+de leve). Motivo: as conversões de profundidade do ffmpeg não são exatas no alfa (8→16 bits por deslocamento dá
+65280; yuva444p12le→gbrap12le soma 8 ao "transparente") e o ProRes 4444 gravado pelo ffmpeg guarda o opaco como
+4083/4095. Sem isso o fundo vazaria ~0,3% onde o recorte é opaco e não seria exato onde é transparente; com
+isso o fundo sai **bit a bit** onde o alfa é 0 (`tests/test_alpha.py`).
+
+**Película**: um arquivo com alfa aberto direto no modo Película passa pela montagem (`Sequence.direct_file()` é
+None para ele; `is_trivial` continua dizendo "sem edição", então o projeto segue simples, formato 1) e sai sobre
+o fundo da sequência (preto por padrão). A linha de comando faz o mesmo (`cli.alpha_sequence`). Não há
+exportação com alfa nem sequência de imagens (fora do escopo da 1.5).
+
+### 22.5 Clipes sem arquivo (`Source.virtual`, `sequence.RENDERERS`)
+
+Títulos, geradores (cor sólida, degradê, contagem regressiva) e legendas chegam depois; a casa deles já
+existe. Só o gancho: nenhum gerador de verdade vem nesta versão (o de `tests/test_virtual_sources.py` é de
+teste).
+
+**A fonte** (`timeline.Source`): `kind` (`"tipo"` no JSON, só quando não é `"arquivo"`) é um dos
+`SOURCE_KINDS` reservados — `"cor"`, `"gerador"`, `"texto"`, `"legenda"`, `"ajuste"` (nunca renomear) —, e
+`data` (`"dados"`, só quando há) guarda os parâmetros do gerador (valores de JSON, chaves sem acento;
+`"nome"` é o nome na Mídia e no clipe). `Source.virtual(tipo, largura, altura, fps, seconds=None, data=,
+alpha=True)` cria uma: o caminho é um id `"<tipo>:<hex>"` (chave em `Sequence.sources` e `Clip.src`, nunca um
+arquivo), sem som, RGB de faixa cheia. `seconds=None` = sem fim (`Source.unbounded`): entra com
+`IMAGE_SECONDS` e estica até `MAX_HOLD_SECONDS` como uma imagem, mas o quadro anda (`src_frame`, com aparar,
+velocidade e congelar). Usar uma deixa o projeto no formato 3 (recurso `"gerador"`; com `alpha`, também
+`"alfa"`).
+
+**O gerador**:
+
+```python
+# sequence.py
+RENDERERS[tipo] = fn(seq, clip, quadro_da_fonte, largura, altura, profundidade) -> np.ndarray
+```
+
+| Regra | Por quê |
+|---|---|
+| Devolve h × w × 4 RGBA **pré-multiplicado** (ou × 3, opaco); uint8 em 8 bits, uint16 em 16 (uint8 em 16 vira ×257; float 0–1 é convertido; outro formato é `ValueError`) | a mesma convenção das camadas com transparência (22.4) |
+| `quadro` é o da fonte; o tamanho é o de decodificação (`decode_size`: a caixa do clipe na tela, na prévia menor) | o gerador desenha só o conteúdo; posição, escala, giro, corte, opacidade, cor e transições o `CLIP` aplica depois |
+| Puro e determinístico: só `seq`, `clip`, o quadro, o tamanho e `src.data` (nada de `random`/`time`) | regra 2 do AGENTS: o quadro N da prévia é o exportado |
+| Sem OpenGL e sem widgets; pode rodar em duas threads ao mesmo tempo (prévia e exportação) | roda na thread de quem lê; um `QImage`/`QPainter` serve, com a `QGuiApplication` criada |
+| Cache, se precisar, é do gerador | `grab` não guarda os quadros gerados |
+
+`sequence.render_source(seq, clip, quadro, w, h, profundidade)` chama o gerador e confere a saída; `grab`
+(prévia, "Salvar quadro") e `SequenceReader` (exportação) passam por ela — prévia = exportação. Tipo sem gerador
+registrado (projeto de uma versão mais nova, por exemplo): camada transparente. Erro no gerador: `grab`
+propaga; o `SequenceReader` desenha transparente e mostra o erro no fim (`reader.error`).
+
+**Quem ignora ou trata as fontes sem arquivo**: `sequence.missing_sources` e `export.job_inputs` (só arquivos);
+`Sequence.relink` e `project._relink_sequence` (não mudam); o `.plc` não grava `"relativo"` para elas;
+`is_trivial`/`direct_file` (None: não há o que ler direto); `first_video_source`, `media_info` (o nome e o
+formato vêm do primeiro arquivo) e `legal_range` (contam como imagem: só numa montagem sem vídeo);
+`audiomix.segments` (sem som); na janela, a forma de onda (`_peaks_for`), a miniatura da Mídia
+(`sequence.source_thumbnail`: o gerador no quadro 0), o tipo na Mídia (`edit_panels.source_kind` →
+`"gerado"`), o "localizar arquivo" ao abrir um projeto, o arquivo do projeto (`_make_project`) e o perfil de
+câmera do primeiro clipe. `MainWindow.adopt_source(src)` põe uma fonte (arquivo ou gerada) na Mídia uma vez só;
+inserir continua sendo `model.insert_media(src, …)` ou arrastar da Mídia.

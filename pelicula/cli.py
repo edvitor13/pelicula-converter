@@ -207,6 +207,15 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
+def look_keys(proj, preset, sets) -> dict:
+    """Chaves de animação do look do projeto (`Project.look_keys`). Um --preset troca o look inteiro (sai sem
+    animação) e um --set fixa o ajuste dado (a chave dele sai)."""
+    if proj is None or preset or not proj.look_keys:
+        return {}
+    fixed = {item.split("=", 1)[0].strip() for item in sets or [] if "=" in item}
+    return {k: v for k, v in proj.look_keys.items() if k not in fixed}
+
+
 def project_sequence(proj):
     """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro)."""
     from . import sequence, timeline
@@ -215,7 +224,7 @@ def project_sequence(proj):
     seq = timeline.Sequence.from_json(proj.sequence)
     if not seq.clips:
         return None
-    trivial = seq.is_trivial()
+    trivial = seq.direct_file()  # um arquivo com transparência passa pela montagem
     if trivial and (not proj.media_path or os.path.abspath(trivial) == os.path.abspath(proj.media_path)):
         return None
     missing = sequence.missing_sources(seq)
@@ -240,11 +249,24 @@ def _source_and_values(path: str, preset, sets):
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
         if not proj.media_path or not os.path.exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        return proj.media_path, values, pid or proj.preset_id, proj, None
+        return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
     if not os.path.exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
-    return path, values, pid, None, None
+    return path, values, pid, None, alpha_sequence(path)
+
+
+def alpha_sequence(path: str):
+    """Arquivo com transparência aberto direto: a montagem só com ele (o alfa sai sobre o fundo da montagem,
+    como na janela; lido direto, o alfa se perderia). None para os outros arquivos."""
+    from . import media, timeline
+    try:
+        info = media.probe(path)
+    except Exception:  # noqa: BLE001 — quem chamou mostra o erro ao ler o arquivo
+        return None
+    if not info.has_alpha:
+        return None
+    return timeline.Sequence.for_source(timeline.Source.from_info(info))
 
 
 def _need_ffmpeg() -> None:
@@ -380,7 +402,7 @@ def cmd_export(a) -> int:
     if values.get("scan_on"):
         _gui_app()
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq)
+                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set))
     if not a.json:
         w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
@@ -475,8 +497,9 @@ def cmd_project(a) -> int:
 
 
 def cmd_frame(a) -> int:
-    from . import export, look, media
-    from .engine import Engine, lut_info
+    from . import export, media
+    from .engine import Engine
+    from .frame import Recipe
     _need_ffmpeg()
     src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
@@ -497,15 +520,18 @@ def cmd_frame(a) -> int:
     if values.get("scan_on"):
         _gui_app()
     w, h = info.width, info.height
+    # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
+    recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
+                               keys=look_keys(proj, a.preset, a.set))
     engine = Engine()
-    if seq is not None:
-        img = engine.compose(sequence.grab(seq, frame, w, h, 16, hq=True), seq, w, h, 16)
-    else:
-        img = media.grab_frame(info, frame, w, h, 16, hq=True)
-    engine.set_input(img)
-    li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
-    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False, legal=legal), 16)
-    engine.release()
+    try:
+        if seq is not None:
+            img = sequence.grab(seq, frame, w, h, 16, hq=True)
+        else:
+            img = media.grab_frame(info, frame, w, h, 16, hq=True)
+        out = recipe.render(engine, img, frame)
+    finally:
+        engine.release()
     try:
         export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
     except (RuntimeError, OSError) as exc:
