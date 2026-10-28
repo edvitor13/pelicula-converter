@@ -200,6 +200,16 @@ def move_key(keys: list[Key] | None, t_from: float, t_to: float) -> list[Key]:
     return sorted(rest + [Key(float(t_to), k.v, k.e)], key=lambda x: x.t)
 
 
+def move_keys(keys: list[Key] | None, moves: Iterable[tuple[float, float]]) -> list[Key]:
+    """Várias chaves da mesma trilha andando juntas (arrastar uma seleção): [(de, para)]. A ordem evita que
+    uma chave que ainda vai andar seja coberta por outra da própria seleção."""
+    moves = list(moves)
+    track = list(keys or [])
+    for a, b in sorted(moves, key=lambda m: m[0], reverse=any(b > a for a, b in moves)):
+        track = move_key(track, float(a), float(b))
+    return track
+
+
 def shift(keys: dict[str, list[Key]], delta: float) -> dict[str, list[Key]]:
     """Todos os tempos somados de `delta`."""
     return {k: [Key(x.t + delta, x.v, x.e) for x in track] for k, track in keys.items()}

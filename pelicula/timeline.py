@@ -1487,6 +1487,14 @@ class Sequence:
         track = keyframes.move_key(c.keys.get(key), float(self.clip_time(c, t_from)), float(self.clip_time(c, t_to)))
         return self._set_track(c, key, track)
 
+    def move_keys(self, cid: str, key: str, moves: Iterable[tuple[float, float]]) -> bool:
+        """Várias chaves do ajuste andando juntas: [(quadro de, quadro para)] da sequência."""
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        moves = [(self.clip_time(c, a), self.clip_time(c, b)) for a, b in moves]
+        return self._set_track(c, key, keyframes.move_keys(c.keys.get(key), moves))
+
     def clear_keys(self, cid: str, key: str | None = None) -> bool:
         """Tira as chaves de um ajuste (ou todas, com `key` None); o valor fixo do ajuste volta a valer."""
         c = self.find(cid)

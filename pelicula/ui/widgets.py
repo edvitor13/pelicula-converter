@@ -274,6 +274,7 @@ class NumberRow(ParamRow):
         self.edit.editingFinished.connect(self._edited)
         top.addWidget(self.edit)
         lay.addLayout(top)
+        self.top = top  # linha do título: o losango das chaves entra aqui (`keyframes_ui`)
         self.slider = FilmSlider(param.min, param.max, param.step, param.default)
         self.slider.valueChanged.connect(self._slid)
         self.slider.resetRequested.connect(lambda: self.store.set(param.key, param.default))
@@ -300,7 +301,7 @@ class NumberRow(ParamRow):
         self.refresh()
 
     def refresh(self) -> None:
-        v = self.store.get(self.param.key)
+        v = self.store.shown(self.param.key)
         self.slider.setValue(v)
         if not self.edit.hasFocus():
             self.edit.setText(fmt_value(self.param, v))
@@ -379,6 +380,7 @@ class ColorRow(ParamRow):
         self.btn = ColorButton()
         self.btn.clicked.connect(self._pick)
         lay.addWidget(self.btn)
+        self.top = lay
         self.refresh()
 
     def _pick(self) -> None:
@@ -394,7 +396,7 @@ class ColorRow(ParamRow):
         self.store.commit()
 
     def refresh(self) -> None:
-        r, g, b = self.store.get(self.param.key)
+        r, g, b = self.store.shown(self.param.key)
         self.btn.color = QColor.fromRgbF(r, g, b)
         self.btn.update()
 
@@ -653,6 +655,7 @@ class WheelRow(ParamRow):
         self.text.setObjectName("Faint")
         top.addWidget(self.text)
         lay.addLayout(top)
+        self.top = top
         row = QHBoxLayout()
         row.addStretch(1)
         self.wheel = ColorWheel()
@@ -671,7 +674,7 @@ class WheelRow(ParamRow):
         self.store.commit()
 
     def refresh(self) -> None:
-        x, y = self.store.get(self.param.key)
+        x, y = self.store.shown(self.param.key)
         self.wheel.setValue(x, y)
         amt = math.hypot(x, y)
         if amt < 1e-4:
@@ -851,7 +854,7 @@ class SectionCard(QFrame):
     def _refresh_chips(self) -> None:
         for key, chip in self._chips.items():
             prefix = f"hsl_{key}_"
-            marked = any(abs(float(self.store.get(p.key))) > 1e-6 for p in self.section.params
+            marked = any(abs(float(self.store.shown(p.key))) > 1e-6 for p in self.section.params
                          if p.key.startswith(prefix))
             if marked != chip.marked:
                 chip.marked = marked

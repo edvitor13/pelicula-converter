@@ -486,12 +486,19 @@ class TimelineModel(QObject):
             raise KeyError(cid)
         return self.seq.values_at(c, frame)[key]
 
-    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear") -> bool:
-        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave."""
-        if self.seq.set_key(cid, key, frame, value, easing):
+    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear",
+                record: bool = True) -> bool:
+        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave.
+        `record=False` (a chave automática de um slider arrastado) agrupa o histórico em 400 ms."""
+        if not self.seq.set_key(cid, key, frame, value, easing):
+            return False
+        if record:
             self._done("values")
-            return True
-        return False
+        else:
+            self._timer.start()
+            self.changed.emit("values")
+            self.historyChanged.emit()
+        return True
 
     def move_key(self, cid: str, key: str, frame_from: float, frame_to: float) -> bool:
         if self.seq.move_key(cid, key, frame_from, frame_to):
@@ -504,6 +511,27 @@ class TimelineModel(QObject):
             self._done("values")
             return True
         return False
+
+    def move_keys(self, cid: str, moves: Iterable[tuple[str, float, float]]) -> bool:
+        """Chaves de vários ajustes do clipe andando juntas ([(ajuste, de, para)]): um passo do desfazer."""
+        by_key: dict[str, list[tuple[float, float]]] = {}
+        for key, a, b in moves:
+            by_key.setdefault(key, []).append((a, b))
+        changed = False
+        for key, pairs in by_key.items():
+            changed = self.seq.move_keys(cid, key, pairs) or changed
+        if changed:
+            self._done("values")
+        return changed
+
+    def remove_keys(self, cid: str, items: Iterable[tuple[str, float]]) -> bool:
+        """Apaga várias chaves do clipe ([(ajuste, quadro)]) num passo do desfazer."""
+        changed = False
+        for key, t in items:
+            changed = self.seq.remove_key(cid, key, t) or changed
+        if changed:
+            self._done("values")
+        return changed
 
     def clear_keys(self, cid: str, key: str | None = None) -> bool:
         """Tira a animação de um ajuste (ou de todos, com `key` None)."""

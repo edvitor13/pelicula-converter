@@ -39,6 +39,7 @@ from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
+from .keyframes_ui import KeyRows
 from .scopes import Scopes
 from .timeline_view import TimelineEditor
 from . import notifier, prefs, welcome
@@ -850,6 +851,9 @@ class MainWindow(QMainWindow):
         il.addStretch(1)
         scroll.setWidget(inner)
         vl.addWidget(scroll, 1)
+        # Losangos das chaves do look (o alvo é o próprio store; quadros do arquivo ou da montagem).
+        self.look_keys = KeyRows(self.store, self.store, self.cards, self)
+        self.look_keys.seekRequested.connect(self.seek)
         return w
 
     def _edit_panel(self) -> QWidget:
@@ -865,6 +869,7 @@ class MainWindow(QMainWindow):
         vl.addWidget(self.edit_scopes)
         self.inspector = ClipInspector(self.model)
         self.inspector.autoRequested.connect(self.auto_adjust_clip)
+        self.inspector.seekRequested.connect(self.seek)
         vl.addWidget(self.inspector, 1)
         return w
 
@@ -1167,6 +1172,12 @@ class MainWindow(QMainWindow):
         self.timeline.set_pos(self.frame_idx)
         self.time_label.setText(f"{timecode(self.frame_idx, self.info.fps)}  /  "
                                 f"{timecode(self.info.frames - 1, self.info.fps)}")
+        self._keys_follow_playhead()
+
+    def _keys_follow_playhead(self) -> None:
+        """Os controles com chaves (look e clipe) mostram o valor do quadro do cursor; mexer neles grava ali."""
+        self.look_keys.set_frame(self.frame_idx)
+        self.inspector.set_playhead(self.frame_idx)
 
     def _preview_changed(self) -> None:
         self.preview_q = self.prev_combo.currentData()
