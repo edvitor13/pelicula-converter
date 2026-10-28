@@ -73,7 +73,8 @@ pelicula/
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
-                             de som: micro_fade, audio_crossfade; sem Qt), History
+                             de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
+                             split_edit, faixa magnética keep_main/settle_main; sem Qt), History
   chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
   loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
@@ -265,7 +266,7 @@ Testes do modo Edição, do plugin e dos módulos:
 |---|---|
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
-| `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
+| `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
@@ -273,6 +274,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |
+| `tests/test_corte_ui.py` | casos de `corte_ui_cases.py`: modelo (desfazer/refazer de inserir, Q/W, J/L, faixa magnética), botão Inserir e Ctrl, Alt ao aparar, menu Corte J/L, Mídia `,`/`.`, diálogo da sequência e a janela (J/K/L, K + J/L, Ctrl+L, Q/W, ajuda de atalhos) |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
@@ -343,6 +345,9 @@ Toda regra de tempo fica em `timeline.Sequence` (sem Qt): `src_frame()` decide o
 métodos do `ui/edit_model.TimelineModel`, que grava o histórico (instantâneos JSON) e emite
 `changed("structure" | "values" | "settings" | "*")`. A janela reage: `"values"` só remonta o quadro
 atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`.
+Operação nova que mexe na estrutura: no modelo, rode-a dentro de `with self.seq.keep_main():` para a faixa
+principal magnética valer (sem ela não faz nada) e monte-a com as primitivas (`_cut`, `split`, `trim_*`,
+`move`, `delete`, `_clear_range`, `open_space`); regras em `docs/ARQUITETURA.md`, seção 13.8.
 
 ### Adicionar um negativo ou uma cópia do Laboratório
 

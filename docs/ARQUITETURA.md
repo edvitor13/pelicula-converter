@@ -763,7 +763,8 @@ flowchart LR
   mais restrito (o grupo nunca sai de sincronia). Faixas travadas não mudam (arrastar um clipe travado
   não mexe em nada).
 - Colocar um clipe sobre outro **sobrescreve** (`_clear_range`: apaga, encurta ou divide o que estava
-  embaixo). `delete(ripple=True)` fecha o espaço; `close_gaps()` junta os clipes de uma faixa.
+  embaixo). `delete(ripple=True)` fecha o espaço; `close_gaps()` junta os clipes de uma faixa. Inserir,
+  Q/W, cortes J/L e a faixa principal magnética: seção 13.8.
 - Velocidade: `set_speed()` mantém o trecho do arquivo e muda a duração (sem invadir o clipe seguinte).
 - `layers_at(t)` resolve as transições: surgir/sumir no preto ou branco (`Layer.fade`), "dissolver"
   (o clipe anterior da mesma faixa continua por baixo, além do fim — `Layer.extension`) e "sumir
@@ -907,6 +908,75 @@ de onda (com cache por arquivo).
   e empurra picos e medidas. A medição recomeça no play, ao pular, na volta do loop, num salto de mais de
   5 s e no clique no medidor; parado, as barras descem e as leituras ficam apagadas.
 - Nada do medidor vai para a exportação; com o módulo desligado não há decodificação nem timer.
+
+### 13.8 Ferramentas de corte (`timeline.py`, `ui/edit_model.py`, `ui/timeline_view.py`)
+
+Tudo é feito com as primitivas que já existiam (`_cut`, `split`, `trim_start`/`trim_end`, `move`, `delete`,
+`_clear_range`) e passa pelo `TimelineModel` (um instantâneo no histórico por operação; faixas travadas
+nunca mudam). A composição dos quadros e a mixagem não mudam: só a posição e a duração dos clipes.
+
+- **Inserir** (`Sequence.open_space(t, d, targets, exclude, all_tracks, split)`): nas faixas-alvo o clipe que
+  atravessa `t` é dividido (`split`, com os ligados); tudo o que começa em `t` ou depois anda `d`, junto com
+  os ligados — em **todas as faixas destravadas** (`all_tracks`, padrão: como o *insert* do Premiere/Resolve
+  com todas as faixas sincronizadas, para nada sair de sincronia) ou só nas faixas-alvo (usado pela faixa
+  magnética, que acerta o resto depois). O que atravessa `t` em outra faixa fica inteiro (uma música de
+  fundo não é cortada). Marcadores a partir de `t` andam, a não ser que um clipe travado tenha ficado depois
+  do ponto (o tempo dele não andou). `insert_media(insert=True)` abre o espaço com a duração do arquivo antes
+  de pôr os clipes; `move_insert()` abre o espaço no destino (sem contar o próprio grupo) e chama `move()` —
+  o lugar de origem fica vazio. Sobrescrever continua o padrão e não mudou.
+- **Q / W** (`ripple_trim_start` / `ripple_trim_end`, alvo por `trim_target`): apara o grupo com
+  `trim_start`/`trim_end` e fecha o espaço com `_pull`: nas faixas do grupo, o que começa a partir do novo
+  começo (Q) ou do fim antigo (W) anda para a esquerda; nas outras faixas (e nos marcadores) só se o trecho
+  tirado ficou livre em todas elas — a mesma regra de `delete(ripple=True)`. O alvo é o clipe sob o cursor
+  na faixa do clipe selecionado; senão, na faixa destravada mais de cima (V mais alta → V1 → A1 → …).
+- **Cortes J/L**: `trim_start_only`/`trim_end_only` aparam um membro do grupo sem os ligados (zeram o
+  `link` só durante a chamada). `cut_pair(clip, left)` acha o corte entre dois pares imagem + som ligados
+  (um de cada tipo, colados na mesma faixa de vídeo e na mesma de som) e `split_edit(cid, left, offset)`
+  **rola** o corte do som para `offset` quadros do corte da imagem (negativo = J, positivo = L, 0 =
+  alinhado), limitado pelo arquivo além do corte (`_head_room` / `max_dur`) e por 1 quadro de cada som. O
+  menu do corte usa `timeline.SPLIT_EDIT_S` = 1 s.
+- **Pares com entrada/saída diferentes** continuam um grupo ligado comum: `move` e `delete` já valem para o
+  grupo; `split(t)` passa o membro que não foi dividido e fica inteiro depois de `t` para o link da parte
+  da direita (dividir no som que entra antes não separa a imagem do som dela); `set_speed` de um grupo com
+  começos/durações diferentes (`_set_speed_offset`) mantém a imagem no lugar e muda as diferenças na
+  proporção (a sincronia `start − src_in·fps/velocidade` fica igual para todos) e encolhe o fim de todos
+  juntos se o arquivo acabar ou se encostar no clipe seguinte.
+- **Faixa principal magnética** (`Sequence.magnetic`, JSON `"faixa_magnetica": true` só quando ligada;
+  ausente = desligada, também em sequências novas — projeto antigo abre e salva igual). Vale com a V1
+  destravada (`magnet_active`). Toda edição estrutural do modelo roda dentro de `with seq.keep_main():`,
+  que guarda um retrato (`_snapshot`) e no fim chama `settle_main(snap)`:
+  1. a V1 fica de ponta a ponta a partir do quadro 0, na ordem; os ligados a ela andam o mesmo que o
+     primeiro clipe da V1 do grupo (e cobrem como um `move`);
+  2. cada clipe das outras faixas (com os ligados, uma "unidade") que a edição **não mexeu** acompanha a
+     imagem da V1 que estava sob o começo dele: `_main_warp(p)` procura onde foi parar o mesmo instante do
+     mesmo arquivo (no mesmo clipe ou numa parte nova — divisão, inserção — da V1); imagem que sumiu leva
+     ao ponto do corte; um buraco antigo da V1 também; depois do fim da V1, a distância até o fim fica;
+     imagem parada e quadro congelado acompanham o próprio clipe;
+  3. o que a edição mexeu (arrastou, aparou, acabou de entrar) fica onde ela deixou e é posto primeiro;
+     ninguém cobre ninguém (`_fit_shift` empurra para a direita até caber);
+  4. marcadores não mexidos pela edição seguem a mesma função.
+
+  Alongar um clipe da V1 não cobre o vizinho: `room_for_end`/`room_for_start`/`room_for_speed` abrem o
+  espaço antes (`open_space(..., all_tracks=False, split=False)`); `delete(ripple=True)` de um clipe da V1
+  vira um delete comum (a V1 se fecha sozinha). Ligar a opção (`set_settings(magnetic=True)`), remover uma
+  faixa ou mudar o fps chamam `settle_main()` sem retrato (a montagem atual é a referência). Escolhemos
+  "acompanhar a imagem" (como as conexões do Final Cut) em vez de "andar o mesmo que o clipe da V1 logo
+  abaixo" porque continua certo em dividir, inserir, aparar e mudar a velocidade, sem guardar conexões no
+  projeto.
+- **Na linha do tempo**: `TimelineCanvas.insert_mode` (botão *Inserir*, ícone `insert_mode`) e
+  `insert_for(mods)` — **Ctrl** inverte ao soltar um arquivo (`filesInserted` em vez de `filesDropped`) ou
+  ao terminar de mover; **Alt** durante o arraste (ou ao soltar) de uma borda chama `trim_start/trim_end(...,
+  solo=True)` e o fantasma mostra só o clipe. O menu do corte tem *Corte J*, *Corte L* e *Alinhar*
+  (`split_edit_actions`). A Mídia emite `placeRequested(caminhos, inserir)` (menu e teclas `,`/`.`); a
+  janela põe no cursor, na V1/A1, e leva o cursor ao fim do que entrou.
+- **J/K/L** (`MainWindow.shuttle`, `_set_shuttle`, `_reverse_tick`, `_shuttle_halt`): para a frente, o
+  `Player` de sempre com `_play_rate` (1, 2, 4, 8) multiplicando o relógio de `_play_tick` (que já pula
+  quadros atrasados). Para trás não há leitor em ordem: um `QTimer` de 40 ms calcula o quadro do relógio
+  andando para trás e pede ao `FrameLoader`, que só decodifica o pedido mais recente — a interface não trava
+  e o quadro mostrado é exato (pode pular quadros se a busca for lenta). Entrada/saída e *Repetir* valem
+  nos dois sentidos. Som e medidor só a 1× para a frente (`start_play` não toca o som fora disso). K
+  segurado (`keyReleaseEvent`; `changeEvent` solta ao perder o foco) faz J/L andarem um quadro. O L do
+  *Repetir* foi para o **Ctrl+L** (`QShortcut`).
 
 ## 14. Laboratório: emulação por densidade
 
