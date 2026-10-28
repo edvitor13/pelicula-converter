@@ -137,12 +137,14 @@ def is_identity(seq: timeline.Sequence, clip: timeline.Clip, tex_w: int, tex_h: 
 
 
 def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex_h: int, canvas_w: int,
-                  canvas_h: int, neutral: bool = False, tex_alpha: bool = False) -> tuple[dict[str, Any], bool]:
+                  canvas_h: int, neutral: bool = False, tex_alpha: bool = False,
+                  light: tuple[int, bool] | None = None) -> tuple[dict[str, Any], bool]:
     """Uniforms de uma camada. Devolve (uniforms, precisa_de_mipmap).
 
     `neutral=True` mantém enquadramento, opacidade e transições, mas desliga cor e detalhe (a imagem
     "original" da comparação no modo Edição). `tex_alpha`: a imagem tem 4 canais (RGBA pré-multiplicado de
-    uma fonte com transparência, `sequence.LayerImage`).
+    uma fonte com transparência, `sequence.LayerImage`). `light`: a luz das transições da 1.5
+    (`transitions.light_of`; None = rec709); com uma delas na camada, os uniforms são os de `CLIP_TR`.
     """
     clip = layer.clip
     # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
@@ -203,6 +205,9 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     U["u_hsl_h"], U["u_hsl_s"], U["u_hsl_l"] = tuple(hh), tuple(hs), tuple(hl)
     U["u_vig"] = (float(v["vinheta"]), 0.2 + 0.8 * float(v["vinheta_tamanho"]))
     U["u_fadeblk"] = float(v["desbotar"])
+    if layer.transitions:  # 1.5: transições de película (`transitions.py`, programa `editshaders.CLIP_TR`)
+        from . import transitions
+        U = transitions.apply(U, seq, layer, transform(seq, clip, canvas_w, canvas_h, v), canvas_w, canvas_h, light)
     return U, mip
 
 
