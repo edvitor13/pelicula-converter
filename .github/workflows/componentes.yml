@@ -1,0 +1,314 @@
+name: Componentes
+
+# Compila no CI, a partir do código oficial e sem nenhuma mudança, os componentes que o app baixa à
+# parte quando o autor não publica binários com checksum para os dois sistemas (origin=CI em
+# pelicula/tools.py). Receita completa em AGENTS.md ("Componente compilado no CI").
+#
+# - Execução manual (workflow_dispatch): componente, versão (tag oficial, sem o "v"), commit que a tag
+#   tem de ter (conferido) e publicar. Sem publicar, os pacotes ficam só como artefatos do run.
+# - Push que muda este arquivo: compila a versão padrão, sem publicar (confere o próprio workflow).
+# - Publicar cria a tag componente-<id>-<versão> (nunca começa com "v": o build.yml só publica tags
+#   v* e não é disparado) e uma PRE-RELEASE que não é a "latest": o atualizador do app usa
+#   /releases/latest, que ignora pre-releases. Uma versão publicada nunca é sobrescrita (o app fixa o
+#   SHA-256 de cada arquivo); para refazer, publique outra versão.
+#
+# whisper.cpp (transcrição local, módulo "legendas_auto"): whisper-cli + bibliotecas compartilhadas,
+# Windows x64 (MSVC, runtime estático: não pede o Visual C++ Redistributable) e Linux x64 (Ubuntu
+# 22.04: glibc 2.35 e libstdc++ do GCC 11 ou mais novos). Duas variantes por sistema:
+#   vulkan: CPU + Vulkan como módulos carregados na hora (GGML_BACKEND_DL). Sem driver Vulkan, o módulo
+#           do Vulkan não carrega e tudo roda na CPU; a CPU usa a melhor variante do processador
+#           (GGML_CPU_ALL_VARIANTS: SSE4.2, AVX, AVX2, AVX-512...).
+#   cpu:    o mesmo sem o Vulkan (para quem tem driver Vulkan com defeito).
+# O Vulkan SDK (LunarG) só é usado para compilar (cabeçalhos e o compilador de shaders glslc), com
+# versão e SHA-256 fixos; nada dele vai nos pacotes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      componente:
+        description: "Componente"
+        type: choice
+        options: [whisper-cpp]
+        default: whisper-cpp
+      versao:
+        description: "Versão oficial (tag sem o v, ex.: 1.9.5)"
+        type: string
+        default: "1.9.5"
+      commit:
+        description: "Commit que a tag oficial tem de ter (conferido)"
+        type: string
+        default: "d1be6fde11ac6e0407606b4e42fe72d34add8037"
+      publicar:
+        description: "Publicar a pre-release componente-<id>-<versão>"
+        type: boolean
+        default: false
+  push:
+    paths: [".github/workflows/componentes.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: componentes-${{ github.ref }}-${{ inputs.componente || 'whisper-cpp' }}-${{ inputs.versao || 'padrao' }}
+  cancel-in-progress: false
+
+env:
+  VERSAO: ${{ inputs.versao || '1.9.5' }}
+  COMMIT: ${{ inputs.commit || 'd1be6fde11ac6e0407606b4e42fe72d34add8037' }}
+  VULKAN_SDK_VERSAO: "1.4.363.0"
+  VULKAN_SDK_SHA256_WINDOWS: "94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141"
+  VULKAN_SDK_SHA256_LINUX: "197962f5cbf80baf2775a03336a01cee7c8745686c65aaa70d3f751ade4d7e43"
+  # Teste de fumaça: o menor modelo (tiny) e o Silero VAD, de revisões fixas do Hugging Face.
+  TINY_URL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin"
+  TINY_SHA256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+  VAD_URL: "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin"
+  VAD_SHA256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
+
+jobs:
+  whisper-cpp:
+    name: whisper.cpp ${{ matrix.plataforma }} ${{ matrix.variante }}
+    if: ${{ (inputs.componente || 'whisper-cpp') == 'whisper-cpp' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, plataforma: windows-x64, variante: vulkan }
+          - { os: windows-2022, plataforma: windows-x64, variante: cpu }
+          - { os: ubuntu-22.04, plataforma: linux-x64, variante: vulkan }
+          - { os: ubuntu-22.04, plataforma: linux-x64, variante: cpu }
+    env:
+      NOME: whisper-cpp-${{ inputs.versao || '1.9.5' }}-${{ matrix.plataforma }}-${{ matrix.variante }}
+      VULKAN: ${{ matrix.variante == 'vulkan' && 'ON' || 'OFF' }}
+    steps:
+      - name: Código oficial (tag v${{ env.VERSAO }})
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: v${{ env.VERSAO }}
+          path: src
+          persist-credentials: false
+
+      - name: Conferir o commit da tag
+        shell: bash
+        run: |
+          got="$(git -C src rev-parse HEAD)"
+          echo "v$VERSAO -> $got"
+          if [ "$got" != "$COMMIT" ]; then
+            echo "::error::a tag v$VERSAO aponta para $got, esperado $COMMIT"
+            exit 1
+          fi
+
+      # ---------------------------------------------------------------- Vulkan SDK (só para compilar)
+      - name: Vulkan SDK (Windows)
+        if: runner.os == 'Windows' && matrix.variante == 'vulkan'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP "vulkansdk.exe"
+          curl.exe -fsSL -o $exe "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSAO/windows/vulkansdk-windows-X64-$env:VULKAN_SDK_VERSAO.exe"
+          $h = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:VULKAN_SDK_SHA256_WINDOWS) { throw "SHA-256 do Vulkan SDK não confere: $h" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "instalação do Vulkan SDK falhou ($($p.ExitCode))" }
+          $root = "C:\VulkanSDK\$env:VULKAN_SDK_VERSAO"
+          if (-not (Test-Path "$root\Bin\glslc.exe")) { throw "glslc não encontrado em $root\Bin" }
+          "VULKAN_SDK=$root" >> $env:GITHUB_ENV
+          "$root\Bin" >> $env:GITHUB_PATH
+
+      - name: Vulkan SDK (Linux)
+        if: runner.os == 'Linux' && matrix.variante == 'vulkan'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/vulkansdk.tar.xz" \
+            "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSAO/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSAO.tar.xz"
+          echo "$VULKAN_SDK_SHA256_LINUX  $RUNNER_TEMP/vulkansdk.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/vulkansdk"
+          tar -xJf "$RUNNER_TEMP/vulkansdk.tar.xz" -C "$RUNNER_TEMP/vulkansdk" --strip-components=1
+          sdk="$RUNNER_TEMP/vulkansdk/x86_64"
+          test -x "$sdk/bin/glslc"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$sdk" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------- compilar
+      - name: Compilar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S src -B build -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_NATIVE=OFF `
+            -DGGML_OPENMP=OFF "-DGGML_VULKAN=$env:VULKAN" `
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF `
+            -DWHISPER_SDL2=OFF -DWHISPER_CURL=OFF `
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          if ($LASTEXITCODE -ne 0) { throw "cmake (configurar) falhou" }
+          cmake --build build --config Release --target whisper-cli --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "cmake (compilar) falhou" }
+          $pkg = "pkg"
+          New-Item -ItemType Directory -Force $pkg | Out-Null
+          Copy-Item build\bin\Release\whisper-cli.exe $pkg
+          Copy-Item build\bin\Release\*.dll $pkg
+          Get-ChildItem $pkg | Format-Table Name, Length
+
+      - name: Compilar (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S src -B build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF "-DGGML_VULKAN=$VULKAN" \
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_SDL2=OFF -DWHISPER_CURL=OFF \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON '-DCMAKE_INSTALL_RPATH=$ORIGIN'
+          cmake --build build --target whisper-cli -j "$(nproc)"
+          mkdir -p pkg
+          cp build/bin/whisper-cli pkg/
+          # Bibliotecas com o nome que o programa procura (SONAME), sem links simbólicos.
+          find build/bin -maxdepth 1 -type f -name 'lib*.so*' | while read -r f; do
+            so="$(objdump -p "$f" | awk '/SONAME/ {print $2}')"
+            cp "$f" "pkg/${so:-$(basename "$f")}"
+          done
+          strip --strip-unneeded pkg/*.so* pkg/whisper-cli
+          ls -l pkg
+          readelf -d pkg/whisper-cli | grep -E 'RUNPATH|RPATH|NEEDED'
+          echo "maior versão da glibc pedida:"
+          objdump -T pkg/whisper-cli pkg/*.so* | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+
+      - name: Conferir dependências (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $bad = @()
+          foreach ($f in Get-ChildItem pkg -Include *.exe, *.dll -Recurse) {
+            $deps = & $dumpbin /nologo /dependents $f.FullName | Select-String -Pattern '\.dll' | ForEach-Object { $_.Line.Trim() }
+            Write-Host "$($f.Name): $($deps -join ', ')"
+            if ($deps | Where-Object { $_ -match '^(vcruntime|msvcp|vcomp|ucrtbase|api-ms-win-crt)' }) { $bad += $f.Name }
+          }
+          if ($bad.Count) { throw "dependem do runtime do Visual C++: $($bad -join ', ')" }
+
+      # ---------------------------------------------------------------- teste de fumaça
+      - name: Modelos do teste (tiny e Silero VAD, SHA-256 conferido)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o tiny.bin "$TINY_URL"
+          curl -fsSL -o vad.bin "$VAD_URL"
+          if command -v sha256sum >/dev/null; then sum=sha256sum; else sum="shasum -a 256"; fi
+          echo "$TINY_SHA256  tiny.bin" | $sum -c -
+          echo "$VAD_SHA256  vad.bin" | $sum -c -
+
+      - name: Transcrever o exemplo (CPU, com VAD e palavra por palavra)
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=pkg/whisper-cli; [ -f pkg/whisper-cli.exe ] && exe=pkg/whisper-cli.exe
+          "$exe" --version || true
+          "$exe" -m tiny.bin -f src/samples/jfk.wav -l en -t 2 -ng -ml 1 -sow -oj -of saida -pp \
+            --vad -vm vad.bin 2>&1 | tee log.txt
+          grep -q "progress = " log.txt
+          grep -qi "country" saida.json
+          python3 -c "import json,sys; d=json.load(open('saida.json',encoding='utf-8')); t=d['transcription']; print(len(t),'segmentos'); print(t[:3])" \
+            || python -c "import json,sys; d=json.load(open('saida.json',encoding='utf-8')); t=d['transcription']; print(len(t),'segmentos'); print(t[:3])"
+
+      - name: Transcrever com Vulkan por software (lavapipe; só diagnóstico)
+        if: runner.os == 'Linux' && matrix.variante == 'vulkan'
+        continue-on-error: true
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 > /dev/null
+          GGML_VK_VISIBLE_DEVICES=0 pkg/whisper-cli -m tiny.bin -f src/samples/jfk.wav -l en -t 2 -ml 1 -sow -oj \
+            -of saida-vk 2>&1 | tee log-vk.txt
+          grep -i "vulkan" log-vk.txt | head -20
+          grep -qi "country" saida-vk.json
+
+      # ---------------------------------------------------------------- pacote
+      - name: Empacotar
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/LICENSE pkg/LICENSE
+          {
+            echo "whisper.cpp $VERSAO - compilado pelo CI do PeliculaConverter a partir do código oficial, sem mudanças."
+            echo "Código: https://github.com/ggml-org/whisper.cpp/tree/v$VERSAO (commit $COMMIT)"
+            echo "Licença: MIT (arquivo LICENSE, nesta pasta)"
+            echo "Variante: ${{ matrix.variante }} (${{ matrix.plataforma }})"
+            if [ "$VULKAN" = "ON" ]; then echo "Vulkan SDK $VULKAN_SDK_VERSAO (LunarG), usado só para compilar"; fi
+            echo "CMake: BUILD_SHARED_LIBS=ON GGML_BACKEND_DL=ON GGML_CPU_ALL_VARIANTS=ON GGML_NATIVE=OFF GGML_OPENMP=OFF GGML_VULKAN=$VULKAN"
+            echo "Compilado em: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > pkg/ORIGEM.txt
+          cat pkg/ORIGEM.txt
+          mkdir -p dist
+          cd pkg
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip -mx=9 "../dist/$NOME.zip" ./* > /dev/null
+          else
+            tar -czf "../dist/$NOME.tar.gz" --owner=0 --group=0 --numeric-owner *
+          fi
+          cd ..
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NOME }}
+          path: dist/*
+          if-no-files-found: error
+
+  publicar:
+    name: SHA256SUMS e pre-release
+    needs: whisper-cpp
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: whisper-cpp-*
+          merge-multiple: true
+
+      - name: SHA256SUMS.txt
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS-whisper-cpp-${{ env.VERSAO }}
+          path: dist/SHA256SUMS.txt
+
+      - name: Publicar a pre-release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publicar }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="componente-whisper-cpp-$VERSAO"
+          case "$tag" in v*) echo "::error::tag de componente não pode começar com v"; exit 1;; esac
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::a release $tag já existe; versões publicadas não são sobrescritas"
+            exit 1
+          fi
+          {
+            echo "Componente do PeliculaConverter (não é uma versão do app): **whisper.cpp $VERSAO**, compilado pelo CI"
+            echo "a partir do código oficial, sem mudanças: https://github.com/ggml-org/whisper.cpp/tree/v$VERSAO"
+            echo "(commit \`$COMMIT\`). Licença MIT (LICENSE em cada pacote)."
+            echo
+            echo "O app baixa estes arquivos sozinho (Configurações › Componentes) e confere o SHA-256 fixado no código."
+            echo "- \`vulkan\`: CPU + Vulkan (placa de vídeo); sem driver Vulkan, roda na CPU."
+            echo "- \`cpu\`: só CPU."
+            echo
+            echo "Compilado em: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > notes.md
+          gh release create "$tag" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Componente: whisper.cpp $VERSAO" --notes-file notes.md
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets \
+            --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[] | {name, size}]}'
