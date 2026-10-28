@@ -220,3 +220,107 @@ def test_ramp_round_trip_at_the_file_end_keeps_every_frame():
         assert seq.source_range(v) == (0.0, 10.0), pid
         seq.retime(v.id, ramp=[])
         assert v.dur == a.dur == 240 and _frames(seq, v) == before, pid
+
+
+# ------------------------------------------------------------------ reverso
+def test_reverse_is_the_exact_mirror_and_toggles_back():
+    seq, v, a = _seq()
+    seq.trim_start(v.id, 30)
+    seq.trim_end(v.id, 200)
+    before = _frames(seq, v)
+    plain = seq.to_json()
+    assert seq.retime(v.id, reverse=True)
+    assert v.reverse and a.reverse and (v.start, v.dur) == (30, 170) and (a.start, a.dur) == (30, 170)
+    assert _frames(seq, v) == before[::-1]
+    assert seq.src_time(v, v.start) == pytest.approx(200 / 24) and seq.src_time(v, v.end) == pytest.approx(30 / 24)
+    assert "reverso" in seq.features() and seq.is_trivial() is None
+    d = seq.to_json()
+    assert next(c for c in d["clipes"] if c["tipo"] == tl.VIDEO)["reverso"] is True
+    back = tl.Sequence.from_json(json.loads(json.dumps(d)))
+    vb = next(c for c in back.clips if c.kind == tl.VIDEO)
+    assert vb.reverse and _frames(back, vb) == before[::-1]
+    assert seq.retime(v.id, reverse=False) and _frames(seq, v) == before and seq.to_json() == plain
+
+
+def test_reverse_with_speed_split_and_trim():
+    seq, v, _a = _seq()
+    seq.set_speed(v.id, 2.0)
+    fwd = _frames(seq, v)
+    seq.retime(v.id, reverse=True)
+    assert v.dur == 120 and _frames(seq, v) == fwd[::-1]
+    whole = {t: seq.src_frame(v, t) for t in range(v.start, v.end)}
+    seq.split(50)
+    left, right = sorted((c for c in seq.clips if c.kind == tl.VIDEO), key=lambda c: c.start)
+    assert left.reverse and right.reverse and seq.continues(left, right)
+    assert {t: seq.src_frame(left if t < 50 else right, t) for t in range(0, 120)} == whole
+    seq.trim_start(right.id, 70)                       # aparar continua mostrando o mesmo quadro no mesmo lugar
+    assert all(seq.src_frame(right, t) == whole[t] for t in range(right.start, right.end))
+    seq.trim_end(left.id, 40)
+    assert all(seq.src_frame(left, t) == whole[t] for t in range(left.start, left.end))
+    head, tail = seq.source_room(left)
+    assert head == pytest.approx((10.0 - seq.src_time(left, left.start)) / 2.0)  # o que sobra "antes" é o fim
+    assert tail == pytest.approx(seq.src_time(left, left.end) / 2.0)
+    assert seq.max_dur(left) == pytest.approx(round(seq.src_time(left, left.start) * 24 / 2), abs=1)
+
+
+def test_reverse_and_ramp_combine_and_the_ramp_stays_on_the_picture():
+    seq, v, _a = _seq()
+    ramp = timemap.preset_anchors("entrada_lenta", 0.0, 10.0, amount=0.8)
+    seq.retime(v.id, ramp=ramp)
+    fwd = _frames(seq, v)
+    seq.retime(v.id, reverse=True)
+    rev = _frames(seq, v)
+    assert v.ramp == timemap.clean_ramp(ramp) and abs(len(rev) - len(fwd)) <= 1
+    assert sorted(set(rev)) == sorted(set(fwd)) or set(rev) ^ set(fwd) <= {fwd[-1], 239}
+    m = seq.time_map(v)
+    assert m.rate_at(0.05) == pytest.approx(1.0) and m.rate_at(v.dur / 24 - 0.05) < 0.5  # lento agora no fim
+    seq.retime(v.id, reverse=False)
+    assert _frames(seq, v) == fwd
+
+
+def test_reverse_l_cut_audio_moves_before_the_picture_without_eating_the_neighbour():
+    seq, v, a = _seq()
+    seq.trim_start(v.id, 48)
+    seq.trim_end_only(v.id, 200)       # o som continua 40 quadros depois da imagem (corte L)
+    assert (v.start, v.end, a.start, a.end) == (48, 200, 48, 240)
+    seq.retime(v.id, reverse=True)     # no espelho, o som do fim do trecho vem antes da imagem
+    assert (v.start, v.end) == (48, 200) and a.end == 200 and a.start == 8
+    for t in range(v.start, v.end):
+        assert seq.src_time(a, t) == pytest.approx(seq.src_time(v, t))
+    seq.retime(v.id, reverse=False)
+    assert (v.start, v.end, a.start, a.end) == (48, 200, 48, 240)
+    # com um clipe de som antes, o som que viria antes da imagem é aparado (não come o vizinho)
+    seq.retime(v.id, reverse=False)
+    music = tl.Source("C:/v/musica.wav", 0, 0, 24.0, "24/1", 20, 20 / 24, has_audio=True, has_video=False)
+    nb, = seq.insert_media(music, at=0)
+    assert nb.kind == tl.AUDIO and nb.track == a.track and (nb.start, nb.end) == (0, 20)
+    seq.retime(v.id, reverse=True)
+    assert (nb.start, nb.end) == (0, 20) and a.start == 20 and a.end == 200
+    for t in range(a.start, a.end):
+        assert seq.src_time(a, t) == pytest.approx(seq.src_time(v, t))
+
+
+def test_audio_graph_reverse_splits_long_clips_into_bounded_blocks(tmp_path, monkeypatch):
+    from pelicula import audiomix, media
+    path = tmp_path / "longo.mp4"
+    path.write_bytes(b"x")
+    src = tl.Source(str(path), 320, 180, 24.0, "24/1", 24 * 25, 25.0, has_audio=True)
+    seq = tl.Sequence.for_source(src)
+    monkeypatch.setattr(media, "ffmpeg", lambda: "ffmpeg")
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.retime(v.id, reverse=True)
+    ins, graph = audiomix.build_graph(seq)
+    assert graph.count("areverse") == ins.count("-i") - 1 >= 3, "um bloco de até 10 s por entrada"
+    spans = [float(ins[i + 1]) for i, x in enumerate(ins) if x == "-t"][1:]
+    assert max(spans) <= audiomix.GROUP_S + 0.2 and sum(spans) >= 25.0
+    assert "atempo" not in graph
+
+
+def test_freezing_a_reversed_clip_holds_its_first_shown_frame():
+    seq, v, _a = _seq()
+    seq.trim_end(v.id, 100)
+    seq.retime(v.id, reverse=True)
+    first = seq.src_frame(v, v.start)
+    assert first == 99
+    seq.set_values(v.id, dict(v.values, congelar=True))
+    assert {seq.src_frame(v, t) for t in range(v.start, v.end)} == {first}

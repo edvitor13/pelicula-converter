@@ -8,7 +8,9 @@ por `Engine.compose()`, na thread dona do contexto OpenGL.
 - `SequenceReader` lê em sequência (reprodução e exportação): um `media.FrameReader` por clipe,
   aberto antes do clipe começar (sem engasgo nos cortes), andando para a frente e repetindo o último
   quadro em câmera lenta. O quadro do arquivo mostrado vem sempre de `Sequence.src_frame()`, então
-  o quadro N lido em sequência é igual ao quadro N buscado direto.
+  o quadro N lido em sequência é igual ao quadro N buscado direto. Um clipe em reverso (`Clip.reverse`) usa
+  `_ReverseStream`: lê blocos do arquivo para a frente e entrega de trás para a frente, com o próximo bloco
+  (o de antes, no arquivo) decodificado ao fundo; a memória fica limitada a dois blocos (`REVERSE_BUDGET`).
 """
 
 from __future__ import annotations
@@ -169,6 +171,10 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
 
 
 # ------------------------------------------------------------------ leitura em sequência
+REVERSE_BUDGET = 192 * 1024 * 1024  # bytes por bloco de um clipe em reverso
+REVERSE_MAX_FRAMES = 48             # quadros por bloco (no máximo)
+
+
 class _ClipStream:
     """Um FrameReader de um clipe, andando para a frente no arquivo."""
 
@@ -211,6 +217,80 @@ class _ClipStream:
             self.reader = None
 
 
+class _ReverseStream:
+    """Um clipe em reverso: o arquivo é lido em blocos para a frente (um `FrameReader` por bloco, que termina no
+    quadro pedido) e entregue de trás para a frente. Enquanto um bloco é mostrado, o anterior do arquivo é
+    decodificado ao fundo; a memória fica em dois blocos de até `REVERSE_BUDGET` bytes cada."""
+
+    def __init__(self, src: timeline.Source, start: int, w: int, h: int, depth: int, hq: bool, perf):
+        self.src, self.w, self.h, self.depth, self.hq, self.perf = src, w, h, depth, hq, perf
+        bpp = (4 if src.has_alpha else 3) * (1 if depth == 8 else 2)
+        self.n = max(2, min(REVERSE_MAX_FRAMES, REVERSE_BUDGET // max(1, w * h * bpp)))
+        self.error = ""
+        self.loads = 0  # blocos decodificados (os testes conferem que a leitura anda em blocos)
+        self._ahead: tuple[int, int, Future] | None = None
+        self._pool: ThreadPoolExecutor | None = None
+        self.cache: dict[int, np.ndarray] = self._load(max(0, start))
+
+    def _load(self, f: int) -> dict[int, np.ndarray]:
+        """O bloco que termina no quadro `f` do arquivo: {quadro: imagem}."""
+        self.loads += 1
+        lo = max(0, f - self.n + 1)
+        out: dict[int, np.ndarray] = {}
+        reader = media.FrameReader(self.src.to_info(), self.w, self.h, self.depth, lo, f - lo + 1, hq=self.hq,
+                                   perf=self.perf, alpha=self.src.has_alpha)
+        try:
+            for k in range(lo, f + 1):
+                img = reader.read()
+                if img is None:
+                    if not self.error:
+                        self.error = reader.error
+                    break
+                out[k] = img
+        finally:
+            reader.close()
+        return out
+
+    def _prefetch(self, lo: int) -> None:
+        """Começa ao fundo o bloco que vem antes de `lo` no arquivo (o próximo a aparecer)."""
+        if lo <= 0 or (self._ahead is not None and self._ahead[1] == lo - 1):
+            return
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="seq-reverse")
+        end = lo - 1
+        self._ahead = (max(0, end - self.n + 1), end, self._pool.submit(self._load, end))
+
+    def get(self, f: int, jump: int) -> np.ndarray:
+        img = self.cache.get(f)
+        if img is None:
+            ahead, self._ahead = self._ahead, None
+            self.cache = {}
+            if ahead is not None and ahead[0] <= f <= ahead[1]:
+                try:
+                    self.cache = ahead[2].result()
+                except Exception as exc:  # noqa: BLE001
+                    self.error = self.error or str(exc)
+            elif ahead is not None:
+                ahead[2].cancel()
+            if f not in self.cache:
+                self.cache = self._load(f)
+            img = self.cache.get(f)
+            if img is None:  # passou do fim do arquivo: o último quadro que existe (como o leitor para a frente)
+                img = self.cache[max(self.cache)] if self.cache else _blank(self.w, self.h, self.depth)
+        if self.cache:
+            self._prefetch(min(self.cache))
+        return img
+
+    def close(self) -> None:
+        self.cache = {}
+        if self._ahead is not None:
+            self._ahead[2].cancel()
+            self._ahead = None
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)
+            self._pool = None
+
+
 class SequenceReader:
     """Lê os quadros da sequência em ordem: `read()` devolve um `FrameLayers` ou None no fim.
 
@@ -251,9 +331,10 @@ class SequenceReader:
     def _size(self, clip: timeline.Clip) -> tuple[int, int]:
         return decode_size(self.seq, clip, self.w, self.h)
 
-    def _new_stream(self, clip: timeline.Clip, first: int) -> _ClipStream:
+    def _new_stream(self, clip: timeline.Clip, first: int) -> _ClipStream | _ReverseStream:
         w, h = self._size(clip)
-        return _ClipStream(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf)
+        kind = _ReverseStream if clip.reverse and not clip.frozen else _ClipStream
+        return kind(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf)
 
     def _stream(self, clip: timeline.Clip, f: int) -> _ClipStream:
         st = self._streams.get(clip.id)

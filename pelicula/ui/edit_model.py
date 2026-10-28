@@ -313,6 +313,10 @@ class TimelineModel(QObject):
         lo, hi = self.seq.source_range(c)
         return self.set_ramp(cid, timemap.preset_anchors(preset, lo, hi, c.reverse, amount, ramp_s))
 
+    def set_reverse(self, cid: str, on: bool) -> bool:
+        """Liga/desliga o reverso do clipe (e dos ligados do mesmo arquivo, o som junto): um passo do desfazer."""
+        return self._retime(cid, reverse=bool(on))
+
     def _retime(self, cid: str, ramp=None, reverse=None) -> bool:
         before = self.history._dump(self.seq)
         with self.seq.keep_main():

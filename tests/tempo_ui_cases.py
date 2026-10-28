@@ -112,3 +112,37 @@ def test_ramp_summary_text():
     m, v = _model()
     m.apply_ramp_preset(v.id, "acelerar", 0.5)
     assert tempo_ui.ramp_summary(m.seq.find(v.id)) == "rampa de 2,50× a 1,00×"
+
+
+# ------------------------------------------------------------------ reverso
+def test_reverse_checkbox_flips_picture_and_sound_in_one_step():
+    m, v, insp = _inspector()
+    p = insp.vtempo
+    assert not p.reverse.isChecked() and p.reverse.isEnabled()
+    before = [m.seq.src_frame(v, t) for t in range(0, 240)]
+    p.reverse.setChecked(True)
+    c = m.seq.find(v.id)
+    assert c.reverse and _audio(m).reverse
+    assert [m.seq.src_frame(c, t) for t in range(0, 240)] == before[::-1]
+    m.undo()
+    assert not m.seq.find(v.id).reverse and not _audio(m).reverse and not p.reverse.isChecked()
+    m.redo()
+    assert m.seq.find(v.id).reverse and p.reverse.isChecked()
+
+
+def test_reverse_from_the_clip_menu_and_frozen_clips():
+    from PySide6.QtWidgets import QMenu
+    from pelicula.ui.timeline_view import TimelineCanvas
+    m, v = _model()
+    cv = TimelineCanvas(m)
+    menu = QMenu()
+    tempo_ui.add_clip_actions(menu, cv, v)
+    act = _actions(menu)["reverse"]
+    assert act.isCheckable() and not act.isChecked()
+    act.trigger()
+    assert m.seq.find(v.id).reverse
+    m.set_clip_values(v.id, dict(m.seq.find(v.id).values, congelar=True))
+    menu2 = QMenu()
+    tempo_ui.add_clip_actions(menu2, cv, m.seq.find(v.id))
+    acts = _actions(menu2)
+    assert not acts["reverse"].isEnabled() and not menu2.findChild(QMenu, "ramp_menu").isEnabled()

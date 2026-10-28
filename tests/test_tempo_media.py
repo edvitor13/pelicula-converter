@@ -129,3 +129,69 @@ def test_ramp_sound_follows_the_picture(ffmpeg_ok, tmp_path, preset, amount, ram
     assert np.abs(err).max() < 1 / 24, f"cada estalo no quadro dele (erro máximo {np.abs(err).max() * 1000:.1f} ms)"
     assert err.max() - err.min() < 0.03, "sem atraso acumulado ao longo da rampa"
     assert min(peaks) > 0.85 * max(peaks), f"o volume fica o mesmo ao longo da rampa: {peaks}"
+
+
+# ------------------------------------------------------------------ reverso
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("ramp", [False, True])
+def test_reverse_frames_are_the_forward_frames_backwards(ffmpeg_ok, sample_video, monkeypatch, ramp):
+    loads = []
+    orig = sequence._ReverseStream._load
+
+    def counted(self, f):
+        out = orig(self, f)
+        loads.append(len(out))
+        return out
+
+    monkeypatch.setattr(sequence, "REVERSE_MAX_FRAMES", 5)   # blocos pequenos: as emendas aparecem no teste
+    monkeypatch.setattr(sequence._ReverseStream, "_load", counted)
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    if ramp:
+        seq.retime(v.id, ramp=timemap.preset_anchors("lento_meio", 0.0, src.length, amount=0.6, ramp_s=0.2))
+    fwd = [seq.src_frame(v, t) for t in range(v.start, v.end)]
+    assert seq.retime(v.id, reverse=True)
+    want = [seq.src_frame(v, t) for t in range(v.start, v.end)]
+    if not ramp:
+        assert want == fwd[::-1] == list(range(src.frames - 1, -1, -1))
+    w, h = 160, 90
+    every = _file_frames(sample_video, w, h)
+    sequence.clear_cache()
+    got = _read_all(seq, w, h)
+    assert [f.frame for f in got] == list(range(seq.duration))
+    for fl, k in zip(got, want):
+        (li,) = fl.layers
+        assert li.layer.src_frame == k
+        assert np.array_equal(li.image, every[k]), f"quadro {fl.frame} (arquivo {k})"
+        assert np.array_equal(sequence.grab(seq, fl.frame, w, h, 8).layers[0].image, li.image)
+    assert max(loads) <= 5 and len(loads) <= src.frames // 5 + 2, "memória limitada: blocos de 5 quadros"
+
+
+def _sweep(path, seconds, f0=200.0, f1=2000.0):
+    t = np.arange(int(R * seconds)) / R
+    k = (f1 - f0) / seconds
+    x = 0.5 * np.sin(2 * np.pi * (f0 * t + k * t * t / 2))
+    for c in (1.3, 4.1, 7.7, 9.95, 10.4):  # estalos em lugares sem simetria (um perto da emenda dos blocos)
+        i = int(c * R)
+        x[i:i + int(0.01 * R)] += 0.45
+    return _write_wav(path, x), x
+
+
+@pytest.mark.ffmpeg
+def test_reverse_sound_is_the_file_backwards(ffmpeg_ok, tmp_path):
+    path, x = _sweep(tmp_path / "varredura.wav", 12.0)
+    src = media.probe_source(path)
+    seq = tl.Sequence(width=320, height=180, fps_str="24/1")
+    clip, = seq.insert_media(src, at=0)
+    assert seq.retime(clip.id, reverse=True) and clip.dur == 288
+    out = tmp_path / "rev.wav"
+    assert audiomix.render_mix(seq, str(out))
+    y = _wav24(out)
+    ref = x[::-1][:len(y)]
+    assert len(y) == pytest.approx(12.0 * R, abs=R / 24)
+    gain = float(np.dot(y, ref) / np.dot(ref, ref))
+    assert 0.6 < gain < 1.05
+    err = np.abs(y - gain * ref)
+    assert np.corrcoef(y, ref)[0, 1] > 0.999, "o som é o arquivo de trás para a frente, amostra por amostra"
+    assert err.max() < 0.05, f"sem estalo nem buraco nas emendas (erro máximo {err.max():.3f} em {err.argmax() / R:.3f} s)"

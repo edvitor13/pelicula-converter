@@ -364,6 +364,8 @@ class TimelineCanvas(QWidget):
             extra.append(_("congelado"))
         if c.ramp and not c.frozen:
             extra.append(_("rampa"))
+        if c.reverse and not c.frozen:
+            extra.append(_("reverso"))
         if muted:
             extra.append(_("mudo"))
         full = label + (("  •  " + "  ".join(extra)) if extra else "")

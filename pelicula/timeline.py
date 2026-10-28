@@ -284,7 +284,7 @@ class Clip:
 
     def to_json(self) -> dict[str, Any]:
         out = {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
-               "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
+               "duracao": self.dur, "entrada": round(self.src_in, 12 if self.retimed else 6), "ligacao": self.link, "nome": self.name,
                "valores": copy.deepcopy(self.values)}
         if self.keys:  # só com animação (o clipe de uma montagem antiga grava igual)
             out["chaves"] = keyframes.to_json(self.keys)
@@ -537,7 +537,10 @@ class Sequence:
         src = self.sources.get(clip.src)
         if src is None or src.is_image:
             return 0
-        s = self.src_time(clip, t + 1) if clip.reverse and not clip.frozen else self.src_time(clip, t)
+        if clip.reverse:  # congelado em reverso: o primeiro quadro que o clipe mostrava (o último do trecho)
+            s = self.time_map(clip).src_at(1 / self.fps) if clip.frozen else self.src_time(clip, t + 1)
+        else:
+            s = self.src_time(clip, t)
         f = int(math.floor(s * src.fps + EPS))
         return min(max(f, 0), max(0, src.frames - 1))
 
@@ -933,7 +936,7 @@ class Sequence:
         for c in members:
             a, b = self.source_range(c)
             x0, x1 = sorted((m.out_at(a), m.out_at(b)))
-            start = anchor.start + int(round(x0 * fps))
+            start = max(0, anchor.start + int(round(x0 * fps)))
             end = max(start + 1, anchor.start + int(round(x1 * fps)))
             plan[c.id] = (start, end, max(0.0, m.src_at((start - anchor.start) / fps)))
         return plan
@@ -951,6 +954,13 @@ class Sequence:
             return False
         plan = self._retime_plan(members, anchor, ramp, reverse)
         ids = {c.id for c in members}
+        for c in members:  # um ligado que passa a começar antes (J/L no reverso) não entra no clipe de antes
+            start, end, src_in = plan[c.id]
+            prv = max((o.end for o in self.clips_on(c.kind, c.track) if o.id not in ids and o.end <= c.start),
+                      default=0)
+            if start < prv < end:
+                head = timemap.TimeMap(src_in, c.speed, ramp, reverse).src_at((prv - start) / self.fps)
+                plan[c.id] = (prv, end, max(0.0, head))
         cut = 0
         for c in members:
             start, end, src_in = plan[c.id]
@@ -962,10 +972,10 @@ class Sequence:
             cut = max(cut, end - lim)
         for c in members:
             start, end, src_in = plan[c.id]
-            dur = max(1, end - cut - max(0, start))
+            dur = max(1, end - cut - start)
             if dur != c.dur:
                 c.rescale_keys(dur / c.dur)
-            c.start, c.dur, c.src_in = max(0, start), dur, src_in
+            c.start, c.dur, c.src_in = start, dur, src_in
             c.ramp, c.reverse = list(ramp), reverse
         for c in members:
             self._clear_range(c.kind, c.track, c.start, c.end, ids)
@@ -1853,6 +1863,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
 }
 FEATURES["rampa"] = lambda seq: any(c.ramp for c in seq.clips)        # rampa de velocidade (`Clip.ramp`)
+FEATURES["reverso"] = lambda seq: any(c.reverse for c in seq.clips)   # clipe tocado de trás para a frente
 
 
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:

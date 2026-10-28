@@ -1,8 +1,10 @@
 """Tempo do clipe na interface: rampa de velocidade (presets), reverso e congelar um quadro.
 
 - `TempoPanel`: entra no fim do cartão "Velocidade" do inspetor do clipe (abaixo da velocidade e do "Congelar
-  quadro"). Escolhe um preset de rampa (`timemap.PRESETS`), a intensidade e a duração de cada transição e aplica
-  no trecho que o clipe mostra; "Tirar a rampa" volta à velocidade constante.
+  quadro"). "Reverso" toca o clipe de trás para a frente (o som junto). Escolhe um preset de rampa
+  (`timemap.PRESETS`), a intensidade e a duração de cada transição e aplica no trecho que o clipe mostra; "Tirar a
+  rampa" volta à velocidade constante. Rampa e reverso combinam: a rampa fica presa à imagem, então no reverso o
+  trecho lento continua no mesmo pedaço do vídeo (uma entrada lenta vira uma saída lenta).
 - `add_clip_actions`: os mesmos comandos no menu do botão direito de um clipe na linha do tempo.
 
 Toda edição passa pelo `TimelineModel` (um passo do desfazer cada); a conta do tempo é só de `timemap` e
@@ -14,7 +16,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from .. import timemap
 from ..i18n import _, fmt_decimal
@@ -40,6 +42,13 @@ class TempoPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 6, 0, 0)
         lay.setSpacing(4)
+        self.reverse = QCheckBox(_("Reverso"))
+        self.reverse.setObjectName("reverse")
+        self.reverse.setToolTip(_("Toca o clipe de trás para a frente, do fim para o começo. O som ligado do mesmo "
+                                  "arquivo também toca ao contrário, junto com a imagem."))
+        self.reverse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reverse.toggled.connect(self._reverse_toggled)
+        lay.addWidget(self.reverse)
         head = QLabel(_("Rampa de velocidade"))
         head.setObjectName("Muted")
         lay.addWidget(head)
@@ -103,18 +112,26 @@ class TempoPanel(QWidget):
     def refresh(self) -> None:
         c = self._clip()
         hold = c is None or self.model.seq._holds(c)
-        for w in (self.preset, self.amount, self.ramp_s, self.btn_apply):
+        for w in (self.preset, self.amount, self.ramp_s, self.btn_apply, self.reverse):
             w.setEnabled(not hold)
+        self.reverse.blockSignals(True)
+        self.reverse.setChecked(c is not None and c.reverse)
+        self.reverse.blockSignals(False)
         self.btn_clear.setEnabled(c is not None and bool(c.ramp))
         if c is None:
             self.status.setText("")
         elif hold:
-            self.status.setText(_("Imagens paradas e quadros congelados não têm rampa."))
+            self.status.setText(_("Imagens paradas e quadros congelados não têm rampa nem reverso."))
         elif c.ramp:
             self.status.setText(_("Com {rampa}. O som acompanha a imagem, sem mudar o tom.").format(
                 rampa=ramp_summary(c)))
         else:
             self.status.setText(_("Velocidade constante."))
+
+    def _reverse_toggled(self, on: bool) -> None:
+        c = self._clip()
+        if c is not None and c.reverse != on and not self.model.set_reverse(c.id, on):
+            self.refresh()
 
     def apply(self) -> bool:
         c = self._clip()
@@ -127,9 +144,15 @@ class TempoPanel(QWidget):
 
 
 def add_clip_actions(menu: QMenu, canvas, clip) -> None:
-    """Rampa de velocidade (e os outros comandos de tempo) no menu do botão direito de um clipe."""
+    """Reverso, rampa de velocidade e congelar no menu do botão direito de um clipe."""
     m = canvas.model
     holds = m.seq._holds(clip)
+    rev = menu.addAction(_("Reverso"))
+    rev.setObjectName("reverse")
+    rev.setCheckable(True)
+    rev.setChecked(clip.reverse)
+    rev.setEnabled(not holds)
+    rev.toggled.connect(lambda on: m.set_reverse(clip.id, on))
     sub = menu.addMenu(_("Rampa de velocidade"))
     sub.setObjectName("ramp_menu")
     sub.setEnabled(not holds)
