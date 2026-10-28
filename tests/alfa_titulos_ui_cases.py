@@ -220,3 +220,71 @@ def test_preview_shows_the_transparency_over_a_checkerboard(win):
     assert mid.red() == mid.green() == mid.blue() and mid.red() > 150
     win.model.undo()  # desfazer volta ao fundo opaco
     assert not win.model.seq.transparent
+
+
+# ------------------------------------------------------------------ geradores ("Novo" da Mídia e inspetor)
+def _menu_action(win, item_id):
+    menu = win.bin.btn_new.menu()
+    assert menu is not None and not win.bin.btn_new.isHidden()
+    act = next((a for a in menu.actions() if a.objectName() == f"novo_{item_id}"), None)
+    assert act is not None, [a.objectName() for a in menu.actions()]
+    return act
+
+
+def test_new_menu_creates_generators_at_the_playhead(win):
+    win.new_project()
+    win.set_mode("edicao")
+    labels = [a.text() for a in win.bin.btn_new.menu().actions()]
+    assert labels[:3] == ["Cor sólida", "Degradê", "Ponta com contagem"]
+    _menu_action(win, "contagem").trigger()
+    seq = win.model.seq
+    leader = next(c for c in seq.clips if seq.sources[c.src].data.get("gerador") == "contagem")
+    assert leader.start == 0 and leader.track == 0 and leader.dur == 8 * 24
+    assert win.model.selection == [leader.id] and leader.src in win.bin.paths()
+    win.seek(48)
+    _menu_action(win, "cor").trigger()  # no cursor, na faixa livre de cima (a V1 tem a ponta)
+    color = next(c for c in win.model.seq.clips if win.model.seq.sources[c.src].kind == "cor")
+    assert color.start == 48 and color.track == 1 and color.dur == 5 * 24
+    win.model.undo()
+    assert not any(win.model.seq.sources[c.src].kind == "cor" for c in win.model.seq.clips)
+
+
+def test_generator_fields_in_the_inspector_with_undo(win):
+    from pelicula import generators
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "degrade").trigger()
+    ed = win.gen_editor
+    assert not ed.isHidden() and ed.gen is generators.GENERATORS["degrade"]
+    store, card = ed._pages["degrade"]
+    rows = {r.param.key: r for r in card.rows}
+    assert rows["cor3"].isHidden() and not rows["angulo"].isHidden()
+    path = ed.path
+    before = dict(win.model.seq.sources[path].data)
+    store.set("cores", "3")
+    assert win.model.seq.sources[path].data["cores"] == "3" and not rows["cor3"].isHidden()
+    store.set("cor1", [1.0, 0.0, 0.0])
+    assert win.model.seq.sources[path].data["cor1"] == "#ff0000"
+    assert win.model.seq.sources[path].data["nome"] == before["nome"]  # o resto fica
+    win.model.undo()  # arrastar agrupa: um passo desfaz tudo
+    assert win.model.seq.sources[path].data == before
+    assert store.get("cores") == "2"
+    # faixa travada: o gerador não muda
+    clip = next(c for c in win.model.seq.clips if c.src == path)
+    win.model.seq.track(tl.VIDEO, clip.track).locked = True
+    assert not win.model.set_source_data(path, {**before, "angulo": 10})
+    win.model.seq.track(tl.VIDEO, clip.track).locked = False
+    # sem clipe escolhido: o painel some
+    win.model.selection = []
+    win.model.selectionChanged.emit()
+    assert ed.isHidden()
+
+
+def test_bin_follows_the_generator_name_and_thumbnail(win):
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "cor").trigger()
+    path = win.gen_editor.path
+    data = dict(win.model.seq.sources[path].data, nome="Fundo azul", cor="#0000ff")
+    assert win.model.set_source_data(path, data)
+    assert pump(lambda: "Fundo azul" in win.bin._item(path).text())

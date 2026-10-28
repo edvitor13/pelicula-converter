@@ -39,6 +39,7 @@ from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
+from . import generators_ui
 from .scopes import Scopes
 from .timeline_view import TimelineEditor
 from . import notifier, prefs, welcome
@@ -453,6 +454,12 @@ class MainWindow(QMainWindow):
         self.bin.removeRequested.connect(self._bin_remove)
         self.bin.filesDropped.connect(self._bin_files)
         self.bin.placeRequested.connect(self.place_at_cursor)
+        self.bin.set_new_menu(generators_ui.new_menu(self, self.new_generated))
+        self._generated_seen: dict[str, str] = {}  # dados de cada clipe sem arquivo na Mídia (para atualizar)
+        self._generated_timer = QTimer(self)
+        self._generated_timer.setSingleShot(True)
+        self._generated_timer.setInterval(250)
+        self._generated_timer.timeout.connect(self._sync_generated_sources)
         self.left_stack = QStackedWidget()
         self.left_stack.addWidget(self.looks)
         self.left_stack.addWidget(self.bin)
@@ -868,6 +875,8 @@ class MainWindow(QMainWindow):
         vl.addWidget(self.edit_scopes)
         self.inspector = ClipInspector(self.model)
         self.inspector.autoRequested.connect(self.auto_adjust_clip)
+        self.gen_editor = generators_ui.GeneratorEditor(self.model)
+        self.inspector.add_source_editor(self.gen_editor)
         vl.addWidget(self.inspector, 1)
         return w
 
@@ -1314,6 +1323,7 @@ class MainWindow(QMainWindow):
             self._refresh_source()
         self._update_title()
         self._update_history()
+        self._generated_timer.start()  # clipe sem arquivo mudado (ou desfeito): nome e miniatura na Mídia
 
     # ---------------------------------------------------------------- marcadores e capítulos
     def _sync_film_markers(self) -> None:
@@ -1471,6 +1481,51 @@ class MainWindow(QMainWindow):
             self.bin.add_source(src)
             self._request_thumb(src)
         return self._sources[src.path]
+
+    # ---------------------------------------------------------------- clipes sem arquivo ("Novo" da Mídia)
+    def new_generated(self, kind_id: str) -> None:
+        """"Novo ▸" da Mídia: cria o clipe sem arquivo (gerador ou título), põe na Mídia e no cursor, na faixa de
+        vídeo mais baixa que está livre ali (por cima do que já aparece), escolhido para ajustar no inspetor."""
+        maker = generators_ui.maker_of(kind_id)
+        if maker is None:
+            return
+        if self.mode != "edicao":
+            self.set_mode("edicao")
+        self.stop_play()
+        seq = self.model.seq
+        src = maker(seq)
+        self.adopt_source(src)
+        self._generated_seen[src.path] = json.dumps(src.data, sort_keys=True)
+        at = max(0, int(self.frame_idx)) if seq.clips else 0
+        track = self._free_video_track(at, seq.default_dur(src))
+        self.model.insert_media(src, at=at, vtrack=track)
+        self.statusBar().showMessage(_("{nome} na faixa V{faixa}: ajuste no inspetor, à direita.").format(
+            nome=src.name, faixa=track + 1), 6000)
+
+    def _free_video_track(self, at: int, dur: int) -> int:
+        """A faixa de vídeo mais baixa, destravada e sem nada em [at, at + dur) (uma nova acima de todas, se não há)."""
+        seq = self.model.seq
+        n = len(seq.kind_tracks(timeline.VIDEO))
+        for t in range(n):
+            tr = seq.track(timeline.VIDEO, t)
+            if tr is not None and tr.locked:
+                continue
+            if all(c.end <= at or c.start >= at + dur for c in seq.clips_on(timeline.VIDEO, t)):
+                return t
+        return n
+
+    def _sync_generated_sources(self) -> None:
+        """Clipes sem arquivo mudados no inspetor (ou num desfazer): a Mídia mostra o nome e a miniatura novos."""
+        for path, src in self.model.seq.sources.items():
+            if src.is_file or path not in self._sources:
+                continue
+            data = json.dumps(src.data, sort_keys=True)
+            if self._generated_seen.get(path) == data:
+                continue
+            self._generated_seen[path] = data
+            self._sources[path] = src
+            self.bin.add_source(src)
+            self._request_thumb(src)
 
     def _request_thumb(self, src: timeline.Source) -> None:
         if not src.has_video:

@@ -293,6 +293,28 @@ class TimelineModel(QObject):
         if not record:
             self.historyChanged.emit()
 
+    def set_source_data(self, path: str, data: dict[str, Any], record: bool = True) -> bool:
+        """Troca os parâmetros de uma fonte sem arquivo (`Source.data`: cor, degradê, texto do título…). Vale para
+        todos os clipes da fonte; recusa (False) se algum está numa faixa travada. `record=False` (arrastando um
+        controle) agrupa o histórico em 400 ms, como `set_clip_values`. Avisa com "values" (só a imagem muda)."""
+        src = self.seq.sources.get(path)
+        if src is None or src.is_file:
+            return False
+        if any(self.seq.locked(c) for c in self.seq.clips if c.src == path):
+            return False
+        new = copy.deepcopy(dict(data))
+        if new == src.data:
+            return True
+        src.data = new
+        if record:
+            self.commit()
+        else:
+            self._timer.start()
+        self.changed.emit("values")
+        if not record:
+            self.historyChanged.emit()
+        return True
+
     def set_speed(self, cid: str, speed: float) -> None:
         with self.seq.keep_main():
             self.seq.room_for_speed(cid, speed)

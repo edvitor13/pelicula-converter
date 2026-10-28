@@ -246,6 +246,7 @@ def _source_and_values(path: str, preset, sets):
         seq = project_sequence(proj)
         if seq is not None:
             from . import sequence
+            _prepare_text(seq)
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
         if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
@@ -254,6 +255,15 @@ def _source_and_values(path: str, preset, sets):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
     return path, values, pid, None, alpha_sequence(path)
+
+
+def _prepare_text(seq) -> None:
+    """Montagem com texto desenhado (a ponta com contagem, títulos): o banco de fontes do Qt precisa de uma
+    QGuiApplication, criada aqui, na thread principal, antes das threads que leem a montagem."""
+    from . import generators
+    if generators.needs_text(seq):
+        from . import textrender
+        textrender.ensure_app()
 
 
 def _exists(path: str) -> bool:

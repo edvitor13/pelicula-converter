@@ -428,3 +428,10 @@ def missing_sources(seq: timeline.Sequence) -> list[str]:
     used = {c.src for c in seq.clips} & _file_sources(seq)
     return sorted(p for p in used if not present(seq.sources[p]))
 
+
+# ------------------------------------------------------------------ geradores que vêm com o app
+# Registram-se aqui (desenho, som e miniatura) para valer em todo lugar que lê uma montagem: janela, exportação
+# e terminal. Ficam registrados mesmo com o módulo desligado (a renderização nunca consulta `modules`).
+from . import generators as _generators  # noqa: E402
+
+_generators.register()

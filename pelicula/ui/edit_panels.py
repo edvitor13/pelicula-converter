@@ -144,6 +144,16 @@ class MediaBin(QWidget):
         self.btn_import.setToolTip(_("Importar vídeos, imagens e músicas (Ctrl+I)"))
         self.btn_import.clicked.connect(self.importRequested)
         row.addWidget(self.btn_import, 1)
+        self.btn_new = QToolButton()  # "Novo ▸": cor sólida, degradê, ponta, título (`set_new_menu`)
+        self.btn_new.setObjectName("Flat")
+        self.btn_new.setText(_("Novo"))
+        self.btn_new.setIcon(icons.icon("wand", theme.TEXT, 16))
+        self.btn_new.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_new.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_new.setToolTip(_("Criar um clipe sem arquivo: cor sólida, degradê, ponta com contagem ou título"))
+        self.btn_new.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_new.setVisible(False)
+        row.addWidget(self.btn_new)
         self.btn_add = self._flat("plus", _("Adicionar o item escolhido ao fim da linha do tempo"))
         self.btn_add.clicked.connect(self._add_current)
         row.addWidget(self.btn_add)
@@ -181,6 +191,11 @@ class MediaBin(QWidget):
         return b
 
     # -------------------------------------------------------- API
+    def set_new_menu(self, menu: QMenu) -> None:
+        """Liga o botão "Novo" ao menu dos clipes sem arquivo (`ui/generators_ui.new_menu`)."""
+        self.btn_new.setMenu(menu)
+        self.btn_new.setVisible(True)
+
     def add_source(self, src: Source, thumb: QImage | None = None) -> None:
         self._sources[src.path] = src
         item = self._item(src.path)
@@ -384,6 +399,11 @@ class ClipInspector(QWidget):
         scroll.setWidget(inner)
         pl.addWidget(scroll, 1)
         return page, cards
+
+    def add_source_editor(self, widget: QWidget) -> None:
+        """Painel no alto da página de imagem para os campos de um clipe sem arquivo (gerador, título); o próprio
+        painel aparece ou some conforme o clipe escolhido (`ui/generators_ui.py`, `ui/titles_panel.py`)."""
+        self.video_page.layout().insertWidget(0, widget)
 
     def _tools(self) -> QWidget:
         w = QWidget()

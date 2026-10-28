@@ -167,7 +167,9 @@ def test_renderer_output_is_checked_and_converted(monkeypatch):
         reader.close()
 
 
-def test_kind_without_renderer_is_a_transparent_layer():
+def test_kind_without_renderer_is_a_transparent_layer(monkeypatch):
+    # "gerador" tem o gerador do app (generators.py): aqui o tipo fica sem gerador, como num projeto mais novo
+    monkeypatch.delitem(sequence.RENDERERS, KIND, raising=False)
     seq, src, clip = only_virtual()
     assert KIND not in sequence.RENDERERS
     layers = sequence.grab(seq, 0, W, H, 8).layers
