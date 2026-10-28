@@ -356,6 +356,8 @@ class ClipInspector(QWidget):
         self.stack.addWidget(self.audio_page)
         self.vstore.changed.connect(lambda key: self._store_changed(self.vstore, self.vcards, key))
         self.astore.changed.connect(lambda key: self._store_changed(self.astore, self.acards, key))
+        from . import transitions_ui  # 1.5: ícones dos tipos de transição e só os ajustes do tipo escolhido
+        self.transitions = transitions_ui.InspectorTransitions(self.vstore, self.vcards, model)
         model.selectionChanged.connect(self._selection_changed)
         model.changed.connect(self._model_changed)
         self._selection_changed()

@@ -29,6 +29,7 @@ from .edit_model import TimelineModel
 from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
 from .widgets import FilmSlider, timecode
+from . import transitions_ui  # 1.5: transições de película (módulo "transicoes")
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
 HEADER_W = 156               # coluna dos nomes e botões das faixas
@@ -279,6 +280,7 @@ class TimelineCanvas(QWidget):
                 continue
             self._paint_clip(p, c, r, fm, dim=c.id in moving)
         self._paint_audio_transitions(p, x_min, x_max)
+        transitions_ui.paint(self, p, x_min, x_max)  # 1.5: transições de película sobre o corte
         self._paint_ghosts(p)
         if not self.seq.clips:
             p.setPen(QColor(theme.FAINT))
@@ -371,7 +373,7 @@ class TimelineCanvas(QWidget):
         v = c.values
         fps = self.seq.fps
         p.setPen(Qt.PenStyle.NoPen)
-        if v.get("entrada_tipo", "corte") != "corte":
+        if v.get("entrada_tipo", "corte") != "corte" and not transitions_ui.is_extra("entrada", v["entrada_tipo"]):
             wpx = min(r.width(), v["entrada_dur"] * fps * self.ppf)
             path = QPainterPath()
             path.moveTo(r.left(), r.bottom())
@@ -381,7 +383,7 @@ class TimelineCanvas(QWidget):
             col = QColor(255, 255, 255, 60) if v["entrada_tipo"] in ("branco", "dissolver") else QColor(0, 0, 0, 90)
             p.setBrush(col)
             p.drawPath(path)
-        if v.get("saida_tipo", "corte") != "corte":
+        if v.get("saida_tipo", "corte") != "corte" and not transitions_ui.is_extra("saida", v["saida_tipo"]):
             wpx = min(r.width(), v["saida_dur"] * fps * self.ppf)
             path = QPainterPath()
             path.moveTo(r.right(), r.bottom())
@@ -1078,6 +1080,7 @@ class TimelineCanvas(QWidget):
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())
+            transitions_ui.add_menu(self, menu, clip, pos.x())  # 1.5: "Transição ▸" (módulo "transicoes")
             self.split_edit_actions(menu, clip, pos.x())
             menu.addSeparator()
             menu.addAction(_("Remover espaços da faixa"), lambda: self._close_gaps(clip.kind, clip.track))

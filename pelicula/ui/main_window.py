@@ -2958,6 +2958,8 @@ class MainWindow(QMainWindow):
             self.curve_timer.start()
         self._meter_enabled = "medidor_som" in on
         self._meter_source()  # desligado: nem decodifica nem mede
+        from . import transitions_ui  # 1.5: tipos novos e o menu "Transição ▸" (módulo "transicoes")
+        transitions_ui.apply_module(self, "transicoes" in on)
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
         self._check_modules()

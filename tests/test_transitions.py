@@ -17,7 +17,8 @@ import numpy as np
 import pytest
 
 import transicoes_base as base
-from pelicula import compositor, editparams, editshaders, look, media, presets, project, sequence, transitions
+from pelicula import (compositor, editparams, editshaders, look, media, modules, presets, project, sequence,
+                      transitions)
 from pelicula import timeline as tl
 
 REF = json.loads(base.DATA.read_text(encoding="utf-8"))
@@ -295,6 +296,18 @@ def test_seed_is_stable_and_params_are_known():
     assert transitions.uses_duration("entrada", "fusao") and not transitions.uses_duration("entrada", "emenda")
 
 
+def test_module_is_stable_on_in_creator_and_detected_in_a_montage():
+    m = modules.get("transicoes")
+    assert m.status == modules.ESTAVEL and m.group == "edicao" and modules.default_enabled("transicoes")
+    sets = {pid: ids for pid, _n, _d, ids in modules.PROFILES}
+    assert "transicoes" not in sets["simples"]
+    assert all("transicoes" in sets[p] for p in ("criador", "cinema", "tudo"))
+    seq, _a, b = two_clips("dissolver")
+    assert "transicoes" not in modules.used_by(None, seq)
+    seq.set_values(b.id, {**b.values, "entrada_tipo": "ponta"})
+    assert "transicoes" in modules.used_by(None, seq)
+
+
 # ------------------------------------------------------------------ GPU
 W, H = 320, 180
 
@@ -486,7 +499,7 @@ def test_preview_and_export_give_the_same_frames(gl_engine, ffmpeg_ok, sample_vi
         ref = exported[n - 2]
         assert np.array_equal(export.preview_frame(gl_engine, info, film, settings, n, seq=seq, depth=16), ref), n
         assert np.array_equal(recipe.render(gl_engine, sequence.grab(seq, n, w, h, 16, hq=True), n), ref), n
-    # 8 bits (a prévia do modo Edição sem película): a leitura em sequência dá a mesma montagem que o quadro avulso
+    # 8 bits (a prévia do modo Edição sem película): a leitura em sequência dá a montagem do quadro avulso
     only = frame.Recipe.for_source(None, info.fps, 8, legal=True, seq=seq, size=(w, h))
     reader = sequence.SequenceReader(seq, w, h, 8, start=2, count=18)
     try:
