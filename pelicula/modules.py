@@ -140,11 +140,19 @@ def default_enabled(module_id: str) -> bool:
 
 
 def is_enabled(settings, module_id: str) -> bool:
-    """Se o módulo está ligado. Sem preferência salva vale o padrão (estável = ligado)."""
+    """Se o módulo está ligado. Sem preferência salva vale o perfil escolhido (um módulo estável que veio
+    numa versão depois da escolha segue o perfil: quem está no Simples não ganha ferramentas ligadas ao
+    atualizar) e, sem perfil gravado, o padrão (estável = ligado)."""
     if not exists(module_id):
         return False
     saved = _truthy(settings.value(KEY_PREFIX + module_id, None)) if settings is not None else None
-    return default_enabled(module_id) if saved is None else saved
+    if saved is not None:
+        return saved
+    if default_enabled(module_id) and settings is not None:
+        chosen = next((p[3] for p in PROFILES if p[0] == settings.value(KEY_PROFILE, None)), None)
+        if chosen is not None:
+            return module_id in chosen
+    return default_enabled(module_id)
 
 
 def set_enabled(settings, module_id: str, on: bool) -> None:

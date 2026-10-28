@@ -67,6 +67,24 @@ def test_profiles_are_nested_and_known():
         assert ids <= every
 
 
+@pytest.mark.parametrize("profile", [p[0] for p in modules.PROFILES])
+def test_a_module_newer_than_the_chosen_profile_follows_it(profile):
+    """Quem escolheu o perfil numa versão antiga não tem preferência gravada para os módulos que vieram
+    depois (os da 1.5): eles seguem o perfil, e o perfil continua o mesmo."""
+    s = FakeSettings()
+    modules.apply_profile(s, profile)
+    newer = ("transicoes", "legendas", "silencios", "titulos_geradores")
+    for mid in newer:
+        del s[modules.KEY_PREFIX + mid]
+    chosen = next(p[3] for p in modules.PROFILES if p[0] == profile)
+    for mid in newer:
+        assert modules.is_enabled(s, mid) == (mid in chosen), mid
+    assert modules.current_profile(s) == profile
+    assert not modules.is_enabled(s, "legendas_auto")  # recurso em teste: nunca pelo perfil
+    s[modules.KEY_PROFILE] = "perfil_que_nao_existe"
+    assert all(modules.is_enabled(s, mid) for mid in newer)
+
+
 def test_custom_choice_has_no_profile():
     s = FakeSettings()
     modules.apply_profile(s, "simples")

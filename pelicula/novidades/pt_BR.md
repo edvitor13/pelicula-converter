@@ -1,3 +1,20 @@
+## Versão 1.5.0 — 28 de outubro de 2026
+
+**Movimento, texto e legendas no modo Edição.**
+
+- 🪟 **Transparência.** Vídeos e imagens com fundo transparente (PNG, ProRes 4444, WebM e o recorte do CorridorKey) aparecem sobre as faixas de baixo, em vez de ficar com fundo preto. Dá para montar com *Fundo transparente* e exportar com transparência em ProRes 4444, WebM ou sequência de PNG ou TIFF. Sequências de imagens numeradas (plano_0001.png…) entram como um vídeo só.
+- ◆ **Animação com chaves.** Clique no losango ao lado de um ajuste para gravar uma chave no ponto em que você está: posição, escala, rotação, opacidade, cor, luz, volume e os ajustes da película mudam ao longo do tempo. As chaves aparecem na linha do tempo, onde dá para arrastá-las.
+- ⏱️ **Tempo do clipe.** Rampa de velocidade com seis formas prontas (o som acompanha sem mudar o tom), reverso e *Congelar este quadro* (Shift+F).
+- 🔤 **Títulos e geradores.** Em Mídia → *Novo*: cor sólida, degradê, ponta com contagem regressiva e bipe, e títulos com 11 fontes embutidas, seis estilos e oito animações.
+- 🎞️ **Transições de película.** Fusão ótica, surgir e escurecer na exposição, queima da película, emenda com clarão, ponta e íris, além de empurrar, cortina e zoom. Clique com o botão direito num clipe → *Transição*.
+- 💬 **Legendas.** Painel (Ctrl+Shift+L) e faixa na linha do tempo, presas à fala mesmo quando você corta. Estilos YouTube, Reels (palavra a palavra) e Cinema; importe e exporte .srt e .vtt. Na exportação, a legenda vai no arquivo, gravada na película (com grão e halação), por cima do look ou num arquivo ao lado.
+- 🎙️ **Legendas pela fala (Beta).** O app transcreve o vídeo no seu computador, sem enviar nada pela internet, e com o tempo de cada palavra dá para cortar pelo texto. Começa desligado: ligue em Configurações → Recursos marcando *Mostrar recursos em teste* e baixe o transcritor e um modelo em Componentes (cerca de 290 MB com o modelo Rápido, ou 600 MB com o Preciso).
+- 🔇 **Remover silêncios.** O app acha os trechos em silêncio, mostra a lista para você revisar e tira tudo de uma vez (um Ctrl+Z desfaz).
+- ✂️ **Ferramentas de corte.** Inserir ou sobrescrever ao soltar um clipe, faixa principal magnética opcional, Q e W para aparar até o cursor, cortes J e L, e as teclas J, K e L para tocar para trás, pausar e tocar para a frente. O **Repetir** mudou para **Ctrl+L**.
+- 🧩 **No seu perfil.** As ferramentas novas seguem o perfil de Configurações → Recursos: no Simples chegam desligadas; no Criador, no Cinema e no Tudo, ligadas.
+- 📂 **Projetos.** Um projeto que usa algo novo da 1.5 só abre na 1.5 ou mais nova (a 1.4 avisa, em vez de abrir errado). Os projetos antigos abrem e saem iguais.
+- 🛠️ **Correção.** No Windows, a prévia da janela de exportação às vezes ficava "Prévia indisponível".
+
 ## Versão 1.4.0 — 27 de outubro de 2026
 
 **Exportação pronta para cada rede, marcadores e capítulos, recorte por IA e um app do seu jeito.**
