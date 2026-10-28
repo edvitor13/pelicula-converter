@@ -94,6 +94,9 @@ def test_spans_follow_speed_selection_mute_and_skip_what_has_no_speech():
     assert subauto.spans_for(seq, []) == []
     seq.track(tl.AUDIO, 0).muted = True                           # faixa muda: não há fala para ouvir
     assert subauto.spans_for(seq) == []
+    seq.track(tl.AUDIO, 0).muted = False
+    assert seq.retime(b.id, reverse=True)                         # reverso: o mesmo trecho, tocado ao contrário
+    assert subauto.spans_for(seq, [b.id]) == [subauto.Span(B, 0.0, 10.0)]
 
 
 def test_spans_without_audio_clips_use_the_picture():

@@ -238,41 +238,61 @@ def clips_for(seq, path: str) -> list:
 @dataclass(frozen=True)
 class Mapping:
     """Como um clipe mostra o arquivo: o segundo `a` do arquivo aparece no segundo `t0` da sequência e o tempo
-    anda `speed` vezes mais rápido no arquivo (o mesmo de `Sequence.src_time`)."""
+    anda `speed` vezes mais rápido no arquivo (o mesmo de `Sequence.src_time`). Com rampa ou reverso, `tm` é o
+    `timemap.TimeMap` do clipe e as contas passam por ele (no reverso, o fim de uma legenda no arquivo vem antes
+    do começo na sequência)."""
     clip: str
     a: float
     t0: float
     speed: float
+    tm: Any = field(default=None, compare=False, repr=False)
+
+    @property
+    def reverse(self) -> bool:
+        return self.tm is not None and self.tm.reverse
 
     def to_seq(self, x: float) -> float:
+        if self.tm is not None:
+            return self.t0 + self.tm.out_at(x)
         return self.t0 + (x - self.a) / self.speed
 
     def to_file(self, t: float) -> float:
+        if self.tm is not None:
+            return self.tm.src_at(t - self.t0)
         return self.a + (t - self.t0) * self.speed
+
+    def span(self, lo: float, hi: float) -> tuple[float, float]:
+        """O trecho [lo, hi] do arquivo em segundos da sequência, em ordem."""
+        s, e = self.to_seq(lo), self.to_seq(hi)
+        return (e, s) if self.reverse else (s, e)
+
+
+def mapping_of(seq, clip) -> Mapping:
+    """O `Mapping` do clipe (o mesmo de `mapped`)."""
+    tm = seq.time_map(clip) if clip.retimed else None
+    return Mapping(clip.id, seq.src_time(clip, clip.start), clip.start / seq.fps, clip.speed, tm)
 
 
 def mapped(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE):
     """Cada pedaço visível das legendas presas ao arquivo `path`: (índice da legenda em `cues`, `Mapping` do clipe,
     legenda em segundos da sequência), na ordem dos clipes. É a regra de `map_cues` (que junta e tira as
     repetidas); a interface usa isto para saber de onde veio cada legenda que aparece."""
-    fps = seq.fps
     cues = list(cues)
     for c in clips_for(seq, path):
-        a, b = seq.src_time(c, c.start), seq.src_time(c, c.end)   # trecho do arquivo que o clipe mostra
+        a, b = sorted((seq.src_time(c, c.start), seq.src_time(c, c.end)))  # trecho do arquivo que o clipe mostra
         if b <= a + EPS:
             continue
-        m = Mapping(c.id, a, c.start / fps, c.speed)
-        to_seq = m.to_seq
+        m = mapping_of(seq, c)
         for i, cue in enumerate(cues):
             lo, hi = max(cue.start, a), min(cue.end, b)
             if hi <= lo + EPS:
                 continue
-            words = tuple(Word(to_seq(max(w.start, a)), to_seq(min(w.end, b)), w.text) for w in cue.words
-                          if a - EPS <= (w.start + w.end) / 2 < b - EPS)
+            words = tuple(sorted((Word(*m.span(max(w.start, a), min(w.end, b)), w.text) for w in cue.words
+                                  if a - EPS <= (w.start + w.end) / 2 < b - EPS), key=lambda w: w.start))
             if cue.words and not words:
                 continue
             cut = lo > cue.start + EPS or hi < cue.end - EPS
-            s, e = to_seq(lo), to_seq(hi)
+            s, e = m.span(lo, hi)
             if cut and e - s < min_piece:
                 continue
             text = cue.text if len(words) == len(cue.words) else " ".join(w.text for w in words)

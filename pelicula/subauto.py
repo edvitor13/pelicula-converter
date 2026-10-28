@@ -65,7 +65,7 @@ def spans_for(seq, clip_ids: Iterable[str] | None = None, gap: float = GAP) -> l
             tr = seq.track(c.kind, c.track)
             if (wanted is not None and c.id not in wanted) or (tr is not None and tr.muted):
                 continue
-            a, b = seq.src_time(c, c.start), seq.src_time(c, c.end)
+            a, b = sorted((seq.src_time(c, c.start), seq.src_time(c, c.end)))  # no reverso, b < a
             if b > a + sb.EPS:
                 ranges.append((max(0.0, a), b))
         out += [Span(path, a, b) for a, b in _merge(ranges, gap)]

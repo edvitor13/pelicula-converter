@@ -76,7 +76,7 @@ def items(seq, subs: sb.Subtitles | None) -> list[Item]:
 
 def mapping_for(seq, clip) -> sb.Mapping:
     """Como o clipe mostra o arquivo dele (o mesmo `Mapping` de `subtitles.mapped`)."""
-    return sb.Mapping(clip.id, seq.src_time(clip, clip.start), clip.start / seq.fps, clip.speed)
+    return sb.mapping_of(seq, clip)
 
 
 def anchor_at(seq, frame: int) -> tuple[str | None, sb.Mapping | None]:
@@ -179,14 +179,18 @@ def set_times(subs: sb.Subtitles, item: Item, start: float | None = None, end: f
     if cue is None:
         return None
     s, e = cue.start, cue.end
+    rev = item.mapping is not None and item.mapping.reverse  # no reverso, o começo na tela é o fim no arquivo
     head = start is not None and abs(start - item.cue.start) > 1e-9
+    tail = end is not None and abs(end - item.cue.end) > 1e-9
     if head:
-        s = max(0.0, _to_store(item, max(0.0, start)))
-    if end is not None and abs(end - item.cue.end) > 1e-9:
-        e = _to_store(item, max(0.0, end))
+        v = max(0.0, _to_store(item, max(0.0, start)))
+        e, s = (v, s) if rev else (e, v)
+    if tail:
+        v = max(0.0, _to_store(item, max(0.0, end)))
+        e, s = (e, v) if rev else (v, s)
     shortest = MIN_DUR * (item.mapping.speed if item.mapping is not None else 1.0)  # no tempo guardado
     if e - s < shortest - 1e-9:
-        if head:
+        if (head and not rev) or (tail and rev):
             s = max(0.0, e - shortest)
         e = max(e, s + shortest)
     new = replace(cue, start=s, end=e, words=_clamp_words(cue.words, s, e))
@@ -199,7 +203,8 @@ def move(subs: sb.Subtitles, item: Item, dt: float) -> Cue | None:
     cue = source(subs, item.ref)
     if cue is None:
         return None
-    d = dt * (item.mapping.speed if item.mapping is not None else 1.0)
+    m = item.mapping
+    d = m.to_file(item.cue.start + dt) - m.to_file(item.cue.start) if m is not None else dt
     d = max(d, -cue.start)
     new = cue.shifted(d)
     _put(subs, item.ref, new)
@@ -214,7 +219,7 @@ def add(subs: sb.Subtitles, start: float, end: float, text: str, mapping: sb.Map
     if not text or end <= start:
         return None
     if path is not None and mapping is not None:
-        s, e = mapping.to_file(start), mapping.to_file(end)
+        s, e = sorted((mapping.to_file(start), mapping.to_file(end)))
     else:
         path, s, e = None, start, end
     cue = Cue(max(0.0, s), max(0.0, e), text)

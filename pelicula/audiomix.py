@@ -12,6 +12,13 @@ onde o clipe vizinho continua o mesmo arquivo do ponto exato (corte não mexido)
 (`values["transicao"]` no clipe que entra, tempo de `Sequence.audio_crossfade`) estende os dois
 clipes além do corte com o arquivo que sobra e cruza as curvas seno/cosseno (`afade curve=qsin`): a
 soma das potências fica constante. Projeto sem nada disso gera exatamente o mesmo grafo de antes.
+
+Rampa de velocidade e reverso (`Clip.ramp`, `Clip.reverse`; o tempo vem de `Sequence.time_map`, o mesmo da
+imagem): o som do clipe vira pedaços de velocidade constante (`TimeMap.pieces`: um só onde a velocidade não
+muda, pedaços de 0,1 s numa transição), cada um com o seu `atempo` (o tom não muda), cruzados em 8 ms e somados
+no lugar exato da saída — as pontas de cada pedaço caem no mapa, então nada se acumula e o som segue a imagem
+quadro a quadro. No reverso cada bloco do arquivo (até `GROUP_S`) entra por uma entrada própria e passa por
+`areverse`: a memória fica limitada ao bloco, não ao clipe. Veja `_retimed_chain`.
 """
 
 from __future__ import annotations
@@ -31,7 +38,11 @@ from . import media, timeline
 from .i18n import _
 
 RATE = 48000
-SCRIPT_LIMIT = 6000  # acima disso o grafo vai para um arquivo (-filter_complex_script)
+SCRIPT_LIMIT = 6000  # acima disso o grafo vai para um arquivo (-/filter_complex)
+XFADE_S = 0.008      # cruzamento entre os pedaços de velocidade de uma rampa
+MARGIN_S = 0.05      # sobra (s da saída) de cada lado do pedaço, para o atempo começar estável
+GROUP_S = 10.0       # s do arquivo por entrada do ffmpeg num clipe com rampa/reverso (memória limitada)
+ATEMPO_LAG_S = 0.015  # quanto cada `atempo` adianta o som, em s da entrada dele (meia janela; medido no ffmpeg 7–9)
 
 
 def _fmt(x: float) -> str:
@@ -51,6 +62,17 @@ def _atempo(speed: float) -> list[str]:
     if abs(s - 1.0) > 1e-6:
         out.append(f"atempo={_fmt(s)}")
     return out
+
+
+def _atempo_lag(speed: float) -> float:
+    """Segundos do arquivo que a cadeia `_atempo(speed)` adianta: a saída no instante τ toca o arquivo em
+    τ·speed + lag. Cada filtro adianta `ATEMPO_LAG_S` da própria entrada (o filtro k recebe o tempo já
+    multiplicado pelos anteriores). Só a rampa/reverso compensa isso; a cadeia comum fica como sempre foi."""
+    lag, p = 0.0, 1.0
+    for f in _atempo(speed):
+        lag += ATEMPO_LAG_S * p
+        p *= float(f.split("=", 1)[1])
+    return lag
 
 
 def _range(seq: timeline.Sequence, start: int, end: int) -> tuple[int, int]:
@@ -105,7 +127,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
         if micro:
             v = c.values
             prev, nxt = seq.previous_on_track(c), seq.next_on_track(c)
-            micro_in = (head is None and float(v["fade_in"]) < micro and c.src_in > 1e-4
+            cut_in = seq.source_room(c)[0] > 1e-4 if c.retimed else c.src_in > 1e-4
+            micro_in = (head is None and float(v["fade_in"]) < micro and cut_in
                         and not (prev is not None and prev.id in audible and seq.continues(prev, c)))
             micro_out = (tail is None and float(v["fade_out"]) < micro and c.dur < seq.max_dur(c)
                          and not (nxt is not None and nxt.id in audible and seq.continues(c, nxt)))
@@ -132,6 +155,11 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "micro_in": micro_in,
             "micro_out": micro_out,
         })
+        if c.retimed:  # rampa / reverso: os pedaços de velocidade constante, do começo da cadeia ao fim
+            m = seq.time_map(c)
+            out[-1]["pieces"] = m.pieces(-pre, c.dur / fps + post)
+            out[-1]["reverse"] = c.reverse
+            out[-1]["length"] = src.length
     return out
 
 
@@ -139,11 +167,19 @@ def has_audio(seq: timeline.Sequence, start: int = 0, end: int = -1) -> bool:
     return bool(segments(seq, start, end))
 
 
-def _chain(seg: dict, k: int) -> str:
+def _chain(seg: dict, k: int, inp: int | None = None) -> str:
+    c: timeline.Clip = seg["clip"]
+    f = [f"[{k + 1 if inp is None else inp}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
+    f += _atempo(c.speed)
+    return ",".join(f + _chain_tail(seg)) + f"[a{k}]"
+
+
+def _chain_tail(seg: dict) -> list[str]:
+    """O que vem depois da velocidade: volume, equalização, voz, ruído, normalização, balanço, fades, recorte e
+    atraso (o mesmo para um clipe comum e para um com rampa/reverso)."""
     c: timeline.Clip = seg["clip"]
     v = c.values
-    f = [f"[{k + 1}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
-    f += _atempo(c.speed)
+    f: list[str] = []
     vk = seg.get("vol_keys")
     if vk:
         f.append(volume_envelope(vk, seg["pre"], seg["fps"], seg["key_off"], seg["track_db"]))
@@ -187,7 +223,104 @@ def _chain(seg: dict, k: int) -> str:
     ms = int(round(seg["delay"] * 1000))
     if ms > 0:
         f.append(f"adelay={ms}|{ms}")
-    return ",".join(f) + f"[a{k}]"
+    return f
+
+
+def _groups(pieces: list[tuple[float, float, float, float]], reverse: bool) -> list[list[tuple]]:
+    """Pedaços em blocos de até `GROUP_S` do arquivo (um bloco = uma entrada do ffmpeg). No reverso um pedaço
+    mais longo que isso é partido (o `areverse` guarda o bloco inteiro na memória)."""
+    flat = []
+    for xa, xb, sa, sb in pieces:
+        n = max(1, int(abs(sb - sa) // GROUP_S) + 1) if reverse else 1
+        for i in range(n):
+            a = xa + (xb - xa) * i / n
+            b = xa + (xb - xa) * (i + 1) / n if i < n - 1 else xb
+            flat.append((a, b, sa + (sb - sa) * i / n, sa + (sb - sa) * (i + 1) / n if i < n - 1 else sb))
+    groups: list[list[tuple]] = []
+    for pc in flat:
+        if groups:
+            lo = min(min(q[2], q[3]) for q in groups[-1] + [pc])
+            hi = max(max(q[2], q[3]) for q in groups[-1] + [pc])
+            if hi - lo <= GROUP_S:
+                groups[-1].append(pc)
+                continue
+        groups.append([pc])
+    return groups
+
+
+def _retimed_chain(seg: dict, k: int, inp: int) -> tuple[list[str], str]:
+    """(entradas, cadeia) do som de um clipe com rampa de velocidade ou reverso (veja o cabeçalho).
+
+    O tempo da cadeia começa `pre` segundos antes do clipe, como na cadeia comum; cada pedaço (xa, xb, sa, sb)
+    toca o arquivo de `sa` a `sb` entre xa e xb (segundos desde o começo do clipe), com `atempo` = |sb − sa| /
+    (xb − xa), e entra/sai num cruzamento de `XFADE_S` com os vizinhos."""
+    c: timeline.Clip = seg["clip"]
+    pre, rev, length = seg["pre"], seg["reverse"], seg["length"]
+    pieces = seg["pieces"]
+    groups = _groups(pieces, rev)
+    n_all = sum(len(g) for g in groups)
+    inputs: list[str] = []
+    parts: list[str] = []
+    labels: list[str] = []
+    j = 0
+    for gi, group in enumerate(groups):
+        rates = [abs(sb - sa) / max(1e-9, xb - xa) for xa, xb, sa, sb in group]
+        pad = max(r * (XFADE_S / 2 + MARGIN_S) + _atempo_lag(r) for r in rates)
+        g_lo = max(0.0, min(min(q[2], q[3]) for q in group) - pad)
+        g_hi = min(length, max(max(q[2], q[3]) for q in group) + pad) if length > 0 else \
+            max(max(q[2], q[3]) for q in group) + pad
+        g_hi = max(g_hi, g_lo + 1e-3)
+        inputs += ["-ss", _fmt(g_lo), "-t", _fmt(g_hi - g_lo), "-i", c.src]
+        head = [f"[{inp + gi}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
+        if rev:
+            head.append("areverse")  # o tempo do bloco corre do fim (g_hi) para o começo
+        names = [f"r{k}_{j + i}" for i in range(len(group))]
+        if len(group) > 1:
+            parts.append(",".join(head) + f",asplit={len(group)}" + "".join(f"[{nm}]" for nm in names))
+        else:
+            parts.append(",".join(head) + f"[{names[0]}]")
+        for (xa, xb, sa, sb), r, nm in zip(group, rates, names):
+            first, last = j == 0, j == n_all - 1
+            a = 0.0 if first else XFADE_S / 2
+            b = 0.0 if last else XFADE_S / 2
+            # A janela do bloco que este pedaço usa (no tempo do bloco: do começo dele, ou do fim no reverso);
+            # a saída do atempo no instante τ toca o ponto τ·r + lag da janela, daí o `off` do recorte.
+            lag = _atempo_lag(r)
+            if rev:
+                want = sa + r * a                      # o arquivo no início do pedaço (com o cruzamento)
+                top = min(g_hi, want + lag + r * MARGIN_S)
+                w0, w1 = g_hi - top, g_hi - max(g_lo, sb - r * (b + MARGIN_S) - lag)
+                off = (top - want - lag) / r if r > 0 else 0.0
+            else:
+                want = sa - r * a
+                bot = max(g_lo, want - lag - r * MARGIN_S)
+                w0, w1 = bot - g_lo, min(g_hi, sb + r * (b + MARGIN_S) + lag) - g_lo
+                off = (want - bot - lag) / r if r > 0 else 0.0
+            late = max(0.0, -off)
+            off = max(0.0, off)
+            span = (xb - xa) + a + b
+            f = [f"[{nm}]atrim=start={_fmt(max(0.0, w0))}:end={_fmt(max(w0 + 1e-3, w1))}", "asetpts=PTS-STARTPTS"]
+            f += _atempo(r)
+            f += ["apad", f"atrim=start={_fmt(off)}:duration={_fmt(max(1e-3, span - late))}", "asetpts=PTS-STARTPTS"]
+            if a:
+                f.append(f"afade=t=in:st=0:d={_fmt(XFADE_S)}")
+            if b:
+                f.append(f"afade=t=out:st={_fmt(max(0.0, span - late - XFADE_S))}:d={_fmt(XFADE_S)}")
+            n = int(round((xa + pre - a + late) * RATE))  # em amostras: exato
+            if n > 0:
+                f.append(f"adelay={n}S|{n}S")
+            out = f"q{k}_{j}"
+            parts.append(",".join(f) + f"[{out}]")
+            labels.append(f"[{out}]")
+            j += 1
+    total = pieces[-1][1] + pre if pieces else 0.0
+    mix = "".join(labels) + (f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+                             if len(labels) > 1 else "anull,")
+    # O primeiro bloco de silêncio do `adelay` sai sem tempo (NOPTS) e o `atrim` se perde: o tempo é refeito pela
+    # contagem de amostras antes de completar e cortar a cadeia.
+    mix += f"asetpts=N/SR/TB,apad,atrim=duration={_fmt(total)}," + ",".join(["asetpts=PTS-STARTPTS"] + _chain_tail(seg))
+    parts.append(mix + f"[a{k}]")
+    return inputs, ";".join(parts)
 
 
 def volume_envelope(keys, pre: float, fps: float, key_off: int, track_db: float = 0.0) -> str:
@@ -211,9 +344,17 @@ def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[
     total = (b - a) / seq.fps
     inputs = ["-f", "lavfi", "-t", _fmt(total), "-i", f"anullsrc=r={RATE}:cl=stereo"]
     chains = []
+    inp = 1
     for k, seg in enumerate(segs):
+        if seg.get("pieces"):  # rampa / reverso: várias entradas, uma por bloco do arquivo
+            ins, chain = _retimed_chain(seg, k, inp)
+            inputs += ins
+            inp += ins.count("-i")
+            chains.append(chain)
+            continue
         inputs += ["-ss", _fmt(seg["src_in"]), "-t", _fmt(seg["src_len"]), "-i", seg["clip"].src]
-        chains.append(_chain(seg, k))
+        chains.append(_chain(seg, k, inp))
+        inp += 1
     labels = "[0:a]" + "".join(f"[a{k}]" for k in range(len(segs)))
     mix = (f"{labels}amix=inputs={len(segs) + 1}:duration=first:dropout_transition=0:normalize=0,"
            f"atrim=duration={_fmt(total)}[out]")
@@ -224,8 +365,9 @@ def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: in
                   script_path: str | None = None) -> list[str] | None:
     """Comando do ffmpeg que grava o som do trecho [start, end) num WAV (None se não há som).
 
-    Com `script_path`, o grafo é gravado nesse arquivo e passado por `-filter_complex_script`
-    (grafos longos passam do limite da linha de comando do Windows).
+    Com `script_path`, o grafo é gravado nesse arquivo e passado por `-/filter_complex` (grafos longos passam do
+    limite da linha de comando do Windows; o antigo `-filter_complex_script` saiu do ffmpeg 8, e o `-/opção`
+    existe desde o 7.0, a versão mínima do app).
     """
     g = build_graph(seq, start, end)
     if g is None:
@@ -234,7 +376,7 @@ def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: in
     cmd = [media.ffmpeg(), "-y", "-v", "error", "-nostdin", "-hide_banner", *inputs]
     if script_path:
         Path(script_path).write_text(graph, encoding="utf-8")
-        cmd += ["-filter_complex_script", script_path]
+        cmd += ["-/filter_complex", script_path]
     else:
         cmd += ["-filter_complex", graph]
     cmd += ["-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(RATE), "-ac", "2", out_path]

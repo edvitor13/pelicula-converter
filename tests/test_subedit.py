@@ -113,6 +113,34 @@ def test_set_times_through_the_clip_mapping():
     same_as_timeline(seq, subs)
 
 
+def test_reverse_and_ramp_keep_the_subtitles_on_the_speech():
+    """Rampa e reverso (frente de tempo): cada legenda continua no instante em que o arquivo passa por ela."""
+    from pelicula import timemap
+    seq = make_seq()
+    v = by_kind(seq, tl.VIDEO)[0]
+    subs = doc(sentence(4.0, "a b"))                            # 4–5 s do arquivo
+    assert seq.retime(v.id, reverse=True)
+    tm = seq.time_map(v)
+    it = se.items(seq, subs)[0]
+    assert it.cue.start == pytest.approx(tm.out_at(5.0)) and it.cue.end == pytest.approx(tm.out_at(4.0))
+    assert it.cue.start < it.cue.end and [w.text for w in it.cue.words] == ["b", "a"]
+    same_as_timeline(seq, subs)
+    new = se.set_times(subs, it, start=it.cue.start - 0.5)      # o começo na tela é o fim no arquivo
+    assert (new.start, new.end) == (4.0, pytest.approx(5.5))
+    new = se.move(subs, se.items(seq, subs)[0], 1.0)            # para a frente na tela = para trás no arquivo
+    assert (new.start, new.end) == (pytest.approx(3.0), pytest.approx(4.5))
+    assert seq.retime(v.id, ramp=timemap.preset_anchors("impacto", 0.0, 20.0, reverse=True), reverse=True)
+    tm = seq.time_map(v)
+    it = se.items(seq, subs)[0]
+    assert it.cue.start == pytest.approx(tm.out_at(4.5)) and it.cue.end == pytest.approx(tm.out_at(3.0))
+    assert seq.retime(v.id, ramp=timemap.preset_anchors("impacto", 0.0, 20.0), reverse=False)
+    tm = seq.time_map(v)
+    it = se.items(seq, subs)[0]
+    assert it.cue.start == pytest.approx(tm.out_at(3.0)) and it.cue.end == pytest.approx(tm.out_at(4.5))
+    assert it.cue.end - it.cue.start != pytest.approx(1.5)      # a rampa estica a fala (não é o tempo constante)
+    same_as_timeline(seq, subs)
+
+
 def test_set_times_clamps_words_and_keeps_minimum():
     subs = doc(sentence(1.0, "um dois três"))     # 1.0–2.5
     seq = make_seq()

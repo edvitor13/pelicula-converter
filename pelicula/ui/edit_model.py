@@ -26,8 +26,10 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import editparams, timeline
+from .. import editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
+
+FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
 AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
@@ -321,6 +323,46 @@ class TimelineModel(QObject):
             self.seq.set_speed(cid, speed)
         self._done("structure")
 
+    # ------------------------------------------------------------ tempo: rampa, reverso
+    def set_ramp(self, cid: str, ramp) -> bool:
+        """Troca a rampa de velocidade do clipe (e dos ligados do mesmo arquivo): um passo do desfazer."""
+        return self._retime(cid, ramp=ramp)
+
+    def apply_ramp_preset(self, cid: str, preset: str, amount: float = timemap.AMOUNT_DEFAULT,
+                          ramp_s: float = timemap.RAMP_S_DEFAULT) -> bool:
+        """Rampa pronta (`timemap.PRESETS`) no trecho do arquivo que o clipe mostra agora."""
+        c = self.seq.find(cid)
+        if c is None or self.seq._holds(c):
+            return False
+        lo, hi = self.seq.source_range(c)
+        return self.set_ramp(cid, timemap.preset_anchors(preset, lo, hi, c.reverse, amount, ramp_s))
+
+    def freeze_frame(self, cid: str | None, frame: int, seconds: float = FREEZE_SECONDS,
+                     insert: bool = True) -> str | None:
+        """"Congelar este quadro" (`Sequence.freeze_frame`): um passo do desfazer; o quadro parado fica escolhido."""
+        with self.seq.keep_main():
+            hold = self.seq.freeze_frame(cid, int(frame), self.seq.frames_for(max(0.04, float(seconds))), insert)
+        if hold is None:
+            return None
+        self.selection = [hold.id]
+        self.selectionChanged.emit()
+        self._done("structure")
+        return hold.id
+
+    def set_reverse(self, cid: str, on: bool) -> bool:
+        """Liga/desliga o reverso do clipe (e dos ligados do mesmo arquivo, o som junto): um passo do desfazer."""
+        return self._retime(cid, reverse=bool(on))
+
+    def _retime(self, cid: str, ramp=None, reverse=None) -> bool:
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            self.seq.room_for_retime(cid, ramp=ramp, reverse=reverse)
+            self.seq.retime(cid, ramp=ramp, reverse=reverse)
+        if self.history._dump(self.seq) == before:
+            return False
+        self._done("structure")
+        return True
+
     def apply_look(self, cid: str, look: dict[str, Any]) -> None:
         """Ajuste rápido: zera a cor e a luz do clipe e aplica os valores do look."""
         c = self.seq.find(cid)
@@ -508,12 +550,19 @@ class TimelineModel(QObject):
             raise KeyError(cid)
         return self.seq.values_at(c, frame)[key]
 
-    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear") -> bool:
-        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave."""
-        if self.seq.set_key(cid, key, frame, value, easing):
+    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear",
+                record: bool = True) -> bool:
+        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave.
+        `record=False` (a chave automática de um slider arrastado) agrupa o histórico em 400 ms."""
+        if not self.seq.set_key(cid, key, frame, value, easing):
+            return False
+        if record:
             self._done("values")
-            return True
-        return False
+        else:
+            self._timer.start()
+            self.changed.emit("values")
+            self.historyChanged.emit()
+        return True
 
     def move_key(self, cid: str, key: str, frame_from: float, frame_to: float) -> bool:
         if self.seq.move_key(cid, key, frame_from, frame_to):
@@ -526,6 +575,27 @@ class TimelineModel(QObject):
             self._done("values")
             return True
         return False
+
+    def move_keys(self, cid: str, moves: Iterable[tuple[str, float, float]]) -> bool:
+        """Chaves de vários ajustes do clipe andando juntas ([(ajuste, de, para)]): um passo do desfazer."""
+        by_key: dict[str, list[tuple[float, float]]] = {}
+        for key, a, b in moves:
+            by_key.setdefault(key, []).append((a, b))
+        changed = False
+        for key, pairs in by_key.items():
+            changed = self.seq.move_keys(cid, key, pairs) or changed
+        if changed:
+            self._done("values")
+        return changed
+
+    def remove_keys(self, cid: str, items: Iterable[tuple[str, float]]) -> bool:
+        """Apaga várias chaves do clipe ([(ajuste, quadro)]) num passo do desfazer."""
+        changed = False
+        for key, t in items:
+            changed = self.seq.remove_key(cid, key, t) or changed
+        if changed:
+            self._done("values")
+        return changed
 
     def clear_keys(self, cid: str, key: str | None = None) -> bool:
         """Tira a animação de um ajuste (ou de todos, com `key` None)."""

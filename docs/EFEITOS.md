@@ -20,6 +20,14 @@ Dicas de uso dos controles: clique no número para digitar (aceita vírgula, `%`
 **duplo clique** no slider volta ao padrão, **Shift + arrastar** faz ajuste fino, o botão ↺ do
 título restaura a seção inteira e o dado (*Sortear*) troca as sementes aleatórias.
 
+**Animar o look (chaves).** Os ajustes de número, cor e rodas têm um **losango** ao lado do nome: clique para
+gravar uma chave no cursor; com o ajuste animado, mexer no controle grava a chave ali (chave automática); as
+setas ◀ ▶ vão à chave anterior / seguinte e o botão direito escolhe a curva até a próxima chave, apaga a chave
+ou limpa a animação. As chaves do look aparecem numa **faixa fina sob a barra da prévia** no modo Película e na
+linha **Look**, no topo da linha do tempo, no modo Edição (com *Com película* ligado): clique leva o cursor
+até a chave, arrastar move (gruda no cursor), Shift escolhe várias e Delete apaga. O tempo das chaves é o do
+vídeo (no modo Película) ou o da montagem; a exportação usa as mesmas chaves, quadro a quadro.
+
 ## Ordem em que tudo acontece
 
 ```

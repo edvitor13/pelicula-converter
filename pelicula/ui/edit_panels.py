@@ -9,13 +9,15 @@ from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
                                QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import editparams
+from .. import editparams, keyframes
 from ..i18n import N_, _, decimal_sep
 from ..timeline import AUDIO, VIDEO, Clip, Source
 from . import icons, theme
 from .edit_model import TimelineModel
 from .flow import flow_widget
+from .keyframes_ui import ClipKeys, KeyRows
 from .store import ParamStore
+from .tempo_ui import TempoPanel
 from .timeline_view import MIME_SOURCE
 from .widgets import SectionCard, Segmented, timecode
 
@@ -307,9 +309,14 @@ def _FlowRow(widgets: list[QWidget], per_row: int = 4) -> QWidget:
 
 
 class ClipInspector(QWidget):
-    """Ajustes do clipe selecionado (imagem ou som), gerados a partir de `editparams`."""
+    """Ajustes do clipe selecionado (imagem ou som), gerados a partir de `editparams`.
+
+    Os ajustes animáveis ganham o losango das chaves (`keyframes_ui.KeyRows`): os controles mostram o valor no
+    quadro do cursor (`set_playhead`, preso ao trecho do clipe) e as setas pedem para levar o cursor a uma chave
+    (`seekRequested`)."""
 
     autoRequested = Signal(str)
+    seekRequested = Signal(int)
 
     OPEN_VIDEO = {"luz", "cor"}
     OPEN_AUDIO = {"som"}
@@ -358,6 +365,14 @@ class ClipInspector(QWidget):
         self.astore.changed.connect(lambda key: self._store_changed(self.astore, self.acards, key))
         from . import transitions_ui  # 1.5: ícones dos tipos de transição e só os ajustes do tipo escolhido
         self.transitions = transitions_ui.InspectorTransitions(self.vstore, self.vcards, model)
+        self.playhead = 0
+        target = ClipKeys(model, lambda: self.clip_id)
+        self.vkeys = KeyRows(self.vstore, target, self.vcards, self)
+        self.akeys = KeyRows(self.astore, target, self.acards, self)
+        for rows in (self.vkeys, self.akeys):
+            rows.seekRequested.connect(self.seekRequested)
+        self.vtempo = self._tempo_panel(self.vcards)  # rampa (e reverso) no fim do cartão "Velocidade"
+        self.atempo = self._tempo_panel(self.acards)
         model.selectionChanged.connect(self._selection_changed)
         model.changed.connect(self._model_changed)
         self._selection_changed()
@@ -386,6 +401,14 @@ class ClipInspector(QWidget):
         scroll.setWidget(inner)
         pl.addWidget(scroll, 1)
         return page, cards
+
+    def _tempo_panel(self, cards: list[SectionCard]) -> TempoPanel | None:
+        card = next((c for c in cards if c.section.key == "tempo"), None)
+        if card is None:
+            return None
+        panel = TempoPanel(self.model, lambda: self.clip_id)
+        card.body.layout().addWidget(panel)
+        return panel
 
     def _tools(self) -> QWidget:
         w = QWidget()
@@ -446,6 +469,7 @@ class ClipInspector(QWidget):
         c = self.model.primary()
         if c is None:
             self.clip_id = None
+            self._sync_frame()
             self._show()
             return
         v, a = self._current_group()
@@ -475,6 +499,9 @@ class ClipInspector(QWidget):
             self.kind_seg.setVisible(False)
             return
         self.stack.setCurrentWidget(self.video_page if c.kind == VIDEO else self.audio_page)
+        for panel in (self.vtempo, self.atempo):
+            if panel is not None:
+                panel.refresh()
         src = self.model.seq.sources.get(c.src)
         self.title.setText(c.name or (src.name if src else ""))
         kind = _("Imagem parada") if (src is not None and src.is_image) else (
@@ -489,18 +516,37 @@ class ClipInspector(QWidget):
             self.btn_paste.setEnabled(self.model.has_clipboard())
 
     def _load(self) -> None:
-        """Copia os valores do clipe para o store certo (sem gerar edições)."""
+        """Copia os valores e as chaves do clipe para o store certo (sem gerar edições). As chaves vão em
+        quadros da sequência, os mesmos do cursor."""
         c = self.current_clip()
         if c is None:
+            self._sync_frame()
             return
         store = self.vstore if c.kind == VIDEO else self.astore
-        if store.values == c.values:
-            return
-        self._loading = True
-        try:
-            store.set_all(copy.deepcopy(c.values), record=False)
-        finally:
-            self._loading = False
+        keys = {k: [keyframes.Key(t, v, e) for t, v, e in self.model.seq.keys_of(c, k)] for k in c.keys}
+        if store.values != c.values or store.keys != keys:
+            self._loading = True
+            try:
+                store.keys = keys
+                store.set_all(copy.deepcopy(c.values), record=False)
+            finally:
+                self._loading = False
+        self._sync_frame()
+
+    def set_playhead(self, frame: int) -> None:
+        """O cursor da linha do tempo andou (chamado a cada quadro na reprodução: só o animado se redesenha)."""
+        self.playhead = int(frame)
+        self._sync_frame()
+
+    def _sync_frame(self) -> None:
+        """O quadro que os controles mostram: o do cursor, preso ao trecho do clipe (fora dele, a ponta mais
+        perto: chave automática nunca cai fora do clipe)."""
+        c = self.current_clip()
+        frame = None if c is None else float(min(max(self.playhead, c.start), c.end - 1))
+        self.vkeys.set_frame(frame if c is not None and c.kind == VIDEO else None)
+        self.akeys.set_frame(frame if c is not None and c.kind == AUDIO else None)
+        self.vkeys.update_states()
+        self.akeys.update_states()
 
     def _store_changed(self, store: ParamStore, cards: list[SectionCard], key: str) -> None:
         for card in cards:
@@ -510,6 +556,11 @@ class ClipInspector(QWidget):
             return
         c = self.current_clip()
         if c is None or (store is self.vstore) != (c.kind == VIDEO):
+            return
+        if key != "*" and store.keys.get(key) and store.view_frame is not None:
+            here = store.key_here(key)  # ajuste animado: o controle gravou uma chave no cursor
+            if here is not None:
+                self.model.add_key(c.id, key, here.t, here.v, here.e, record=False)
             return
         self.model.set_clip_values(c.id, copy.deepcopy(store.values), record=False)
 

@@ -15,8 +15,12 @@ class ParamStore(QObject):
 
     `keys`: chaves de animação dos ajustes (`keyframes.py`; {ajuste: [Key]}), em quadros do arquivo ou da
     montagem que entra no look. Cada passo do desfazer guarda os valores e as chaves juntos. A interface das
-    chaves (losangos na linha do tempo) fica para depois: `add_key`/`move_key`/`remove_key`/`keys_of`/`value_at`
-    são a API dela.
+    chaves (`ui/keyframes_ui.py`: losangos ao lado dos ajustes e na linha do tempo) usa
+    `add_key`/`move_key`/`remove_key`/`keys_of`/`value_at`.
+
+    `view_frame`: o quadro que a interface está mostrando (o cursor). Com ele, os controles mostram o valor
+    animado ali (`shown`) e mexer num ajuste animado grava uma chave nesse quadro (chave automática, como no
+    Resolve) em vez de trocar o valor fixo. None (o padrão) = sem cursor: `set` troca sempre o valor fixo.
     """
 
     changed = Signal(str)  # chave alterada, ou "*" quando tudo muda
@@ -27,6 +31,7 @@ class ParamStore(QObject):
         self.schema = schema or params.FILM
         self.values = self.schema.sanitize(values or self.schema.defaults())
         self.keys: dict[str, list] = {}
+        self.view_frame: float | None = None
         self._hist = [self._entry()]
         self._pos = 0
         self._timer = QTimer(self)
@@ -45,10 +50,20 @@ class ParamStore(QObject):
     def get(self, key: str) -> Any:
         return self.values[key]
 
+    def shown(self, key: str) -> Any:
+        """O valor que os controles mostram: o animado em `view_frame` (se o ajuste tem chaves), senão o fixo."""
+        track = self.keys.get(key)
+        if not track or self.view_frame is None:
+            return self.values[key]
+        return keyframes.value_at(track, float(self.view_frame), self.schema.params[key].kind, self.values[key])
+
     def set(self, key: str, value: Any, record: bool = True) -> None:
         p = self.schema.params[key]
         if p.kind in params.LIST_KINDS:
             value = [float(c) for c in value]
+        if self.keys.get(key) and self.view_frame is not None:
+            self._auto_key(p, value, record)
+            return
         if self.values.get(key) == value:
             return
         self.values[key] = value
@@ -66,6 +81,27 @@ class ParamStore(QObject):
         self.changed.emit("*")
         if record:
             self.commit()
+
+    def _auto_key(self, p: params.Param, value: Any, record: bool) -> None:
+        """Ajuste animado mexido no controle: grava (ou troca) a chave do quadro do cursor, com a curva que a
+        chave dali já tinha."""
+        if self.shown(p.key) == value:
+            return
+        t = float(self.view_frame)
+        track = self.keys[p.key]
+        here = next((k for k in track if k.t == t), None)
+        self.keys = {**self.keys, p.key: keyframes.set_key(track, t, params._clean(p, value),
+                                                           here.e if here else keyframes.LINEAR)}
+        self.changed.emit(p.key)
+        if record:
+            self._timer.start()
+
+    def key_here(self, key: str, frame: float | None = None):
+        """A chave do ajuste no quadro (`view_frame` por padrão), ou None."""
+        t = self.view_frame if frame is None else frame
+        if t is None:
+            return None
+        return next((k for k in self.keys.get(key, []) if abs(k.t - float(t)) < 1e-6), None)
 
     def snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self.values)
@@ -102,6 +138,36 @@ class ParamStore(QObject):
 
     def remove_key(self, key: str, frame: float) -> bool:
         return self._set_track(key, keyframes.remove_key(self.keys.get(key), float(frame)))
+
+    def move_keys(self, moves) -> bool:
+        """Chaves de vários ajustes andando juntas ([(ajuste, de, para)]): um passo do desfazer."""
+        by_key: dict[str, list[tuple[float, float]]] = {}
+        for key, a, b in moves:
+            by_key.setdefault(key, []).append((float(a), float(b)))
+        return self._set_tracks({k: keyframes.move_keys(self.keys.get(k), pairs) for k, pairs in by_key.items()})
+
+    def remove_keys(self, items) -> bool:
+        """Apaga várias chaves ([(ajuste, quadro)]) num passo do desfazer."""
+        tracks: dict[str, list] = {}
+        for key, t in items:
+            tracks[key] = keyframes.remove_key(tracks.get(key, self.keys.get(key)), float(t))
+        return self._set_tracks(tracks)
+
+    def _set_tracks(self, tracks: dict[str, list]) -> bool:
+        keys = dict(self.keys)
+        changed = [k for k, track in tracks.items() if track != self.keys.get(k, [])]
+        if not changed:
+            return False
+        for k in changed:
+            if tracks[k]:
+                keys[k] = tracks[k]
+            else:
+                keys.pop(k, None)
+        self.keys = keys
+        for k in changed:
+            self.changed.emit(k)
+        self.commit()
+        return True
 
     def clear_keys(self, key: str | None = None) -> bool:
         """Tira a animação de um ajuste (ou de todos, com `key` None); o valor fixo volta a valer."""

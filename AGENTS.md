@@ -100,8 +100,11 @@ pelicula/
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
                              de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
-                             split_edit, faixa magnética keep_main/settle_main; sem Qt), History; Source.virtual
+                             split_edit, faixa magnética keep_main/settle_main; tempo: time_map, retime (rampa e
+                             reverso), freeze_frame; sem Qt), History; Source.virtual
                              (clipe sem arquivo: kind/SOURCE_KINDS, data)
+  timemap.py                 tempo de um clipe (sem Qt): TimeMap (velocidade, rampa por âncoras, reverso; forma
+                             fechada e inversa exata, pieces() para o som), clean_ramp, PRESETS/preset_anchors
   chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
   loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
@@ -125,6 +128,8 @@ pelicula/
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             keyframes_ui (losangos das chaves: KeyRows, KeyStrip), tempo_ui (rampa, reverso,
+                             congelar este quadro),
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              transitions_ui (transições de película: inspetor, menu "Transição" do corte,
@@ -318,6 +323,11 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
+| `tests/test_chaves_ui.py` | casos de `chaves_ui_cases.py`: losangos do inspetor (estados, chave no cursor, chave automática, arrastar = um passo do desfazer, setas, menu de curvas, apagar/limpar), do look, da linha do tempo (juntos, dica, clique vai até a chave, arrastar com ímã no cursor, Shift, Delete, desfazer), `KeyStrip` e a janela (faixas sob a barra e "Look" na Edição) |
+| `tests/test_timemap.py` | mapa de tempo sem ffmpeg: linha reta sem rampa, monótono, inversa exata, forma fechada = integral, presets, JSON (projeto sem rampa igual), rampa presa à imagem em dividir/aparar/velocidade, V1 magnética, reverso = espelho exato (velocidade, dividir, aparar, J/L, com rampa), grafo do som em blocos |
+| `tests/test_freeze.py` | "Congelar este quadro": inserir e sobrescrever (imagem parada, som em silêncio, sincronia depois), look e quadro daquele instante (rampa, reverso), JSON, recusas, V1 magnética, desfazer |
+| `tests/test_tempo_media.py` | com o ffmpeg: quadros da rampa e do reverso = `src_frame` por `SequenceReader` e `grab` (blocos pequenos no reverso), som da rampa no quadro certo (estalos), som do reverso = arquivo ao contrário (varredura com emenda de blocos), quadro congelado = quadro do arquivo e, na GPU, igual ao quadro de antes |
+| `tests/test_tempo_ui.py` | casos de `tempo_ui_cases.py`: seção da rampa no cartão Velocidade, aplicar/tirar com desfazer, menu do clipe, Reverso (caixa e menu), congelado sem rampa, "Congelar este quadro…" (duração, inserir/sobrescrever) e Shift+F na janela |
 | `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |

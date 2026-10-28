@@ -26,7 +26,7 @@ from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, edi
 from ..i18n import N_, _
 from ..engine import Engine
 from ..frame import Recipe
-from . import icons, theme
+from . import icons, tempo_ui, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
 from .meter import AudioMeter
@@ -39,8 +39,9 @@ from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
+from .keyframes_ui import KeyRows, KeyStrip
 from .scopes import Scopes
-from .timeline_view import TimelineEditor
+from .timeline_view import HEADER_W, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 
@@ -465,6 +466,14 @@ class MainWindow(QMainWindow):
         self.tl_editor.filesInserted.connect(lambda p, f, k, t: self.drop_on_timeline(p, f, k, t, insert=True))
         self.tl_editor.set_peaks_provider(self._peaks_for)
         self.tl_editor.setVisible(False)
+        cv = self.tl_editor.canvas  # linha "Look": as chaves do look sobre a montagem, no tempo da montagem
+        self.look_lane = KeyStrip(self.store, cv.frame_to_x, cv.x_to_frame, lambda: cv.playhead,
+                                  lambda: self.model.seq.fps, _("Look"), HEADER_W)
+        self.look_lane.setToolTip(_("Chaves do look (Película sobre a montagem). Clique leva o cursor; arraste para "
+                                    "mover; Delete apaga."))
+        self.look_lane.seekRequested.connect(self.seek)
+        self.look_lane.setVisible(False)
+        self.tl_editor.add_lane(self.look_lane)
         self.center_split.addWidget(self.tl_editor)
         self.center_split.setStretchFactor(0, 3)
         self.center_split.setStretchFactor(1, 2)
@@ -734,8 +743,9 @@ class MainWindow(QMainWindow):
         th.addWidget(self.shuttle_label)
         self.timeline = Timeline()
         self.timeline.seek.connect(self.seek)
-        tr.scrub, tr.top_row, tr.row, tr.scrub_index = self.timeline, top, th, th.count()
-        th.addWidget(self.timeline, 1)
+        self.scrub_box = self._scrub_with_keys()
+        tr.scrub, tr.top_row, tr.row, tr.scrub_index = self.scrub_box, top, th, th.count()
+        th.addWidget(self.scrub_box, 1)
         self.btn_in = self._flat("mark_in", _("Marcar entrada (I)"))
         self.btn_in.clicked.connect(self.mark_in)
         self.btn_out = self._flat("mark_out", _("Marcar saída (O)"))
@@ -760,6 +770,32 @@ class MainWindow(QMainWindow):
         vl.addWidget(tr)
         self.transport = tr
         return w
+
+    def _scrub_with_keys(self) -> QWidget:
+        """A barra da prévia com a faixa das chaves do look logo abaixo (só aparece quando o look tem chaves)."""
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.timeline)
+        tl = self.timeline
+        self.look_strip = KeyStrip(self.store, tl._x, lambda x: (x - 10) / max(1, tl.width() - 20) * max(1, tl.total - 1),
+                                   lambda: tl.pos, lambda: tl.fps)
+        self.look_strip.setVisible(False)
+        self.look_strip.seekRequested.connect(self.seek)
+        lay.addWidget(self.look_strip)
+        return box
+
+    def _sync_look_strips(self) -> None:
+        """Mostra a faixa das chaves do look onde ela vale: sob a barra da prévia (Película) ou na linha "Look"
+        da linha do tempo (Edição com a película ligada)."""
+        if getattr(self, "look_lane", None) is None or getattr(self, "look_strip", None) is None:
+            return  # ainda montando a janela
+        edit = self.mode == "edicao"
+        keys = bool(self.store.keys)
+        self.scrub_box.setVisible(not edit)
+        self.look_strip.setVisible(keys and not edit)
+        self.look_lane.setVisible(keys and edit and self.edit_film)
 
     def _right_panel(self) -> QWidget:
         w = QWidget()
@@ -855,6 +891,9 @@ class MainWindow(QMainWindow):
         il.addStretch(1)
         scroll.setWidget(inner)
         vl.addWidget(scroll, 1)
+        # Losangos das chaves do look (o alvo é o próprio store; quadros do arquivo ou da montagem).
+        self.look_keys = KeyRows(self.store, self.store, self.cards, self)
+        self.look_keys.seekRequested.connect(self.seek)
         return w
 
     def _edit_panel(self) -> QWidget:
@@ -870,6 +909,7 @@ class MainWindow(QMainWindow):
         vl.addWidget(self.edit_scopes)
         self.inspector = ClipInspector(self.model)
         self.inspector.autoRequested.connect(self.auto_adjust_clip)
+        self.inspector.seekRequested.connect(self.seek)
         vl.addWidget(self.inspector, 1)
         return w
 
@@ -1177,6 +1217,15 @@ class MainWindow(QMainWindow):
         self.timeline.set_pos(self.frame_idx)
         self.time_label.setText(f"{timecode(self.frame_idx, self.info.fps)}  /  "
                                 f"{timecode(self.info.frames - 1, self.info.fps)}")
+        self._keys_follow_playhead()
+
+    def _keys_follow_playhead(self) -> None:
+        """Os controles com chaves (look e clipe) mostram o valor do quadro do cursor; mexer neles grava ali."""
+        self.look_keys.set_frame(self.frame_idx)
+        self.inspector.set_playhead(self.frame_idx)
+        for strip in (self.look_strip, self.look_lane):
+            if strip.isVisible():
+                strip.update()
 
     def _preview_changed(self) -> None:
         self.preview_q = self.prev_combo.currentData()
@@ -1205,6 +1254,7 @@ class MainWindow(QMainWindow):
         self.right_panel.setCurrentIndex(1 if edit else 0)
         self.tl_editor.setVisible(edit)
         self.timeline.setVisible(not edit)
+        self._sync_look_strips()
         for wdg in self._edit_only:
             wdg.setVisible(edit)
         self.btn_open.setText(_("Importar") if edit else _("Abrir"))
@@ -1223,6 +1273,7 @@ class MainWindow(QMainWindow):
 
     def _set_edit_film(self, on: bool) -> None:
         self.edit_film = bool(on)
+        self._sync_look_strips()
         self.settings.setValue("edit_film", "true" if on else "false")
         self._update_label_proc()
         self.render_now()
@@ -1705,6 +1756,7 @@ class MainWindow(QMainWindow):
         for c in self.cards:
             if key == "*" or key in c.keys():
                 c.refresh(key)
+        self._sync_look_strips()
         self.schedule_render()
         timer = getattr(self, "thumb_timer", None)
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
@@ -3038,7 +3090,11 @@ class MainWindow(QMainWindow):
             "Edição: Q / W apara o começo / o fim do clipe até o cursor e fecha o espaço\n"
             ", / . — inserir / sobrescrever no cursor (itens escolhidos na Mídia)\n"
             "Ctrl ao soltar ou mover — inverte inserir / sobrescrever • Alt ao aparar — só a imagem ou só o som "
-            "(corte J/L)") + "\n\n" + _(
+            "(corte J/L)") + "\n" + _(
+            "Edição: Shift+F congela o quadro do cursor (divide o clipe e põe ali 2 s de quadro parado; inserir / "
+            "sobrescrever segue o botão da linha do tempo)\n"
+            "Losango ao lado de um ajuste — chave no cursor (botão direito: curva, apagar) • setas — chave anterior "
+            "/ próxima\nLosangos na linha do tempo: clique vai até a chave, arrastar move, Delete apaga") + "\n\n" + _(
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)"))
 
@@ -3067,13 +3123,18 @@ class MainWindow(QMainWindow):
             self.model.split_at(self.frame_idx)
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            self.model.delete_selected(ripple=shift)
+            if not self.tl_editor.canvas.delete_keys():  # chaves selecionadas na linha do tempo vão antes
+                self.model.delete_selected(ripple=shift)
             return
         if self.mode == "edicao" and k == Qt.Key.Key_M and not shift:
             self.add_marker()  # no modo Edição o M marca; o som da prévia fica no Shift+M
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Q, Qt.Key.Key_W) and not shift:
             self.trim_to_playhead("start" if k == Qt.Key.Key_Q else "end")
+            return
+        if self.mode == "edicao" and k == Qt.Key.Key_F and shift:
+            sel = [c for c in self.model.selected_clips() if c.start <= self.frame_idx < c.end]
+            tempo_ui.freeze_at(self.tl_editor.canvas, sel[0].id if sel else None)  # congelar este quadro
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
             self.bin.place(k == Qt.Key.Key_Comma)  # inserir / sobrescrever no cursor

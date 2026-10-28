@@ -203,7 +203,7 @@ Um clique resolve o mais comum:
 | **Detalhe** | Nitidez, clareza (contraste local: realça textura ou suaviza a pele), desfoque e redução de ruído |
 | **Efeitos** | Vinheta (escurece ou clareia as bordas) e desbotar (pretos lavados, como foto antiga) |
 | **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
-| **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha |
+| **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
 
 > **Dissolver** mistura o começo deste clipe com o fim do clipe anterior da mesma faixa (encostado nele).
@@ -242,6 +242,72 @@ cada clipe repete a mesma queima e a mesma poeira toda vez. O som não muda: par
 **Transição de som** abaixo. Desligar o recurso só esconde os tipos novos e o menu; um projeto que já os
 usa continua saindo igual (o app avisa e oferece religar). Projetos com transições de película pedem a 1.5
 ou mais nova para abrir.
+
+### Animar com chaves (losangos)
+
+Todo ajuste que pode mudar ao longo do clipe (luz, cor, rodas, enquadramento, opacidade, volume…) tem um
+**losango** ao lado do nome:
+
+- **Clique no losango** grava uma chave no cursor com o valor atual. O losango fica **cheio** quando há uma
+  chave exatamente no cursor, **vazado** quando o ajuste está animado (com chaves em outro ponto) e **apagado**
+  quando o ajuste é fixo. Fora do clipe (cursor antes ou depois dele) o losango fica desligado.
+- Depois que um ajuste tem chaves, **mexer no controle grava uma chave no cursor** (chave automática, como no
+  Resolve). Um arraste inteiro do slider é um passo só do desfazer.
+- As **setas ◀ ▶** ao lado do losango levam o cursor à chave anterior / seguinte desse ajuste.
+- **Botão direito no losango**: a **curva até a próxima chave** (linear, suavizar a entrada, suavizar a saída,
+  suavizar as duas), apagar a chave do cursor ou **limpar a animação** (o ajuste volta a ser fixo).
+- Os controles mostram o valor **no cursor** e acompanham a reprodução.
+
+Na **linha do tempo**, as chaves do clipe escolhido aparecem como losangos no corpo dele (de todos os ajustes
+juntos; parar o mouse em cima diz quais). **Clique** leva o cursor até a chave; **arrastar** move a chave no
+tempo (gruda no cursor e fica dentro do clipe); **Shift** ou **Alt** escolhe várias; **Delete** apaga as
+chaves escolhidas (antes dos clipes); **Esc** tira a escolha. Cada ação é um passo do desfazer.
+
+As chaves andam com o clipe: mover, aparar, dividir e mudar a velocidade mantêm cada chave no mesmo ponto da
+imagem. Ao pôr ou tirar uma rampa, ou ligar o reverso, as chaves ficam na mesma fração do tempo do clipe (um
+aumento de luz no começo continua no começo).
+
+### Tempo do clipe: rampa, reverso e congelar
+
+**Rampa de velocidade** (cartão *Velocidade* do clipe, ou botão direito no clipe → *Rampa de velocidade*):
+escolha a forma e clique em **Aplicar rampa**.
+
+| Forma | O que faz |
+|---|---|
+| **Acelerar** | Normal na primeira metade, rápido na segunda |
+| **Desacelerar** | Normal na primeira metade, câmera lenta na segunda |
+| **Impacto (rápido–lento–rápido)** | Rápido, câmera lenta no meio, rápido de novo — o clássico do esporte |
+| **Câmera lenta no meio** | Normal, câmera lenta no meio, normal |
+| **Entrada em câmera lenta** | Começa em câmera lenta e volta ao normal |
+| **Saída em câmera lenta** | Normal e termina em câmera lenta |
+
+- **Intensidade**: quanto o trecho lento fica lento e o rápido fica rápido (50% = 2,5× e 0,4×; 100% = 4× e
+  0,25×). **Transição**: quanto tempo (em segundos do vídeo) leva cada mudança de velocidade.
+- A rampa vale para o trecho do vídeo que o clipe mostra: ele continua mostrando o mesmo começo e o mesmo
+  fim, e a **duração muda** (sem cobrir o clipe seguinte nem passar do fim do arquivo; na faixa principal
+  magnética, o resto anda). A *Velocidade* do clipe multiplica a rampa.
+- A rampa fica **presa à imagem**: aparar, dividir, mover e mudar a velocidade mantêm o trecho lento no mesmo
+  pedaço do vídeo. **Tirar a rampa** volta à velocidade constante (e à duração de antes).
+- **O som acompanha** quadro a quadro, sem mudar o tom (o app troca a velocidade do som em pedaços curtos e
+  cruza um no outro). Em trechos muito rápidos (4×) sons curtos podem ficar borrados, como em qualquer editor.
+- Imagens paradas e clipes com *Congelar quadro* não têm rampa. O rótulo do clipe mostra *rampa*.
+
+**Reverso** (cartão *Velocidade* ou botão direito no clipe): o clipe toca **do fim para o começo**, com o mesmo
+trecho e a mesma duração. O som ligado do mesmo arquivo também toca ao contrário, junto com a imagem; uma
+música ligada de outro arquivo continua como está. Combina com a velocidade e com a rampa — como a rampa fica
+presa à imagem, uma *entrada em câmera lenta* vira uma saída lenta no reverso. Num corte J/L, o som que sobrava
+depois da imagem passa a vir antes dela (sem cobrir o clipe de som anterior). O rótulo mostra *reverso*.
+
+**Congelar este quadro** (botão direito no clipe → *Congelar este quadro…*, ou **Shift+F** com o cursor sobre
+o clipe): divide o clipe no cursor e põe ali o **quadro do cursor parado** por 2 segundos (o menu pergunta a
+duração e o Shift+F usa a última escolhida). O quadro parado leva a cor e o enquadramento daquele instante.
+
+- Com o botão **Inserir** ligado, o resto do clipe (e tudo o que vem depois) anda para a direita.
+- Com ele desligado (sobrescrever), o quadro parado cobre os próximos segundos do clipe e o resto fica onde
+  estava.
+- O som ligado fica em **silêncio** enquanto a imagem está parada e continua em sincronia depois.
+- É um passo só do desfazer. A caixa **Congelar quadro** do cartão continua igual (congela o clipe inteiro no
+  primeiro quadro).
 
 ### Som
 
@@ -341,7 +407,8 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl ao soltar ou mover | Inverte o botão Inserir naquele momento |
 | Alt ao aparar | Só a imagem ou só o som do par ligado (corte J/L à mão) |
 | B / V | Ferramenta Lâmina / Selecionar |
-| Delete | Excluir os clipes selecionados (ou o marcador selecionado) |
+| Delete | Excluir as chaves escolhidas na linha do tempo; sem elas, os clipes selecionados (ou o marcador selecionado) |
+| Shift+F | Congelar o quadro do cursor (2 s; inserir / sobrescrever segue o botão Inserir) |
 | Shift+Delete | Excluir e fechar o espaço |
 | N | Ímã liga/desliga (Shift ao arrastar inverte) |
 | M | Marcador no cursor (dois cliques nele: nome, nota, cor e capítulo) |
