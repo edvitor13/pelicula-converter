@@ -370,6 +370,26 @@ def test_endpoints_are_the_plain_clips(gl_engine, side, kind, depth):
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("kind", ["iris", "cortina"])
+def test_new_transitions_over_a_transparent_background_keep_the_coverage(gl_engine, kind):
+    """"Fundo transparente" (frente de alfa): o que a transição ainda não mostrou fica transparente, como no CLIP."""
+    seq = tl.Sequence(width=W, height=H, fps_str="24/1")
+    b, = seq.insert_media(src("b.mp4"), at=0)
+    seq.trim_end(b.id, 48)
+    seq.set_values(b.id, {**b.values, "entrada_tipo": kind, "entrada_dur": 1.0})
+    seq.transparent = True
+    fl = _frame(seq, 12, 8)
+    assert fl.layers[0].layer.transitions
+    out = gl_engine.compose(fl, seq, W, H, 8, alpha=True)
+    alpha = out[..., 3]
+    assert alpha.min() == 0 and alpha.max() == 255           # parte mostrada e parte ainda transparente
+    full = gl_engine.compose(_frame(seq, 12, 8, progress=1.0), seq, W, H, 8, alpha=True)
+    assert (full[..., 3] == 255).all()                       # andamento 1: o clipe inteiro, opaco
+    shown = alpha == 255
+    assert np.array_equal(out[..., :3][shown], full[..., :3][shown])
+
+
+@pytest.mark.gpu
 def test_leader_hides_the_clip(gl_engine):
     seq, frames = pair("entrada", "ponta", entrada_ponta="clara")
     t = frames[2]

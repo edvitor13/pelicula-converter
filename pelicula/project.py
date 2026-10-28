@@ -174,6 +174,7 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         return None
     from . import timeline
+    from .media import path_exists  # sequência de imagens: o primeiro quadro dela
     seq = timeline.Sequence.from_json(data)
     if not project_path:
         return seq.to_json()
@@ -182,9 +183,10 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
             for s in data.get("fontes") or [] if isinstance(s, dict)}
     for old in list(seq.sources):
         rel = rels.get(old, "")
-        if seq.sources[old].is_file and not os.path.exists(old) and rel:
+        start = seq.sources[old].seq_start
+        if seq.sources[old].is_file and not path_exists(old, start) and rel:
             cand = os.path.normpath(os.path.join(folder, rel))
-            if os.path.exists(cand):
+            if path_exists(cand, start):
                 seq.relink(old, cand)
     return seq.to_json()
 

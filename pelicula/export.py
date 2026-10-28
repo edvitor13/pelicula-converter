@@ -135,6 +135,48 @@ class ExportSettings:
 pix_depth = media.pix_depth
 
 
+# ------------------------------------------------------------------ transparência (canal alfa)
+# Codecs que guardam transparência e o formato de pixel com alfa de cada formato sem alfa: ProRes 4444 (perfis 4 e
+# 5, yuva444p10le), WebM VP9 (yuva420p, o libvpx só tem alfa em 8 bits) e PNG/TIFF RGBA de 8 ou 16 bits. Os
+# formatos com alfa entram no fim da lista `pix` de cada codec; quem pede é a janela ("Manter a transparência")
+# ou `--pix` na linha de comando. Sem alfa no `pix`, a exportação é a de sempre (tela opaca).
+ALPHA_PIX: dict[str, dict[str, str]] = {
+    "prores": {"yuv422p10le": "yuva444p10le", "yuv444p10le": "yuva444p10le"},
+    "vp9": {"yuv420p": "yuva420p", "yuv420p10le": "yuva420p"},
+    "png_seq": {"rgb48be": "rgba64be", "rgb24": "rgba"},
+    "tiff_seq": {"rgb48le": "rgba64le", "rgb24": "rgba"},
+    "png": {"rgb48be": "rgba64be", "rgb24": "rgba"},
+    "tiff": {"rgb48le": "rgba64le", "rgb24": "rgba"},
+}
+for _codec, _pairs in ALPHA_PIX.items():
+    CODECS[_codec]["pix"] += [p for p in dict.fromkeys(_pairs.values()) if p not in CODECS[_codec]["pix"]]
+
+
+def supports_alpha(codec: str) -> bool:
+    """O codec guarda transparência?"""
+    return codec in ALPHA_PIX
+
+
+def alpha_pix(codec: str, pix: str) -> str:
+    """O formato com alfa que corresponde a `pix` (o próprio, se já tem alfa); `pix` se o codec não tem alfa."""
+    pairs = ALPHA_PIX.get(codec)
+    if not pairs or media.pix_has_alpha(pix):
+        return pix
+    return pairs.get(pix) or next(iter(pairs.values()))
+
+
+def opaque_pix(codec: str, pix: str) -> str:
+    """O formato sem alfa que corresponde a `pix` (o primeiro da lista do codec que vira `pix`)."""
+    if not media.pix_has_alpha(pix):
+        return pix
+    return next((k for k, v in ALPHA_PIX.get(codec, {}).items() if v == pix), pix)
+
+
+def wants_alpha(s: ExportSettings) -> bool:
+    """A exportação sai com transparência (formato de pixel com alfa num codec que guarda alfa)."""
+    return supports_alpha(s.codec) and media.pix_has_alpha(s.pix)
+
+
 def high_depth(s: ExportSettings) -> bool:
     return pix_depth(s.pix) > 8 or s.codec in ("prores", "ffv1")
 
@@ -393,6 +435,8 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     """
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
+    if wants_alpha(s):  # quadros RGBA de cor direta (`Recipe(alpha=True)`)
+        in_pix = "rgba" if depth == 8 else "rgba64le"
     th = int(s.threads)
     args = [media.ffmpeg(), "-y", "-v", "error", "-hide_banner", "-progress", "pipe:2", "-stats_period", "0.5",
             "-f", "rawvideo", "-pix_fmt", in_pix,
@@ -470,7 +514,10 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     elif s.codec == "xvid":
         args += ["-q:v", f"{int(s.quality or 3)}", "-vtag", "XVID"]
     elif s.codec == "prores":
-        args += ["-profile:v", s.profile or "3", "-vendor", "apl0"]
+        profile = s.profile or "3"
+        if wants_alpha(s) and profile not in ("4", "5"):
+            profile = "4"  # só o ProRes 4444 (e o XQ) guarda o alfa
+        args += ["-profile:v", profile, "-vendor", "apl0"]
     elif s.codec == "dnxhr":
         args += ["-profile:v", s.profile or "dnxhr_hq"]
     elif s.codec == "ffv1":
@@ -685,7 +732,7 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
         legal = media.legal_range(info)
     return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
                   seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, keys=dict(keys or {}),
-                  src_fps=float(info.fps), burn=burn)
+                  src_fps=float(info.fps), burn=burn, alpha=wants_alpha(s))
 
 
 def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
@@ -1254,18 +1301,27 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
 STILL_ARGS = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
               ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"],
               ".jpeg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}
+# Quadro com transparência (h × w × 4): só PNG e TIFF guardam o alfa.
+STILL_ALPHA_ARGS = {".png": ["-pix_fmt", "rgba64be"], ".tif": ["-pix_fmt", "rgba64le", "-compression_algo", "deflate"],
+                    ".tiff": ["-pix_fmt", "rgba64le"]}
 
 
 def save_still(img, path: str) -> None:
-    """Grava um quadro RGB de 16 bits (array h × w × 3) em PNG, TIFF ou JPEG, conforme a extensão.
+    """Grava um quadro RGB de 16 bits (array h × w × 3) em PNG, TIFF ou JPEG, conforme a extensão. Com 4 canais
+    (RGBA de cor direta), PNG e TIFF guardam a transparência; outro formato levanta ValueError.
 
     Grava num parcial ao lado e só então troca o destino; se o ffmpeg falhar, levanta RuntimeError e o
     arquivo antigo com o mesmo nome fica intacto.
     """
     h, w = img.shape[:2]
+    ext = Path(path).suffix.lower()
+    rgba = img.ndim == 3 and img.shape[2] == 4
+    if rgba and ext not in STILL_ALPHA_ARGS:
+        raise ValueError(_("Só PNG e TIFF guardam a transparência."))
     part = system.partial_path(path)
-    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}",
-           "-i", "pipe:0", *STILL_ARGS.get(Path(path).suffix.lower(), []), "-frames:v", "1", "-update", "1", part]
+    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba64le" if rgba else "rgb48le",
+           "-s", f"{w}x{h}", "-i", "pipe:0", *(STILL_ALPHA_ARGS if rgba else STILL_ARGS).get(ext, []),
+           "-frames:v", "1", "-update", "1", part]
     res = subprocess.run(cmd, input=img.tobytes(), capture_output=True, creationflags=media.NO_WINDOW)
     if res.returncode != 0 or not os.path.isfile(part):
         system.remove_file(part)

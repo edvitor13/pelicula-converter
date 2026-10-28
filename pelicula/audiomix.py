@@ -164,7 +164,62 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
 
 
 def has_audio(seq: timeline.Sequence, start: int = 0, end: int = -1) -> bool:
-    return bool(segments(seq, start, end))
+    return bool(segments(seq, start, end)) or bool(tones(seq, start, end))
+
+
+# ------------------------------------------------------------------ som de clipes sem arquivo
+# Tons de um clipe gerado (o bipe da ponta com contagem, `generators.tones`):
+#     TONES[tipo da fonte] = fn(seq, clipe) -> [(quadro da fonte, quadros, frequência Hz, ganho dB)]
+# O tom toca nos quadros da sequência que mostram aqueles quadros da fonte (`Sequence.src_frame`: com aparar e
+# velocidade), exato à amostra a 48 kHz, nas duas saídas (prévia e exportação usam `build_graph`). Faixa de
+# vídeo escondida: sem tom. Sem tons, o grafo é o de sempre.
+TONES: dict = {}
+
+
+def tones(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict]:
+    """Tons que tocam no trecho [start, end) (quadros): {onset, samples (no trecho, em amostras), freq, gain_db}."""
+    if not TONES:
+        return []
+    a, b = _range(seq, start, end)
+    fps = seq.fps
+    out = []
+    for c in seq.clips:
+        src = seq.sources.get(c.src)
+        fn = TONES.get(src.kind) if (c.kind == timeline.VIDEO and src is not None and not src.is_file) else None
+        if fn is None:
+            continue
+        tr = seq.track(timeline.VIDEO, c.track)
+        if tr is not None and tr.muted:
+            continue
+        for f0, n, freq, db in fn(seq, c):
+            shown = [t for t in range(c.start, c.end) if f0 <= seq.src_frame(c, t) < f0 + n]
+            if not shown:
+                continue
+            t0, t1 = max(shown[0], a), min(shown[-1] + 1, b)
+            if t1 <= t0:
+                continue
+            s0 = int(round((t0 - a) / fps * RATE))
+            s1 = int(round((t1 - a) / fps * RATE))
+            if s1 > s0:
+                out.append({"onset": s0, "samples": s1 - s0, "freq": float(freq), "gain_db": float(db),
+                            "phase": int(round((t0 - shown[0]) / fps * RATE)), "clip": c.id})
+    return out
+
+
+def _tone_input(tone: dict) -> list[str]:
+    """Entrada do ffmpeg com o tom (seno estéreo na amplitude exata, começando na fase certa)."""
+    amp = 10.0 ** (tone["gain_db"] / 20.0)
+    w = f"{amp:.8f}*sin(2*PI*{_fmt(tone['freq'])}*(n+{tone['phase']})/{RATE})"
+    secs = (tone["samples"] + 64) / RATE
+    return ["-f", "lavfi", "-i", f"aevalsrc=exprs={w}|{w}:s={RATE}:d={secs:.6f}"]
+
+
+def _tone_chain(tone: dict, index: int, k: int) -> str:
+    f = [f"[{index}:a]aformat=sample_fmts=fltp:channel_layouts=stereo", f"atrim=end_sample={tone['samples']}",
+         "asetpts=PTS-STARTPTS"]
+    if tone["onset"] > 0:
+        f.append(f"adelay=delays={tone['onset']}S|{tone['onset']}S")
+    return ",".join(f) + f"[t{k}]"
 
 
 def _chain(seg: dict, k: int, inp: int | None = None) -> str:
@@ -338,7 +393,8 @@ def volume_envelope(keys, pre: float, fps: float, key_off: int, track_db: float 
 def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[list[str], str] | None:
     """(entradas do ffmpeg, grafo de filtros) do trecho, ou None se não há som nele."""
     segs = segments(seq, start, end)
-    if not segs:
+    tns = tones(seq, start, end)
+    if not segs and not tns:
         return None
     a, b = _range(seq, start, end)
     total = (b - a) / seq.fps
@@ -355,8 +411,12 @@ def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[
         inputs += ["-ss", _fmt(seg["src_in"]), "-t", _fmt(seg["src_len"]), "-i", seg["clip"].src]
         chains.append(_chain(seg, k, inp))
         inp += 1
-    labels = "[0:a]" + "".join(f"[a{k}]" for k in range(len(segs)))
-    mix = (f"{labels}amix=inputs={len(segs) + 1}:duration=first:dropout_transition=0:normalize=0,"
+    for k, tone in enumerate(tns):  # tons de clipes gerados (entradas depois dos arquivos)
+        inputs += _tone_input(tone)
+        chains.append(_tone_chain(tone, inp, k))
+        inp += 1
+    labels = "[0:a]" + "".join(f"[a{k}]" for k in range(len(segs))) + "".join(f"[t{k}]" for k in range(len(tns)))
+    mix = (f"{labels}amix=inputs={len(segs) + len(tns) + 1}:duration=first:dropout_transition=0:normalize=0,"
            f"atrim=duration={_fmt(total)}[out]")
     return inputs, ";".join(chains + [mix])
 
@@ -445,6 +505,9 @@ def mix_key(seq: timeline.Sequence) -> str:
     }
     if seq.micro_fade:
         data["micro_fades"] = True
+    tns = tones(seq)
+    if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
+        data["tons"] = [[t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns]
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 

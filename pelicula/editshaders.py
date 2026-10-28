@@ -323,6 +323,14 @@ void main() {
     }
     if (u_fade.w > 0.0) c = mix(c, u_fade.rgb, u_fade.w);
     vec3 res = blend(dst.rgb, c);
+    if (dst.a < 1.0) {
+        // Tela transparente ("Fundo transparente"): "sobre" com cor direta; o modo de mesclagem só vale onde
+        // há algo embaixo (a cor do clipe pesa onde a tela é transparente).
+        float oa = a + dst.a * (1.0 - a);
+        vec3 s = mix(c, res, dst.a);
+        f_out = vec4((s * a + dst.rgb * (dst.a * (1.0 - a))) / max(oa, 1e-6), oa);
+        return;
+    }
     if (a >= 1.0) f_out = vec4(res, 1.0);
     else f_out = vec4(mix(dst.rgb, res, a), 1.0);
 }
@@ -599,6 +607,17 @@ void main() {
     }
     if (u_fade.w > 0.0) c = mix(c, u_fade.rgb, u_fade.w);
     vec3 res = blend(dst.rgb, c);
+    if (dst.a < 1.0) {
+        // Tela transparente ("Fundo transparente"), como no CLIP: "sobre" com cor direta; a transição pesa na
+        // cobertura e a mistura na luz só vale onde há algo embaixo.
+        float ea = a * clamp(w, 0.0, 1.0);
+        float oa = ea + dst.a * (1.0 - ea);
+        vec3 s = mix(c, res, dst.a);
+        if (any(notEqual(mulO, vec3(1.0))) || any(notEqual(addO, vec3(0.0))))
+            s = lightAffine(s, mix(vec3(1.0), mulO, a), addO * a);
+        f_out = vec4((s * ea + dst.rgb * (dst.a * (1.0 - ea))) / max(oa, 1e-6), oa);
+        return;
+    }
     vec3 T = lightMix(dst.rgb, res, w);
     vec3 o = w <= 0.0 ? dst.rgb : (a >= 1.0 ? T : mix(dst.rgb, T, a));
     if (any(notEqual(mulO, vec3(1.0))) || any(notEqual(addO, vec3(0.0))))

@@ -20,6 +20,11 @@ Legendas gravadas no vídeo (`Recipe.burn`, um `subtitles.Burn`) entram no passo
 da imagem montada *antes* do look (no tamanho do conteúdo: grão, halação e tremor passam por elas) e "digital"
 por cima do quadro final *depois* do look (no tamanho da saída, com o encaixe). O instante é `index / fps`.
 
+Com `alpha` (saída com transparência: a prévia e o "Salvar quadro" de uma montagem com "Fundo transparente", a
+exportação num formato com alfa, `export.wants_alpha`) a montagem sai RGBA de cor direta e o look devolve RGBA:
+a cor é a mesma de sempre e o alfa é a cobertura da montagem movida pela geometria do look (veja
+`alphashaders`). Sem `alpha`, nada muda.
+
 O que muda entre quem chama são só os campos: a prévia usa o tamanho reduzido, 8 bits e o pontilhado do
 look; a exportação usa o tamanho e a profundidade da saída. Com os mesmos campos, o quadro é bit a bit o mesmo
 (`tests/test_frame.py`). Montar uma receita com a faixa e o LUT certos: `export.frame_pipeline` (com os ajustes
@@ -52,6 +57,7 @@ class Recipe:
     keys: dict = field(default_factory=dict)  # chaves de animação do look ({chave: [[tempo, valor, curva]…]})
     src_fps: float = 0.0          # fps do arquivo/sequência, em que as chaves do look estão (0 = `fps`)
     burn: Any = None              # subtitles.Burn: legendas gravadas no vídeo (antes ou depois do look); None = sem
+    alpha: bool = False           # saída RGBA (h × w × 4, cor direta): a transparência da montagem
 
     def __post_init__(self) -> None:
         if self.keys:  # JSON do projeto ou chaves já limpas: sempre `keyframes.Key` só de ajustes animáveis
@@ -61,10 +67,11 @@ class Recipe:
     # ---------------------------------------------------------------- campos derivados
     @classmethod
     def for_source(cls, values: dict | None, fps: float, depth: int, *, legal: bool, seq=None, dither=False,
-                   size: tuple[int, int] | None = None, keys: dict | None = None, burn=None) -> "Recipe":
+                   size: tuple[int, int] | None = None, keys: dict | None = None, burn=None,
+                   alpha: bool = False) -> "Recipe":
         """Receita sem encaixe (prévia, "Salvar quadro", `pelicula-cli quadro`), com o LUT dos ajustes."""
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
-                   None, 0.0, size, dict(keys or {}), float(fps), burn)
+                   None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha))
 
     def with_(self, **kw) -> "Recipe":
         """Cópia com alguns campos trocados (ex.: a prévia em 16 bits para comparar com a exportação)."""
@@ -91,8 +98,9 @@ class Recipe:
         w, h = self.montage_size()
         crop = self.fit.canvas_crop if self.fit is not None else None
         from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
+        kw = {"alpha": True} if self.alpha else {}
         return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop,
-                              light=light_of(self.values, self.legal))
+                              light=light_of(self.values, self.legal), **kw)
 
     def look_values(self, index: int) -> dict:
         """Passo 3: os ajustes do look no quadro `index` da saída (com as chaves de animação avaliadas)."""
@@ -117,16 +125,19 @@ class Recipe:
             upload = upload or burned is not img
             img = burned
         if self.values is None:
-            out = img
+            out = opaque_alpha(img) if self.alpha else img
         else:
             if upload:
                 engine.set_input(img)
             h, w = img.shape[:2]
             plan = self.plan(w, h, index)
+            kw = {"alpha": True} if self.alpha else {}
             if self.fit is not None and self.fit.composite:
-                out = engine.render_fit(plan, self.depth, self.fit)
+                out = engine.render_fit(plan, self.depth, self.fit, **kw)
             else:
-                out = engine.render(plan, self.depth)
+                out = engine.render(plan, self.depth, **kw)
+            if self.alpha:
+                out = opaque_alpha(out)
         if burn is not None and burn.mode == "digital":
             out = burn.apply(out, self.time(index))
         return out
@@ -138,6 +149,15 @@ class Recipe:
     def render(self, engine, img, index: int):
         """O quadro inteiro: montagem (se `img` são camadas) e look. `index` é o número do quadro na saída."""
         return self.look(engine, self.montage(engine, img), index)
+
+
+def opaque_alpha(img):
+    """RGBA: um quadro de 3 canais (entrada sem transparência) ganha o alfa todo opaco; 4 canais passam direto."""
+    if img.ndim == 3 and img.shape[2] == 4:
+        return img
+    import numpy as np
+    mx = np.iinfo(img.dtype).max
+    return np.dstack([img, np.full(img.shape[:2], mx, img.dtype)])
 
 
 def lut_of(values: dict | None) -> tuple | None:

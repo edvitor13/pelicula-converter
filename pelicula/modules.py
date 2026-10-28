@@ -47,6 +47,9 @@ class Module:
 MODULES: tuple[Module, ...] = (
     Module("edicao", N_("Modo Edição"),
            N_("Linha do tempo com faixas de vídeo e de som, cortes e ajustes por clipe."), "edicao"),
+    Module("titulos_geradores", N_("Títulos e geradores"),
+           N_("Títulos com estilos prontos e animações, cor sólida, degradê e ponta com contagem, no botão Novo "
+              "da Mídia do modo Edição."), "edicao"),
     Module("laboratorio", N_("Laboratório"),
            N_("Emulação por densidade: negativo, luzes da copiadora, cópia e Technicolor."), "pelicula"),
     Module("defeitos", N_("Defeitos da película"),
@@ -94,7 +97,8 @@ MODULES: tuple[Module, ...] = (
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
-_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios"}
+_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios",
+                       "titulos_geradores"}
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
@@ -102,7 +106,7 @@ _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 PROFILES: tuple[tuple[str, str, str, frozenset[str]], ...] = (
     ("simples", N_("Simples"), N_("O essencial: looks prontos, cortes simples e exportação."), _SIMPLES),
     ("criador", N_("Criador"), N_("Para vídeos de redes sociais e YouTube: defeitos, LUTs, scopes, medidor de som, "
-                                  "transições de película, legendas e remover silêncios."),
+                                  "títulos e geradores, transições de película, legendas e remover silêncios."),
      _CRIADOR),
     ("cinema", N_("Cinema"), N_("Tudo do Criador mais o Laboratório, o scan, a curva, LUTs e o plugin do DaVinci."),
      _CINEMA),
@@ -206,6 +210,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
     trivial = getattr(sequence, "is_trivial", lambda: True)
     if sequence is not None and getattr(sequence, "clips", True) and not trivial():
         used.add("edicao")
+        if any(not s.is_file for s in getattr(sequence, "used_sources", lambda: [])()):
+            used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
     if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
         used.add("transicoes")
     for subs in (subtitles, getattr(sequence, "subtitles", None)):

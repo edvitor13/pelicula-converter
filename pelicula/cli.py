@@ -259,14 +259,30 @@ def _source_and_values(path: str, preset, sets):
         seq = project_sequence(proj)
         if seq is not None:
             from . import sequence
+            _prepare_text(seq)
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
-        if not proj.media_path or not os.path.exists(proj.media_path):
+        if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
         return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
-    if not os.path.exists(path):
+    if not _exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
     return path, values, pid, None, alpha_sequence(path)
+
+
+def _prepare_text(seq) -> None:
+    """Montagem com texto desenhado (a ponta com contagem, títulos): o banco de fontes do Qt precisa de uma
+    QGuiApplication, criada aqui, na thread principal, antes das threads que leem a montagem."""
+    from . import generators
+    if generators.needs_text(seq):
+        from . import textrender
+        textrender.ensure_app()
+
+
+def _exists(path: str) -> bool:
+    """O arquivo existe? (um padrão de sequência de imagens, plano_%04d.png: algum quadro dele)"""
+    from .media import path_exists
+    return path_exists(path)
 
 
 def alpha_sequence(path: str):
@@ -277,7 +293,7 @@ def alpha_sequence(path: str):
         info = media.probe(path)
     except Exception:  # noqa: BLE001 — quem chamou mostra o erro ao ler o arquivo
         return None
-    if not info.has_alpha:
+    if not info.has_alpha and not info.is_sequence:  # sequência de imagens: também pela montagem
         return None
     return timeline.Sequence.for_source(timeline.Source.from_info(info))
 
@@ -399,7 +415,7 @@ def cmd_export(a) -> int:
         raise CliError(_("Codec indisponível neste computador: {codec}").format(codec=s.codec))
     if s.container not in export.CODECS[s.codec]["exts"]:
         s.container = export.CODECS[s.codec]["exts"][0]
-    out = a.saida or str(Path(src).with_name(Path(src).stem + "_pelicula." + s.container))
+    out = a.saida or str(Path(src).with_name(media.sequence_stem(src) + "_pelicula." + s.container))
     out = str(Path(out).with_suffix("." + s.container))
     if os.path.abspath(out) == os.path.abspath(src):
         raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))
@@ -543,8 +559,10 @@ def cmd_frame(a) -> int:
         _gui_app()
     w, h = info.width, info.height
     # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
+    # "Fundo transparente" da montagem: PNG e TIFF guardam a transparência (como "Salvar quadro" na janela).
+    alpha = seq is not None and seq.transparent and ext in export.STILL_ALPHA_ARGS
     recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
-                               keys=look_keys(proj, a.preset, a.set), burn=burn)
+                               keys=look_keys(proj, a.preset, a.set), burn=burn, alpha=alpha)
     engine = Engine()
     try:
         if seq is not None:

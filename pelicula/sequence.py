@@ -114,10 +114,20 @@ def render_source(seq: timeline.Sequence, clip: timeline.Clip, frame: int, w: in
     return _as_layer(fn(seq, clip, int(frame), int(w), int(h), int(depth)), int(w), int(h), depth, src.kind)
 
 
-def source_thumbnail(src: timeline.Source, w: int, h: int) -> np.ndarray:
-    """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0, sobre preto."""
+# Quadro da fonte que a miniatura mostra, por tipo (padrão 0): um título que surge aos poucos mostra o texto inteiro.
+THUMBNAIL_FRAME: dict[str, Callable[[timeline.Source], int]] = {}
+
+
+def source_thumbnail(src: timeline.Source, w: int, h: int, rgba: bool = False) -> np.ndarray:
+    """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0 (ou o de
+    `THUMBNAIL_FRAME`), sobre preto. `rgba`: a imagem do gerador (RGBA pré-multiplicado), para mostrar sobre o
+    xadrez (`ui/alphaview.py`)."""
     seq = timeline.Sequence.for_source(src)
-    img = render_source(seq, seq.clips[0], 0, w, h, 8)
+    pick = THUMBNAIL_FRAME.get(src.kind)
+    frame = max(0, int(pick(src))) if pick is not None else 0
+    img = render_source(seq, seq.clips[0], frame, w, h, 8)
+    if rgba and img.shape[2] == 4:
+        return np.ascontiguousarray(img)
     return np.ascontiguousarray(img[..., :3])  # pré-multiplicado sobre preto = o próprio RGB
 
 
@@ -132,9 +142,15 @@ def clear_cache() -> None:
         _CACHE.clear()
 
 
+def present(src: timeline.Source) -> bool:
+    """O arquivo da fonte está no disco? (sequência de imagens: o primeiro quadro dela)"""
+    return media.path_exists(src.path, src.seq_start)
+
+
 def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, hq: bool) -> np.ndarray:
     try:
-        mtime = os.path.getmtime(src.path)
+        mtime = os.path.getmtime(media.sequence_file(src.path, src.seq_start + frame) if src.is_sequence
+                                 else src.path)
     except OSError:
         mtime = 0.0
     key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq, src.has_alpha)
@@ -164,7 +180,7 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
         if not src.is_file:
             out.append(LayerImage(layer, render_source(seq, layer.clip, layer.src_frame, w, h, depth)))
             continue
-        if not os.path.exists(src.path):
+        if not present(src):
             continue
         out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq)))
     return FrameLayers(int(frame), out)
@@ -383,7 +399,7 @@ class SequenceReader:
                 continue
             src = self.seq.sources.get(c.src)
             if (src is None or src.is_image or not src.has_video or not src.is_file
-                    or not os.path.exists(src.path)):
+                    or not present(src)):
                 continue
             self._pending[c.id] = self._pool.submit(self._new_stream, c, self.seq.src_frame(c, c.start))
 
@@ -406,7 +422,7 @@ class SequenceReader:
             if not src.is_file:
                 out.append(LayerImage(layer, self._render(layer)))
                 continue
-            if not os.path.exists(src.path):
+            if not present(src):
                 continue
             if src.is_image:
                 img = self._image(c)
@@ -473,7 +489,9 @@ def media_info(seq: timeline.Sequence) -> media.MediaInfo:
     base = Path(anyp) if anyp else Path.home() / "sequencia.mp4"
     video = first is not None and not first.is_image
     ext = base.suffix if (video and base.suffix) else ".mp4"
-    name = seq.name or (base.stem + "_edicao")
+    if first is not None and first.is_sequence:  # plano_%04d.png → plano_edicao.mov
+        ext = ".mov"
+    name = seq.name or (media.sequence_stem(str(base)) + "_edicao")
     fr = timeline.parse_fps(seq.fps_str)
     frames = max(1, seq.duration)
     return media.MediaInfo(
@@ -489,4 +507,13 @@ def media_info(seq: timeline.Sequence) -> media.MediaInfo:
 def missing_sources(seq: timeline.Sequence) -> list[str]:
     """Arquivos usados pela sequência que não existem mais no disco (clipes sem arquivo não contam)."""
     used = {c.src for c in seq.clips} & _file_sources(seq)
-    return sorted(p for p in used if not os.path.exists(p))
+    return sorted(p for p in used if not present(seq.sources[p]))
+
+
+# ------------------------------------------------------------------ geradores que vêm com o app
+# Registram-se aqui (desenho, som e miniatura) para valer em todo lugar que lê uma montagem: janela, exportação
+# e terminal. Ficam registrados mesmo com o módulo desligado (a renderização nunca consulta `modules`).
+from . import generators as _generators, titles as _titles  # noqa: E402
+
+_generators.register()
+_titles.register()

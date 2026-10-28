@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -116,12 +117,22 @@ class MediaInfo:
     container: str
     is_image: bool
     has_alpha: bool = False  # imagem com transparência (`stream_has_alpha`; WebM com alpha_mode=1; PNG com paleta)
+    # Sequência de imagens numeradas (`path` é o padrão do ffmpeg, plano_%04d.png): número do 1º quadro; -1 = não é.
+    seq_start: int = -1
 
     @property
     def ext(self) -> str:
         return Path(self.path).suffix.lower()
 
+    @property
+    def is_sequence(self) -> bool:
+        return self.seq_start >= 0
+
     def summary(self) -> str:
+        if self.is_sequence:
+            return _("{w}×{h} • {fps} fps • sequência de {n} imagens {codec} • {bits} bits").format(
+                w=self.width, h=self.height, fps=f"{self.fps:.3f}", n=self.frames, codec=self.codec.upper(),
+                bits=self.bit_depth)
         if self.is_image:
             return _("{w}×{h} • imagem {codec} • {bits} bits").format(
                 w=self.width, h=self.height, codec=self.codec.upper(), bits=self.bit_depth)
@@ -216,7 +227,14 @@ def _probe_json(path: str) -> dict:
     return json.loads(res.stdout.decode("utf-8", "replace") or "{}")
 
 
-def probe(path: str) -> MediaInfo:
+def probe(path: str, fps_str: str = "") -> MediaInfo:
+    """Metadados de um arquivo. Um padrão de sequência de imagens (plano_%04d.png) lê o primeiro trecho de
+    números seguidos da pasta, a `fps_str` quadros por segundo (padrão 24)."""
+    if is_sequence_pattern(path):
+        found = sequence_from_pattern(path)
+        if found is None:
+            raise RuntimeError(_("Nenhum quadro da sequência foi encontrado: {caminho}").format(caminho=path))
+        return probe_sequence(found, fps_str or "24/1")
     return _info_from(path, _probe_json(path))
 
 
@@ -226,6 +244,8 @@ def probe_source(path: str):
     Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`.
     """
     from . import timeline
+    if is_sequence_pattern(path):
+        return timeline.Source.from_info(probe(path))
     data = _probe_json(path)
     streams = data.get("streams", [])
     has_video = any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
@@ -292,6 +312,207 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         has_audio=aus is not None, audio_codec=(aus or {}).get("codec_name", ""),
         container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha),
     )
+
+
+# ------------------------------------------------------------------ sequências de imagens numeradas
+# plano_0001.png, plano_0002.png… viram uma fonte só: o caminho é o padrão do ffmpeg (plano_%04d.png) e
+# `seq_start` é o número do primeiro quadro; a leitura usa `-f image2 -framerate -start_number` (`sequence_input`).
+# O ffmpeg para de ler no primeiro número que falta, então a sequência é sempre o trecho de números seguidos que
+# contém o arquivo escolhido (`ImageSequence.gaps` lista os buracos da pasta, para o aviso).
+SEQUENCE_EXT = (".png", ".tif", ".tiff", ".jpg", ".jpeg", ".exr", ".dpx")
+_SEQUENCE_DECODER = {".exr": "exr", ".dpx": "dpx"}  # só entram se o ffmpeg desta máquina decodifica
+_NUMBERED = re.compile(r"^(.*?)(\d+)(\.[A-Za-z0-9]+)$")
+_TOKEN = re.compile(r"(?<!%)%(0\d+)?d")
+
+
+def sequence_exts() -> tuple[str, ...]:
+    """Extensões que podem formar uma sequência de imagens nesta máquina (EXR e DPX só com o decodificador)."""
+    try:
+        dec = decoders()
+    except Exception:  # noqa: BLE001 — sem ffmpeg: fica com as comuns
+        dec = set()
+    return tuple(e for e in SEQUENCE_EXT if e not in _SEQUENCE_DECODER or _SEQUENCE_DECODER[e] in dec)
+
+
+@dataclass(frozen=True)
+class ImageSequence:
+    """Imagens numeradas de uma pasta (`find_sequence`)."""
+
+    pattern: str              # caminho com o número trocado por %0Nd (ou %d, sem zeros à esquerda)
+    first: int                # número do primeiro quadro do trecho de números seguidos
+    count: int                # quadros seguidos a partir de `first` (o que entra na montagem)
+    numbers: tuple[int, ...]  # todos os números achados na pasta, em ordem (com os buracos)
+
+    @property
+    def last(self) -> int:
+        return self.first + self.count - 1
+
+    def file(self, n: int) -> str:
+        return sequence_file(self.pattern, n)
+
+    @property
+    def gaps(self) -> list[tuple[int, int]]:
+        """Buracos da numeração: (primeiro, último número que falta), do menor ao maior número achado."""
+        out, prev = [], None
+        for n in self.numbers:
+            if prev is not None and n > prev + 1:
+                out.append((prev + 1, n - 1))
+            prev = n
+        return out
+
+    @property
+    def label(self) -> str:
+        return sequence_label(self.pattern, self.first, self.count)
+
+
+def is_sequence_pattern(path: str) -> bool:
+    """O caminho é o padrão de uma sequência de imagens (plano_%04d.png)?"""
+    return bool(path) and Path(path).suffix.lower() in SEQUENCE_EXT and bool(_TOKEN.search(os.path.basename(path)))
+
+
+def sequence_file(pattern: str, n: int) -> str:
+    """O arquivo do quadro número `n` de um padrão (plano_%04d.png, 12 → plano_0012.png)."""
+    folder, name = os.path.split(pattern)
+    return os.path.join(folder, name % int(n)) if folder else name % int(n)
+
+
+def sequence_label(pattern: str, first: int, count: int) -> str:
+    """Nome para mostrar: plano_[0001-0120].png."""
+    name = os.path.basename(pattern)
+    m = _TOKEN.search(name)
+    if not m:
+        return name
+    width = int(m.group(1) or 0)
+    tag = f"[{first:0{width}d}-{first + max(1, count) - 1:0{width}d}]"
+    return (name[:m.start()] + tag + name[m.end():]).replace("%%", "%")
+
+
+def sequence_stem(path: str) -> str:
+    """Nome-base para arquivos derivados (exportação, quadro salvo): plano_%04d.png → plano."""
+    stem = Path(path).stem
+    if not is_sequence_pattern(path):
+        return stem
+    return _TOKEN.sub("", stem).replace("%%", "%").rstrip("_-. ") or "sequencia"
+
+
+def path_exists(path: str, seq_start: int = -1) -> bool:
+    """O arquivo existe? Numa sequência de imagens, o primeiro quadro dela (`seq_start`; -1 = qualquer um)."""
+    if not is_sequence_pattern(path):
+        return os.path.exists(path)
+    if seq_start >= 0:
+        return os.path.exists(sequence_file(path, seq_start))
+    return sequence_from_pattern(path) is not None
+
+
+def _numbers(folder: str, prefix: str, ext: str) -> list[str]:
+    """Os números (texto, com os zeros) dos arquivos prefixo + número + extensão de uma pasta."""
+    try:
+        names = os.listdir(folder or ".")
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        m = _NUMBERED.match(name)
+        if m and m.group(1) == prefix and m.group(3) == ext:
+            out.append(m.group(2))
+    return out
+
+
+def _sequence(folder: str, prefix: str, ext: str, digits: list[str], pick: str | None,
+              width: int | None = None) -> ImageSequence | None:
+    """Monta a sequência: com zeros à esquerda (%0Nd, só números de N dígitos) ou sem (%d)."""
+    if width is None:
+        w = len(pick) if pick else max((len(d) for d in digits), default=1)
+        padded = len({len(d) for d in digits}) == 1 or any(len(d) == w and len(d) > 1 and d[0] == "0"
+                                                            for d in digits)
+        width = w if padded and w > 1 else 0
+    if width:
+        keep = sorted({int(d) for d in digits if len(d) == width})
+        token = f"%0{width}d"
+    else:
+        keep = sorted({int(d) for d in digits if len(d) == 1 or d[0] != "0"})
+        token = "%d"
+    if not keep:
+        return None
+    have = set(keep)
+    start = int(pick) if pick is not None and int(pick) in have else keep[0]
+    while start - 1 in have:
+        start -= 1
+    count = 1
+    while start + count in have:
+        count += 1
+    if count < 2:
+        return None
+    name = prefix.replace("%", "%%") + token + ext.replace("%", "%%")
+    return ImageSequence(os.path.join(folder, name) if folder else name, start, count, tuple(keep))
+
+
+def find_sequence(path: str, exts: tuple[str, ...] | None = None) -> ImageSequence | None:
+    """Sequência de imagens numeradas a partir de um arquivo (plano_0001.png) ou de uma pasta (o maior grupo de
+    imagens numeradas dela). None se não há pelo menos dois quadros seguidos."""
+    exts = sequence_exts() if exts is None else exts
+    if os.path.isdir(path):
+        groups: dict[tuple[str, str], list[str]] = {}
+        try:
+            names = sorted(os.listdir(path))
+        except OSError:
+            return None
+        for name in names:
+            m = _NUMBERED.match(name)
+            if m and m.group(3).lower() in exts:
+                groups.setdefault((m.group(1), m.group(3)), []).append(m.group(2))
+        best = None
+        for (prefix, ext), digits in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            found = _sequence(path, prefix, ext, digits, None)
+            if found is not None and (best is None or found.count > best.count):
+                best = found
+        return best
+    folder, name = os.path.split(path)
+    m = _NUMBERED.match(name)
+    if not m or m.group(3).lower() not in exts:
+        return None
+    prefix, pick, ext = m.groups()
+    return _sequence(folder, prefix, ext, _numbers(folder, prefix, ext), pick)
+
+
+def sequence_from_pattern(pattern: str, start: int = -1) -> ImageSequence | None:
+    """A sequência de um padrão já gravado (projeto, relocalizar): o trecho seguido que começa em `start` (ou
+    o primeiro da pasta)."""
+    folder, name = os.path.split(pattern)
+    m = _TOKEN.search(name)
+    if not m:
+        return None
+    prefix, ext = name[:m.start()].replace("%%", "%"), name[m.end():].replace("%%", "%")
+    digits = _numbers(folder, prefix, ext)
+    width = int(m.group(1) or 0)
+    found = _sequence(folder, prefix, ext, digits, None, width=width)
+    if found is None or start < 0 or start == found.first:
+        return found
+    pick = f"{start:0{width}d}" if width else str(start)
+    other = _sequence(folder, prefix, ext, digits, pick, width=width)
+    return other if other is not None and other.first == start else found
+
+
+def probe_sequence(found: ImageSequence, fps_str: str = "24/1") -> MediaInfo:
+    """`MediaInfo` de uma sequência de imagens: o primeiro quadro diz o tamanho, a cor e a transparência;
+    `fps_str` é a velocidade escolhida ao importar (padrão: a da montagem)."""
+    first = found.file(found.first)
+    info = _info_from(first, _probe_json(first))
+    try:
+        fr = Fraction(str(fps_str or "24/1"))
+        if fr <= 0 or fr > 1000:
+            raise ValueError
+    except (ValueError, ZeroDivisionError):
+        fr = Fraction(24, 1)
+    return dataclasses.replace(info, path=found.pattern, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
+                               frames=found.count, duration=found.count / float(fr), is_image=False, bitrate=0,
+                               container="image2", seq_start=found.first)
+
+
+def sequence_input(info: MediaInfo, start_frame: int = 0) -> list[str]:
+    """Opções de entrada (antes do `-i`) para ler uma sequência de imagens a partir do quadro `start_frame`."""
+    return ["-f", "image2", "-framerate", info.fps_str or "24/1",
+            "-start_number", str(int(info.seq_start) + max(0, int(start_frame)))]
 
 
 def _in_matrix(info: MediaInfo) -> str:
@@ -471,14 +692,17 @@ class FrameReader:
         self.dtype = np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
         self.frame_bytes = width * height * self.channels * (1 if self.dtype == np.uint8 else 2)
         args = [ffmpeg(), "-v", "error", "-nostdin", "-hide_banner"]
-        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha:
+        numbered = getattr(info, "seq_start", -1) >= 0
+        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha and not numbered:
             args += ["-hwaccel", perf.hwaccel]
         if perf.threads > 0:
             args += ["-threads", str(perf.threads)]
-        if not info.is_image and start_frame > 0:
+        if not info.is_image and start_frame > 0 and not numbered:
             args += ["-ss", f"{max(0.0, (start_frame - 0.45) / info.fps):.6f}"]
         if alpha:
             args += alpha_decoder(info.codec)
+        if numbered:  # sequência de imagens: começa no número do quadro pedido (exato, sem procurar)
+            args += sequence_input(info, start_frame)
         args += ["-i", info.path, "-map", "0:v:0", "-an", "-sn", "-dn"]
         flags = "lanczos+accurate_rnd+full_chroma_int" if hq else "bicubic+full_chroma_int"
         vf = []
