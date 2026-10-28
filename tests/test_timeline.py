@@ -450,3 +450,303 @@ def test_history_undoes_markers():
     assert h.undo().marker(mk.id).name == "A"
     assert h.undo().markers == []
     assert h.redo().marker(mk.id).name == "A"
+
+
+# ------------------------------------------------------------------ ferramentas de corte (1.5)
+def named(seq, name, kind=tl.VIDEO):
+    return sorted((c for c in seq.clips if c.name == name and c.kind == kind), key=lambda c: c.start)
+
+
+def layout(seq):
+    """(faixa, nome, início, fim) de cada clipe, em ordem: o retrato da montagem para comparar."""
+    return sorted((f"{c.kind[0]}{c.track + 1}", c.name, c.start, c.end) for c in seq.clips)
+
+
+def no_overlaps(seq):
+    for kind in (tl.VIDEO, tl.AUDIO):
+        for i in range(len(seq.kind_tracks(kind))):
+            cs = seq.clips_on(kind, i)
+            for a, b in zip(cs, cs[1:]):
+                assert a.end <= b.start, (kind, i, a.name, b.name)
+
+
+def main_packed(seq):
+    v1 = seq.clips_on(tl.VIDEO, 0)
+    pos = 0
+    for c in v1:
+        assert c.start == pos, [(x.name, x.start, x.end) for x in v1]
+        pos = c.end
+
+
+def three(title=True, music=True):
+    """A, B, C (100 quadros cada, com som ligado) na V1/A1; um título de 120 quadros na V2 a partir de 150 (em
+    cima de B), uma música na A2 de 0 a 300 e um marcador em 250 (em cima de C)."""
+    seq = tl.Sequence(1920, 1080, "24/1")
+    for n in "ABC":
+        seq.insert_media(src(n, frames=100))
+    if title:
+        seq.insert_media(tl.Source("T.png", 100, 100, is_image=True), at=150, vtrack=1)
+    if music:
+        seq.insert_media(tl.Source("M.mp3", has_video=False, has_audio=True, duration=300 / 24), at=0, atrack=1)
+    seq.add_marker(250)
+    return seq
+
+
+def handles():
+    """A, B, C usando o meio de arquivos de 200 quadros (sobra de 50 antes e depois de cada clipe)."""
+    seq = tl.Sequence(1920, 1080, "24/1")
+    for n in "ABC":
+        seq.insert_media(src(n, frames=200))
+    for n in "ABC":
+        v = named(seq, n)[0]
+        seq.trim_start(v.id, v.start + 50)
+        seq.trim_end(v.id, v.start + 100)
+    seq.close_gaps(tl.VIDEO, 0)
+    seq.close_gaps(tl.AUDIO, 0)
+    return seq
+
+
+def sync(c):
+    """Quadro da sequência onde estaria o começo do arquivo: igual na imagem e no som = em sincronia."""
+    return round(c.start - c.src_in * 24 / c.speed, 6)
+
+
+def test_insert_pushes_everything_after_the_point_and_splits_the_target_tracks():
+    seq = three()
+    made = seq.insert_media(src("X", frames=50), at=150, insert=True)
+    assert spans(made) == [(150, 200), (150, 200)]
+    assert spans(named(seq, "B")) == [(100, 150), (200, 250)]
+    assert spans(named(seq, "B", tl.AUDIO)) == [(100, 150), (200, 250)]
+    assert named(seq, "B")[1].src_in == pytest.approx(50 / 24)  # a parte da direita continua do mesmo ponto
+    assert spans(named(seq, "C")) == spans(named(seq, "C", tl.AUDIO)) == [(250, 350)]
+    assert spans(named(seq, "T.png")) == [(200, 320)]          # começava no ponto: anda junto
+    assert spans(named(seq, "M.mp3", tl.AUDIO)) == [(0, 300)]  # atravessa o ponto em outra faixa: fica inteira
+    assert [m.frame for m in seq.markers] == [300]
+    right_b = named(seq, "B")[1]
+    assert right_b.link and right_b.link == named(seq, "B", tl.AUDIO)[1].link != named(seq, "B")[0].link
+    no_overlaps(seq)
+
+
+def test_overwrite_stays_the_default():
+    seq = three()
+    seq.insert_media(src("X", frames=50), at=150)
+    assert spans(named(seq, "B")) == [(100, 150)]
+    assert spans(named(seq, "C")) == [(200, 300)]
+    assert spans(named(seq, "T.png")) == [(150, 270)] and [m.frame for m in seq.markers] == [250]
+
+
+def test_insert_at_a_cut_does_not_split_and_respects_locked_tracks():
+    seq = three()
+    seq.track(tl.VIDEO, 1).locked = True
+    seq.insert_media(src("X", frames=50), at=100, insert=True)
+    assert spans(named(seq, "A")) == [(0, 100)] and spans(named(seq, "B")) == [(150, 250)]
+    assert spans(named(seq, "C")) == [(250, 350)]
+    assert spans(named(seq, "T.png")) == [(150, 270)]   # faixa travada não anda...
+    assert [m.frame for m in seq.markers] == [250]      # ...e os marcadores ficam com ela
+
+
+def test_move_insert_opens_space_at_the_destination():
+    seq = three(title=False, music=False)
+    c = named(seq, "C")[0]
+    seq.move_insert(c.id, 50)
+    assert layout(seq) == [("a1", "A", 0, 50), ("a1", "A", 150, 200), ("a1", "B", 200, 300), ("a1", "C", 50, 150),
+                           ("v1", "A", 0, 50), ("v1", "A", 150, 200), ("v1", "B", 200, 300), ("v1", "C", 50, 150)]
+    seq = three(title=False, music=False)
+    a = named(seq, "A")[0]
+    seq.move_insert(a.id, 150)  # para a direita, no meio de B: B se divide e o lugar de A fica vazio
+    assert spans(named(seq, "B")) == [(100, 150), (250, 300)] and spans(named(seq, "A")) == [(150, 250)]
+    assert spans(named(seq, "C")) == [(300, 400)]
+    no_overlaps(seq)
+
+
+def test_ripple_trim_start_and_end_close_the_gap():
+    seq = three(music=False)
+    b = named(seq, "B")[0]
+    assert seq.ripple_trim_start(b.id, 130) == 30
+    assert spans(named(seq, "B")) == spans(named(seq, "B", tl.AUDIO)) == [(100, 170)]
+    assert named(seq, "B")[0].src_in == pytest.approx(30 / 24)
+    assert spans(named(seq, "C")) == [(170, 270)]
+    assert spans(named(seq, "T.png")) == [(120, 240)] and [m.frame for m in seq.markers] == [220]
+    seq = three(music=False)
+    b = named(seq, "B")[0]
+    assert seq.ripple_trim_end(b.id, 130) == 70
+    assert spans(named(seq, "B")) == [(100, 130)] and spans(named(seq, "C", tl.AUDIO)) == [(130, 230)]
+    # O título atravessa o trecho tirado: só as faixas do clipe andam e o marcador fica (como em "Excluir e
+    # fechar o espaço").
+    assert spans(named(seq, "T.png")) == [(150, 270)] and [m.frame for m in seq.markers] == [250]
+    assert seq.ripple_trim_end(b.id, 100) == 0 and seq.ripple_trim_end(b.id, 300) == 0  # cursor fora do clipe
+
+
+def test_ripple_trim_keeps_other_tracks_when_something_is_under_the_cut():
+    seq = three()  # a música atravessa o trecho tirado: só as faixas do clipe andam
+    b = named(seq, "B")[0]
+    seq.ripple_trim_start(b.id, 130)
+    assert spans(named(seq, "C")) == [(170, 270)] and spans(named(seq, "T.png")) == [(150, 270)]
+    assert spans(named(seq, "M.mp3", tl.AUDIO)) == [(0, 300)] and [m.frame for m in seq.markers] == [250]
+
+
+def test_trim_target_prefers_the_selected_track_then_the_top_unlocked_one():
+    seq = three()
+    assert seq.trim_target(160).name == "T.png"
+    assert seq.trim_target(160, (tl.AUDIO, 1)).name == "M.mp3"
+    seq.track(tl.VIDEO, 1).locked = True
+    assert seq.trim_target(160).name == "B"
+    assert seq.trim_target(100).name == "M.mp3"  # num corte da V1 não há o que aparar: vale a faixa de baixo
+    assert seq.trim_target(5000) is None
+
+
+def test_j_and_l_cuts_roll_only_the_sound():
+    seq = handles()
+    b = named(seq, "B")[0]
+    assert seq.split_edit(b.id, True, -24) == -24       # corte J: o som de B entra 1 s antes da imagem
+    assert spans(named(seq, "A")) == [(0, 100)] and spans(named(seq, "A", tl.AUDIO)) == [(0, 76)]
+    assert spans(named(seq, "B")) == [(100, 200)] and spans(named(seq, "B", tl.AUDIO)) == [(76, 200)]
+    assert sync(named(seq, "B")[0]) == sync(named(seq, "B", tl.AUDIO)[0])
+    assert seq.split_edit(b.id, False, 12) == 12        # corte L: o som de B continua depois do corte
+    assert spans(named(seq, "B", tl.AUDIO)) == [(76, 212)] and spans(named(seq, "C", tl.AUDIO)) == [(212, 300)]
+    assert sync(named(seq, "C")[0]) == sync(named(seq, "C", tl.AUDIO)[0])
+    assert seq.split_edit(b.id, True, 0) == 0           # alinha de novo
+    assert spans(named(seq, "B", tl.AUDIO)) == [(100, 212)] and spans(named(seq, "A", tl.AUDIO)) == [(0, 100)]
+    assert seq.split_edit(b.id, True, -500) == -50      # só cabe o que sobra do arquivo antes da entrada
+    unlinked = named(seq, "A")[0]
+    seq.unlink(unlinked.id)
+    assert seq.split_edit(b.id, True, -10) is None      # sem par ligado do outro lado do corte
+
+
+def test_alt_trim_moves_only_one_side_of_the_pair():
+    seq = handles()
+    b = named(seq, "B")[0]
+    seq.trim_end_only(b.id, 180)
+    assert spans(named(seq, "B")) == [(100, 180)] and spans(named(seq, "B", tl.AUDIO)) == [(100, 200)]
+    a_audio = named(seq, "A", tl.AUDIO)[0]
+    seq.trim_start_only(named(seq, "B", tl.AUDIO)[0].id, 90)  # cobre o fim do som de A, a imagem fica
+    assert spans(named(seq, "B", tl.AUDIO)) == [(90, 200)] and a_audio.end == 90
+    assert named(seq, "B")[0].link == named(seq, "B", tl.AUDIO)[0].link
+
+
+def test_offset_pairs_survive_move_split_delete_speed_and_undo():
+    seq = handles()
+    b = named(seq, "B")[0]
+    seq.split_edit(b.id, True, -24)
+    snap = json.dumps(seq.to_json())
+    lead = named(seq, "B", tl.AUDIO)[0].start - b.start
+    seq.move(b.id, b.start + 5)
+    assert named(seq, "B", tl.AUDIO)[0].start - named(seq, "B")[0].start == lead == -24
+    assert sync(named(seq, "B")[0]) == sync(named(seq, "B", tl.AUDIO)[0])
+    seq.move(b.id, b.start - 5)
+    # dividir dentro do som que entra antes: a imagem de B vai com a parte da direita do som
+    seq.split(85)
+    ba = named(seq, "B", tl.AUDIO)
+    assert spans(ba) == [(76, 85), (85, 200)]
+    assert named(seq, "B")[0].link == ba[1].link and ba[0].link != ba[1].link
+    seq = tl.Sequence.from_json(json.loads(snap))  # o corte J sobrevive ao projeto salvo
+    assert named(seq, "B", tl.AUDIO)[0].start - named(seq, "B")[0].start == -24
+    h = tl.History(seq)
+    b = named(seq, "B")[0]
+    seq.set_speed(b.id, 2.0)
+    vb, ab = named(seq, "B")[0], named(seq, "B", tl.AUDIO)[0]
+    assert (vb.start, ab.start, vb.speed, ab.speed) == (100, 88, 2.0, 2.0)
+    assert sync(vb) == sync(ab)
+    seq.set_speed(b.id, 1.0)
+    assert spans(named(seq, "B")) == [(100, 200)] and spans(named(seq, "B", tl.AUDIO)) == [(76, 200)]
+    seq.delete([named(seq, "B")[0].id])
+    assert named(seq, "B", tl.AUDIO) == [] and named(seq, "B") == []
+    h.push(seq)
+    restored = h.undo()
+    assert spans(named(restored, "B", tl.AUDIO)) == [(76, 200)]
+
+
+def test_magnetic_key_is_optional_and_off_by_default():
+    seq = three()
+    data = seq.to_json()
+    assert "faixa_magnetica" not in data and not seq.magnetic
+    assert not tl.Sequence().magnetic and not tl.Sequence.for_source(src()).magnetic
+    assert tl.Sequence.from_json(data).to_json() == data  # projeto antigo sai igual
+    seq.magnetic = True
+    data = seq.to_json()
+    assert data["faixa_magnetica"] is True and tl.Sequence.from_json(data).magnetic
+    for junk in ("sim", 1, None, [True]):
+        assert not tl.Sequence.from_json({**data, "faixa_magnetica": junk}).magnetic
+
+
+def magnetic(seq):
+    seq.magnetic = True
+    seq.settle_main()
+    return seq
+
+
+def test_magnetic_delete_closes_v1_and_the_rest_follows_the_picture():
+    seq = magnetic(three())
+    with seq.keep_main():
+        seq.delete([named(seq, "B")[0].id])
+    main_packed(seq)
+    assert spans(named(seq, "C")) == spans(named(seq, "C", tl.AUDIO)) == [(100, 200)]
+    assert spans(named(seq, "T.png")) == [(100, 220)]  # a imagem de baixo sumiu: vai para o ponto do corte
+    assert spans(named(seq, "M.mp3", tl.AUDIO)) == [(0, 300)]  # começava em A, que não mudou
+    assert [m.frame for m in seq.markers] == [150]  # estava em C (quadro 50 dele): continua lá
+    no_overlaps(seq)
+
+
+def test_magnetic_move_keeps_connected_clips_on_their_picture():
+    seq = magnetic(three())
+    with seq.keep_main():
+        seq.move(named(seq, "B")[0].id, 300)
+    main_packed(seq)
+    assert [c.name for c in seq.clips_on(tl.VIDEO, 0)] == ["A", "C", "B"]
+    assert spans(named(seq, "B")) == [(200, 300)]
+    assert spans(named(seq, "T.png")) == [(250, 370)]  # estava no quadro 50 de B: foi junto
+    assert [m.frame for m in seq.markers] == [150]
+    with seq.keep_main():  # mexer no próprio título: fica onde a pessoa deixou
+        seq.move(named(seq, "T.png")[0].id, 10)
+    assert spans(named(seq, "T.png")) == [(10, 130)]
+    no_overlaps(seq)
+
+
+def test_magnetic_insert_and_growth_push_instead_of_covering():
+    seq = magnetic(handles())
+    with seq.keep_main():
+        seq.insert_media(src("X", frames=50), at=150, insert=seq.magnet_active)
+    main_packed(seq)
+    assert [c.name for c in seq.clips_on(tl.VIDEO, 0)] == ["A", "B", "X", "B", "C"]
+    seq = magnetic(handles())
+    b = named(seq, "B")[0]
+    with seq.keep_main():
+        seq.trim_start(b.id, seq.room_for_start(b.id, 90))  # alongar o começo mostra mais do arquivo
+    assert spans(named(seq, "A")) == [(0, 100)] and spans(named(seq, "B")) == [(100, 210)]
+    assert spans(named(seq, "C")) == spans(named(seq, "C", tl.AUDIO)) == [(210, 310)]
+    with seq.keep_main():
+        seq.room_for_speed(b.id, 0.5)
+        seq.set_speed(b.id, 0.5)
+    assert spans(named(seq, "B")) == [(100, 320)] and spans(named(seq, "C")) == [(320, 420)]
+    with seq.keep_main():
+        seq.trim_end(b.id, 200)  # encurtar puxa o resto
+    main_packed(seq)
+    assert spans(named(seq, "C")) == [(200, 300)]
+    no_overlaps(seq)
+
+
+def test_magnetic_turning_on_closes_gaps_and_locked_v1_waits():
+    seq = three(title=False, music=False)
+    seq.delete([named(seq, "B")[0].id])
+    assert spans(video(seq)) == [(0, 100), (200, 300)]
+    seq.magnetic = True
+    seq.track(tl.VIDEO, 0).locked = True
+    assert not seq.magnet_active
+    seq.settle_main()
+    assert spans(video(seq)) == [(0, 100), (200, 300)]  # V1 travada: nada muda
+    seq.track(tl.VIDEO, 0).locked = False
+    seq.settle_main()
+    assert spans(video(seq)) == spans(audio(seq)) == [(0, 100), (100, 200)]
+    with seq.keep_main():
+        seq.ripple_trim_start(named(seq, "C")[0].id, 150)
+    main_packed(seq)
+    assert spans(named(seq, "C")) == [(100, 150)]
+
+
+def test_magnetic_off_changes_nothing():
+    seq = three()
+    before = seq.to_json()
+    with seq.keep_main():
+        pass
+    seq.settle_main()
+    assert seq.to_json() == before

@@ -497,6 +497,18 @@ extrair, e ficam em `%LOCALAPPDATA%\PeliculaConverter\ferramentas` (Linux:
 download. O ffmpeg é a exceção: como os builds mudam o tempo todo, o app baixa o mais recente e confere
 com o SHA-256 publicado pelo autor do build.
 
+Componentes que podem ser baixados hoje (cada um aparece em Componentes junto com o recurso que o usa):
+
+| Componente | Para quê | Tamanho do download | De onde vem | Licença |
+|---|---|---|---|---|
+| ffmpeg | ler e gravar vídeo e som (obrigatório) | ~100–130 MB | gyan.dev (Windows) / BtbN (Linux) | GPL |
+| whisper.cpp 1.9.5 | motor das **legendas automáticas** (Beta): transcreve a fala neste computador, na placa de vídeo (Vulkan) ou no processador | 18 MB (Windows) / 21 MB (Linux) | compilado pelo CI do PeliculaConverter a partir do [código oficial](https://github.com/ggml-org/whisper.cpp/tree/v1.9.5) e publicado nas [Releases deste repositório](https://github.com/edvitor13/pelicula-converter/releases/tag/componente-whisper-cpp-1.9.5) | MIT |
+| Modelo de fala Rápido (small) | transcrição leve, muitos idiomas | 264 MB | [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) (revisão fixa) | MIT (Whisper, OpenAI) |
+| Modelo de fala Preciso (turbo) | transcrição mais precisa (large-v3-turbo) | 574 MB | [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) (revisão fixa) | MIT (Whisper, OpenAI) |
+| Silero VAD 6.2 | acha onde há fala: a transcrição pula os silêncios | 0,9 MB | [Hugging Face](https://huggingface.co/ggml-org/whisper-vad) (revisão fixa) | MIT |
+| CorridorKey 2.0 | **recorte por IA** (Beta) | ~7,6 GB | GitHub da Corridor Digital e Hugging Face | Corridor Key Licence |
+| uv | monta o ambiente Python do CorridorKey | ~16 MB | GitHub da Astral | MIT / Apache-2.0 |
+
 Ferramentas de IA em Python (o CorridorKey) ganham um **ambiente Python próprio**, montado pelo
 [uv](https://github.com/astral-sh/uv) (também baixado e conferido por SHA-256) numa pasta do componente,
 sem mexer no Python do computador: Python e bibliotecas de uma lista travada com o hash de cada arquivo,
@@ -658,7 +670,7 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 - **Linha do tempo**: clique ou arraste; `Espaço` reproduz/pausa (a reprodução pula quadros se a
   prévia não acompanhar, mantendo o tempo real), `←`/`→` andam um quadro, `Shift+←/→` um segundo,
   `Home`/`End` vão para a entrada/saída (ou começo/fim).
-- **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `L` liga/desliga a repetição. O trecho
+- **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `Ctrl+L` liga/desliga a repetição. O trecho
   marcado pode ser exportado sozinho.
 - **Som**: a reprodução toca o áudio do vídeo, sincronizado com o quadro mostrado (o som se corrige
   sozinho se escorregar mais de 0,15 s, inclusive na repetição e ao buscar). O botão de alto-falante
@@ -795,12 +807,14 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | Atalho | Ação |
 |---|---|
 | `Espaço` | Reproduzir / pausar |
+| `J` / `K` / `L` | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (sem som fora de 1× para a frente) |
+| `K` + `J` / `K` + `L` | Segurando o K: um quadro para trás / para a frente |
 | `←` / `→` | Quadro anterior / próximo |
 | `Shift + ←` / `Shift + →` | Voltar / avançar 1 segundo |
 | `Home` / `End` | Ir para a entrada (ou início) / saída (ou fim) |
 | `I` / `O` | Marcar entrada / saída |
 | `X` | Limpar entrada e saída |
-| `L` | Repetir (liga/desliga) |
+| `Ctrl+L` | Repetir (liga/desliga; antes era o `L`) |
 | `C` | Trocar o modo de comparação |
 | `F` | Ajustar à janela |
 | `+` / `−` | Mais / menos zoom (de 10% a 1600%) |
@@ -824,6 +838,10 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+1` / `Ctrl+2` | Modo Película / modo Edição |
 | `Ctrl+I` | Importar para a edição |
 | `S` (Edição) | Dividir no cursor |
+| `Q` / `W` (Edição) | Aparar o começo / o fim do clipe até o cursor e fechar o espaço |
+| `,` / `.` (Edição) | Inserir / sobrescrever no cursor (itens escolhidos na Mídia) |
+| `Ctrl` ao soltar ou mover (linha do tempo) | Inverte o botão **Inserir** (empurrar × sobrescrever) |
+| `Alt` ao aparar (linha do tempo) | Só a imagem ou só o som do par ligado (corte J/L) |
 | `Delete` / `Shift+Delete` (Edição) | Apagar / apagar e fechar o espaço |
 | `B` / `V` / `N` (linha do tempo) | Lâmina / seleção / ímã |
 | `Ctrl` + roda (linha do tempo) | Zoom da linha do tempo |
@@ -1303,22 +1321,26 @@ internet nestes casos:
 | Ao abrir, no máximo uma vez por dia: procurar versão nova do app | `api.github.com` | Um pedido de página comum (o endereço IP, como em qualquer site, e `User-Agent: PeliculaConverter/<versão>`) |
 | Ao abrir, no Windows: ver qual é a versão mais nova do ffmpeg | `www.gyan.dev` | O mesmo tipo de pedido |
 | Quando você pede: baixar ou atualizar o ffmpeg, ou *Procurar versão nova* em Componentes | `www.gyan.dev` (Windows) ou `github.com` (Linux, builds do BtbN) | Download do arquivo (ou o pedido de versão) |
-| Quando você pede: baixar um componente em Configurações › Componentes | A fonte oficial mostrada no cartão (o site do autor ou as Releases deste repositório) | Download do arquivo |
+| Quando você pede: baixar um componente em Configurações › Componentes | A fonte oficial mostrada no cartão (o site do autor, as Releases deste repositório ou o `huggingface.co`, para modelos) | Download do arquivo |
 | Quando você aceita uma atualização do app | `github.com` (Releases deste repositório) | Download do arquivo |
 
 - As duas consultas feitas ao abrir podem ser desligadas em **Configurações → Procurar atualizações
   automaticamente**. Desligadas, o app só se conecta quando você pede.
 - As notificações do sistema, as cópias da recuperação automática e os relatórios de erro ficam só neste
   computador: nada é enviado.
-- Esses serviços têm as próprias políticas: [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)
-  e [gyan.dev](https://www.gyan.dev/).
+- **A transcrição das legendas automáticas é 100% local**: o whisper.cpp roda neste computador, e o som
+  e o texto dos seus vídeos nunca são enviados. A internet só é usada uma vez, quando você pede, para
+  baixar o motor (Releases deste repositório) e os modelos (Hugging Face).
+- Esses serviços têm as próprias políticas: [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement),
+  [gyan.dev](https://www.gyan.dev/) e [Hugging Face](https://huggingface.co/privacy).
 
 *English:* PeliculaConverter does not collect personal data: no accounts, telemetry, usage
 statistics or ads, and your videos, projects and presets never leave your computer. It only goes
 online to (1) check GitHub for a new app version at startup, at most once a day; (2) on Windows,
 check gyan.dev for the latest ffmpeg version at startup; (3) download ffmpeg or another component
 (Settings › Components) from its official source when you ask; and (4) download an app update when
-you accept it. These requests carry no personal data besides the
+you accept it. Speech transcription for automatic subtitles runs entirely on your computer: audio and
+text are never uploaded. These requests carry no personal data besides the
 IP address inherent to any connection and a `PeliculaConverter/<version>` user agent. The two
 startup checks can be turned off in **Settings → Check for updates automatically**; with them off,
 the program will not transfer any information to other networked systems unless specifically
@@ -1331,10 +1353,34 @@ requested by the user.
 O ffmpeg baixado pelo app não faz parte deste repositório e segue a licença do próprio ffmpeg
 (os builds *essentials* do gyan.dev e os builds do BtbN são GPL).
 
+### Fontes que acompanham o app (títulos e legendas)
+
+O texto dos títulos e das legendas usa só fontes que vêm junto com o app (`pelicula/data/fontes`),
+nunca as do sistema — por isso o mesmo texto sai igual em qualquer computador. Todas são da
+[SIL Open Font License 1.1](https://openfontlicense.org) (o texto da licença está no `OFL.txt` de cada
+pasta), sem nenhuma mudança nos arquivos, tiradas do repositório oficial do
+[Google Fonts](https://github.com/google/fonts) no commit `ddf386b` (SHA-256 de cada arquivo em
+`pelicula/data/fontes/SOURCE.txt`):
+
+| Família | Direitos (como no OFL.txt) | Estilos |
+|---|---|---|
+| Atkinson Hyperlegible | Braille Institute of America | normal, itálico, negrito, negrito itálico |
+| Poppins | The Poppins Project Authors (Indian Type Foundry) | normal, itálico, negrito, negrito itálico, black |
+| Barlow Condensed | The Barlow Project Authors (Jeremy Tribby) | normal, negrito |
+| Bebas Neue | Dharma Type | normal |
+| Anton | The Anton Project Authors (Vernon Adams) | normal |
+| Archivo Black | The Archivo Black Project Authors (Omnibus-Type) | normal |
+| DM Serif Display | Adobe (Source Serif, nome reservado "Source") e Google LLC; desenho da Colophon Foundry | normal, itálico |
+| Crimson Text | The Crimson Text Project Authors (Sebastian Kosch) | normal, itálico, negrito, negrito itálico |
+| Courier Prime | The Courier Prime Project Authors (Quote-Unquote Apps) | normal, itálico, negrito, negrito itálico |
+| Patrick Hand | Patrick Wagesreiter | normal |
+| Pacifico | The Pacifico Project Authors (Vernon Adams e outros) | normal |
+
 ### Créditos e licenças de terceiros (componentes baixados à parte)
 
-Nada disto vem no repositório, no pacote ou nas releases do PeliculaConverter: cada componente é
-baixado, quando você pede, das fontes oficiais direto para o seu computador.
+Nada disto vem no repositório nem no pacote do PeliculaConverter: cada componente é baixado, quando você
+pede, direto para o seu computador — das fontes oficiais ou, no caso do whisper.cpp, de uma release à
+parte deste repositório com o programa compilado do código oficial, sem mudanças.
 
 - **CorridorKey**, da **Corridor Digital** ([código](https://github.com/nikopueringer/CorridorKey2.0),
   [pesos](https://huggingface.co/nikopueringer/CorridorKey2.0)) —
@@ -1351,6 +1397,15 @@ baixado, quando você pede, das fontes oficiais direto para o seu computador.
   Apache-2.0, pesos CC-BY 4.0).
 - **uv**, da Astral ([MIT / Apache-2.0](https://github.com/astral-sh/uv)), monta o ambiente Python;
   o PyTorch e as outras bibliotecas seguem as próprias licenças.
+- **whisper.cpp**, de Georgi Gerganov e colaboradores (ggml-org,
+  [MIT](https://github.com/ggml-org/whisper.cpp/blob/d1be6fde11ac6e0407606b4e42fe72d34add8037/LICENSE)),
+  versão 1.9.5, compilado sem mudanças pelo CI deste repositório
+  (`.github/workflows/componentes.yml`; o pacote leva o `LICENSE` e um `ORIGEM.txt`).
+- Modelos de fala **Whisper** (OpenAI, [MIT](https://github.com/openai/whisper/blob/c0d2f624c09dc18e709e37c2ad90c039a4eb72a2/LICENSE)),
+  convertidos para o formato do whisper.cpp pelo autor dele
+  ([ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)).
+- **Silero VAD** (Silero, [MIT](https://github.com/snakers4/silero-vad/blob/v6.2/LICENSE)), no formato
+  do whisper.cpp ([ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad)).
 
 ## Aviso legal
 

@@ -17,3 +17,7 @@ packaging/macos/**  text eol=lf
 *.msi  binary
 *.deb  binary
 *.jpg  binary
+
+# Fontes que acompanham o app (OFL.txt e .ttf conferidos por SHA-256 em tests/test_textrender.py): bytes exatos
+pelicula/data/fontes/** binary
+*.ttf  binary

@@ -10,6 +10,7 @@ frações do quadro da sequência (independentes de resolução); tempos de fade
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from .i18n import N_
@@ -130,12 +131,46 @@ VIDEO_SECTIONS: list[Section] = [
     Section("transicao", "Transições", None, [
         C("entrada_tipo", "Entrada", "corte", [
             ("corte", N_("Corte seco")), ("dissolver", N_("Dissolver com o clipe anterior")),
-            ("preto", N_("Surgir do preto")), ("branco", N_("Surgir do branco"))]),
+            ("preto", N_("Surgir do preto")), ("branco", N_("Surgir do branco")),
+            # 1.5 (`transitions.py`, módulo "transicoes"): só acrescentar no fim, nunca renomear.
+            ("fusao", N_("Fusão ótica (soma as exposições)")), ("exposicao", N_("Surgir do preto na exposição")),
+            ("queima", N_("Queima da película")), ("emenda", N_("Emenda com clarão")),
+            ("ponta", N_("Ponta entre os planos")), ("iris", N_("Íris (abre um círculo)")),
+            ("empurrar", N_("Empurrar")), ("cortina", N_("Cortina")), ("zoom", N_("Zoom (atravessa o corte)"))]),
         F("entrada_dur", "Duração da entrada", 1.0, 0.04, 5.0, 0.04, 2, " s"),
+        C("entrada_direcao", "Direção", "direita", [
+            ("direita", N_("Vem da direita")), ("esquerda", N_("Vem da esquerda")), ("baixo", N_("Vem de baixo")),
+            ("cima", N_("Vem de cima"))], "De que lado o clipe novo entra."),
+        F("entrada_suavidade", "Suavidade da borda", 24.0, 0, 300, 1, 0, " px",
+          "Largura da borda suave, em pixels de um quadro de 1080 linhas (0 = borda dura)."),
+        _pct("entrada_centro_x", "Centro horizontal", lo=-0.5, hi=0.5,
+             tip="Onde a transição começa: fração da largura do quadro (0 = meio)."),
+        _pct("entrada_centro_y", "Centro vertical", lo=-0.5, hi=0.5,
+             tip="Onde a transição começa: fração da altura do quadro (0 = meio; positivo desce)."),
+        F("entrada_anel", "Anel preto", 0.0, 0, 200, 1, 0, " px",
+          "Anel preto em volta do círculo, como nos filmes mudos (0 = sem anel)."),
+        C("entrada_ponta", "Ponta", "preta", [("preta", N_("Ponta preta")), ("clara", N_("Ponta clara"))],
+          "A ponta é a película sem imagem do começo e do fim dos rolos: preta, ou clara (transparente)."),
+        F("entrada_zoom", "Ampliação", 2.0, 1.1, 4.0, 0.05, 2, "×", "Quanto a imagem amplia no meio da transição."),
+        F("entrada_quadros", "Quadros do clarão", 2.0, 1, 3, 1, 0, "",
+          "Quantos quadros estouram de luz na emenda (1 a 3)."),
+        F("entrada_clarao", "Força do clarão", 2.0, 0.5, 4.0, 0.1, 1, " EV",
+          "Quanto a luz estoura no quadro da emenda, em pontos de exposição."),
         C("saida_tipo", "Saída", "corte", [
             ("corte", N_("Corte seco")), ("preto", N_("Sumir no preto")), ("branco", N_("Sumir no branco")),
-            ("transparente", N_("Sumir (mostra a faixa de baixo)"))]),
+            ("transparente", N_("Sumir (mostra a faixa de baixo)")),
+            # 1.5 (`transitions.py`, módulo "transicoes"): só acrescentar no fim, nunca renomear.
+            ("exposicao", N_("Escurecer na exposição")),
+            ("queima", N_("Queimar a película (mostra a faixa de baixo)")), ("iris", N_("Íris (fecha o círculo)"))]),
         F("saida_dur", "Duração da saída", 1.0, 0.04, 5.0, 0.04, 2, " s"),
+        F("saida_suavidade", "Suavidade da borda", 24.0, 0, 300, 1, 0, " px",
+          "Largura da borda suave, em pixels de um quadro de 1080 linhas (0 = borda dura)."),
+        _pct("saida_centro_x", "Centro horizontal", lo=-0.5, hi=0.5,
+             tip="Para onde a transição fecha: fração da largura do quadro (0 = meio)."),
+        _pct("saida_centro_y", "Centro vertical", lo=-0.5, hi=0.5,
+             tip="Para onde a transição fecha: fração da altura do quadro (0 = meio; positivo desce)."),
+        F("saida_anel", "Anel preto", 0.0, 0, 200, 1, 0, " px",
+          "Anel preto em volta do círculo, como nos filmes mudos (0 = sem anel)."),
     ], "Dissolver, surgir do preto e sumir"),
 ]
 
@@ -167,6 +202,20 @@ VIDEO = Schema(VIDEO_SECTIONS)
 AUDIO = Schema(AUDIO_SECTIONS)
 SCHEMAS = {"video": VIDEO, "audio": AUDIO}
 
+COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
+
+# Ajustes que aceitam chaves de animação (`keyframes.py`, `Clip.keys`): enquadramento e opacidade, todo ajuste
+# numérico de cor, luz, detalhe e efeitos (e as rodas) e o volume do som. Escolhas, liga/desliga, corte,
+# velocidade e transições ficam de fora. Receita "Tornar um ajuste animável" no AGENTS.md.
+ANIMATABLE_VIDEO = ("pos_x", "pos_y", "escala", "rotacao", "opacidade",
+                    *(p.key for s in VIDEO_SECTIONS if s.key in COLOR_SECTIONS for p in s.params
+                      if p.kind in ("float", "int", "wheel")))
+ANIMATABLE_AUDIO = ("volume",)
+for _schema, _keys in ((VIDEO, ANIMATABLE_VIDEO), (AUDIO, ANIMATABLE_AUDIO)):
+    for _k in _keys:
+        _schema.params[_k].animatable = True
+del _schema, _keys, _k
+
 # Ajustes rápidos do inspetor: valores que substituem os da seção de cor e luz (o resto fica).
 QUICK_LOOKS: list[tuple[str, str, dict[str, Any]]] = [
     ("vivo", N_("Mais vivo"), dict(contraste=0.15, vibracao=0.35, saturacao=0.05, clareza=0.15)),
@@ -179,9 +228,6 @@ QUICK_LOOKS: list[tuple[str, str, dict[str, Any]]] = [
 ]
 
 # Chaves zeradas por "Restaurar cor" (tudo que não é enquadramento, tempo nem transição).
-COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
-
-
 def color_keys() -> list[str]:
     return [p.key for s in VIDEO_SECTIONS if s.key in COLOR_SECTIONS for p in s.params]
 
@@ -202,3 +248,29 @@ def is_neutral(kind: str, values: dict[str, Any]) -> bool:
     """True se todos os ajustes do clipe estão no padrão (o clipe sai igual ao arquivo)."""
     schema = SCHEMAS[kind]
     return schema.sanitize(values) == schema.defaults()
+
+
+# ------------------------------------------------------------------ 1.5: transições novas e JSON enxuto
+# Tipos de transição da 1.5 (desenhados por `transitions.py` e `editshaders.CLIP_TR`); os de antes continuam no
+# caminho de sempre, bit a bit. EXTRA_TWO_CLIP: os que mostram a cauda do clipe anterior da faixa por baixo, como
+# o "dissolver". Usar um deles grava o projeto no formato 3 (`timeline.FEATURES["transicoes"]`).
+EXTRA_IN = ("fusao", "exposicao", "queima", "emenda", "ponta", "iris", "empurrar", "cortina", "zoom")
+EXTRA_OUT = ("exposicao", "queima", "iris")
+EXTRA_TWO_CLIP = ("fusao", "queima", "iris", "empurrar", "cortina", "zoom")
+
+# Ajustes de clipe que vieram depois da 1.4: só vão para o JSON quando fora do padrão (`stored_values`), então o
+# clipe de uma montagem antiga grava exatamente o JSON de antes (a leitura completa com o padrão). Ajuste novo de
+# clipe: acrescente a chave aqui.
+SPARSE_KEYS: set[str] = {
+    "entrada_direcao", "entrada_suavidade", "entrada_centro_x", "entrada_centro_y", "entrada_anel", "entrada_ponta",
+    "entrada_zoom", "entrada_quadros", "entrada_clarao",
+    "saida_suavidade", "saida_centro_x", "saida_centro_y", "saida_anel",
+}
+_DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
+
+
+def stored_values(kind: str, values: dict[str, Any]) -> dict[str, Any]:
+    """Os ajustes do clipe como vão para o JSON: uma cópia sem as chaves de `SPARSE_KEYS` que estão no padrão."""
+    base = _DEFAULTS[kind]
+    return {k: copy.deepcopy(v) for k, v in values.items()
+            if k not in SPARSE_KEYS or k not in base or v != base[k]}

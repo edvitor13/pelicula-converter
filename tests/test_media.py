@@ -87,6 +87,22 @@ def test_named_pipe_name_and_double_close():
     p.close()  # fechar de novo não quebra
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="pipes nomeados só no Windows")
+def test_named_pipe_keeps_the_data_when_the_writer_finished_before_connect():
+    """Um quadro pequeno cabe no buffer do pipe: o ffmpeg pode abrir, gravar tudo e fechar antes de o app chamar
+    ConnectNamedPipe (erro 232 do Windows). Os dados continuam no pipe e não podem virar "Falha ao ler o quadro"."""
+    p = media.NamedPipe(inbound=True)
+    code = f"f = open({p.name!r}, 'wb'); f.write(b'x' * 270000); f.close()"
+    proc = subprocess.Popen([sys.executable, "-c", code])
+    proc.wait(timeout=30)
+    f = p.connect(proc, timeout=20)
+    data = b""
+    while chunk := f.read(65536):
+        data += chunk
+    p.close()
+    assert len(data) == 270000
+
+
 @pytest.mark.parametrize("name", ["pipe_in", "pipe_out"])
 def test_named_pipe_connect_fails_fast_when_process_dies(hang_runs, name):
     _check_isolated(hang_runs, name)

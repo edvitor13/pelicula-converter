@@ -9,12 +9,13 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from . import look, media, system
-from .engine import Engine, lut_info
+from . import media, system
+from .engine import Engine
+from .frame import Recipe, lut_of
 from .i18n import _
 
 X26_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
@@ -132,6 +133,48 @@ class ExportSettings:
 
 
 pix_depth = media.pix_depth
+
+
+# ------------------------------------------------------------------ transparência (canal alfa)
+# Codecs que guardam transparência e o formato de pixel com alfa de cada formato sem alfa: ProRes 4444 (perfis 4 e
+# 5, yuva444p10le), WebM VP9 (yuva420p, o libvpx só tem alfa em 8 bits) e PNG/TIFF RGBA de 8 ou 16 bits. Os
+# formatos com alfa entram no fim da lista `pix` de cada codec; quem pede é a janela ("Manter a transparência")
+# ou `--pix` na linha de comando. Sem alfa no `pix`, a exportação é a de sempre (tela opaca).
+ALPHA_PIX: dict[str, dict[str, str]] = {
+    "prores": {"yuv422p10le": "yuva444p10le", "yuv444p10le": "yuva444p10le"},
+    "vp9": {"yuv420p": "yuva420p", "yuv420p10le": "yuva420p"},
+    "png_seq": {"rgb48be": "rgba64be", "rgb24": "rgba"},
+    "tiff_seq": {"rgb48le": "rgba64le", "rgb24": "rgba"},
+    "png": {"rgb48be": "rgba64be", "rgb24": "rgba"},
+    "tiff": {"rgb48le": "rgba64le", "rgb24": "rgba"},
+}
+for _codec, _pairs in ALPHA_PIX.items():
+    CODECS[_codec]["pix"] += [p for p in dict.fromkeys(_pairs.values()) if p not in CODECS[_codec]["pix"]]
+
+
+def supports_alpha(codec: str) -> bool:
+    """O codec guarda transparência?"""
+    return codec in ALPHA_PIX
+
+
+def alpha_pix(codec: str, pix: str) -> str:
+    """O formato com alfa que corresponde a `pix` (o próprio, se já tem alfa); `pix` se o codec não tem alfa."""
+    pairs = ALPHA_PIX.get(codec)
+    if not pairs or media.pix_has_alpha(pix):
+        return pix
+    return pairs.get(pix) or next(iter(pairs.values()))
+
+
+def opaque_pix(codec: str, pix: str) -> str:
+    """O formato sem alfa que corresponde a `pix` (o primeiro da lista do codec que vira `pix`)."""
+    if not media.pix_has_alpha(pix):
+        return pix
+    return next((k for k, v in ALPHA_PIX.get(codec, {}).items() if v == pix), pix)
+
+
+def wants_alpha(s: ExportSettings) -> bool:
+    """A exportação sai com transparência (formato de pixel com alfa num codec que guarda alfa)."""
+    return supports_alpha(s.codec) and media.pix_has_alpha(s.pix)
 
 
 def high_depth(s: ExportSettings) -> bool:
@@ -376,7 +419,7 @@ PASSLOG = "pelicula_2passadas"  # nome relativo: o codificador roda com cwd na p
 def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w: int, h: int, fps_str: str,
                       depth: int, start_time: float, duration: float, input_path: str = "pipe:0",
                       audio_path: str | None = None, chapters_path: str | None = None, *, two_pass: int = 0,
-                      loudness_measured: dict | None = None) -> list[str]:
+                      loudness_measured: dict | None = None, subtitles: Any = None) -> list[str]:
     """Comando do codificador. `audio_path` (modo Edição) é um WAV já recortado no trecho: entra sem -ss.
 
     `chapters_path`: arquivo FFMETADATA com os capítulos do trecho (`chapters.export_file`); fica de fora da
@@ -385,10 +428,15 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     passadas tem nome relativo (`PASSLOG`): rode o comando com `cwd` numa pasta temporária (os caminhos do
     destino, do som e dos capítulos viram absolutos). A 1ª passada não grava arquivo nem som (`-f null`).
     `loudness_measured`: valores medidos por `loudnorm.measure()` (volume alvo em `s.loudness`); o som recebe
-    o `loudnorm` linear da segunda passada do volume. Sem os opcionais o comando é o de sempre.
+    o `loudnorm` linear da segunda passada do volume.
+    `subtitles`: faixa de legenda do trecho (`subtitles.Embed`, de `subtitles.export_file`): mov_text no
+    MP4/MOV, SRT no MKV, WebVTT no WebM; fica de fora da 1ª passada do tamanho alvo, como os capítulos.
+    Sem os opcionais o comando é o de sempre.
     """
     c = CODECS[s.codec]
     in_pix = "rgb24" if depth == 8 else "rgb48le"
+    if wants_alpha(s):  # quadros RGBA de cor direta (`Recipe(alpha=True)`)
+        in_pix = "rgba" if depth == 8 else "rgba64le"
     th = int(s.threads)
     args = [media.ffmpeg(), "-y", "-v", "error", "-hide_banner", "-progress", "pipe:2", "-stats_period", "0.5",
             "-f", "rawvideo", "-pix_fmt", in_pix,
@@ -466,7 +514,10 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
     elif s.codec == "xvid":
         args += ["-q:v", f"{int(s.quality or 3)}", "-vtag", "XVID"]
     elif s.codec == "prores":
-        args += ["-profile:v", s.profile or "3", "-vendor", "apl0"]
+        profile = s.profile or "3"
+        if wants_alpha(s) and profile not in ("4", "5"):
+            profile = "4"  # só o ProRes 4444 (e o XQ) guarda o alfa
+        args += ["-profile:v", profile, "-vendor", "apl0"]
     elif s.codec == "dnxhr":
         args += ["-profile:v", s.profile or "dnxhr_hq"]
     elif s.codec == "ffv1":
@@ -497,6 +548,12 @@ def build_encoder_cmd(out_path: str, info: media.MediaInfo, s: ExportSettings, w
         at = args.index("-map")
         args[at:at] = ["-f", "ffmetadata", "-i", os.path.abspath(chapters_path) if two_pass else chapters_path]
         args += ["-map_chapters", str(n_inputs)]
+    if subtitles is not None and two_pass != 1:
+        from . import subtitles as subs
+        sub_in, sub_out = subs.encoder_args(subtitles, args.count("-i"), absolute=bool(two_pass))
+        at = args.index("-map")
+        args[at:at] = sub_in
+        args += sub_out
     args += [os.path.abspath(out_path) if two_pass else out_path]
     return args
 
@@ -570,9 +627,10 @@ def _norm(path: str) -> str:
 
 
 def job_inputs(info: media.MediaInfo, sequence=None) -> list[str]:
-    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, todos os arquivos da montagem."""
+    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, todos os arquivos da montagem (clipes sem
+    arquivo não contam)."""
     if sequence is not None:
-        return [str(p) for p in sequence.sources]
+        return [str(p) for p, s in sequence.sources.items() if s.is_file]
     return [info.path]
 
 
@@ -646,41 +704,16 @@ def _commit_output(path: str, s: ExportSettings) -> None:
 
 
 # ------------------------------------------------------------------ quadro a quadro (exportação e prévia)
-@dataclass
-class FramePipeline:
-    """Do quadro decodificado ao quadro gravado: montagem (modo Edição), look e encaixe no quadro (`fit.py`).
-
-    A exportação (`_encode`) e a prévia da janela de exportação (`preview_frame`) usam este mesmo objeto:
-    o quadro N da prévia é o quadro N gravado.
-    """
-    values: dict
-    fit: Any                 # fit.Fit
-    fps: float
-    depth: int
-    dither: bool
-    legal: bool
-    lut: tuple | None = None
-    seq: Any = None
-    net_grain: float = 0.0   # "Grão para redes": px da imagem por px da saída (0 = desligado)
-
-    def render(self, engine: Engine, img, index: int):
-        """`img` é o quadro decodificado (ou `sequence.FrameLayers` no modo Edição); `index`, o número do quadro."""
-        f = self.fit
-        if self.seq is not None:
-            img = engine.compose(img, self.seq, f.dec_w, f.dec_h, self.depth, crop=f.canvas_crop)
-        engine.set_input(img)
-        h, w = img.shape[:2]
-        plan = look.build_plan(self.values, w, h, index, self.fps, self.lut, dither=self.dither, legal=self.legal,
-                               net_grain=self.net_grain)
-        if f.composite:
-            return engine.render_fit(plan, self.depth, f)
-        return engine.render(plan, self.depth)
+# Do quadro decodificado ao quadro gravado: a receita única de `frame.py` (montagem, look e encaixe). O nome
+# antigo continua valendo para quem já usava `export.FramePipeline`.
+FramePipeline = Recipe
 
 
 def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=None, scale: float = 1.0,
-                   depth: int | None = None) -> FramePipeline:
-    """O caminho de um quadro desta exportação. `scale` < 1 reduz tudo (prévia): o quadro, o encaixe e o
-    tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura)."""
+                   depth: int | None = None, keys: dict | None = None, burn=None) -> Recipe:
+    """A receita de um quadro desta exportação (`frame.Recipe`). `scale` < 1 reduz tudo (prévia): o quadro, o
+    encaixe e o tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura). `keys`: as chaves de
+    animação do look (`Project.look_keys`). `burn`: legendas gravadas no vídeo (`subtitles.Burn`)."""
     from . import fit as fitmod
     ow, oh = output_size(info, s)
     if scale != 1.0:
@@ -697,12 +730,12 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
         legal = legal_range(seq)
     else:
         legal = media.legal_range(info)
-    lut = lut_info(values.get("lut_arquivo", "")) if values.get("lut_on") else None
-    return FramePipeline(values, geometry, fps, depth, bool(s.dither) and depth == 8, legal, lut, seq,
-                         float(scale) if s.net_grain else 0.0)
+    return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
+                  seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, keys=dict(keys or {}),
+                  src_fps=float(info.fps), burn=burn, alpha=wants_alpha(s))
 
 
-def open_reader(info: media.MediaInfo, frames: FramePipeline, start: int, total: int, fps_out: str | None,
+def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
                 perf: media.Perf, seq=None):
     """Leitor em ordem da exportação no tamanho do encaixe: (leitor, quadros a pular no começo)."""
     f = frames.fit
@@ -720,10 +753,10 @@ def open_reader(info: media.MediaInfo, frames: FramePipeline, start: int, total:
 
 
 def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: ExportSettings, frame: int, seq=None,
-                  scale: float = 1.0, depth: int = 8):
+                  scale: float = 1.0, depth: int = 8, keys: dict | None = None, burn=None):
     """Um quadro do resultado da exportação (o mesmo caminho de `_encode`), para a prévia da janela de
     exportação. Com `scale` = 1 e a profundidade da exportação, é exatamente o quadro gravado."""
-    frames = frame_pipeline(info, values, s, seq, scale, depth)
+    frames = frame_pipeline(info, values, s, seq, scale, depth, keys, burn)
     f = frames.fit
     frame = max(0, min(int(frame), info.frames - 1))
     if seq is not None:
@@ -764,6 +797,10 @@ class ExportJob:
     pass_index: int = 0      # passada atual (0 = primeira); `done`/`total` contam os quadros dela
     stage: str = ""          # etapa atual para a fila ("Medindo o volume…", "Passada 1 de 2"); "" = exportando
     chapters: list = field(default_factory=list)  # [(quadro, título)] dos capítulos (`chapters.points`)
+    look_keys: dict = field(default_factory=dict)  # chaves de animação do look (`Project.look_keys`)
+    subtitles: dict = field(default_factory=dict)  # legendas em tempo da sequência (`subtitles.job_payload`)
+    burn: dict = field(default_factory=dict)       # legendas gravadas no vídeo (`subtitles.Burn.to_json`)
+    subtitle_file: dict = field(default_factory=dict)  # .srt/.vtt ao lado (`subtitle_file_payload`)
 
     @property
     def progress(self) -> float:
@@ -774,29 +811,45 @@ class ExportJob:
 
     def to_dict(self) -> dict:
         """O que é preciso para refazer este trabalho depois (fila guardada pela recuperação automática)."""
-        return {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
-                "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
-                "config": self.settings.to_dict(), "midia": asdict(self.info),
-                "edicao": self.sequence.to_json() if self.sequence is not None else None,
-                "capitulos": [[int(q), str(t)] for q, t in self.chapters]}
+        out = {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
+               "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
+               "config": self.settings.to_dict(), "midia": asdict(self.info),
+               "edicao": self.sequence.to_json() if self.sequence is not None else None,
+               "capitulos": [[int(q), str(t)] for q, t in self.chapters],
+               "legendas": self.subtitles}
+        if self.burn:
+            out["legendas_gravadas"] = self.burn
+        if self.subtitle_file:
+            out["legendas_arquivo"] = self.subtitle_file
+        if self.look_keys:
+            from . import keyframes, params
+            out["chaves"] = keyframes.to_json(keyframes.clean_keys(params.FILM, self.look_keys))
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExportJob":
         """Trabalho novo (aguardando, do começo) a partir de `to_dict()`. ValueError se faltar algo."""
         names = {f.name for f in fields(media.MediaInfo)}
+        # Campos novos do MediaInfo têm padrão (has_alpha, 1.5): uma fila guardada por uma versão anterior abre.
+        needed = {f.name for f in fields(media.MediaInfo) if f.default is MISSING and f.default_factory is MISSING}
         raw = d.get("midia") if isinstance(d, dict) else None
-        if not isinstance(raw, dict) or not names <= set(raw) or not d.get("saida"):
+        if not isinstance(raw, dict) or not needed <= set(raw) or not d.get("saida"):
             raise ValueError(_("Trabalho de exportação incompleto."))
+        names &= set(raw)
         seq = None
         if isinstance(d.get("edicao"), dict):
             from . import timeline
             seq = timeline.Sequence.from_json(d["edicao"])
-        from . import params
+        from . import keyframes, params
         return cls(info=media.MediaInfo(**{k: raw[k] for k in names}), values=params.sanitize(d.get("valores") or {}),
                    settings=ExportSettings.from_dict(d.get("config") or {}), out_path=str(d["saida"]),
                    start_frame=int(d.get("inicio") or 0), end_frame=int(d.get("fim", -1)),
                    name=str(d.get("nome") or ""), sequence=seq,
-                   chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []])
+                   chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []],
+                   look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, d.get("chaves"))),
+                   subtitles=d.get("legendas") if isinstance(d.get("legendas"), dict) else {},
+                   burn=d.get("legendas_gravadas") if isinstance(d.get("legendas_gravadas"), dict) else {},
+                   subtitle_file=d.get("legendas_arquivo") if isinstance(d.get("legendas_arquivo"), dict) else {})
 
 
 class ExportQueue:
@@ -871,11 +924,15 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     target = _prepare_output(job.out_path, s)
     mix_path = None
     chapters_path = None
+    subs_embed = None
     keep_partial = False
     try:
         if job.chapters:
             from . import chapters
             chapters_path = chapters.export_file(job.chapters, s.container, start, end + 1, info.fps)
+        if job.subtitles:
+            from . import subtitles
+            subs_embed = subtitles.export_file(job.subtitles, s.container, start, end + 1, info.fps)
         if seq is not None:
             # Modo Edição: o som da sequência é mixado antes, já no trecho exportado.
             from . import audiomix
@@ -898,7 +955,12 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
         run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
-                   seq, mix_path, chapters_path)
+                   seq, mix_path, chapters_path, subs_embed)
+        if job.burn:
+            from . import subtitles, textrender
+            run.burn = subtitles.Burn.from_json(job.burn)
+            if run.burn is not None:
+                textrender.ensure_app()  # o texto é desenhado pelo Qt (a janela e o pelicula-cli já têm a dela)
         if wants_loudness(s) and not _measure_loudness(job, run, s):
             return
         if _encode_passes(job, engine, run, s):
@@ -913,6 +975,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                     destino=output_target(job.out_path, s), erro=exc, parcial=partial_output(job.out_path, s))
             else:
                 job.status = "concluido"
+                _write_subtitle_file(job, start, end + 1)
     finally:
         if job.status != "concluido" and not keep_partial:
             _discard_output(job.out_path, s)
@@ -920,6 +983,8 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             system.remove_file(mix_path)
         if chapters_path:
             system.remove_file(chapters_path)
+        if subs_embed is not None:
+            system.remove_file(subs_embed.path)
 
 
 @dataclass
@@ -941,7 +1006,23 @@ class _Run:
     seq: Any
     mix_path: str | None
     chapters_path: str | None = None  # FFMETADATA dos capítulos (apagado no fim do run_job)
+    subtitles: Any = None             # faixa de legenda (subtitles.Embed; o arquivo é apagado no fim do run_job)
     loud: dict | None = None  # volume medido (loudnorm.measure) para o loudnorm da gravação
+    burn: Any = None          # legendas gravadas no vídeo (subtitles.Burn, de `ExportJob.burn`)
+
+
+def _write_subtitle_file(job: ExportJob, start: int, end: int) -> None:
+    """Legendas num .srt/.vtt ao lado do vídeo exportado (`ExportJob.subtitle_file`), no tempo do trecho. Se não
+    der para gravar, o vídeo fica e o trabalho diz o que faltou."""
+    if not job.subtitle_file:
+        return
+    from . import subtitles
+    try:
+        subtitles.write_sidecar(job.subtitle_file, job.out_path, start, end, job.info.fps)
+    except OSError as exc:
+        job.status = "erro"
+        job.error = _("O vídeo foi exportado, mas não foi possível gravar o arquivo de legendas: {erro}").format(
+            erro=exc)
 
 
 def _measure_loudness(job: ExportJob, run: _Run, s: ExportSettings) -> bool:
@@ -1021,8 +1102,8 @@ def _encode(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings, two_pa
     cmd = build_encoder_cmd(run.target, info, s, run.w, run.h, run.fps_str, depth, run.start_time, run.duration,
                             pipe.name if pipe else "pipe:0", audio_path=run.mix_path, chapters_path=run.chapters_path,
                             two_pass=two_pass,
-                            loudness_measured=run.loud)
-    frames = frame_pipeline(info, job.values, s, run.seq)
+                            loudness_measured=run.loud, subtitles=run.subtitles)
+    frames = frame_pipeline(info, job.values, s, run.seq, keys=job.look_keys, burn=run.burn)
     reader, skip = open_reader(info, frames, run.start, total, run.fps_out, perf, run.seq)
     enc = subprocess.Popen(cmd, stdin=None if pipe else subprocess.PIPE, stdout=subprocess.DEVNULL,
                            stderr=subprocess.PIPE, cwd=cwd, **perf.popen_kwargs())
@@ -1166,7 +1247,8 @@ def job_frames(info: media.MediaInfo, s: ExportSettings, start: int = 0, end: in
 
 
 def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings, cancel: threading.Event,
-                  frames: int = 60, limit: float = 15.0, sequence=None, stats: dict | None = None) -> float:
+                  frames: int = 60, limit: float = 15.0, sequence=None, stats: dict | None = None,
+                  keys: dict | None = None) -> float:
     """Exporta um trecho num arquivo temporário e devolve a velocidade real (quadros/s) de uma passada.
 
     Os primeiros quadros (abertura do ffmpeg e do codificador) ficam de fora da conta, e a
@@ -1184,7 +1266,7 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
     start = 0 if info.frames <= frames * 2 else info.frames // 3
     out = os.path.join(tmp, "teste." + s.container)
     job = ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start,
-                    end_frame=min(info.frames - 1, start + frames - 1), sequence=sequence)
+                    end_frame=min(info.frames - 1, start + frames - 1), sequence=sequence, look_keys=dict(keys or {}))
     stop = threading.Event()
 
     def watch():
@@ -1219,18 +1301,27 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
 STILL_ARGS = {".png": ["-pix_fmt", "rgb48be"], ".tif": ["-pix_fmt", "rgb48le", "-compression_algo", "deflate"],
               ".tiff": ["-pix_fmt", "rgb48le"], ".jpg": ["-pix_fmt", "yuvj444p", "-q:v", "2"],
               ".jpeg": ["-pix_fmt", "yuvj444p", "-q:v", "2"]}
+# Quadro com transparência (h × w × 4): só PNG e TIFF guardam o alfa.
+STILL_ALPHA_ARGS = {".png": ["-pix_fmt", "rgba64be"], ".tif": ["-pix_fmt", "rgba64le", "-compression_algo", "deflate"],
+                    ".tiff": ["-pix_fmt", "rgba64le"]}
 
 
 def save_still(img, path: str) -> None:
-    """Grava um quadro RGB de 16 bits (array h × w × 3) em PNG, TIFF ou JPEG, conforme a extensão.
+    """Grava um quadro RGB de 16 bits (array h × w × 3) em PNG, TIFF ou JPEG, conforme a extensão. Com 4 canais
+    (RGBA de cor direta), PNG e TIFF guardam a transparência; outro formato levanta ValueError.
 
     Grava num parcial ao lado e só então troca o destino; se o ffmpeg falhar, levanta RuntimeError e o
     arquivo antigo com o mesmo nome fica intacto.
     """
     h, w = img.shape[:2]
+    ext = Path(path).suffix.lower()
+    rgba = img.ndim == 3 and img.shape[2] == 4
+    if rgba and ext not in STILL_ALPHA_ARGS:
+        raise ValueError(_("Só PNG e TIFF guardam a transparência."))
     part = system.partial_path(path)
-    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}",
-           "-i", "pipe:0", *STILL_ARGS.get(Path(path).suffix.lower(), []), "-frames:v", "1", "-update", "1", part]
+    cmd = [media.ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba64le" if rgba else "rgb48le",
+           "-s", f"{w}x{h}", "-i", "pipe:0", *(STILL_ALPHA_ARGS if rgba else STILL_ARGS).get(ext, []),
+           "-frames:v", "1", "-update", "1", part]
     res = subprocess.run(cmd, input=img.tobytes(), capture_output=True, creationflags=media.NO_WINDOW)
     if res.returncode != 0 or not os.path.isfile(part):
         system.remove_file(part)

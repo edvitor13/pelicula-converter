@@ -27,6 +27,7 @@ class Param:
     tip: str = ""
     advanced: bool = False
     percent: bool = False  # mostra 0..1 como 0..100 %
+    animatable: bool = False  # aceita chaves de animação (`keyframes.py`)
 
 
 @dataclass
@@ -513,6 +514,14 @@ class Schema:
 
 FILM = Schema(SECTIONS)
 PARAMS: dict[str, Param] = FILM.params
+
+# Chaves de animação no look: todo ajuste numérico contínuo e toda cor (escolhas, liga/desliga, inteiros como
+# sementes e eixos, e arquivos ficam de fora). Receita "Tornar um ajuste animável" no AGENTS.md.
+ANIMATABLE_KINDS = ("float", "color")
+for _p in PARAMS.values():
+    if _p.kind in ANIMATABLE_KINDS:
+        _p.animatable = True
+del _p
 
 
 def defaults() -> dict[str, Any]:

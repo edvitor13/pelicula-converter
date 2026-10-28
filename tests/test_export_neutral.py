@@ -59,7 +59,8 @@ def matrix(ex) -> list[tuple[str, str, dict, float, str | None]]:
             out.append((f"qualidade:{name}:{key}", name, d, 0.0, None))
     for codec, c in ex.CODECS.items():
         info = "imagem" if c.get("image") else "deitado"
-        combos = {(ext, c["pix"][0]) for ext in c["exts"]} | {(c["exts"][0], pix) for pix in c["pix"]}
+        opaque = [p for p in c["pix"] if not p.startswith(("rgba", "yuva"))]  # com alfa: novos na 1.5
+        combos = {(ext, c["pix"][0]) for ext in c["exts"]} | {(c["exts"][0], pix) for pix in opaque}
         for ext, pix in sorted(combos):
             d = dict(codec=codec, container=ext, pix=pix, quality=float(c.get("qrange", (0, 20))[1] // 2),
                      preset=(c.get("presets") or [""])[-1], profile=(c.get("profiles") or [("", "")])[-1][0],

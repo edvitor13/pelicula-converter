@@ -14,7 +14,7 @@ import threading
 import moderngl
 import numpy as np
 
-from . import editshaders, look, luts, shaders
+from . import alphashaders, editshaders, look, luts, shaders
 
 _LUT_CACHE: dict[str, tuple[float, luts.Lut3D]] = {}
 _LUT_LOCK = threading.Lock()
@@ -54,12 +54,16 @@ class Engine:
         for name, src in (("base", shaders.BASE), ("extract", shaders.EXTRACT), ("blur", shaders.BLUR),
                           ("noise", shaders.NOISE), ("final", shaders.FINAL), ("bake", shaders.BAKE),
                           ("clip", editshaders.CLIP), ("canvas_out", editshaders.OUT),
-                          ("copy", shaders.COPY), ("fit", shaders.FIT)):
+                          ("copy", shaders.COPY), ("fit", shaders.FIT),
+                          ("alpha", alphashaders.ALPHA), ("canvas_alpha", alphashaders.CANVAS_OUT),
+                          ("premul", alphashaders.PREMUL)):
             prog = self.ctx.program(vertex_shader=shaders.VERT, fragment_shader=src)
             self.progs[name] = prog
             self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, "2f", "in_pos")])
         self._targets: dict[str, tuple[moderngl.Texture, moderngl.Framebuffer]] = {}
         self.input_tex: moderngl.Texture | None = None
+        # Transparência (1 − alfa) da entrada RGBA (`set_input` com 4 canais); None = entrada opaca.
+        self.input_alpha: moderngl.Texture | None = None
         self._lut_tex: moderngl.Texture3D | None = None
         self._lut_key = None
         self._dummy3d = self.ctx.texture3d((2, 2, 2), 3, data=np.zeros(24, "f4").tobytes(), dtype="f4")
@@ -85,8 +89,15 @@ class Engine:
         return tex, fbo
 
     def set_input(self, frame: np.ndarray) -> None:
+        """Envia a imagem do look (h × w × 3; ou × 4, RGBA de cor direta: o alfa vai à parte, veja `render`)."""
         h, w = frame.shape[:2]
         dtype = "f1" if frame.dtype == np.uint8 else "nu2"
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            self._set_alpha(frame[..., 3], dtype)
+            frame = frame[..., :3]
+        elif self.input_alpha is not None:
+            self.input_alpha.release()
+            self.input_alpha = None
         t = self.input_tex
         if t is None or t.size != (w, h) or t.dtype != dtype:
             if t is not None:
@@ -97,6 +108,20 @@ class Engine:
             t.filter = (moderngl.LINEAR, moderngl.LINEAR)
             self.input_tex = t
         t.write(np.ascontiguousarray(frame))
+
+    def _set_alpha(self, alpha: np.ndarray, dtype: str) -> None:
+        h, w = alpha.shape[:2]
+        t = self.input_alpha
+        if t is None or t.size != (w, h) or t.dtype != dtype:
+            if t is not None:
+                t.release()
+            t = self.ctx.texture((w, h), 1, dtype=dtype, alignment=1)
+            t.repeat_x = False
+            t.repeat_y = False
+            t.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self.input_alpha = t
+        mx = np.iinfo(alpha.dtype).max
+        t.write(np.ascontiguousarray(mx - alpha))  # transparência: o que o BASE desenha fora da imagem é opaco
 
     def _lut_texture(self, path: str):
         if not path:
@@ -156,9 +181,12 @@ class Engine:
     def _blur(self, src, dst, direction, sigma, lod) -> None:
         self._run("blur", dst, {"t_src": src}, {"u_dir": direction, "u_sigma": float(sigma), "u_lod": float(lod)})
 
-    def render(self, plan: look.Plan, depth: int = 8) -> np.ndarray:
-        """Renderiza a imagem de entrada atual e devolve (h, w, 3) uint8 ou uint16."""
+    def render(self, plan: look.Plan, depth: int = 8, alpha: bool = False) -> np.ndarray:
+        """Renderiza a imagem de entrada atual e devolve (h, w, 3) uint8 ou uint16. `alpha` com uma entrada RGBA:
+        (h, w, 4) de cor direta, a mesma cor de sempre e o alfa com a geometria do look (`_alpha_out`)."""
         out = self._render_look(plan, depth)
+        if alpha and self.input_alpha is not None:
+            return self._alpha_out(plan, depth, out)
         w, h = out[0].size
         out_dtype = "f1" if depth == 8 else "nu2"
         data = out[1].read(components=3, alignment=1, dtype=out_dtype)
@@ -223,15 +251,32 @@ class Engine:
         self._run("final", out, textures, U)
         return out
 
-    def render_fit(self, plan: look.Plan, depth: int, fit) -> np.ndarray:
+    def _alpha_out(self, plan: look.Plan, depth: int, out) -> np.ndarray:
+        """O quadro do look (`out`, já desenhado) com o alfa: o BASE desenha a transparência da entrada com a
+        geometria do look (`alphashaders.ALPHA_GEOMETRY`) e o `ALPHA` junta cor e alfa. (h, w, 4) cor direta."""
+        from . import alphashaders
+        w, h = self.input_tex.size
+        geo = self._target("alpha_geo", (w, h), dtype="f4")
+        self._run("base", geo, {"t_in": self.input_alpha, "t_text": self._text_tex},
+                  {**plan.uniforms, **alphashaders.ALPHA_GEOMETRY})
+        out_dtype = "f1" if depth == 8 else "nu2"
+        res = self._target("alpha_out8" if depth == 8 else "alpha_out16", (w, h), dtype=out_dtype)
+        self._run("alpha", res, {"t_rgb": out[0], "t_geo": geo[0], "t_ain": self.input_alpha}, plan.uniforms)
+        data = res[1].read(components=4, alignment=1, dtype=out_dtype)
+        return np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16).reshape(h, w, 4)
+
+    def render_fit(self, plan: look.Plan, depth: int, fit, alpha: bool = False) -> np.ndarray:
         """Look na imagem de entrada (o tamanho de `fit.box`) e encaixe num quadro `fit.out_w` × `fit.out_h`.
 
         `fit` é um `fit.Fit` com modo `bordas` (fundo preto) ou `desfocado` (a própria imagem com o look,
         ampliada para cobrir o quadro, desfocada — `fit.BLUR_PX` em px@1080 — e escurecida por `fit.DIM`).
         Dentro da caixa o quadro é exatamente o que `render()` devolveria. Devolve (h, w, 3) uint8 ou uint16.
+        `alpha` com uma entrada RGBA: (h, w, 4); fora da caixa, transparente nas bordas e opaco no desfocado.
         """
         from . import fit as fitmod
-        img = self._render_look(plan, depth)[0]
+        look_out = self._render_look(plan, depth)
+        img = look_out[0]
+        inner = self._alpha_out(plan, depth, look_out)[..., 3] if alpha and self.input_alpha is not None else None
         cw, ch = img.size
         ow, oh = int(fit.out_w), int(fit.out_h)
         x, y = int(fit.box[0]), int(fit.box[1])
@@ -262,7 +307,13 @@ class Engine:
         self._run("fit", out, {"t_img": img, "t_bg": bg}, U)
         data = out[1].read(components=3, alignment=1, dtype=out_dtype)
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
-        return arr.reshape(oh, ow, 3)
+        arr = arr.reshape(oh, ow, 3)
+        if inner is None:
+            return arr
+        mx = 255 if depth == 8 else 65535
+        a = np.full((oh, ow), mx if fit.mode == fitmod.DESFOCADO else 0, dtype=arr.dtype)
+        a[y:y + ch, x:x + cw] = inner
+        return np.dstack([arr, a])
 
     def bake_lut(self, values: dict, size: int = 33, legal: bool = False) -> np.ndarray:
         """Grava só a parte de cor do look num LUT 3D (ordem .cube).
@@ -294,26 +345,39 @@ class Engine:
     # ------------------------------------------------------------ modo Edição
     def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:
         h, w = img.shape[:2]
+        comps = 4 if img.ndim == 3 and img.shape[2] == 4 else 3  # 4 = RGBA pré-multiplicado (transparência)
         dtype = "f1" if img.dtype == np.uint8 else "nu2"
         t = self._clip_tex.get(slot)
-        if t is None or t.size != (w, h) or t.dtype != dtype:
+        if t is None or t.size != (w, h) or t.dtype != dtype or t.components != comps:
             if t is not None:
                 t.release()
-            t = self.ctx.texture((w, h), 3, dtype=dtype, alignment=1)
+            t = self.ctx.texture((w, h), comps, dtype=dtype, alignment=1)
             t.repeat_x = False
             t.repeat_y = False
             self._clip_tex[slot] = t
         t.write(np.ascontiguousarray(img))
         return t
 
+    def _lazy_program(self, name: str, src: str) -> None:
+        """Compila um programa só na primeira vez que ele é usado (os das transições da 1.5)."""
+        if name not in self.progs:
+            prog = self.ctx.program(vertex_shader=shaders.VERT, fragment_shader=src)
+            self.progs[name] = prog
+            self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, "2f", "in_pos")])
+
     def compose(self, frame_layers, seq, canvas_w: int, canvas_h: int, depth: int = 8,
-                neutral: bool = False, crop: tuple[int, int, int, int] | None = None) -> np.ndarray:
+                neutral: bool = False, crop: tuple[int, int, int, int] | None = None,
+                light: tuple[int, bool] | None = None, alpha: bool = False) -> np.ndarray:
         """Monta um quadro da sequência (modo Edição) e devolve (h, w, 3) uint8 ou uint16.
 
         `frame_layers` é um `sequence.FrameLayers` (imagens já decodificadas, de baixo para cima).
         Cada camada é desenhada por `editshaders.CLIP` com os valores de `compositor.clip_uniforms`
         sobre uma tela RGBA de 32 bits (alterna entre dois alvos). Só na thread dona do contexto.
         `crop` (x, y, largura, altura) devolve só esse recorte da tela (exportação com "cortar", `fit.py`).
+        `light`: em que luz as transições da 1.5 misturam (`transitions.light_of`; None = rec709); as camadas
+        com uma delas são desenhadas por `editshaders.CLIP_TR`.
+        `alpha`: (h, w, 4) RGBA de cor direta; com o "Fundo transparente" da sequência a tela começa transparente
+        (`_canvas_alpha`). Sem `alpha`, a tela é sempre opaca, exatamente como antes.
         """
         from . import compositor
         size = (int(canvas_w), int(canvas_h))
@@ -321,23 +385,30 @@ class Engine:
         b = self._target("canvas_b", size, dtype="f4")
         bg = tuple(float(c) for c in seq.background)
         a[1].use()
-        a[1].clear(bg[0], bg[1], bg[2], 1.0)
+        a[1].clear(bg[0], bg[1], bg[2], 0.0 if alpha and getattr(seq, "transparent", False) else 1.0)
         src, dst = a, b
         for slot, li in enumerate(frame_layers.layers):
             img = li.image
             tex = self._clip_texture(slot, img)
-            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral)
+            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral,
+                                              tex_alpha=tex.components == 4, light=light)
             if mip:
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
                 tex.build_mipmaps()
             else:
                 tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            self._run("clip", dst, {"t_clip": tex, "t_dst": src[0]}, U)
+            program = "clip"
+            if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
+                program = "clip_tr"
+                self._lazy_program(program, editshaders.CLIP_TR)
+            self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         out_dtype = "u1" if depth == 8 else "u2"
         osize, offset = size, (0, 0)
         if crop is not None:
             osize, offset = (int(crop[2]), int(crop[3])), (int(crop[0]), int(crop[1]))
+        if alpha:
+            return self._canvas_alpha(src, size, osize, offset, depth)
         out = self._target("canvas_out8" if depth == 8 else "canvas_out16", osize, dtype=out_dtype)
         self._run("canvas_out", out, {"t_canvas": src[0]},
                   {"u_max": 255.0 if depth == 8 else 65535.0, "u_offset": offset})
@@ -345,7 +416,25 @@ class Engine:
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
         return arr.reshape(osize[1], osize[0], 3)
 
+    def _canvas_alpha(self, canvas, size, osize, offset, depth: int) -> np.ndarray:
+        """A tela da montagem em RGBA de cor direta; pixels transparentes com a cor dos vizinhos (mipmap)."""
+        pm = self._target("canvas_pm", size, dtype="f4", mip=True)
+        self._run("premul", pm, {"t_canvas": canvas[0]}, {})
+        pm[0].build_mipmaps()
+        levels = float(max(1, int(math.floor(math.log2(max(size))))))
+        out_dtype = "u1" if depth == 8 else "u2"
+        out = self._target("canvas_alpha8" if depth == 8 else "canvas_alpha16", osize, dtype=out_dtype)
+        self._run("canvas_alpha", out, {"t_canvas": canvas[0], "t_pm": pm[0]},
+                  {"u_max": 255.0 if depth == 8 else 65535.0, "u_offset": offset,
+                   "u_size": (float(size[0]), float(size[1])), "u_levels": levels})
+        data = out[1].read(components=4, alignment=1, dtype=out_dtype)
+        arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
+        return arr.reshape(osize[1], osize[0], 4)
+
     def release(self) -> None:
+        if self.input_alpha is not None:
+            self.input_alpha.release()
+            self.input_alpha = None
         for t in self._clip_tex.values():
             t.release()
         self._clip_tex.clear()

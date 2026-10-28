@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -40,9 +41,10 @@ def _candidates() -> list[Path]:
 
 def reset_cache() -> None:
     """Esquece codificadores e acelerações detectados (depois de trocar o ffmpeg)."""
-    global _ENCODERS, _HWACCELS
+    global _ENCODERS, _HWACCELS, _DECODERS
     _ENCODERS = None
     _HWACCELS = None
+    _DECODERS = None
     _WORKING.clear()
 
 
@@ -114,12 +116,23 @@ class MediaInfo:
     audio_codec: str
     container: str
     is_image: bool
+    has_alpha: bool = False  # imagem com transparência (`stream_has_alpha`; WebM com alpha_mode=1; PNG com paleta)
+    # Sequência de imagens numeradas (`path` é o padrão do ffmpeg, plano_%04d.png): número do 1º quadro; -1 = não é.
+    seq_start: int = -1
 
     @property
     def ext(self) -> str:
         return Path(self.path).suffix.lower()
 
+    @property
+    def is_sequence(self) -> bool:
+        return self.seq_start >= 0
+
     def summary(self) -> str:
+        if self.is_sequence:
+            return _("{w}×{h} • {fps} fps • sequência de {n} imagens {codec} • {bits} bits").format(
+                w=self.width, h=self.height, fps=f"{self.fps:.3f}", n=self.frames, codec=self.codec.upper(),
+                bits=self.bit_depth)
         if self.is_image:
             return _("{w}×{h} • imagem {codec} • {bits} bits").format(
                 w=self.width, h=self.height, codec=self.codec.upper(), bits=self.bit_depth)
@@ -146,6 +159,56 @@ def pix_depth(pix: str) -> int:
     return int(m.group(1)) if m else 8
 
 
+# Formatos de pixel do ffmpeg com canal alfa (prefixos): yuva420p…/yuva444p10le (ProRes 4444), gbrap*, rgba/bgra/
+# argb/abgr (e rgba64*), ya8/ya16 (cinza com alfa), ayuv/vuya. "pal8" (paleta) pode ter transparência, mas o
+# formato sozinho não diz: só o ffprobe do arquivo (`probe`) decide. "rgb0"/"0rgb"/"bgr0" não têm alfa.
+ALPHA_PIX_PREFIXES = ("yuva", "gbrap", "rgba", "bgra", "argb", "abgr", "ya8", "ya16", "ayuv", "vuya")
+
+
+def pix_has_alpha(pix: str) -> bool:
+    """O formato de pixel tem canal alfa? (yuva444p10le → True, yuv420p → False)"""
+    return (pix or "").lower().startswith(ALPHA_PIX_PREFIXES)
+
+
+def stream_has_alpha(vs: dict) -> bool:
+    """O fluxo de vídeo do ffprobe tem transparência: formato de pixel com alfa, ou VP8/VP9 no WebM com a
+    marca `alpha_mode=1` (o ffprobe mostra yuv420p porque o decodificador nativo descarta o alfa)."""
+    if pix_has_alpha(vs.get("pix_fmt", "")):
+        return True
+    tags = {str(k).lower(): str(v).strip() for k, v in (vs.get("tags") or {}).items()}
+    return vs.get("codec_name") in ("vp8", "vp9") and tags.get("alpha_mode") == "1"
+
+
+ALPHA_DECODERS = {"vp9": "libvpx-vp9", "vp8": "libvpx"}
+
+
+def alpha_decoder(codec: str) -> list[str]:
+    """Decodificador que entrega o alfa, para pôr antes do `-i`: o VP8/VP9 nativo do ffmpeg descarta o alfa do
+    WebM; o libvpx não. [] para os outros formatos (ou se esta compilação do ffmpeg não tem o libvpx)."""
+    name = ALPHA_DECODERS.get(codec or "")
+    return ["-c:v", name] if name and name in decoders() else []
+
+
+def decodes_alpha(info: MediaInfo) -> bool:
+    """A leitura entrega a transparência deste arquivo? (`has_alpha`; o VP8/VP9 só com o libvpx nesta compilação
+    do ffmpeg — sem ele o clipe sai opaco, como antes)."""
+    if not getattr(info, "has_alpha", False):
+        return False
+    return info.codec not in ALPHA_DECODERS or bool(alpha_decoder(info.codec))
+
+
+def _palette_alpha(path: str) -> bool:
+    """Imagem com paleta (pal8: PNG, GIF) tem transparência? O formato não diz: decodifica e olha o alfa."""
+    try:
+        res = subprocess.run([ffmpeg(), "-v", "error", "-nostdin", "-i", path, "-frames:v", "1", "-f", "rawvideo",
+                              "-pix_fmt", "rgba", "pipe:1"], capture_output=True, creationflags=NO_WINDOW,
+                             timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    alpha = res.stdout[3::4]
+    return res.returncode == 0 and bool(alpha) and min(alpha) < 255
+
+
 def _depth(pix: str, raw: str | None) -> int:
     d = pix_depth(pix)
     if d > 8:
@@ -164,7 +227,14 @@ def _probe_json(path: str) -> dict:
     return json.loads(res.stdout.decode("utf-8", "replace") or "{}")
 
 
-def probe(path: str) -> MediaInfo:
+def probe(path: str, fps_str: str = "") -> MediaInfo:
+    """Metadados de um arquivo. Um padrão de sequência de imagens (plano_%04d.png) lê o primeiro trecho de
+    números seguidos da pasta, a `fps_str` quadros por segundo (padrão 24)."""
+    if is_sequence_pattern(path):
+        found = sequence_from_pattern(path)
+        if found is None:
+            raise RuntimeError(_("Nenhum quadro da sequência foi encontrado: {caminho}").format(caminho=path))
+        return probe_sequence(found, fps_str or "24/1")
     return _info_from(path, _probe_json(path))
 
 
@@ -174,6 +244,8 @@ def probe_source(path: str):
     Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`.
     """
     from . import timeline
+    if is_sequence_pattern(path):
+        return timeline.Source.from_info(probe(path))
     data = _probe_json(path)
     streams = data.get("streams", [])
     has_video = any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
@@ -229,6 +301,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
     if is_image:
         frames, dur = 1, 0.0
     pix = vs.get("pix_fmt", "")
+    alpha = stream_has_alpha(vs) or (is_image and pix == "pal8" and _palette_alpha(path))
     return MediaInfo(
         path=path, width=w, height=h, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
         frames=max(frames, 1), duration=dur, pix_fmt=pix, bit_depth=_depth(pix, vs.get("bits_per_raw_sample")),
@@ -237,8 +310,209 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         color_space=vs.get("color_space", "") or "", color_range=vs.get("color_range", "") or "",
         color_transfer=vs.get("color_transfer", "") or "", color_primaries=vs.get("color_primaries", "") or "",
         has_audio=aus is not None, audio_codec=(aus or {}).get("codec_name", ""),
-        container=fmt.get("format_name", ""), is_image=is_image,
+        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha),
     )
+
+
+# ------------------------------------------------------------------ sequências de imagens numeradas
+# plano_0001.png, plano_0002.png… viram uma fonte só: o caminho é o padrão do ffmpeg (plano_%04d.png) e
+# `seq_start` é o número do primeiro quadro; a leitura usa `-f image2 -framerate -start_number` (`sequence_input`).
+# O ffmpeg para de ler no primeiro número que falta, então a sequência é sempre o trecho de números seguidos que
+# contém o arquivo escolhido (`ImageSequence.gaps` lista os buracos da pasta, para o aviso).
+SEQUENCE_EXT = (".png", ".tif", ".tiff", ".jpg", ".jpeg", ".exr", ".dpx")
+_SEQUENCE_DECODER = {".exr": "exr", ".dpx": "dpx"}  # só entram se o ffmpeg desta máquina decodifica
+_NUMBERED = re.compile(r"^(.*?)(\d+)(\.[A-Za-z0-9]+)$")
+_TOKEN = re.compile(r"(?<!%)%(0\d+)?d")
+
+
+def sequence_exts() -> tuple[str, ...]:
+    """Extensões que podem formar uma sequência de imagens nesta máquina (EXR e DPX só com o decodificador)."""
+    try:
+        dec = decoders()
+    except Exception:  # noqa: BLE001 — sem ffmpeg: fica com as comuns
+        dec = set()
+    return tuple(e for e in SEQUENCE_EXT if e not in _SEQUENCE_DECODER or _SEQUENCE_DECODER[e] in dec)
+
+
+@dataclass(frozen=True)
+class ImageSequence:
+    """Imagens numeradas de uma pasta (`find_sequence`)."""
+
+    pattern: str              # caminho com o número trocado por %0Nd (ou %d, sem zeros à esquerda)
+    first: int                # número do primeiro quadro do trecho de números seguidos
+    count: int                # quadros seguidos a partir de `first` (o que entra na montagem)
+    numbers: tuple[int, ...]  # todos os números achados na pasta, em ordem (com os buracos)
+
+    @property
+    def last(self) -> int:
+        return self.first + self.count - 1
+
+    def file(self, n: int) -> str:
+        return sequence_file(self.pattern, n)
+
+    @property
+    def gaps(self) -> list[tuple[int, int]]:
+        """Buracos da numeração: (primeiro, último número que falta), do menor ao maior número achado."""
+        out, prev = [], None
+        for n in self.numbers:
+            if prev is not None and n > prev + 1:
+                out.append((prev + 1, n - 1))
+            prev = n
+        return out
+
+    @property
+    def label(self) -> str:
+        return sequence_label(self.pattern, self.first, self.count)
+
+
+def is_sequence_pattern(path: str) -> bool:
+    """O caminho é o padrão de uma sequência de imagens (plano_%04d.png)?"""
+    return bool(path) and Path(path).suffix.lower() in SEQUENCE_EXT and bool(_TOKEN.search(os.path.basename(path)))
+
+
+def sequence_file(pattern: str, n: int) -> str:
+    """O arquivo do quadro número `n` de um padrão (plano_%04d.png, 12 → plano_0012.png)."""
+    folder, name = os.path.split(pattern)
+    return os.path.join(folder, name % int(n)) if folder else name % int(n)
+
+
+def sequence_label(pattern: str, first: int, count: int) -> str:
+    """Nome para mostrar: plano_[0001-0120].png."""
+    name = os.path.basename(pattern)
+    m = _TOKEN.search(name)
+    if not m:
+        return name
+    width = int(m.group(1) or 0)
+    tag = f"[{first:0{width}d}-{first + max(1, count) - 1:0{width}d}]"
+    return (name[:m.start()] + tag + name[m.end():]).replace("%%", "%")
+
+
+def sequence_stem(path: str) -> str:
+    """Nome-base para arquivos derivados (exportação, quadro salvo): plano_%04d.png → plano."""
+    stem = Path(path).stem
+    if not is_sequence_pattern(path):
+        return stem
+    return _TOKEN.sub("", stem).replace("%%", "%").rstrip("_-. ") or "sequencia"
+
+
+def path_exists(path: str, seq_start: int = -1) -> bool:
+    """O arquivo existe? Numa sequência de imagens, o primeiro quadro dela (`seq_start`; -1 = qualquer um)."""
+    if not is_sequence_pattern(path):
+        return os.path.exists(path)
+    if seq_start >= 0:
+        return os.path.exists(sequence_file(path, seq_start))
+    return sequence_from_pattern(path) is not None
+
+
+def _numbers(folder: str, prefix: str, ext: str) -> list[str]:
+    """Os números (texto, com os zeros) dos arquivos prefixo + número + extensão de uma pasta."""
+    try:
+        names = os.listdir(folder or ".")
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        m = _NUMBERED.match(name)
+        if m and m.group(1) == prefix and m.group(3) == ext:
+            out.append(m.group(2))
+    return out
+
+
+def _sequence(folder: str, prefix: str, ext: str, digits: list[str], pick: str | None,
+              width: int | None = None) -> ImageSequence | None:
+    """Monta a sequência: com zeros à esquerda (%0Nd, só números de N dígitos) ou sem (%d)."""
+    if width is None:
+        w = len(pick) if pick else max((len(d) for d in digits), default=1)
+        padded = len({len(d) for d in digits}) == 1 or any(len(d) == w and len(d) > 1 and d[0] == "0"
+                                                            for d in digits)
+        width = w if padded and w > 1 else 0
+    if width:
+        keep = sorted({int(d) for d in digits if len(d) == width})
+        token = f"%0{width}d"
+    else:
+        keep = sorted({int(d) for d in digits if len(d) == 1 or d[0] != "0"})
+        token = "%d"
+    if not keep:
+        return None
+    have = set(keep)
+    start = int(pick) if pick is not None and int(pick) in have else keep[0]
+    while start - 1 in have:
+        start -= 1
+    count = 1
+    while start + count in have:
+        count += 1
+    if count < 2:
+        return None
+    name = prefix.replace("%", "%%") + token + ext.replace("%", "%%")
+    return ImageSequence(os.path.join(folder, name) if folder else name, start, count, tuple(keep))
+
+
+def find_sequence(path: str, exts: tuple[str, ...] | None = None) -> ImageSequence | None:
+    """Sequência de imagens numeradas a partir de um arquivo (plano_0001.png) ou de uma pasta (o maior grupo de
+    imagens numeradas dela). None se não há pelo menos dois quadros seguidos."""
+    exts = sequence_exts() if exts is None else exts
+    if os.path.isdir(path):
+        groups: dict[tuple[str, str], list[str]] = {}
+        try:
+            names = sorted(os.listdir(path))
+        except OSError:
+            return None
+        for name in names:
+            m = _NUMBERED.match(name)
+            if m and m.group(3).lower() in exts:
+                groups.setdefault((m.group(1), m.group(3)), []).append(m.group(2))
+        best = None
+        for (prefix, ext), digits in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            found = _sequence(path, prefix, ext, digits, None)
+            if found is not None and (best is None or found.count > best.count):
+                best = found
+        return best
+    folder, name = os.path.split(path)
+    m = _NUMBERED.match(name)
+    if not m or m.group(3).lower() not in exts:
+        return None
+    prefix, pick, ext = m.groups()
+    return _sequence(folder, prefix, ext, _numbers(folder, prefix, ext), pick)
+
+
+def sequence_from_pattern(pattern: str, start: int = -1) -> ImageSequence | None:
+    """A sequência de um padrão já gravado (projeto, relocalizar): o trecho seguido que começa em `start` (ou
+    o primeiro da pasta)."""
+    folder, name = os.path.split(pattern)
+    m = _TOKEN.search(name)
+    if not m:
+        return None
+    prefix, ext = name[:m.start()].replace("%%", "%"), name[m.end():].replace("%%", "%")
+    digits = _numbers(folder, prefix, ext)
+    width = int(m.group(1) or 0)
+    found = _sequence(folder, prefix, ext, digits, None, width=width)
+    if found is None or start < 0 or start == found.first:
+        return found
+    pick = f"{start:0{width}d}" if width else str(start)
+    other = _sequence(folder, prefix, ext, digits, pick, width=width)
+    return other if other is not None and other.first == start else found
+
+
+def probe_sequence(found: ImageSequence, fps_str: str = "24/1") -> MediaInfo:
+    """`MediaInfo` de uma sequência de imagens: o primeiro quadro diz o tamanho, a cor e a transparência;
+    `fps_str` é a velocidade escolhida ao importar (padrão: a da montagem)."""
+    first = found.file(found.first)
+    info = _info_from(first, _probe_json(first))
+    try:
+        fr = Fraction(str(fps_str or "24/1"))
+        if fr <= 0 or fr > 1000:
+            raise ValueError
+    except (ValueError, ZeroDivisionError):
+        fr = Fraction(24, 1)
+    return dataclasses.replace(info, path=found.pattern, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
+                               frames=found.count, duration=found.count / float(fr), is_image=False, bitrate=0,
+                               container="image2", seq_start=found.first)
+
+
+def sequence_input(info: MediaInfo, start_frame: int = 0) -> list[str]:
+    """Opções de entrada (antes do `-i`) para ler uma sequência de imagens a partir do quadro `start_frame`."""
+    return ["-f", "image2", "-framerate", info.fps_str or "24/1",
+            "-start_number", str(int(info.seq_start) + max(0, int(start_frame)))]
 
 
 def _in_matrix(info: MediaInfo) -> str:
@@ -341,14 +615,17 @@ class NamedPipe:
             try:
                 self._w.ConnectNamedPipe(self.handle, self._w.NULL)
             except OSError as exc:
-                if getattr(exc, "winerror", 0) != 535:
+                # 535: o ffmpeg abriu o pipe antes desta chamada. 232: ele já gravou tudo e fechou (um quadro
+                # pequeno cabe no buffer); os dados continuam no pipe para ler.
+                if getattr(exc, "winerror", 0) not in (535, 232):
                     errs.append(exc)
             done.set()
 
         threading.Thread(target=run, daemon=True).start()
         t0 = time.time()
         while not done.wait(0.05):
-            if proc.poll() is not None or time.time() - t0 > timeout:
+            # O ffmpeg pode ter terminado depois de gravar: dá tempo para a conexão acontecer antes de desistir.
+            if (proc.poll() is not None and not done.wait(0.5)) or time.time() - t0 > timeout:
                 try:
                     # O outro lado do pipe precisa do acesso oposto: quem lê (inbound) é destravado
                     # por alguém que escreve, e vice-versa.
@@ -391,23 +668,41 @@ class FrameReader:
 
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
+
+    `alpha` (pede a transparência; vale só se `decodes_alpha(info)`, senão saem os 3 canais de sempre): quadros
+    RGBA **pré-multiplicados** (h × w × 4, uint8 ou uint16). O ffmpeg entrega o alfa direto (*straight*); a cor
+    vira RGB com a matriz do arquivo no tamanho original, é multiplicada pelo alfa (`premultiply`) e só então
+    redimensionada — assim a borda não puxa a cor dos pixels transparentes (sem franja escura). O WebM VP8/VP9
+    usa o libvpx (`alpha_decoder`). Sem `alpha`, nada muda (3 canais, os mesmos bits). Veja `_alpha_graph`.
     """
 
     def __init__(self, info: MediaInfo, width: int, height: int, depth: int = 8, start_frame: int = 0,
                  max_frames: int | None = None, fps_out: str | None = None, hq: bool = False,
-                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None):
+                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
         perf = perf or Perf()
+        alpha = alpha and decodes_alpha(info)
         self.w, self.h, self.depth = width, height, depth
-        self.pix = "rgb24" if depth == 8 else "rgb48le"
-        self.dtype = np.uint8 if depth == 8 else np.uint16
-        self.frame_bytes = width * height * 3 * (1 if depth == 8 else 2)
+        self.channels = 4 if alpha else 3
+        # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
+        self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
+        if alpha:
+            self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
+        else:
+            self.pix = "rgb24" if depth == 8 else "rgb48le"
+        self.dtype = np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
+        self.frame_bytes = width * height * self.channels * (1 if self.dtype == np.uint8 else 2)
         args = [ffmpeg(), "-v", "error", "-nostdin", "-hide_banner"]
-        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image:
+        numbered = getattr(info, "seq_start", -1) >= 0
+        if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha and not numbered:
             args += ["-hwaccel", perf.hwaccel]
         if perf.threads > 0:
             args += ["-threads", str(perf.threads)]
-        if not info.is_image and start_frame > 0:
+        if not info.is_image and start_frame > 0 and not numbered:
             args += ["-ss", f"{max(0.0, (start_frame - 0.45) / info.fps):.6f}"]
+        if alpha:
+            args += alpha_decoder(info.codec)
+        if numbered:  # sequência de imagens: começa no número do quadro pedido (exato, sem procurar)
+            args += sequence_input(info, start_frame)
         args += ["-i", info.path, "-map", "0:v:0", "-an", "-sn", "-dn"]
         flags = "lanczos+accurate_rnd+full_chroma_int" if hq else "bicubic+full_chroma_int"
         vf = []
@@ -416,9 +711,13 @@ class FrameReader:
             vf.append(f"crop={cw}:{ch}:{cx}:{cy}:exact=1")
         if fps_out:
             vf.append(f"fps={fps_out}")
-        vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
-                  f":in_range={_in_range(info)}:threads={max(0, perf.threads)}")
-        vf.append(f"format={self.pix}")
+        th = max(0, perf.threads)
+        if alpha:
+            vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
+        else:
+            vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
+                      f":in_range={_in_range(info)}:threads={th}")
+            vf.append(f"format={self.pix}")
         args += ["-vf", ",".join(vf)]
         if perf.threads > 0:
             args += ["-filter_threads", str(perf.threads)]
@@ -470,7 +769,8 @@ class FrameReader:
             if not n:
                 return None
             got += n
-        return np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, 3)
+        img = np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, self.channels)
+        return img.astype(np.uint16) * np.uint16(257) if self._widen else img
 
     def close(self) -> None:
         try:
@@ -489,14 +789,34 @@ class FrameReader:
                 pass
 
 
+def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: int, pix: str) -> str:
+    """Filtros da leitura com transparência: cor em RGB com a matriz do arquivo (no tamanho dele), alfa intacto,
+    pré-multiplicação e só então o tamanho pedido; sai em `pix` (`rgba` ou `rgba64le`).
+
+    Arquivo de 8 bits: a cor vai pelo mesmo caminho da leitura sem alfa (`rgb24`) e o alfa é copiado à parte
+    (`alphaextract`/`alphamerge`) — o swscale converte yuva420p de 8 bits errado para formatos com alfa (cores
+    trocadas no VP9 com alfa, conforme os filtros). Paleta (pal8) e cinza com alfa viram `rgba` antes (exato; o
+    `alphaextract` direto na paleta derruba o ffmpeg). Mais de 8 bits (ProRes 4444, yuva…p10/12/16): direto em
+    `gbrap16le`, que converte certo e guarda a precisão do arquivo."""
+    color = f"scale=flags={flags}:in_color_matrix={_in_matrix(info)}:in_range={_in_range(info)}:threads={threads}"
+    resize = f"scale={width}:{height}:flags={flags}:threads={threads}"
+    if info.bit_depth > 8:
+        return f"{color},format=gbrap16le,premultiply=inplace=1,{resize},format={pix}"
+    decoded = "yuva420p" if info.codec in ALPHA_DECODERS else (info.pix_fmt or "")  # o libvpx entrega yuva420p
+    pre = "" if decoded.startswith(("yuva", "gbrap", "rgba", "bgra", "argb", "abgr")) else "format=rgba,"
+    return (f"{pre}split[c][a];[c]{color},format=rgb24,format=rgba[cc];[a]alphaextract,format=gray[aa];"
+            f"[cc][aa]alphamerge,premultiply=inplace=1,{resize},format={pix}")
+
+
 def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False,
-               crop: tuple[int, int, int, int] | None = None):
-    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop)
+               crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
+    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado, veja `FrameReader`)."""
+    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha)
     try:
         img = r.read()
         if img is None and frame > 0:
             r.close()
-            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop)
+            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha)
             img = r.read()
         if img is None:
             raise RuntimeError(r.error or _("Falha ao ler o quadro."))
@@ -507,6 +827,25 @@ def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int 
 
 _ENCODERS: set[str] | None = None
 _WORKING: dict[str, bool] = {}
+_DECODERS: set[str] | None = None
+
+
+def decoders() -> set[str]:
+    """Decodificadores de vídeo desta compilação do ffmpeg (para o libvpx do WebM com alfa)."""
+    global _DECODERS
+    if _DECODERS is None:
+        try:
+            res = subprocess.run([ffmpeg(), "-hide_banner", "-decoders"], capture_output=True, creationflags=NO_WINDOW)
+            lines = res.stdout.decode("utf-8", "replace").splitlines()
+        except OSError:
+            lines = []
+        names = set()
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2 and len(parts[0]) == 6 and parts[0][0] in "VAS" and parts[1] != "=":
+                names.add(parts[1])
+        _DECODERS = names
+    return _DECODERS
 
 
 def encoders() -> set[str]:

@@ -6,16 +6,18 @@ import copy
 
 from PySide6.QtCore import QMimeData, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-                               QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
+                               QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import editparams
+from .. import editparams, keyframes
 from ..i18n import N_, _, decimal_sep
 from ..timeline import AUDIO, VIDEO, Clip, Source
 from . import icons, theme
 from .edit_model import TimelineModel
 from .flow import flow_widget
+from .keyframes_ui import ClipKeys, KeyRows
 from .store import ParamStore
+from .tempo_ui import TempoPanel
 from .timeline_view import MIME_SOURCE
 from .widgets import SectionCard, Segmented, timecode
 
@@ -30,6 +32,8 @@ def fmt_seconds(sec: float) -> str:
 
 
 def source_kind(src: Source) -> str:
+    if not src.is_file:
+        return "gerado"  # clipe sem arquivo (título, cor, contagem…: `sequence.RENDERERS`)
     if src.is_image:
         return "imagem"
     if not src.has_video:
@@ -37,7 +41,7 @@ def source_kind(src: Source) -> str:
     return "video"
 
 
-KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem")}
+KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem"), "gerado": N_("gerado")}
 
 
 # ------------------------------------------------------------------ mídia
@@ -106,7 +110,7 @@ def _kind_pixmap(kind: str, thumb: QImage | None) -> QPixmap:
         y = (img.height() - THUMB.height()) // 2
         p.drawImage(0, 0, img, x, y, THUMB.width(), THUMB.height())
     else:
-        name = {"video": "film_mode", "audio": "music", "imagem": "image"}[kind]
+        name = {"video": "film_mode", "audio": "music", "imagem": "image", "gerado": "wand"}[kind]
         color = theme.CLIP_AUDIO_HI if kind == "audio" else theme.ACCENT
         ic = icons.icon(name, color, 22).pixmap(QSize(22, 22))
         p.drawPixmap((THUMB.width() - 22) // 2, (THUMB.height() - 22) // 2, ic)
@@ -121,6 +125,7 @@ class MediaBin(QWidget):
     addRequested = Signal(str)
     removeRequested = Signal(str)
     filesDropped = Signal(list)
+    placeRequested = Signal(list, bool)   # (caminhos, inserir): no cursor, empurrando (True) ou cobrindo (False)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,6 +146,16 @@ class MediaBin(QWidget):
         self.btn_import.setToolTip(_("Importar vídeos, imagens e músicas (Ctrl+I)"))
         self.btn_import.clicked.connect(self.importRequested)
         row.addWidget(self.btn_import, 1)
+        self.btn_new = QToolButton()  # "Novo ▸": cor sólida, degradê, ponta, título (`set_new_menu`)
+        self.btn_new.setObjectName("Flat")
+        self.btn_new.setText(_("Novo"))
+        self.btn_new.setIcon(icons.icon("wand", theme.TEXT, 16))
+        self.btn_new.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_new.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_new.setToolTip(_("Criar um clipe sem arquivo: cor sólida, degradê, ponta com contagem ou título"))
+        self.btn_new.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_new.setVisible(False)
+        row.addWidget(self.btn_new)
         self.btn_add = self._flat("plus", _("Adicionar o item escolhido ao fim da linha do tempo"))
         self.btn_add.clicked.connect(self._add_current)
         row.addWidget(self.btn_add)
@@ -159,6 +174,8 @@ class MediaBin(QWidget):
         self.list.itemDoubleClicked.connect(lambda it: self.addRequested.emit(it.data(Qt.ItemDataRole.UserRole)))
         self.list.itemSelectionChanged.connect(self._sync)
         self.list.filesDropped.connect(self.filesDropped)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._menu)
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.list)
         lay.addWidget(self.stack, 1)
@@ -176,6 +193,11 @@ class MediaBin(QWidget):
         return b
 
     # -------------------------------------------------------- API
+    def set_new_menu(self, menu: QMenu) -> None:
+        """Liga o botão "Novo" ao menu dos clipes sem arquivo (`ui/generators_ui.new_menu`)."""
+        self.btn_new.setMenu(menu)
+        self.btn_new.setVisible(True)
+
     def add_source(self, src: Source, thumb: QImage | None = None) -> None:
         self._sources[src.path] = src
         item = self._item(src.path)
@@ -184,8 +206,11 @@ class MediaBin(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, src.path)
             self.list.addItem(item)
         kind = source_kind(src)
-        dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
-        item.setText(f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
+        if kind == "gerado" and src.unbounded:
+            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])}")
+        else:
+            dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
+            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
         item.setToolTip(src.path)
         item.setData(Qt.ItemDataRole.UserRole + 1, kind)
         item.setIcon(QIcon(_kind_pixmap(kind, thumb)))
@@ -218,6 +243,28 @@ class MediaBin(QWidget):
     def current_path(self) -> str | None:
         it = self.list.currentItem()
         return it.data(Qt.ItemDataRole.UserRole) if it is not None else None
+
+    def selected_paths(self) -> list[str]:
+        """Itens escolhidos, na ordem da lista."""
+        rows = sorted(self.list.row(it) for it in self.list.selectedItems())
+        return [self.list.item(r).data(Qt.ItemDataRole.UserRole) for r in rows]
+
+    def place(self, insert: bool) -> None:
+        """"Inserir no cursor" (`,`) / "Sobrescrever no cursor" (`.`) com os itens escolhidos."""
+        paths = self.selected_paths()
+        if paths:
+            self.placeRequested.emit(paths, bool(insert))
+
+    def _menu(self, pos) -> None:
+        if self.list.itemAt(pos) is None or not self.list.selectedItems():
+            return
+        menu = QMenu(self)
+        menu.addAction(_("Adicionar ao fim da linha do tempo"), self._add_current)
+        menu.addAction(_("Inserir no cursor (,)"), lambda: self.place(True))
+        menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.place(False))
+        menu.addSeparator()
+        menu.addAction(_("Tirar da lista"), self._remove_current)
+        menu.exec(self.list.viewport().mapToGlobal(pos))
 
     # -------------------------------------------------------- interno
     def _item(self, path: str) -> QListWidgetItem | None:
@@ -277,9 +324,14 @@ def _FlowRow(widgets: list[QWidget], per_row: int = 4) -> QWidget:
 
 
 class ClipInspector(QWidget):
-    """Ajustes do clipe selecionado (imagem ou som), gerados a partir de `editparams`."""
+    """Ajustes do clipe selecionado (imagem ou som), gerados a partir de `editparams`.
+
+    Os ajustes animáveis ganham o losango das chaves (`keyframes_ui.KeyRows`): os controles mostram o valor no
+    quadro do cursor (`set_playhead`, preso ao trecho do clipe) e as setas pedem para levar o cursor a uma chave
+    (`seekRequested`)."""
 
     autoRequested = Signal(str)
+    seekRequested = Signal(int)
 
     OPEN_VIDEO = {"luz", "cor"}
     OPEN_AUDIO = {"som"}
@@ -326,6 +378,16 @@ class ClipInspector(QWidget):
         self.stack.addWidget(self.audio_page)
         self.vstore.changed.connect(lambda key: self._store_changed(self.vstore, self.vcards, key))
         self.astore.changed.connect(lambda key: self._store_changed(self.astore, self.acards, key))
+        from . import transitions_ui  # 1.5: ícones dos tipos de transição e só os ajustes do tipo escolhido
+        self.transitions = transitions_ui.InspectorTransitions(self.vstore, self.vcards, model)
+        self.playhead = 0
+        target = ClipKeys(model, lambda: self.clip_id)
+        self.vkeys = KeyRows(self.vstore, target, self.vcards, self)
+        self.akeys = KeyRows(self.astore, target, self.acards, self)
+        for rows in (self.vkeys, self.akeys):
+            rows.seekRequested.connect(self.seekRequested)
+        self.vtempo = self._tempo_panel(self.vcards)  # rampa (e reverso) no fim do cartão "Velocidade"
+        self.atempo = self._tempo_panel(self.acards)
         model.selectionChanged.connect(self._selection_changed)
         model.changed.connect(self._model_changed)
         self._selection_changed()
@@ -354,6 +416,19 @@ class ClipInspector(QWidget):
         scroll.setWidget(inner)
         pl.addWidget(scroll, 1)
         return page, cards
+
+    def _tempo_panel(self, cards: list[SectionCard]) -> TempoPanel | None:
+        card = next((c for c in cards if c.section.key == "tempo"), None)
+        if card is None:
+            return None
+        panel = TempoPanel(self.model, lambda: self.clip_id)
+        card.body.layout().addWidget(panel)
+        return panel
+
+    def add_source_editor(self, widget: QWidget) -> None:
+        """Painel no alto da página de imagem para os campos de um clipe sem arquivo (gerador, título); o próprio
+        painel aparece ou some conforme o clipe escolhido (`ui/generators_ui.py`, `ui/titles_panel.py`)."""
+        self.video_page.layout().insertWidget(0, widget)
 
     def _tools(self) -> QWidget:
         w = QWidget()
@@ -414,6 +489,7 @@ class ClipInspector(QWidget):
         c = self.model.primary()
         if c is None:
             self.clip_id = None
+            self._sync_frame()
             self._show()
             return
         v, a = self._current_group()
@@ -443,6 +519,9 @@ class ClipInspector(QWidget):
             self.kind_seg.setVisible(False)
             return
         self.stack.setCurrentWidget(self.video_page if c.kind == VIDEO else self.audio_page)
+        for panel in (self.vtempo, self.atempo):
+            if panel is not None:
+                panel.refresh()
         src = self.model.seq.sources.get(c.src)
         self.title.setText(c.name or (src.name if src else ""))
         kind = _("Imagem parada") if (src is not None and src.is_image) else (
@@ -457,18 +536,37 @@ class ClipInspector(QWidget):
             self.btn_paste.setEnabled(self.model.has_clipboard())
 
     def _load(self) -> None:
-        """Copia os valores do clipe para o store certo (sem gerar edições)."""
+        """Copia os valores e as chaves do clipe para o store certo (sem gerar edições). As chaves vão em
+        quadros da sequência, os mesmos do cursor."""
         c = self.current_clip()
         if c is None:
+            self._sync_frame()
             return
         store = self.vstore if c.kind == VIDEO else self.astore
-        if store.values == c.values:
-            return
-        self._loading = True
-        try:
-            store.set_all(copy.deepcopy(c.values), record=False)
-        finally:
-            self._loading = False
+        keys = {k: [keyframes.Key(t, v, e) for t, v, e in self.model.seq.keys_of(c, k)] for k in c.keys}
+        if store.values != c.values or store.keys != keys:
+            self._loading = True
+            try:
+                store.keys = keys
+                store.set_all(copy.deepcopy(c.values), record=False)
+            finally:
+                self._loading = False
+        self._sync_frame()
+
+    def set_playhead(self, frame: int) -> None:
+        """O cursor da linha do tempo andou (chamado a cada quadro na reprodução: só o animado se redesenha)."""
+        self.playhead = int(frame)
+        self._sync_frame()
+
+    def _sync_frame(self) -> None:
+        """O quadro que os controles mostram: o do cursor, preso ao trecho do clipe (fora dele, a ponta mais
+        perto: chave automática nunca cai fora do clipe)."""
+        c = self.current_clip()
+        frame = None if c is None else float(min(max(self.playhead, c.start), c.end - 1))
+        self.vkeys.set_frame(frame if c is not None and c.kind == VIDEO else None)
+        self.akeys.set_frame(frame if c is not None and c.kind == AUDIO else None)
+        self.vkeys.update_states()
+        self.akeys.update_states()
 
     def _store_changed(self, store: ParamStore, cards: list[SectionCard], key: str) -> None:
         for card in cards:
@@ -478,6 +576,11 @@ class ClipInspector(QWidget):
             return
         c = self.current_clip()
         if c is None or (store is self.vstore) != (c.kind == VIDEO):
+            return
+        if key != "*" and store.keys.get(key) and store.view_frame is not None:
+            here = store.key_here(key)  # ajuste animado: o controle gravou uma chave no cursor
+            if here is not None:
+                self.model.add_key(c.id, key, here.t, here.v, here.e, record=False)
             return
         self.model.set_clip_values(c.id, copy.deepcopy(store.values), record=False)
 

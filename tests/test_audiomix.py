@@ -90,13 +90,20 @@ def test_mix_key_follows_only_audio(tmp_path):
     assert audiomix.mix_key(seq) != k0
 
 
-def test_long_graph_uses_script(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version,option", [((9, 0), "-/filter_complex"), ((7, 1, 2), "-/filter_complex"),
+                                            ((6, 1, 1), "-filter_complex_script"), (None, "-/filter_complex")])
+def test_long_graph_uses_script(tmp_path, monkeypatch, version, option):
+    """O grafo num arquivo: `-/filter_complex` no ffmpeg 7 ou mais novo, a opção antiga no 6 (Ubuntu 24.04)."""
+    from pelicula import deps
     paths = fake_files(tmp_path, *[f"c{i}.mp4" for i in range(3)])
     seq = seq_with(paths)
-    monkeypatch.setattr(media, "ffmpeg", lambda: "ffmpeg")
+    ff = f"ffmpeg-{version}"
+    monkeypatch.setattr(media, "ffmpeg", lambda: ff)
+    monkeypatch.setattr(deps, "inspect", lambda path: deps.FFmpegInfo(path, "", version, None))
+    monkeypatch.setattr(audiomix, "_SCRIPT_OPTION", {})
     script = tmp_path / "grafo.txt"
     cmd = audiomix.build_mix_cmd(seq, str(tmp_path / "o.wav"), script_path=str(script))
-    assert "-filter_complex_script" in cmd and "amix" in script.read_text(encoding="utf-8")
+    assert cmd[cmd.index(option) + 1] == str(script) and "amix" in script.read_text(encoding="utf-8")
     cmd = audiomix.build_mix_cmd(seq, str(tmp_path / "o.wav"))
     assert cmd[cmd.index("-filter_complex") + 1].endswith("[out]")
     assert cmd[-1].endswith("o.wav") and "pcm_s24le" in cmd

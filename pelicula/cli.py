@@ -207,6 +207,15 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
+def look_keys(proj, preset, sets) -> dict:
+    """Chaves de animação do look do projeto (`Project.look_keys`). Um --preset troca o look inteiro (sai sem
+    animação) e um --set fixa o ajuste dado (a chave dele sai)."""
+    if proj is None or preset or not proj.look_keys:
+        return {}
+    fixed = {item.split("=", 1)[0].strip() for item in sets or [] if "=" in item}
+    return {k: v for k, v in proj.look_keys.items() if k not in fixed}
+
+
 def project_sequence(proj):
     """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro)."""
     from . import sequence, timeline
@@ -215,13 +224,26 @@ def project_sequence(proj):
     seq = timeline.Sequence.from_json(proj.sequence)
     if not seq.clips:
         return None
-    trivial = seq.is_trivial()
+    trivial = seq.direct_file()  # um arquivo com transparência passa pela montagem
     if trivial and (not proj.media_path or os.path.abspath(trivial) == os.path.abspath(proj.media_path)):
         return None
     missing = sequence.missing_sources(seq)
     if missing:
         raise CliError(_("Arquivos da edição não encontrados:\n{lista}").format(lista="\n".join(missing[:10])))
     return seq
+
+
+def project_subtitles(proj):
+    """Legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência — as mesmas da
+    janela, também quando a montagem é só o arquivo inteiro. (None, []) sem legendas."""
+    from . import timeline
+    if not proj or not proj.sequence:
+        return None, []
+    full = timeline.Sequence.from_json(proj.sequence)
+    subs = full.subtitles
+    if subs is None or subs.is_empty():
+        return None, []
+    return subs, (subs.timeline_cues(full) if full.clips else subs.timeline_cues(None, proj.media_path))
 
 
 def _source_and_values(path: str, preset, sets):
@@ -237,14 +259,43 @@ def _source_and_values(path: str, preset, sets):
         seq = project_sequence(proj)
         if seq is not None:
             from . import sequence
+            _prepare_text(seq)
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
-        if not proj.media_path or not os.path.exists(proj.media_path):
+        if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        return proj.media_path, values, pid or proj.preset_id, proj, None
-    if not os.path.exists(path):
+        return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
+    if not _exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
-    return path, values, pid, None, None
+    return path, values, pid, None, alpha_sequence(path)
+
+
+def _prepare_text(seq) -> None:
+    """Montagem com texto desenhado (a ponta com contagem, títulos): o banco de fontes do Qt precisa de uma
+    QGuiApplication, criada aqui, na thread principal, antes das threads que leem a montagem."""
+    from . import generators
+    if generators.needs_text(seq):
+        from . import textrender
+        textrender.ensure_app()
+
+
+def _exists(path: str) -> bool:
+    """O arquivo existe? (um padrão de sequência de imagens, plano_%04d.png: algum quadro dele)"""
+    from .media import path_exists
+    return path_exists(path)
+
+
+def alpha_sequence(path: str):
+    """Arquivo com transparência aberto direto: a montagem só com ele (o alfa sai sobre o fundo da montagem,
+    como na janela; lido direto, o alfa se perderia). None para os outros arquivos."""
+    from . import media, timeline
+    try:
+        info = media.probe(path)
+    except Exception:  # noqa: BLE001 — quem chamou mostra o erro ao ler o arquivo
+        return None
+    if not info.has_alpha and not info.is_sequence:  # sequência de imagens: também pela montagem
+        return None
+    return timeline.Sequence.for_source(timeline.Source.from_info(info))
 
 
 def _need_ffmpeg() -> None:
@@ -319,7 +370,7 @@ def _export_notes(plat, s, info, duration: float) -> list[str]:
 
 # ------------------------------------------------------------------ comandos
 def cmd_export(a) -> int:
-    from . import export, media, platforms
+    from . import export, media, platforms, subtitles
     from .engine import Engine
     resolution = parse_resolution(a.resolucao) if a.resolucao is not None else None
     _need_ffmpeg()
@@ -364,7 +415,7 @@ def cmd_export(a) -> int:
         raise CliError(_("Codec indisponível neste computador: {codec}").format(codec=s.codec))
     if s.container not in export.CODECS[s.codec]["exts"]:
         s.container = export.CODECS[s.codec]["exts"][0]
-    out = a.saida or str(Path(src).with_name(Path(src).stem + "_pelicula." + s.container))
+    out = a.saida or str(Path(src).with_name(media.sequence_stem(src) + "_pelicula." + s.container))
     out = str(Path(out).with_suffix("." + s.container))
     if os.path.abspath(out) == os.path.abspath(src):
         raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))
@@ -377,10 +428,14 @@ def cmd_export(a) -> int:
                 caminho=export.output_target(out, s)))
         raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=out))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    if values.get("scan_on"):
-        _gui_app()
+    subs, cues = project_subtitles(proj)
+    choice = subtitles.default_delivery(subs, s.container) if a.legendas in (None, "projeto") else a.legendas
+    sub_fields = subtitles.delivery_fields(choice, subs, cues, s.container)
+    if values.get("scan_on") or sub_fields["burn"]:
+        _gui_app()  # texto da borda do scan e legendas gravadas: desenhados pelo Qt
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq)
+                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set),
+                           **sub_fields)
     if not a.json:
         w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
@@ -388,6 +443,8 @@ def cmd_export(a) -> int:
             preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
         for line in _export_notes(plat, s, info, duration):
             print(line, file=sys.stderr)
+        if cues:
+            print(_("Legendas: {modo} ({n})").format(modo=choice, n=len(cues)), file=sys.stderr)
 
     def on_sigint(*_args):
         job.cancel.set()
@@ -475,8 +532,10 @@ def cmd_project(a) -> int:
 
 
 def cmd_frame(a) -> int:
-    from . import export, look, media
-    from .engine import Engine, lut_info
+    from . import export, media
+    from .engine import Engine
+    from .frame import Recipe
+    from .subtitles import Burn
     _need_ffmpeg()
     src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
@@ -494,18 +553,25 @@ def cmd_frame(a) -> int:
     ext = Path(path).suffix.lower()
     if ext not in export.STILL_ARGS:
         raise CliError(_("Formato de imagem não suportado: {ext} (use .png, .tif ou .jpg)").format(ext=ext))
-    if values.get("scan_on"):
+    subs, cues = project_subtitles(proj)
+    burn = Burn.make(subs.burn, subs.style, cues) if subs is not None else None  # gravadas, como o projeto pede
+    if values.get("scan_on") or burn is not None:
         _gui_app()
     w, h = info.width, info.height
+    # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
+    # "Fundo transparente" da montagem: PNG e TIFF guardam a transparência (como "Salvar quadro" na janela).
+    alpha = seq is not None and seq.transparent and ext in export.STILL_ALPHA_ARGS
+    recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
+                               keys=look_keys(proj, a.preset, a.set), burn=burn, alpha=alpha)
     engine = Engine()
-    if seq is not None:
-        img = engine.compose(sequence.grab(seq, frame, w, h, 16, hq=True), seq, w, h, 16)
-    else:
-        img = media.grab_frame(info, frame, w, h, 16, hq=True)
-    engine.set_input(img)
-    li = lut_info(values["lut_arquivo"]) if values.get("lut_on") else None
-    out = engine.render(look.build_plan(values, w, h, frame, info.fps, li, dither=False, legal=legal), 16)
-    engine.release()
+    try:
+        if seq is not None:
+            img = sequence.grab(seq, frame, w, h, 16, hq=True)
+        else:
+            img = media.grab_frame(info, frame, w, h, 16, hq=True)
+        out = recipe.render(engine, img, frame)
+    finally:
+        engine.release()
     try:
         export.save_still(out, path)  # grava num parcial e só troca o arquivo no fim
     except (RuntimeError, OSError) as exc:
@@ -818,6 +884,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--fim", help=_("fim: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--trecho", action="store_true", help=_("usa a entrada e a saída marcadas no projeto"))
+    p.add_argument("--legendas", choices=["projeto", "nao", "faixa", "copia", "digital", "srt", "vtt"],
+                   help=_("legendas do projeto: projeto (o que ele pede; padrão), nao, faixa (no arquivo), copia "
+                          "(gravadas antes do look), digital (depois do look), srt ou vtt (arquivo ao lado)"))
     p.add_argument("--threads", type=int, help=_("núcleos do processador (0 = todos)"))
     p.add_argument("--prioridade", choices=["baixa", "normal", "alta"])
     p.add_argument("--hwaccel", help=_("decodificação por hardware (none, auto, cuda, d3d11va, qsv)"))

@@ -12,6 +12,13 @@ onde o clipe vizinho continua o mesmo arquivo do ponto exato (corte não mexido)
 (`values["transicao"]` no clipe que entra, tempo de `Sequence.audio_crossfade`) estende os dois
 clipes além do corte com o arquivo que sobra e cruza as curvas seno/cosseno (`afade curve=qsin`): a
 soma das potências fica constante. Projeto sem nada disso gera exatamente o mesmo grafo de antes.
+
+Rampa de velocidade e reverso (`Clip.ramp`, `Clip.reverse`; o tempo vem de `Sequence.time_map`, o mesmo da
+imagem): o som do clipe vira pedaços de velocidade constante (`TimeMap.pieces`: um só onde a velocidade não
+muda, pedaços de 0,1 s numa transição), cada um com o seu `atempo` (o tom não muda), cruzados em 8 ms e somados
+no lugar exato da saída — as pontas de cada pedaço caem no mapa, então nada se acumula e o som segue a imagem
+quadro a quadro. No reverso cada bloco do arquivo (até `GROUP_S`) entra por uma entrada própria e passa por
+`areverse`: a memória fica limitada ao bloco, não ao clipe. Veja `_retimed_chain`.
 """
 
 from __future__ import annotations
@@ -31,7 +38,11 @@ from . import media, timeline
 from .i18n import _
 
 RATE = 48000
-SCRIPT_LIMIT = 6000  # acima disso o grafo vai para um arquivo (-filter_complex_script)
+SCRIPT_LIMIT = 6000  # acima disso o grafo vai para um arquivo (-/filter_complex)
+XFADE_S = 0.008      # cruzamento entre os pedaços de velocidade de uma rampa
+MARGIN_S = 0.05      # sobra (s da saída) de cada lado do pedaço, para o atempo começar estável
+GROUP_S = 10.0       # s do arquivo por entrada do ffmpeg num clipe com rampa/reverso (memória limitada)
+ATEMPO_LAG_S = 0.015  # quanto cada `atempo` adianta o som, em s da entrada dele (meia janela; medido no ffmpeg 7–9)
 
 
 def _fmt(x: float) -> str:
@@ -51,6 +62,17 @@ def _atempo(speed: float) -> list[str]:
     if abs(s - 1.0) > 1e-6:
         out.append(f"atempo={_fmt(s)}")
     return out
+
+
+def _atempo_lag(speed: float) -> float:
+    """Segundos do arquivo que a cadeia `_atempo(speed)` adianta: a saída no instante τ toca o arquivo em
+    τ·speed + lag. Cada filtro adianta `ATEMPO_LAG_S` da própria entrada (o filtro k recebe o tempo já
+    multiplicado pelos anteriores). Só a rampa/reverso compensa isso; a cadeia comum fica como sempre foi."""
+    lag, p = 0.0, 1.0
+    for f in _atempo(speed):
+        lag += ATEMPO_LAG_S * p
+        p *= float(f.split("=", 1)[1])
+    return lag
 
 
 def _range(seq: timeline.Sequence, start: int, end: int) -> tuple[int, int]:
@@ -85,8 +107,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
     out = []
     for c in playing:
         src = seq.sources.get(c.src)
-        if src is None or not src.has_audio or not os.path.exists(c.src):
-            continue
+        if src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
+            continue  # clipes sem arquivo (geradores) não têm som
         head, tail = heads.get(c.id), tails.get(c.id)
         pre = head[0] if head else 0.0    # o clipe começa antes (transição com o anterior)
         post = tail[1] if tail else 0.0   # e termina depois (transição com o próximo)
@@ -105,7 +127,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
         if micro:
             v = c.values
             prev, nxt = seq.previous_on_track(c), seq.next_on_track(c)
-            micro_in = (head is None and float(v["fade_in"]) < micro and c.src_in > 1e-4
+            cut_in = seq.source_room(c)[0] > 1e-4 if c.retimed else c.src_in > 1e-4
+            micro_in = (head is None and float(v["fade_in"]) < micro and cut_in
                         and not (prev is not None and prev.id in audible and seq.continues(prev, c)))
             micro_out = (tail is None and float(v["fade_out"]) < micro and c.dur < seq.max_dur(c)
                          and not (nxt is not None and nxt.id in audible and seq.continues(c, nxt)))
@@ -119,6 +142,11 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "trim_len": trim_len,
             "delay": delay,                                      # posição no trecho
             "gain_db": float(c.values["volume"]) + (tr.volume if tr else 0.0),
+            "track_db": tr.volume if tr else 0.0,
+            # Volume animado: as chaves do clipe no tempo dele (τ = segundos do clipe × fps + key_off).
+            "vol_keys": c.keys.get("volume") or [],
+            "key_off": c.key_off,
+            "fps": fps,
             "pre": pre,                                          # s antes do início do clipe (transição)
             "xf_in": sum(head) if head else 0.0,                 # transição de entrada (começa em 0)
             "xf_out": sum(tail) if tail else 0.0,                # transição de saída...
@@ -127,19 +155,90 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "micro_in": micro_in,
             "micro_out": micro_out,
         })
+        if c.retimed:  # rampa / reverso: os pedaços de velocidade constante, do começo da cadeia ao fim
+            m = seq.time_map(c)
+            out[-1]["pieces"] = m.pieces(-pre, c.dur / fps + post)
+            out[-1]["reverse"] = c.reverse
+            out[-1]["length"] = src.length
     return out
 
 
 def has_audio(seq: timeline.Sequence, start: int = 0, end: int = -1) -> bool:
-    return bool(segments(seq, start, end))
+    return bool(segments(seq, start, end)) or bool(tones(seq, start, end))
 
 
-def _chain(seg: dict, k: int) -> str:
+# ------------------------------------------------------------------ som de clipes sem arquivo
+# Tons de um clipe gerado (o bipe da ponta com contagem, `generators.tones`):
+#     TONES[tipo da fonte] = fn(seq, clipe) -> [(quadro da fonte, quadros, frequência Hz, ganho dB)]
+# O tom toca nos quadros da sequência que mostram aqueles quadros da fonte (`Sequence.src_frame`: com aparar e
+# velocidade), exato à amostra a 48 kHz, nas duas saídas (prévia e exportação usam `build_graph`). Faixa de
+# vídeo escondida: sem tom. Sem tons, o grafo é o de sempre.
+TONES: dict = {}
+
+
+def tones(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict]:
+    """Tons que tocam no trecho [start, end) (quadros): {onset, samples (no trecho, em amostras), freq, gain_db}."""
+    if not TONES:
+        return []
+    a, b = _range(seq, start, end)
+    fps = seq.fps
+    out = []
+    for c in seq.clips:
+        src = seq.sources.get(c.src)
+        fn = TONES.get(src.kind) if (c.kind == timeline.VIDEO and src is not None and not src.is_file) else None
+        if fn is None:
+            continue
+        tr = seq.track(timeline.VIDEO, c.track)
+        if tr is not None and tr.muted:
+            continue
+        for f0, n, freq, db in fn(seq, c):
+            shown = [t for t in range(c.start, c.end) if f0 <= seq.src_frame(c, t) < f0 + n]
+            if not shown:
+                continue
+            t0, t1 = max(shown[0], a), min(shown[-1] + 1, b)
+            if t1 <= t0:
+                continue
+            s0 = int(round((t0 - a) / fps * RATE))
+            s1 = int(round((t1 - a) / fps * RATE))
+            if s1 > s0:
+                out.append({"onset": s0, "samples": s1 - s0, "freq": float(freq), "gain_db": float(db),
+                            "phase": int(round((t0 - shown[0]) / fps * RATE)), "clip": c.id})
+    return out
+
+
+def _tone_input(tone: dict) -> list[str]:
+    """Entrada do ffmpeg com o tom (seno estéreo na amplitude exata, começando na fase certa)."""
+    amp = 10.0 ** (tone["gain_db"] / 20.0)
+    w = f"{amp:.8f}*sin(2*PI*{_fmt(tone['freq'])}*(n+{tone['phase']})/{RATE})"
+    secs = (tone["samples"] + 64) / RATE
+    return ["-f", "lavfi", "-i", f"aevalsrc=exprs={w}|{w}:s={RATE}:d={secs:.6f}"]
+
+
+def _tone_chain(tone: dict, index: int, k: int) -> str:
+    f = [f"[{index}:a]aformat=sample_fmts=fltp:channel_layouts=stereo", f"atrim=end_sample={tone['samples']}",
+         "asetpts=PTS-STARTPTS"]
+    if tone["onset"] > 0:
+        f.append(f"adelay=delays={tone['onset']}S|{tone['onset']}S")
+    return ",".join(f) + f"[t{k}]"
+
+
+def _chain(seg: dict, k: int, inp: int | None = None) -> str:
+    c: timeline.Clip = seg["clip"]
+    f = [f"[{k + 1 if inp is None else inp}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
+    f += _atempo(c.speed)
+    return ",".join(f + _chain_tail(seg)) + f"[a{k}]"
+
+
+def _chain_tail(seg: dict) -> list[str]:
+    """O que vem depois da velocidade: volume, equalização, voz, ruído, normalização, balanço, fades, recorte e
+    atraso (o mesmo para um clipe comum e para um com rampa/reverso)."""
     c: timeline.Clip = seg["clip"]
     v = c.values
-    f = [f"[{k + 1}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
-    f += _atempo(c.speed)
-    if abs(seg["gain_db"]) > 1e-6:
+    f: list[str] = []
+    vk = seg.get("vol_keys")
+    if vk:
+        f.append(volume_envelope(vk, seg["pre"], seg["fps"], seg["key_off"], seg["track_db"]))
+    elif abs(seg["gain_db"]) > 1e-6:
         f.append(f"volume={_fmt(seg['gain_db'])}dB")
     if v["voz"]:
         f += ["highpass=f=90", "acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2"]
@@ -179,42 +278,181 @@ def _chain(seg: dict, k: int) -> str:
     ms = int(round(seg["delay"] * 1000))
     if ms > 0:
         f.append(f"adelay={ms}|{ms}")
-    return ",".join(f) + f"[a{k}]"
+    return f
+
+
+def _groups(pieces: list[tuple[float, float, float, float]], reverse: bool) -> list[list[tuple]]:
+    """Pedaços em blocos de até `GROUP_S` do arquivo (um bloco = uma entrada do ffmpeg). No reverso um pedaço
+    mais longo que isso é partido (o `areverse` guarda o bloco inteiro na memória)."""
+    flat = []
+    for xa, xb, sa, sb in pieces:
+        n = max(1, int(abs(sb - sa) // GROUP_S) + 1) if reverse else 1
+        for i in range(n):
+            a = xa + (xb - xa) * i / n
+            b = xa + (xb - xa) * (i + 1) / n if i < n - 1 else xb
+            flat.append((a, b, sa + (sb - sa) * i / n, sa + (sb - sa) * (i + 1) / n if i < n - 1 else sb))
+    groups: list[list[tuple]] = []
+    for pc in flat:
+        if groups:
+            lo = min(min(q[2], q[3]) for q in groups[-1] + [pc])
+            hi = max(max(q[2], q[3]) for q in groups[-1] + [pc])
+            if hi - lo <= GROUP_S:
+                groups[-1].append(pc)
+                continue
+        groups.append([pc])
+    return groups
+
+
+def _retimed_chain(seg: dict, k: int, inp: int) -> tuple[list[str], str]:
+    """(entradas, cadeia) do som de um clipe com rampa de velocidade ou reverso (veja o cabeçalho).
+
+    O tempo da cadeia começa `pre` segundos antes do clipe, como na cadeia comum; cada pedaço (xa, xb, sa, sb)
+    toca o arquivo de `sa` a `sb` entre xa e xb (segundos desde o começo do clipe), com `atempo` = |sb − sa| /
+    (xb − xa), e entra/sai num cruzamento de `XFADE_S` com os vizinhos."""
+    c: timeline.Clip = seg["clip"]
+    pre, rev, length = seg["pre"], seg["reverse"], seg["length"]
+    pieces = seg["pieces"]
+    groups = _groups(pieces, rev)
+    n_all = sum(len(g) for g in groups)
+    inputs: list[str] = []
+    parts: list[str] = []
+    labels: list[str] = []
+    j = 0
+    for gi, group in enumerate(groups):
+        rates = [abs(sb - sa) / max(1e-9, xb - xa) for xa, xb, sa, sb in group]
+        pad = max(r * (XFADE_S / 2 + MARGIN_S) + _atempo_lag(r) for r in rates)
+        g_lo = max(0.0, min(min(q[2], q[3]) for q in group) - pad)
+        g_hi = min(length, max(max(q[2], q[3]) for q in group) + pad) if length > 0 else \
+            max(max(q[2], q[3]) for q in group) + pad
+        g_hi = max(g_hi, g_lo + 1e-3)
+        inputs += ["-ss", _fmt(g_lo), "-t", _fmt(g_hi - g_lo), "-i", c.src]
+        head = [f"[{inp + gi}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
+        if rev:
+            head.append("areverse")  # o tempo do bloco corre do fim (g_hi) para o começo
+        names = [f"r{k}_{j + i}" for i in range(len(group))]
+        if len(group) > 1:
+            parts.append(",".join(head) + f",asplit={len(group)}" + "".join(f"[{nm}]" for nm in names))
+        else:
+            parts.append(",".join(head) + f"[{names[0]}]")
+        for (xa, xb, sa, sb), r, nm in zip(group, rates, names):
+            first, last = j == 0, j == n_all - 1
+            a = 0.0 if first else XFADE_S / 2
+            b = 0.0 if last else XFADE_S / 2
+            # A janela do bloco que este pedaço usa (no tempo do bloco: do começo dele, ou do fim no reverso);
+            # a saída do atempo no instante τ toca o ponto τ·r + lag da janela, daí o `off` do recorte.
+            lag = _atempo_lag(r)
+            if rev:
+                want = sa + r * a                      # o arquivo no início do pedaço (com o cruzamento)
+                top = min(g_hi, want + lag + r * MARGIN_S)
+                w0, w1 = g_hi - top, g_hi - max(g_lo, sb - r * (b + MARGIN_S) - lag)
+                off = (top - want - lag) / r if r > 0 else 0.0
+            else:
+                want = sa - r * a
+                bot = max(g_lo, want - lag - r * MARGIN_S)
+                w0, w1 = bot - g_lo, min(g_hi, sb + r * (b + MARGIN_S) + lag) - g_lo
+                off = (want - bot - lag) / r if r > 0 else 0.0
+            late = max(0.0, -off)
+            off = max(0.0, off)
+            span = (xb - xa) + a + b
+            f = [f"[{nm}]atrim=start={_fmt(max(0.0, w0))}:end={_fmt(max(w0 + 1e-3, w1))}", "asetpts=PTS-STARTPTS"]
+            f += _atempo(r)
+            f += ["apad", f"atrim=start={_fmt(off)}:duration={_fmt(max(1e-3, span - late))}", "asetpts=PTS-STARTPTS"]
+            if a:
+                f.append(f"afade=t=in:st=0:d={_fmt(XFADE_S)}")
+            if b:
+                f.append(f"afade=t=out:st={_fmt(max(0.0, span - late - XFADE_S))}:d={_fmt(XFADE_S)}")
+            n = int(round((xa + pre - a + late) * RATE))  # em amostras: exato
+            if n > 0:
+                f.append(f"adelay={n}S|{n}S")
+            out = f"q{k}_{j}"
+            parts.append(",".join(f) + f"[{out}]")
+            labels.append(f"[{out}]")
+            j += 1
+    total = pieces[-1][1] + pre if pieces else 0.0
+    mix = "".join(labels) + (f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+                             if len(labels) > 1 else "anull,")
+    # O primeiro bloco de silêncio do `adelay` sai sem tempo (NOPTS) e o `atrim` se perde: o tempo é refeito pela
+    # contagem de amostras antes de completar e cortar a cadeia.
+    mix += f"asetpts=N/SR/TB,apad,atrim=duration={_fmt(total)}," + ",".join(["asetpts=PTS-STARTPTS"] + _chain_tail(seg))
+    parts.append(mix + f"[a{k}]")
+    return inputs, ";".join(parts)
+
+
+def volume_envelope(keys, pre: float, fps: float, key_off: int, track_db: float = 0.0) -> str:
+    """Filtro `volume` do ffmpeg com o volume animado (chaves em dB, `keyframes.ffmpeg_expr`: a mesma conta da
+    imagem), avaliado a cada bloco de som (`eval=frame`). `t` é o tempo da cadeia, que começa `pre` segundos
+    antes do clipe (transição de som); o tempo das chaves é τ = (t − pre) × fps + key_off."""
+    from . import keyframes
+    tau = f"((t-{_fmt(pre)})*{_fmt(fps)}+{int(key_off)})"
+    db = keyframes.ffmpeg_expr(keys, tau)
+    if abs(track_db) > 1e-9:
+        db = f"({db})+{_fmt(track_db)}"
+    return f"volume='pow(10,({db})/20)':eval=frame"
 
 
 def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[list[str], str] | None:
     """(entradas do ffmpeg, grafo de filtros) do trecho, ou None se não há som nele."""
     segs = segments(seq, start, end)
-    if not segs:
+    tns = tones(seq, start, end)
+    if not segs and not tns:
         return None
     a, b = _range(seq, start, end)
     total = (b - a) / seq.fps
     inputs = ["-f", "lavfi", "-t", _fmt(total), "-i", f"anullsrc=r={RATE}:cl=stereo"]
     chains = []
+    inp = 1
     for k, seg in enumerate(segs):
+        if seg.get("pieces"):  # rampa / reverso: várias entradas, uma por bloco do arquivo
+            ins, chain = _retimed_chain(seg, k, inp)
+            inputs += ins
+            inp += ins.count("-i")
+            chains.append(chain)
+            continue
         inputs += ["-ss", _fmt(seg["src_in"]), "-t", _fmt(seg["src_len"]), "-i", seg["clip"].src]
-        chains.append(_chain(seg, k))
-    labels = "[0:a]" + "".join(f"[a{k}]" for k in range(len(segs)))
-    mix = (f"{labels}amix=inputs={len(segs) + 1}:duration=first:dropout_transition=0:normalize=0,"
+        chains.append(_chain(seg, k, inp))
+        inp += 1
+    for k, tone in enumerate(tns):  # tons de clipes gerados (entradas depois dos arquivos)
+        inputs += _tone_input(tone)
+        chains.append(_tone_chain(tone, inp, k))
+        inp += 1
+    labels = "[0:a]" + "".join(f"[a{k}]" for k in range(len(segs))) + "".join(f"[t{k}]" for k in range(len(tns)))
+    mix = (f"{labels}amix=inputs={len(segs) + len(tns) + 1}:duration=first:dropout_transition=0:normalize=0,"
            f"atrim=duration={_fmt(total)}[out]")
     return inputs, ";".join(chains + [mix])
+
+
+_SCRIPT_OPTION: dict[str, str] = {}
+
+
+def script_option(ffmpeg_path: str) -> str:
+    """A opção que lê o grafo de um arquivo: `-/filter_complex` desde o ffmpeg 7.0 (o antigo
+    `-filter_complex_script` saiu no 8); num ffmpeg 6 (o do Ubuntu 24.04, abaixo da versão recomendada mas
+    ainda aceito), a antiga. Versão desconhecida (build de desenvolvimento): a nova."""
+    opt = _SCRIPT_OPTION.get(ffmpeg_path)
+    if opt is None:
+        from . import deps
+        info = deps.inspect(ffmpeg_path)
+        old = info is not None and info.version is not None and info.version < (7, 0)
+        opt = _SCRIPT_OPTION[ffmpeg_path] = "-filter_complex_script" if old else "-/filter_complex"
+    return opt
 
 
 def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
                   script_path: str | None = None) -> list[str] | None:
     """Comando do ffmpeg que grava o som do trecho [start, end) num WAV (None se não há som).
 
-    Com `script_path`, o grafo é gravado nesse arquivo e passado por `-filter_complex_script`
-    (grafos longos passam do limite da linha de comando do Windows).
+    Com `script_path`, o grafo é gravado nesse arquivo e passado pela opção de `script_option` (grafos longos
+    passam do limite da linha de comando do Windows).
     """
     g = build_graph(seq, start, end)
     if g is None:
         return None
     inputs, graph = g
-    cmd = [media.ffmpeg(), "-y", "-v", "error", "-nostdin", "-hide_banner", *inputs]
+    ff = media.ffmpeg()
+    cmd = [ff, "-y", "-v", "error", "-nostdin", "-hide_banner", *inputs]
     if script_path:
         Path(script_path).write_text(graph, encoding="utf-8")
-        cmd += ["-filter_complex_script", script_path]
+        cmd += [script_option(ff), script_path]
     else:
         cmd += ["-filter_complex", graph]
     cmd += ["-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(RATE), "-ac", "2", out_path]
@@ -283,6 +521,9 @@ def mix_key(seq: timeline.Sequence) -> str:
     }
     if seq.micro_fade:
         data["micro_fades"] = True
+    tns = tones(seq)
+    if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
+        data["tons"] = [[t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns]
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 

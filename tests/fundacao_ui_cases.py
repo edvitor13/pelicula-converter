@@ -1,0 +1,367 @@
+"""Casos da janela principal para a base da 1.5: a receita do quadro, as chaves de animação e a transparência.
+
+Rodados por test_fundacao_ui.py num subprocesso offscreen (via `uicases.run_cases`): os widgets do Qt precisam
+de uma QApplication própria. Este arquivo não é coletado sozinho pelo pytest. A janela precisa de OpenGL 3.3:
+sem ele, os casos pulam.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+APP = QApplication.instance() or QApplication([])
+
+from pelicula import export, media, presets  # noqa: E402
+from pelicula import timeline as tl  # noqa: E402
+from pelicula.export import ExportSettings  # noqa: E402
+
+
+def pump(cond, timeout=20.0) -> bool:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        APP.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+@pytest.fixture(scope="module")
+def win():
+    from pelicula.ui import prefs
+    from pelicula.ui.main_window import MainWindow
+    st = prefs.settings()
+    st.setValue("auto_update", "false")
+    st.setValue("language", "pt_BR")
+    try:
+        w = MainWindow()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"OpenGL 3.3 indisponível: {exc}")
+    w.confirm_discard = lambda: True
+    w.resize(1400, 900)
+    w.show()
+    APP.processEvents()
+    yield w
+
+
+def _open(win, path) -> None:
+    win.set_mode("pelicula")
+    win.cur = None
+    win.load_media(path)
+    assert pump(lambda: win.cur is not None), "o quadro não carregou"
+
+
+def _set_sequence(win, seq, mode="edicao") -> None:
+    win._loading = True
+    try:
+        win.model.set_sequence(seq)
+    finally:
+        win._loading = False
+    win._refresh_source(reset=True)
+    win.set_mode(mode)
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None), "o quadro da montagem não carregou"
+
+
+def _export_frame(win, n) -> np.ndarray:
+    """O quadro `n` como a exportação (no tamanho original, 16 bits, sem pontilhado) o grava."""
+    s = ExportSettings(codec="ffv1", container="mkv", pix="rgb48le", audio="none", dither=False)
+    seq = win.src_seq.copy() if win.src_seq is not None else None
+    return export.preview_frame(win.engine, win.info, win._export_look()[0], s, n, seq=seq, depth=16,
+                                keys=win._export_keys())
+
+
+# ------------------------------------------------------------------ receita do quadro
+def test_save_frame_is_the_exported_frame_in_film_mode(win, sample_video):
+    _open(win, sample_video)
+    win.apply_preset("vision3_500t")
+    win.store.set("grao_forca", 1.5)
+    for n in (2, 7):
+        assert np.array_equal(win.still_frame(n), _export_frame(win, n)), f"quadro {n}"
+
+
+def test_preview_recipe_is_the_export_recipe_reduced(win, sample_video):
+    _open(win, sample_video)
+    win.apply_preset("vision3_500t")
+    prev, still = win.frame_recipe(), win.frame_recipe(16, full=True)
+    assert (prev.depth, prev.dither, prev.size) == (8, True, win.preview_size())
+    assert prev.values is win.store.values and prev.seq is None
+    assert (still.depth, still.dither, still.size) == (16, False, (win.info.width, win.info.height))
+    assert still.values == win._export_look()[0]
+    assert (prev.fps, prev.legal, prev.lut) == (still.fps, still.legal, still.lut)
+
+
+def test_save_frame_is_the_exported_frame_in_edit_mode(win, sample_video):
+    _open(win, sample_video)
+    win.apply_preset("vision3_500t")
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    seq.split(10)
+    v = sorted((c for c in seq.clips if c.kind == tl.VIDEO), key=lambda c: c.start)
+    seq.set_values(v[1].id, {**v[1].values, "exposicao": 0.5, "escala": 0.7, "rotacao": 6.0})
+    over, = seq.insert_media(src, at=3, vtrack=1, with_audio=False)
+    seq.set_values(over.id, {**over.values, "escala": 0.5, "opacidade": 0.5})
+    _set_sequence(win, seq)
+    for film in (False, True):
+        win._set_edit_film(film)
+        r = win.frame_recipe()
+        assert (r.values is None) == (not film) and r.seq is win.model.seq
+        assert win.frame_recipe(16, full=True).values == win._export_look()[0]
+        for n in (4, 12):
+            assert np.array_equal(win.still_frame(n), _export_frame(win, n)), f"quadro {n}, película {film}"
+    win._set_edit_film(False)
+    assert presets.builtin_values("original") == win._export_look()[0]
+
+
+# ------------------------------------------------------------------ chaves de animação (sem GPU)
+def _model_seq():
+    from pelicula.ui.edit_model import TimelineModel
+    src = tl.Source("C:/v/a.mp4", 320, 180, 24.0, "24/1", 240, 10.0, has_audio=True)
+    m = TimelineModel(tl.Sequence.for_source(src))
+    v = next(c for c in m.seq.clips if c.kind == tl.VIDEO)
+    return m, v.id
+
+
+def test_timeline_model_key_api_with_history():
+    m, vid = _model_seq()
+    seen = []
+    m.changed.connect(seen.append)
+    assert m.add_key(vid, "opacidade", 10, 0.0)
+    assert m.add_key(vid, "opacidade", 40, 1.0, "suavizar")
+    assert m.keys_of(vid, "opacidade") == [(10.0, 0.0, "linear"), (40.0, 1.0, "suavizar")]
+    assert m.value_at(vid, "opacidade", 25) == 0.5 and m.value_at(vid, "opacidade", 0) == 0.0
+    assert seen == ["values", "values"]
+    assert m.move_key(vid, "opacidade", 40, 30)
+    assert m.keys_of(vid, "opacidade")[1][0] == 30.0
+    assert not m.move_key(vid, "opacidade", 99, 31) and not m.remove_key(vid, "opacidade", 77)
+    assert m.remove_key(vid, "opacidade", 10) and len(m.keys_of(vid, "opacidade")) == 1
+    m.undo()
+    assert len(m.keys_of(vid, "opacidade")) == 2
+    m.undo()
+    assert m.keys_of(vid, "opacidade")[1][0] == 40.0
+    m.redo()
+    m.redo()
+    assert m.keys_of(vid, "opacidade") == [(30.0, 1.0, "suavizar")]
+    assert m.clear_keys(vid) and m.keys_of(vid, "opacidade") == [] and not m.clear_keys(vid)
+    m.undo()
+    assert m.keys_of(vid, "opacidade") == [(30.0, 1.0, "suavizar")]
+    with pytest.raises(KeyError):
+        m.add_key(vid, "mesclagem", 0, "tela")
+
+
+def test_timeline_model_edits_keep_the_animation():
+    m, vid = _model_seq()
+    m.add_key(vid, "exposicao", 0, -1.0)
+    m.add_key(vid, "exposicao", 100, 1.0, "suavizar")
+    before = {t: m.value_at(vid, "exposicao", t) for t in range(0, 200)}
+    m.split_clip(vid, 50)
+    m.commit()
+    halves = sorted((c for c in m.seq.clips if c.kind == tl.VIDEO), key=lambda c: c.start)
+    assert len(halves) == 2
+    for t in range(0, 200):
+        c = halves[0] if t < halves[1].start else halves[1]
+        assert m.value_at(c.id, "exposicao", t) == before[t]
+    # copiar a cor (com a animação) para o outro clipe, preso ao começo dele
+    assert m.copy_values(halves[0].id) and m.paste_values([halves[1].id]) == 1
+    for k in range(0, 40):
+        assert m.value_at(halves[1].id, "exposicao", 50 + k) == before[k]
+    m.undo()
+    for t in range(50, 200):
+        assert m.value_at(halves[1].id, "exposicao", t) == before[t]
+    # fps novo: as chaves acompanham o tempo em segundos
+    c0 = halves[0]
+    m.set_settings(m.seq.width, m.seq.height, "48/1")
+    c0 = m.seq.find(c0.id)
+    assert m.value_at(c0.id, "exposicao", 50) == pytest.approx(before[25])
+    m.undo()
+    assert m.value_at(c0.id, "exposicao", 25) == before[25]
+
+
+def test_param_store_look_keys_with_history():
+    from pelicula.ui.store import ParamStore
+    st = ParamStore()
+    assert st.keys == {} and st.keys_json() == {}
+    st.set("exposicao", 0.5)
+    assert st.add_key("exposicao", 0)          # o valor atual
+    assert st.add_key("exposicao", 24, 1.5, "suavizar_entrada")
+    assert st.keys_of("exposicao") == [(0.0, 0.5, "linear"), (24.0, 1.5, "suavizar_entrada")]
+    assert st.value_at("exposicao", 12) == pytest.approx(1.0)  # curva da chave da esquerda (linear)
+    assert st.values_at(12)["exposicao"] == pytest.approx(1.0) and st.values["exposicao"] == 0.5
+    st.undo()
+    assert st.keys_of("exposicao") == [(0.0, 0.5, "linear")]
+    st.redo()
+    assert len(st.keys_of("exposicao")) == 2
+    assert st.move_key("exposicao", 24, 48) and st.keys_of("exposicao")[1][0] == 48.0
+    st.set_all(presets.builtin_values("vision3_500t"))  # um preset troca os valores; as chaves ficam
+    assert len(st.keys_of("exposicao")) == 2
+    st.set_all(st.values, keys={})
+    assert st.keys == {}
+    st.undo()
+    assert len(st.keys_of("exposicao")) == 2
+    with pytest.raises(KeyError):
+        st.add_key("bitola", 0, "8mm")
+
+
+# ------------------------------------------------------------------ chaves de animação na janela
+def test_look_keys_reach_preview_save_frame_project_and_export(win, sample_video):
+    from pelicula import project
+    _open(win, sample_video)
+    win.apply_preset("vision3_500t")
+    win.store.add_key("exposicao", 0, -1.0)
+    win.store.add_key("exposicao", 20, 1.5, "suavizar")
+    assert win.frame_recipe().keys == win.store.keys and win._export_keys() == win.store.keys_json()
+    for n in (2, 15):
+        assert np.array_equal(win.still_frame(n), _export_frame(win, n)), f"quadro {n}"
+    a, b = win.still_frame(2), win.still_frame(15)
+    assert not np.array_equal(a, b)
+    p = win._make_project(backup=True)
+    assert p.look_keys == win.store.keys_json() and "chaves_look" in p.features()
+    win._saved_state = win._state()
+    win.store.remove_key("exposicao", 20)
+    assert win.is_dirty()
+    win.store.clear_keys()
+    win.show_project(project.from_json(p.to_json()), remember=False)
+    assert win.store.keys_json() == p.look_keys
+    win.store.clear_keys()
+
+
+def test_animated_clip_in_edit_mode_is_the_exported_frame(win, sample_video):
+    _open(win, sample_video)
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_key(v.id, "escala", 0, 1.0)
+    seq.set_key(v.id, "escala", 20, 0.5, "suavizar")
+    seq.set_key(v.id, "exposicao", 0, 0.0)
+    seq.set_key(v.id, "exposicao", 20, 1.0)
+    _set_sequence(win, seq)
+    win._set_edit_film(False)
+    shots = [win.still_frame(n) for n in (3, 18)]
+    for n, img in zip((3, 18), shots):
+        assert np.array_equal(img, _export_frame(win, n)), f"quadro {n}"
+    assert not np.array_equal(shots[0], shots[1])
+    live = win._live_layers(win.cur_layers) if win.cur_layers is not None else None
+    if live is not None and live.layers:
+        layer = live.layers[0].layer
+        assert layer.values == win.model.seq.values_at(layer.clip, live.frame)
+
+
+# ------------------------------------------------------------------ transparência
+ALPHA_W, ALPHA_H = 320, 180
+
+
+def _alpha_media(ffmpeg, folder):
+    """Um PNG com alfa (transparente à esquerda, rampa, opaco à direita) e um PNG de cor sólida para a V1."""
+    import subprocess
+    png, bg = os.path.join(folder, "recorte.png"), os.path.join(folder, "fundo_azul.png")
+    geq = "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X,100),0,if(lt(X,220),255*(X-100)/120,255))'"
+    for out, args in ((png, ["-f", "lavfi", "-i", f"testsrc2=s={ALPHA_W}x{ALPHA_H}:d=0.1", "-vf", geq]),
+                      (bg, ["-f", "lavfi", "-i", f"color=c=0x3366CC:s={ALPHA_W}x{ALPHA_H}"])):
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-nostdin", *args, "-frames:v", "1", out], check=True)
+    return png, bg
+
+
+def test_alpha_file_through_the_bin_and_a_drop_on_the_timeline(win, ffmpeg_ok, tmp_path):
+    png, bg = _alpha_media(ffmpeg_ok, str(tmp_path))
+    win.set_mode("edicao")
+    win._loading = True
+    try:
+        win.model.set_sequence(tl.Sequence(width=ALPHA_W, height=ALPHA_H, fps_str="24/1"))
+    finally:
+        win._loading = False
+    win._sources = {}
+    win.bin.clear()
+    win._refresh_source(reset=True)
+    win._bin_files([png])  # soltos na Mídia
+    assert win._sources[png].has_alpha and win.bin._sources[png].has_alpha
+    win.drop_on_timeline([bg], 0, tl.VIDEO, 0)
+    win.drop_on_timeline([png], 0, tl.VIDEO, 1)  # da Mídia para a V2
+    seq = win.model.seq
+    assert seq.sources[png].has_alpha and not seq.sources[bg].has_alpha
+    assert sorted(c.track for c in seq.clips if c.kind == tl.VIDEO) == [0, 1]
+    win._set_edit_film(False)
+    win._refresh_source(reset=True)
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None), "o quadro da montagem não carregou"
+    img = win.still_frame(0)
+    assert np.array_equal(img, _export_frame(win, 0)), "a prévia e a exportação veem a mesma transparência"
+    top = next(c for c in seq.clips if c.src == png)
+    win.model.set_clip_values(top.id, {**top.values, "opacidade": 0.0})  # só o fundo, pelo mesmo caminho
+    win._refresh_source()
+    fundo = win.still_frame(0)
+    assert np.array_equal(img[:, :95], fundo[:, :95]), "o fundo aparece igual onde o recorte é transparente"
+    assert not np.array_equal(img[:, 230:], fundo[:, 230:]), "o recorte cobre o fundo onde é opaco"
+    seq = win.model.seq
+    d = seq.to_json()
+    assert any(s.get("alfa") for s in d["fontes"]) and "alfa" in seq.features()
+
+
+def test_alpha_file_opened_in_film_mode_is_composed_over_the_background(win, ffmpeg_ok, tmp_path):
+    png, _bg = _alpha_media(ffmpeg_ok, str(tmp_path))
+    _open(win, png)
+    assert win.file_info.has_alpha and win.model.seq.sources[png].has_alpha
+    assert win.src_seq is not None, "com alfa a prévia passa pela montagem (lido direto o alfa se perderia)"
+    assert win._seq_json() is None, "sem edições o projeto continua simples"
+    assert np.array_equal(win.still_frame(0), _export_frame(win, 0))
+    p = win._make_project()
+    assert p.sequence is None and p.media_path == png
+
+
+# ------------------------------------------------------------------ clipes sem arquivo
+def _test_generator(seq, clip, frame, w, h, depth):
+    """Gerador só de teste (registrado neste subprocesso): metade direita laranja, opaca; o resto transparente."""
+    img = np.zeros((h, w, 4), np.uint8 if depth == 8 else np.uint16)
+    mx = 255 if depth == 8 else 65535
+    img[:, w // 2:] = (mx, mx // 2, 0, mx)
+    return img
+
+
+def test_virtual_source_in_the_bin_timeline_and_project(win, sample_video, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMessageBox
+
+    from pelicula import project, sequence
+    monkeypatch.setitem(sequence.RENDERERS, "gerador", _test_generator)
+    _open(win, sample_video)
+    win.set_mode("edicao")
+    src = tl.Source.virtual("gerador", 320, 180, "24/1", data={"nome": "Teste gerado"})
+    assert win.adopt_source(src) is src and win.adopt_source(src) is src  # uma vez só na Mídia
+    item = win.bin._item(src.path)
+    assert item is not None and item.text().splitlines() == ["Teste gerado", "gerado"]
+    assert item.data(Qt.ItemDataRole.UserRole + 1) == "gerado"
+    win.drop_on_timeline([src.path], 0, tl.VIDEO, 1)  # arrastado da Mídia para a V2
+    seq = win.model.seq
+    clip = next(c for c in seq.clips if c.src == src.path)
+    assert clip.kind == tl.VIDEO and clip.track == 1 and not any(c.src == src.path for c in seq.clips
+                                                                  if c.kind == tl.AUDIO)
+    assert win._peaks_for(src.path) is None
+    win._set_edit_film(False)
+    win._refresh_source()
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None)
+    img = win.still_frame(0)
+    assert np.array_equal(img, _export_frame(win, 0)), "a prévia e a exportação desenham igual"
+    top = np.abs(img[:, 200:].astype(int) - (65535, 32767, 0)).max()
+    assert top <= 128, f"o gerador por cima, opaco ({top})"  # meio código de 8 bits: a saída da tela
+    # projeto: abre sem pedir para "localizar" a fonte sem arquivo
+    p = win._make_project()
+    assert p.media_path == sample_video
+    path = str(tmp_path / "gerado.plc")
+    project.save(p, path)
+
+    def no_prompt(*a, **k):
+        raise AssertionError("pediu para localizar uma fonte sem arquivo")
+
+    monkeypatch.setattr(QMessageBox, "question", no_prompt)
+    win._open_sequence_project(project.load(path), remember=False)
+    assert src.path in win.model.seq.sources and win.bin._item(src.path) is not None

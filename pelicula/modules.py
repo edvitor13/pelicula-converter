@@ -47,6 +47,9 @@ class Module:
 MODULES: tuple[Module, ...] = (
     Module("edicao", N_("Modo Edição"),
            N_("Linha do tempo com faixas de vídeo e de som, cortes e ajustes por clipe."), "edicao"),
+    Module("titulos_geradores", N_("Títulos e geradores"),
+           N_("Títulos com estilos prontos e animações, cor sólida, degradê e ponta com contagem, no botão Novo "
+              "da Mídia do modo Edição."), "edicao"),
     Module("laboratorio", N_("Laboratório"),
            N_("Emulação por densidade: negativo, luzes da copiadora, cópia e Technicolor."), "pelicula"),
     Module("defeitos", N_("Defeitos da película"),
@@ -65,6 +68,11 @@ MODULES: tuple[Module, ...] = (
            N_("Tira o fundo verde ou azul de um vídeo com o CorridorKey, da Corridor Digital, e grava o vídeo com "
               "transparência e a máscara. Precisa de uma placa NVIDIA RTX série 30 ou mais nova e de um download à "
               "parte em Componentes."), "edicao", BETA, requires=("corridorkey",)),
+    Module("legendas_auto", N_("Legendas automáticas"),
+           N_("Transcreve a fala dos vídeos neste computador, sem enviar nada para a internet, e cria as legendas "
+              "com o tempo de cada palavra; com as palavras, dá para cortar trechos pelo texto. Precisa do "
+              "whisper.cpp, de um modelo de fala e do Silero VAD, baixados à parte em Componentes."),
+           "edicao", BETA, requires=("whisper_cpp", "silero_vad")),
     Module("medidor_som", N_("Medidor de som"),
            N_("Pico e volume (LUFS) do som durante a reprodução."), "audio"),
     Module("davinci", N_("Plugin do DaVinci Resolve"),
@@ -75,19 +83,30 @@ MODULES: tuple[Module, ...] = (
     Module("recuperacao", N_("Recuperação automática"),
            N_("Guarda cópias de segurança do projeto para recuperar o trabalho depois de um travamento."),
            "sistema"),
+    Module("transicoes", N_("Transições de película"),
+           N_("Queima da película, emenda com clarão, ponta, íris, fusão ótica e exposição, mais empurrar, cortina "
+              "e zoom, no menu do corte e no inspetor do clipe."), "edicao"),
+    Module("legendas", N_("Legendas"),
+           N_("Painel e faixa de legendas: escrever e acertar o tempo, estilos prontos (YouTube, Reels e Cinema), "
+              "importar e exportar .srt e .vtt e gravar as legendas no vídeo."), "edicao"),
+    Module("silencios", N_("Remover silêncios"),
+           N_("Acha os trechos sem fala no som da montagem e tira todos de uma vez, depois que você revisa a "
+              "lista."), "edicao"),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
-_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som"}
+_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios",
+                       "titulos_geradores"}
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
 # nunca são ligados por perfil, só um a um.
 PROFILES: tuple[tuple[str, str, str, frozenset[str]], ...] = (
     ("simples", N_("Simples"), N_("O essencial: looks prontos, cortes simples e exportação."), _SIMPLES),
-    ("criador", N_("Criador"), N_("Para vídeos de redes sociais e YouTube: defeitos, LUTs, scopes e medidor de som."),
+    ("criador", N_("Criador"), N_("Para vídeos de redes sociais e YouTube: defeitos, LUTs, scopes, medidor de som, "
+                                  "títulos e geradores, transições de película, legendas e remover silêncios."),
      _CRIADOR),
     ("cinema", N_("Cinema"), N_("Tudo do Criador mais o Laboratório, o scan, a curva, LUTs e o plugin do DaVinci."),
      _CINEMA),
@@ -173,8 +192,9 @@ def visible(settings) -> list[Module]:
     return [m for m in MODULES if m.status == ESTAVEL or tests or is_enabled(settings, m.id)]
 
 
-def used_by(values: dict | None = None, sequence=None) -> set[str]:
-    """Módulos que um look (valores) ou uma montagem usam de fato.
+def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[str]:
+    """Módulos que um look (valores), uma montagem ou as legendas do projeto (`subtitles.Subtitles`, também
+    lidas de `sequence.subtitles`) usam de fato.
 
     Serve para avisar ao abrir um projeto ou aplicar um preset que depende de um módulo
     desligado. A renderização não muda: o aviso só oferece religar a ferramenta.
@@ -190,4 +210,11 @@ def used_by(values: dict | None = None, sequence=None) -> set[str]:
     trivial = getattr(sequence, "is_trivial", lambda: True)
     if sequence is not None and getattr(sequence, "clips", True) and not trivial():
         used.add("edicao")
+        if any(not s.is_file for s in getattr(sequence, "used_sources", lambda: [])()):
+            used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
+    if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
+        used.add("transicoes")
+    for subs in (subtitles, getattr(sequence, "subtitles", None)):
+        if subs is not None and not subs.is_empty():
+            used.add("legendas")
     return used

@@ -5,13 +5,18 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
-- "settings": resolução, fps, fundo ou fades curtos nas emendas de som da sequência;
+- "settings": resolução, fps, fundo, fades curtos nas emendas de som ou faixa principal magnética;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
+- "subtitles": só as legendas mudaram (`edit_subtitles`; a montagem e o som não mudam, só o desenho das
+  legendas gravadas no vídeo), inclusive ao desfazer/refazer;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
 outro, e "Excluir" apaga o que estiver selecionado.
+
+Toda edição que mexe na estrutura passa por `Sequence.keep_main()`: com a faixa principal magnética ligada,
+a V1 fica sem buracos depois dela e o resto acompanha (`Sequence.settle_main`); sem ela, nada muda.
 """
 
 from __future__ import annotations
@@ -21,8 +26,10 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import editparams, timeline
+from .. import editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
+
+FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
 AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
@@ -31,6 +38,13 @@ AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo 
 def _without_markers(seq: Sequence) -> dict[str, Any]:
     d = seq.to_json()
     d.pop("marcadores", None)
+    return d
+
+
+def _without_subtitles(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("legendas", None)
+    d.pop("formato", None)  # o recurso "legendas" muda o formato do bloco
     return d
 
 
@@ -46,6 +60,7 @@ class TimelineModel(QObject):
         self.selection: list[str] = []
         self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
+        self.clipboard_keys: dict[str, list] = {}  # chaves da cor copiadas (tempo a partir do começo do clipe)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(400)
@@ -78,9 +93,11 @@ class TimelineModel(QObject):
         if seq is None:
             return
         only_markers = _without_markers(seq) == _without_markers(self.seq)
+        only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
         self.seq = seq
         self._filter_selection()
-        self.changed.emit("markers" if only_markers else "*")  # desfazer um marcador não recarrega a prévia
+        # Desfazer um marcador ou uma legenda não recarrega a prévia.
+        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles else "*")
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -146,8 +163,11 @@ class TimelineModel(QObject):
         return clips[0] if clips else None
 
     # ------------------------------------------------------------ edição
-    def insert_media(self, src: Source, at: int | None = None, vtrack: int = 0, atrack: int = 0) -> list[Clip]:
-        made = self.seq.insert_media(src, at, vtrack, atrack)
+    def insert_media(self, src: Source, at: int | None = None, vtrack: int = 0, atrack: int = 0,
+                     insert: bool = False) -> list[Clip]:
+        """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o resto em vez de sobrescrever."""
+        with self.seq.keep_main():
+            made = self.seq.insert_media(src, at, vtrack, atrack, insert=insert)
         if made:
             self.selection = [c.id for c in made]
             self.selectionChanged.emit()
@@ -169,13 +189,20 @@ class TimelineModel(QObject):
             self._done("structure")
         return made
 
+    def _delete(self, ids: list[str], ripple: bool) -> None:
+        seq = self.seq
+        if ripple and seq._magnet_owns(seq.expand(ids)):
+            ripple = False  # V1 magnética: ela mesma fecha o espaço e o resto acompanha a imagem
+        with seq.keep_main():
+            seq.delete(ids, ripple=ripple)
+
     def delete_selected(self, ripple: bool = False) -> None:
         if self.marker_sel is not None:
             self.remove_marker(self.marker_sel)
             return
         if not self.selection:
             return
-        self.seq.delete(list(self.selection), ripple=ripple)
+        self._delete(list(self.selection), ripple)
         self.selection = []
         self.selectionChanged.emit()
         self._done("structure")
@@ -184,30 +211,83 @@ class TimelineModel(QObject):
         ids = list(ids)
         if not ids:
             return
-        self.seq.delete(ids, ripple=ripple)
+        self._delete(ids, ripple)
         self._done("structure")
 
-    def move_clip(self, cid: str, start: int, track: int | None = None) -> int:
+    def remove_ranges(self, frames: Iterable[tuple[int, int]]) -> int:
+        """Tira trechos de tempo (quadros [a, b)) de todas as faixas destravadas e encosta o resto, num passo de
+        desfazer ("Remover silêncios…", "Cortar pelo texto"; `rangecut.remove_ranges`). Devolve os quadros tirados."""
+        from .. import rangecut
+        with self.seq.keep_main():
+            n = rangecut.remove_ranges(self.seq, frames)
+        if n:
+            self._filter_selection(emit=True)
+            self._done("structure")
+        return n
+
+    def move_clip(self, cid: str, start: int, track: int | None = None, insert: bool = False) -> int:
+        """Move o clipe (e os ligados); `insert` abre espaço no destino em vez de sobrescrever."""
         c = self.seq.find(cid)
         if c is None:
             return 0
-        before = (c.start, c.track)
-        delta = self.seq.move(cid, int(start), track)
-        if (c.start, c.track) != before or delta:
+        before = self.history._dump(self.seq) if self.seq.magnetic else (c.start, c.track)
+        with self.seq.keep_main():
+            delta = (self.seq.move_insert if insert else self.seq.move)(cid, int(start), track)
+        after = self.history._dump(self.seq) if self.seq.magnetic else (c.start, c.track)
+        if after != before or delta:
             self._done("structure")
         return delta
 
-    def trim_start(self, cid: str, frame: int) -> int:
-        delta = self.seq.trim_start(cid, int(frame))
+    def trim_start(self, cid: str, frame: int, solo: bool = False) -> int:
+        """Apara o começo; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
+        seq = self.seq
+        with seq.keep_main():
+            if solo:
+                delta = seq.trim_start_only(cid, int(frame))
+            else:
+                delta = seq.trim_start(cid, seq.room_for_start(cid, int(frame)))
         if delta:
             self._done("structure")
         return delta
 
-    def trim_end(self, cid: str, frame: int) -> int:
-        delta = self.seq.trim_end(cid, int(frame))
+    def trim_end(self, cid: str, frame: int, solo: bool = False) -> int:
+        """Apara o fim; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
+        seq = self.seq
+        with seq.keep_main():
+            if solo:
+                delta = seq.trim_end_only(cid, int(frame))
+            else:
+                seq.room_for_end(cid, int(frame))
+                delta = seq.trim_end(cid, int(frame))
         if delta:
             self._done("structure")
         return delta
+
+    def trim_to_playhead(self, frame: int, side: str) -> int:
+        """Q (`side="start"`) / W (`"end"`): apara até o cursor o clipe sob ele — na faixa do clipe selecionado,
+        senão na faixa destravada mais de cima — e fecha o espaço. Devolve os quadros tirados (0 = nada)."""
+        prim = self.primary()
+        target = self.seq.trim_target(int(frame), (prim.kind, prim.track) if prim is not None else None)
+        if target is None:
+            return 0
+        with self.seq.keep_main():
+            if side == "start":
+                n = self.seq.ripple_trim_start(target.id, int(frame))
+            else:
+                n = self.seq.ripple_trim_end(target.id, int(frame))
+        if n:
+            self._done("structure")
+        return n
+
+    def split_edit(self, cid: str, left: bool, offset: int) -> int | None:
+        """Corte J (`offset` < 0) / L (> 0) / alinhado (0) no corte do começo (`left`) ou do fim do par ligado
+        de `cid`. Devolve o deslocamento que coube (None: ali não há um corte entre dois pares ligados)."""
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            got = self.seq.split_edit(cid, left, int(offset))
+        if got is not None and self.history._dump(self.seq) != before:
+            self._done("structure")
+        return got
 
     def set_clip_values(self, cid: str, values: dict[str, Any], record: bool = True) -> None:
         """Troca os ajustes do clipe. `record=False` (arrastando um slider) agrupa o histórico em 400 ms."""
@@ -216,7 +296,16 @@ class TimelineModel(QObject):
             return
         before = (c.start, c.dur, c.speed)
         old = copy.deepcopy(c.values)
-        self.seq.set_values(cid, values)
+        speed = values.get("velocidade", c.speed) if isinstance(values, dict) else c.speed
+        if self.seq.magnetic and abs(float(speed) - c.speed) > 1e-9:
+            whole = self.history._dump(self.seq)
+            with self.seq.keep_main():  # V1 magnética: mais lento empurra o resto, mais rápido puxa
+                self.seq.room_for_speed(cid, float(speed))
+                self.seq.set_values(cid, values)
+            if self.history._dump(self.seq) != whole:
+                before = None
+        else:
+            self.seq.set_values(cid, values)
         if c.values == old and (c.start, c.dur, c.speed) == before:
             return
         kind = "structure" if (c.start, c.dur, c.speed) != before else "values"
@@ -228,9 +317,73 @@ class TimelineModel(QObject):
         if not record:
             self.historyChanged.emit()
 
+    def set_source_data(self, path: str, data: dict[str, Any], record: bool = True) -> bool:
+        """Troca os parâmetros de uma fonte sem arquivo (`Source.data`: cor, degradê, texto do título…). Vale para
+        todos os clipes da fonte; recusa (False) se algum está numa faixa travada. `record=False` (arrastando um
+        controle) agrupa o histórico em 400 ms, como `set_clip_values`. Avisa com "values" (só a imagem muda)."""
+        src = self.seq.sources.get(path)
+        if src is None or src.is_file:
+            return False
+        if any(self.seq.locked(c) for c in self.seq.clips if c.src == path):
+            return False
+        new = copy.deepcopy(dict(data))
+        if new == src.data:
+            return True
+        src.data = new
+        if record:
+            self.commit()
+        else:
+            self._timer.start()
+        self.changed.emit("values")
+        if not record:
+            self.historyChanged.emit()
+        return True
+
     def set_speed(self, cid: str, speed: float) -> None:
-        self.seq.set_speed(cid, speed)
+        with self.seq.keep_main():
+            self.seq.room_for_speed(cid, speed)
+            self.seq.set_speed(cid, speed)
         self._done("structure")
+
+    # ------------------------------------------------------------ tempo: rampa, reverso
+    def set_ramp(self, cid: str, ramp) -> bool:
+        """Troca a rampa de velocidade do clipe (e dos ligados do mesmo arquivo): um passo do desfazer."""
+        return self._retime(cid, ramp=ramp)
+
+    def apply_ramp_preset(self, cid: str, preset: str, amount: float = timemap.AMOUNT_DEFAULT,
+                          ramp_s: float = timemap.RAMP_S_DEFAULT) -> bool:
+        """Rampa pronta (`timemap.PRESETS`) no trecho do arquivo que o clipe mostra agora."""
+        c = self.seq.find(cid)
+        if c is None or self.seq._holds(c):
+            return False
+        lo, hi = self.seq.source_range(c)
+        return self.set_ramp(cid, timemap.preset_anchors(preset, lo, hi, c.reverse, amount, ramp_s))
+
+    def freeze_frame(self, cid: str | None, frame: int, seconds: float = FREEZE_SECONDS,
+                     insert: bool = True) -> str | None:
+        """"Congelar este quadro" (`Sequence.freeze_frame`): um passo do desfazer; o quadro parado fica escolhido."""
+        with self.seq.keep_main():
+            hold = self.seq.freeze_frame(cid, int(frame), self.seq.frames_for(max(0.04, float(seconds))), insert)
+        if hold is None:
+            return None
+        self.selection = [hold.id]
+        self.selectionChanged.emit()
+        self._done("structure")
+        return hold.id
+
+    def set_reverse(self, cid: str, on: bool) -> bool:
+        """Liga/desliga o reverso do clipe (e dos ligados do mesmo arquivo, o som junto): um passo do desfazer."""
+        return self._retime(cid, reverse=bool(on))
+
+    def _retime(self, cid: str, ramp=None, reverse=None) -> bool:
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            self.seq.room_for_retime(cid, ramp=ramp, reverse=reverse)
+            self.seq.retime(cid, ramp=ramp, reverse=reverse)
+        if self.history._dump(self.seq) == before:
+            return False
+        self._done("structure")
+        return True
 
     def apply_look(self, cid: str, look: dict[str, Any]) -> None:
         """Ajuste rápido: zera a cor e a luz do clipe e aplica os valores do look."""
@@ -282,11 +435,13 @@ class TimelineModel(QObject):
         if len(self.seq.kind_tracks(kind)) <= 1:
             return
         self.seq.remove_track(kind, idx)
+        self.seq.settle_main()  # a faixa que virou V1 também fica sem buracos (se ela for magnética)
         self._done("structure")
 
     def close_gaps(self, kind: str, idx: int) -> None:
         """Junta os clipes da faixa, sem espaços entre eles."""
-        self.seq.close_gaps(kind, idx)
+        with self.seq.keep_main():
+            self.seq.close_gaps(kind, idx)
         self._done("structure")
 
     def set_track(self, kind: str, idx: int, **attrs) -> None:
@@ -307,12 +462,18 @@ class TimelineModel(QObject):
 
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,
-                     micro_fade: bool | None = None) -> None:
-        """Resolução, fps, fundo e fades curtos nas emendas de som. Ao mudar o fps, os clipes mantêm o
-        tempo (em segundos)."""
+                     micro_fade: bool | None = None, magnetic: bool | None = None,
+                     transparent: bool | None = None) -> None:
+        """Resolução, fps, fundo, fades curtos nas emendas de som e faixa principal magnética. Ao mudar o fps,
+        os clipes mantêm o tempo (em segundos); ao ligar a faixa magnética, a V1 se fecha na hora.
+        `transparent`: "Fundo transparente" (None = como está)."""
         seq = self.seq
+        if transparent is not None:
+            seq.transparent = bool(transparent)
         if micro_fade is not None:
             seq.micro_fade = bool(micro_fade)
+        if magnetic is not None:
+            seq.magnetic = bool(magnetic)
         old_fps = seq.fps
         fr = timeline.parse_fps(fps_str)
         seq.width = max(16, int(width))
@@ -326,10 +487,12 @@ class TimelineModel(QObject):
             for c in seq.clips:
                 c.start = int(round(c.start * ratio))
                 c.dur = max(1, int(round(c.dur * ratio)))
+                c.rescale_keys(ratio)  # chaves de animação no tempo novo
             for c in seq.clips:
                 c.dur = max(1, min(c.dur, seq.max_dur(c)))
             for mk in seq.markers:
                 mk.frame = int(round(mk.frame * ratio))
+        seq.settle_main()
         self._done("settings")
 
     # ------------------------------------------------------------ transição de som
@@ -398,12 +561,83 @@ class TimelineModel(QObject):
             self.selectionChanged.emit()
             self._done("markers")
 
+    # ------------------------------------------------------------ chaves de animação (keyframes.py)
+    # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo
+    # para as chaves fica para depois: estas funções são a API dela.
+    def keys_of(self, cid: str, key: str) -> list[tuple[float, Any, str]]:
+        """Chaves de um ajuste do clipe: [(quadro da sequência, valor, curva)]."""
+        c = self.seq.find(cid)
+        return self.seq.keys_of(c, key) if c is not None else []
+
+    def value_at(self, cid: str, key: str, frame: float) -> Any:
+        """O valor do ajuste no quadro (com as chaves; sem elas, o valor fixo do clipe)."""
+        c = self.seq.find(cid)
+        if c is None:
+            raise KeyError(cid)
+        return self.seq.values_at(c, frame)[key]
+
+    def add_key(self, cid: str, key: str, frame: float, value: Any = None, easing: str = "linear",
+                record: bool = True) -> bool:
+        """Chave no quadro (`value` None = o valor que o ajuste tem ali). Mesmo quadro = troca a chave.
+        `record=False` (a chave automática de um slider arrastado) agrupa o histórico em 400 ms."""
+        if not self.seq.set_key(cid, key, frame, value, easing):
+            return False
+        if record:
+            self._done("values")
+        else:
+            self._timer.start()
+            self.changed.emit("values")
+            self.historyChanged.emit()
+        return True
+
+    def move_key(self, cid: str, key: str, frame_from: float, frame_to: float) -> bool:
+        if self.seq.move_key(cid, key, frame_from, frame_to):
+            self._done("values")
+            return True
+        return False
+
+    def remove_key(self, cid: str, key: str, frame: float) -> bool:
+        if self.seq.remove_key(cid, key, frame):
+            self._done("values")
+            return True
+        return False
+
+    def move_keys(self, cid: str, moves: Iterable[tuple[str, float, float]]) -> bool:
+        """Chaves de vários ajustes do clipe andando juntas ([(ajuste, de, para)]): um passo do desfazer."""
+        by_key: dict[str, list[tuple[float, float]]] = {}
+        for key, a, b in moves:
+            by_key.setdefault(key, []).append((a, b))
+        changed = False
+        for key, pairs in by_key.items():
+            changed = self.seq.move_keys(cid, key, pairs) or changed
+        if changed:
+            self._done("values")
+        return changed
+
+    def remove_keys(self, cid: str, items: Iterable[tuple[str, float]]) -> bool:
+        """Apaga várias chaves do clipe ([(ajuste, quadro)]) num passo do desfazer."""
+        changed = False
+        for key, t in items:
+            changed = self.seq.remove_key(cid, key, t) or changed
+        if changed:
+            self._done("values")
+        return changed
+
+    def clear_keys(self, cid: str, key: str | None = None) -> bool:
+        """Tira a animação de um ajuste (ou de todos, com `key` None)."""
+        if self.seq.clear_keys(cid, key):
+            self._done("values")
+            return True
+        return False
+
     # ------------------------------------------------------------ copiar ajustes
     def copy_values(self, cid: str) -> bool:
         c = self.seq.find(cid)
         if c is None or c.kind != VIDEO:
             return False
         self.clipboard = {k: copy.deepcopy(c.values[k]) for k in editparams.color_keys()}
+        # A animação da cor vai junto, presa ao começo do clipe (`Sequence.local_keys`).
+        self.clipboard_keys = self.seq.local_keys(c, editparams.color_keys())
         return True
 
     def has_clipboard(self) -> bool:
@@ -420,6 +654,7 @@ class TimelineModel(QObject):
             vals = dict(c.values)
             vals.update(copy.deepcopy(self.clipboard))
             self.seq.set_values(cid, vals)
+            self.seq.paste_keys(cid, self.clipboard_keys, editparams.color_keys())
             n += 1
         if n:
             self._done("values")
@@ -433,6 +668,56 @@ class TimelineModel(QObject):
 
     def kinds_selected(self) -> set[str]:
         return {c.kind for c in self.selected_clips()}
+
+    # ------------------------------------------------------------ transições de película (1.5)
+    last_transition_s = 1.0  # duração do menu do corte: a última usada (1 s no começo)
+
+    def set_transition(self, cid: str, side: str, kind: str, seconds: float | None = None) -> bool:
+        """Transição `kind` na entrada ou na saída (`side`) do clipe de vídeo `cid`, num passo só do desfazer.
+        A duração é `seconds`, a que o lado já tinha (se tinha transição) ou a última usada. Faixa travada ou
+        tipo desconhecido: nada (False)."""
+        c = self.seq.find(cid)
+        if c is None or c.kind != VIDEO or side not in ("entrada", "saida") or self.seq.locked(c):
+            return False
+        if kind not in {v for v, _label in editparams.VIDEO.params[f"{side}_tipo"].choices}:
+            return False
+        vals = dict(c.values)
+        if seconds is None:
+            seconds = float(vals[f"{side}_dur"]) if vals.get(f"{side}_tipo", "corte") != "corte" \
+                else self.last_transition_s
+        vals[f"{side}_tipo"] = kind
+        if kind != "corte":
+            p = editparams.VIDEO.params[f"{side}_dur"]
+            vals[f"{side}_dur"] = min(max(float(seconds), p.min), p.max)
+            self.last_transition_s = vals[f"{side}_dur"]
+        if vals == c.values:
+            return False
+        self.seq.set_values(cid, vals)
+        self._done("values")
+        return True
+
+    # ------------------------------------------------------------ legendas (subtitles.py, ui/subtitles_ui.py)
+    def subtitles(self):
+        """As legendas da sequência (`subtitles.Subtitles`; um bloco vazio, fora da sequência, se ainda não há)."""
+        from .. import subtitles as sb
+        return self.seq.subtitles if self.seq.subtitles is not None else sb.Subtitles()
+
+    def edit_subtitles(self, fn) -> bool:
+        """Uma mudança nas legendas num passo de desfazer: `fn(subs)` mexe no `subtitles.Subtitles` da sequência
+        (devolver False desiste). Avisa com "subtitles": a montagem e o som não mudam. True se mudou algo."""
+        from .. import subtitles as sb
+        self.commit()
+        before = self.seq.subtitles
+        subs = sb.Subtitles.from_json(before.to_json()) if before is not None else sb.Subtitles()
+        if fn(subs) is False:
+            return False
+        if before is not None and subs.to_json() == before.to_json():
+            return False
+        if before is None and subs.is_default():
+            return False
+        self.seq.subtitles = subs
+        self._done("subtitles")
+        return True
 
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

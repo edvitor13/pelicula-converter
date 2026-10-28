@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDou
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import chapters as chapters_mod, export, media, platforms, system
+from .. import chapters as chapters_mod, export, media, platforms, subtitles as subs_mod, system
 from .. import fit as fitmod
 from ..i18n import N_, _, fmt_decimal, fmt_int
 from . import icons, theme
@@ -43,6 +43,11 @@ LOUDNESS = ((0.0, N_("Desligado (volume original)")), (-14.0, N_("−14 LUFS (re
 PLATFORM_KEYS = ("platform", "frame", "fit", "target_mb", "maxrate", "loudness", "true_peak")
 PREVIEW_BOX = 200  # px do quadrado onde a prévia do resultado aparece
 PREVIEW_MAX = 400  # maior lado (px) do quadro renderizado para a prévia
+# Legendas na exportação (`subtitles.DELIVERY`): chave → rótulo.
+SUBTITLE_LABELS = {"nao": N_("Sem legendas"), "faixa": N_("Faixa de legenda no arquivo (dá para ligar e desligar)"),
+                   "copia": N_("Gravada na cópia (antes do look: com grão, halação e tremor)"),
+                   "digital": N_("Digital (gravada depois do look, nítida)"), "srt": N_("Arquivo .srt ao lado do vídeo"),
+                   "vtt": N_("Arquivo .vtt ao lado do vídeo")}
 
 def fmt_dur(sec: float) -> str:
     sec = int(round(max(sec, 1)))
@@ -88,14 +93,15 @@ class _PreviewWorker:
                 item = nxt
             if item is None:
                 break
-            token, (info, values, s, frame, seq, scale) = item
+            token, (info, values, s, frame, seq, scale, keys, burn) = item
             img = None
             if not failed:
                 try:
                     if engine is None:
                         from ..engine import Engine
                         engine = Engine()
-                    img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8)
+                    img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8,
+                                               keys=keys, burn=burn)
                 except Exception:  # noqa: BLE001 — sem GPU ou arquivo ilegível: a janela diz "indisponível"
                     img = None
                     failed = engine is None
@@ -108,9 +114,14 @@ class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
-                 last_platform: str = "", chapters=None):
+                 last_platform: str = "", chapters=None, look_keys: dict | None = None, subtitles=None,
+                 subtitle_cues=None):
         super().__init__(parent)
         self.info = info
+        # legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência
+        self.subs_doc = subtitles
+        self.subs_cues = list(subtitle_cues or [])
+        self.look_keys = dict(look_keys or {})  # chaves de animação do look (`Project.look_keys`)
         self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
         self.chapters = list(chapters or [])  # [(quadro, título)] dos capítulos da montagem (`chapters.points`)
         self.values = values
@@ -220,6 +231,7 @@ class ExportDialog(QDialog):
         form.addRow(_("Codec"), self.codec)
         form.addRow(_("Recipiente"), self.container)
         form.addRow(_("Formato de cor"), self.pix)
+        self._alpha_rows(form)
         form.addRow(self.qlabel, self.qval)
         form.addRow(_("Taxa de bits"), self.bitrate)
         form.addRow(_("Velocidade"), self.speed)
@@ -263,6 +275,8 @@ class ExportDialog(QDialog):
             self.r_sel.toggled.connect(self._summary)
         self.chapters_box = self._chapters_box()
         lay.addWidget(self.chapters_box)
+        self.subs_row = self._subtitles_row()
+        lay.addWidget(self.subs_row)
         lay.addStretch(1)
 
         foot = QWidget()
@@ -317,12 +331,15 @@ class ExportDialog(QDialog):
             w.currentIndexChanged.connect(self._custom)
         self.container.currentIndexChanged.connect(self._fix_ext)
         self.container.currentIndexChanged.connect(self._sync_chapters)
+        self.container.currentIndexChanged.connect(self._sync_subtitles)
         for w in (self.qval, self.bitrate):
             w.valueChanged.connect(self._custom)
         for w in (self.grain, self.dither):
             w.toggled.connect(self._custom)
         self.res.currentIndexChanged.connect(self._update_mem)
         self.pix.currentIndexChanged.connect(self._update_mem)
+        self.alpha_box.toggled.connect(self._summary)  # independe da qualidade escolhida (não vira "Personalizado")
+        self.alpha_box.toggled.connect(self._update_mem)
         self.frame_box.currentIndexChanged.connect(self._frame_changed)
         for w in (self.fit_box, self.loud):
             w.currentIndexChanged.connect(self._custom)
@@ -338,6 +355,7 @@ class ExportDialog(QDialog):
             self._set_combo(self.platform, last_platform)  # a última plataforma usada preenche tudo de novo
         self._update_mem()
         self._sync_chapters()
+        self._init_subtitles()
 
     # ------------------------------------------------------------ plataforma
     def _platform_group(self) -> QGroupBox:
@@ -604,7 +622,7 @@ class ExportDialog(QDialog):
         if not s.codec:
             return 0
         w, h = export.output_size(self.info, s)
-        return w * h * 3 * (2 if export.high_depth(s) else 1)
+        return w * h * (4 if export.wants_alpha(s) else 3) * (2 if export.high_depth(s) else 1)
 
     def _update_mem(self, *_args):
         fb = self._frame_bytes()
@@ -634,6 +652,8 @@ class ExportDialog(QDialog):
             self.container.addItem("." + e, e)
         self.pix.clear()
         for pf in c["pix"]:
+            if media.pix_has_alpha(pf):
+                continue  # com alfa: "Manter a transparência" (`_alpha_rows`)
             self.pix.addItem(f"{_(PIX_NAMES.get(pf, pf))}  ({pf})", pf)
         rc = c.get("rc")
         self.speed.clear()
@@ -655,6 +675,7 @@ class ExportDialog(QDialog):
         if hasattr(self, "gpu"):
             self.gpu.setEnabled(bool(c.get("gpu")))
         self._res_labels(key)
+        self._sync_alpha()
 
     def _res_labels(self, codec: str) -> None:
         """Cada resolução mostra o tamanho que sai deste arquivo (o número vale para o lado menor)."""
@@ -669,7 +690,9 @@ class ExportDialog(QDialog):
         self._set_combo(self.codec, s.codec)
         self._fill_codec_fields(s.codec)
         self._set_combo(self.container, s.container)
-        self._set_combo(self.pix, s.pix)
+        self._set_combo(self.pix, export.opaque_pix(s.codec, s.pix))
+        if media.pix_has_alpha(s.pix) and export.supports_alpha(s.codec):
+            self.alpha_box.setChecked(True)
         self._set_combo(self.speed, s.preset)
         self._set_combo(self.profile, s.profile)
         if export.CODECS[s.codec].get("rc") in Q_LABELS:
@@ -704,6 +727,10 @@ class ExportDialog(QDialog):
             resolution=self.res.currentData(), fps=self.fps.currentData(), audio=self.audio.currentData(),
             # isHidden e não isVisible: depois de "Adicionar à fila" a janela já fechou e nada mais é visível.
             tune_grain=self.grain.isChecked() and not self.grain.isHidden(), dither=self.dither.isChecked())
+        if self.keeps_alpha():
+            s.pix = export.alpha_pix(s.codec, s.pix)
+            if s.codec == "prores" and s.profile not in ("4", "5"):
+                s.profile = "4"  # só o ProRes 4444 guarda o alfa
         if not self.info.is_image:
             s.platform = self.platform_id()
             s.frame = self.frame_box.currentData() or ""
@@ -773,7 +800,7 @@ class ExportDialog(QDialog):
         ext = self.container.currentData() or "mp4"
         cur = self.path.text().strip()
         if not cur:
-            stem = Path(self.info.path).stem + "_pelicula"
+            stem = media.sequence_stem(self.info.path) + "_pelicula"
             cur = str(Path(self.out_dir) / f"{stem}.{ext}")
         else:
             cur = str(Path(cur).with_suffix("." + ext))
@@ -811,7 +838,8 @@ class ExportDialog(QDialog):
             size = " • " + _("teto de {taxa} Mb/s").format(taxa=fmt_decimal(s.maxrate, 1))
         self.summary.setText(_("Saída: {w}×{h} • {fps} quadros/s • {duracao} • {quadros} quadros • "
                                "processamento em {bits} bits por canal").format(
-            w=w, h=h, fps=f"{fps:.3f}", duracao=f"{mins}min{secs:04.1f}s", quadros=frames, bits=depth) + size)
+            w=w, h=h, fps=f"{fps:.3f}", duracao=f"{mins}min{secs:04.1f}s", quadros=frames, bits=depth) + size
+            + (" • " + _("com transparência") if export.wants_alpha(s) else ""))
         self._schedule_estimate()
         self._warnings(s, dur)
         self._schedule_preview()
@@ -875,12 +903,12 @@ class ExportDialog(QDialog):
         token = self._est_token
         cancel = threading.Event()
         self._est_cancel = cancel
-        info, values, seq = self.info, dict(self.values), self.sequence
+        info, values, seq, keys = self.info, dict(self.values), self.sequence, dict(self.look_keys)
 
         def run():
             stats: dict = {}
             try:
-                fps = export.measure_speed(info, values, s, cancel, sequence=seq, stats=stats)
+                fps = export.measure_speed(info, values, s, cancel, sequence=seq, stats=stats, keys=keys)
             except Exception:  # noqa: BLE001
                 fps = 0.0
             if not cancel.is_set():
@@ -925,12 +953,13 @@ class ExportDialog(QDialog):
         a, b = self._range()
         last = self.info.frames - 1 if b < 0 else b
         frame = max(a, min(self.frame_index, last))
-        return self.info, dict(self.values), s, frame, self.sequence, scale
+        return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys), self.burn()
 
     def _start_preview(self) -> None:
         args = self._preview_args()
         s = args[2]
-        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3])
+        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3],
+               self.subtitle_choice(), export.wants_alpha(s))
         if key == self._preview_key:
             return
         self._preview_key = key
@@ -946,7 +975,8 @@ class ExportDialog(QDialog):
             self.preview.setPixmap(QPixmap())
             self.preview.setText(_("Prévia indisponível"))
             return
-        arr = np.ascontiguousarray(img if img.dtype == np.uint8 else (img >> 8).astype(np.uint8))
+        from .alphaview import over_checker
+        arr = over_checker(img)  # com transparência: sobre o xadrez (3 canais passam direto, em 8 bits)
         h, w = arr.shape[:2]
         qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         pm = QPixmap.fromImage(qimg).scaled(PREVIEW_BOX - 2, PREVIEW_BOX - 2, Qt.AspectRatioMode.KeepAspectRatio,
@@ -993,7 +1023,45 @@ class ExportDialog(QDialog):
         return export.ExportJob(info=self.info, values=dict(self.values), settings=self.settings(),
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
-                                sequence=self.sequence, chapters=self.chapter_points())
+                                sequence=self.sequence, chapters=self.chapter_points(),
+                                look_keys=dict(self.look_keys),
+                                **subs_mod.delivery_fields(self.subtitle_choice(), self.subs_doc, self.subs_cues,
+                                                           self.container.currentData()))
+
+    # ---------------------------------------------------------------- transparência
+    def _alpha_rows(self, form: QFormLayout) -> None:
+        """"Manter a transparência": só com a montagem em "Fundo transparente" e um codec que guarda alfa."""
+        self.alpha_box = QCheckBox(_("Manter a transparência (canal alfa)"))
+        transparent = bool(getattr(self.sequence, "transparent", False))
+        self.alpha_box.setChecked(transparent)
+        self.alpha_note = QLabel()
+        self.alpha_note.setObjectName("Faint")
+        self.alpha_note.setWordWrap(True)
+        form.addRow("", self.alpha_box)
+        form.addRow("", self.alpha_note)
+        if self.info.is_image:
+            form.setRowVisible(self.alpha_box, False)
+            form.setRowVisible(self.alpha_note, False)
+
+    def _sync_alpha(self) -> None:
+        if not hasattr(self, "alpha_box"):
+            return
+        transparent = bool(getattr(self.sequence, "transparent", False))
+        ok = export.supports_alpha(self.codec.currentData() or "")
+        self.alpha_box.setEnabled(transparent and ok)
+        if not transparent:
+            text = _("Para exportar com transparência, ligue \"Fundo transparente\" em Configurar a sequência.")
+        elif not ok:
+            text = _("Este formato não guarda transparência: o fundo sai na cor da sequência. Use ProRes 4444, "
+                     "WebM VP9 ou uma sequência PNG ou TIFF.")
+        else:
+            text = _("Onde nada cobre a tela, o vídeo sai transparente.")
+        self.alpha_note.setText(text)
+
+    def keeps_alpha(self) -> bool:
+        """A exportação vai sair com transparência (opção marcada e disponível)."""
+        return (hasattr(self, "alpha_box") and self.alpha_box.isChecked() and self.alpha_box.isEnabled()
+                and not self.info.is_image)
 
     # ---------------------------------------------------------------- capítulos
     def _chapters_box(self) -> QCheckBox:
@@ -1008,6 +1076,52 @@ class ExportDialog(QDialog):
         ok = self.container.currentData() in chapters_mod.CONTAINERS
         self.chapters_box.setEnabled(ok)
         self.chapters_box.setToolTip("" if ok else _("Só MP4, MOV e MKV guardam capítulos."))
+
+    # ---------------------------------------------------------------- legendas
+    def _subtitles_row(self) -> QWidget:
+        """Legendas: aparece só quando a montagem tem legendas (padrão: o que o projeto pede)."""
+        w = QWidget()
+        hl = QHBoxLayout(w)
+        hl.setContentsMargins(0, 0, 0, 0)
+        lab = QLabel(_("Legendas"))
+        hl.addWidget(lab)
+        self.subs_box = QComboBox()
+        for key in subs_mod.DELIVERY:
+            self.subs_box.addItem(_(SUBTITLE_LABELS[key]), key)
+        self.subs_box.setToolTip(_("Faixa no arquivo: o player liga e desliga (MP4, MOV, MKV e WebM). Gravada na "
+                                   "cópia: entra antes do look, como numa cópia de cinema legendada. Digital: entra "
+                                   "depois do look, nítida. Arquivo ao lado: .srt ou .vtt com o mesmo nome do vídeo."))
+        self.subs_box.currentIndexChanged.connect(self._schedule_preview)
+        hl.addWidget(self.subs_box, 1)
+        w.setVisible(bool(self.subs_cues) and self.subs_doc is not None)
+        return w
+
+    def _init_subtitles(self) -> None:
+        self._set_combo(self.subs_box, subs_mod.default_delivery(self.subs_doc if self.subs_cues else None,
+                                                                  self.container.currentData()))
+        self._sync_subtitles()
+
+    def _sync_subtitles(self, *_args) -> None:
+        """A faixa só nos recipientes que guardam legenda; escolhida num que não guarda, vira o .srt ao lado."""
+        ok = self.container.currentData() in subs_mod.EMBED_CODECS
+        item = self.subs_box.model().item(self.subs_box.findData("faixa"))
+        if item is not None:
+            item.setEnabled(ok)
+            item.setToolTip("" if ok else _("Só MP4, MOV, MKV e WebM guardam faixa de legenda."))
+        if not ok and self.subs_box.currentData() == "faixa":
+            self._set_combo(self.subs_box, "srt")
+
+    def subtitle_choice(self) -> str:
+        if not self.subs_cues or self.subs_doc is None or self.subs_row.isHidden():
+            return "nao"
+        return str(self.subs_box.currentData() or "nao")
+
+    def burn(self):
+        """As legendas gravadas que a prévia do resultado mostra (`subtitles.Burn`), ou None."""
+        choice = self.subtitle_choice()
+        if choice not in ("copia", "digital"):
+            return None
+        return subs_mod.Burn.make(choice, self.subs_doc.style, self.subs_cues)
 
     def chapter_points(self) -> list[tuple[int, str]]:
         """Capítulos que vão para o arquivo (vazio se a opção está desligada ou o recipiente não guarda)."""

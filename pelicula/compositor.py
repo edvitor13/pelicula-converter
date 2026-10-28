@@ -87,22 +87,25 @@ def detail_active(v: dict[str, Any]) -> bool:
     return any(v.get(k) != _DEFAULTS[k] for k in DETAIL_KEYS)
 
 
-def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> tuple[float, float]:
-    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe."""
+def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
+            values: dict[str, Any] | None = None) -> tuple[float, float]:
+    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe. `values`: os ajustes no quadro
+    (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
     sw = float(src.width if src and src.width else canvas_w)
     sh = float(src.height if src and src.height else canvas_h)
-    mode = clip.values.get("encaixe", "ajustar")
+    mode = (values if values is not None else clip.values).get("encaixe", "ajustar")
     if mode == "esticar":
         return float(canvas_w), float(canvas_h)
     f = min(canvas_w / sw, canvas_h / sh) if mode == "ajustar" else max(canvas_w / sw, canvas_h / sh)
     return sw * f, sh * f
 
 
-def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> np.ndarray:
+def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
+              values: dict[str, Any] | None = None) -> np.ndarray:
     """Matriz 3×3 que leva um pixel da tela (x, y, 1) ao uv do clipe (0 a 1)."""
-    v = clip.values
-    bw, bh = fit_box(seq, clip, canvas_w, canvas_h)
+    v = values if values is not None else clip.values
+    bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
     s = float(v["escala"])
     th = math.radians(float(v["rotacao"]))
     cs, sn = math.cos(th), math.sin(th)
@@ -121,37 +124,42 @@ def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas
 
 
 def is_identity(seq: timeline.Sequence, clip: timeline.Clip, tex_w: int, tex_h: int, canvas_w: int,
-                canvas_h: int) -> bool:
+                canvas_h: int, values: dict[str, Any] | None = None) -> bool:
     """O clipe cobre a tela pixel a pixel (sem reamostrar): a saída pode ser bit a bit."""
     if (tex_w, tex_h) != (canvas_w, canvas_h):
         return False
-    v = clip.values
+    v = values if values is not None else clip.values
     if any(v[k] for k in ("corte_esq", "corte_dir", "corte_topo", "corte_base", "espelhar_h", "espelhar_v")):
         return False
-    m = transform(seq, clip, canvas_w, canvas_h)
+    m = transform(seq, clip, canvas_w, canvas_h, v)
     ref = np.array([[1.0 / canvas_w, 0, 0], [0, 1.0 / canvas_h, 0], [0, 0, 1]])
     return bool(np.allclose(m, ref, atol=1e-12, rtol=0))
 
 
 def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex_h: int, canvas_w: int,
-                  canvas_h: int, neutral: bool = False) -> tuple[dict[str, Any], bool]:
+                  canvas_h: int, neutral: bool = False, tex_alpha: bool = False,
+                  light: tuple[int, bool] | None = None) -> tuple[dict[str, Any], bool]:
     """Uniforms de uma camada. Devolve (uniforms, precisa_de_mipmap).
 
     `neutral=True` mantém enquadramento, opacidade e transições, mas desliga cor e detalhe (a imagem
-    "original" da comparação no modo Edição).
+    "original" da comparação no modo Edição). `tex_alpha`: a imagem tem 4 canais (RGBA pré-multiplicado de
+    uma fonte com transparência, `sequence.LayerImage`). `light`: a luz das transições da 1.5
+    (`transitions.light_of`; None = rec709); com uma delas na camada, os uniforms são os de `CLIP_TR`.
     """
     clip = layer.clip
-    v = clip.values
-    bw, bh = fit_box(seq, clip, canvas_w, canvas_h)
+    # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
+    v = layer.values if layer.values is not None else clip.values
+    bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
     s = float(v["escala"])
     U: dict[str, Any] = {
         "u_canvas": (float(canvas_w), float(canvas_h)),
         "u_clip_px": (float(tex_w), float(tex_h)),
-        "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h)),
+        "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h, v)),
         "u_px_per_uv": (float(s * bw), float(s * bh)),
-        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h) else 0,
+        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
+        "u_tex_alpha": 1 if tex_alpha else 0,
         "u_blend": BLEND_IDS.get(v["mesclagem"], 0),
         "u_fade": tuple(float(c) for c in layer.fade_color) + (float(layer.fade),),
     }
@@ -197,14 +205,23 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     U["u_hsl_h"], U["u_hsl_s"], U["u_hsl_l"] = tuple(hh), tuple(hs), tuple(hl)
     U["u_vig"] = (float(v["vinheta"]), 0.2 + 0.8 * float(v["vinheta_tamanho"]))
     U["u_fadeblk"] = float(v["desbotar"])
+    if layer.transitions:  # 1.5: transições de película (`transitions.py`, programa `editshaders.CLIP_TR`)
+        from . import transitions
+        U = transitions.apply(U, seq, layer, transform(seq, clip, canvas_w, canvas_h, v), canvas_w, canvas_h, light)
     return U, mip
 
 
 # ------------------------------------------------------------------ ajuste automático
 def _to_float(img: np.ndarray, step: int = 4) -> np.ndarray:
-    sub = np.asarray(img)[::step, ::step, :3]
+    sub = np.asarray(img)[::step, ::step]
     scale = 65535.0 if sub.dtype == np.uint16 else 255.0 if sub.dtype == np.uint8 else 1.0
-    return sub.reshape(-1, 3).astype(np.float64) / scale
+    px = sub.reshape(-1, sub.shape[-1]).astype(np.float64) / scale
+    if px.shape[1] == 4:  # transparência (RGBA pré-multiplicado): só a parte quase opaca, com a cor do clipe
+        keep = px[px[:, 3] >= 0.5]
+        if len(keep):
+            return keep[:, :3] / keep[:, 3:4]
+        px = px[:, :3]
+    return px[:, :3]
 
 
 def _snap(v: float, key: str) -> float:

@@ -7,6 +7,60 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Transparência (canal alfa)** em todo o caminho do modo Edição: PNG, ProRes 4444, WebM (VP8/VP9) e
+  sequências de imagens com alfa aparecem sobre as faixas de baixo, sem a franja escura na borda (o
+  recorte do CorridorKey, `_cutout.mov`, deixa de ficar com fundo preto). **Fundo transparente** em
+  *Configurar a sequência*, com xadrez na prévia e na Mídia, e **exportar com transparência** em ProRes
+  4444, WebM VP9 ou sequência PNG/TIFF; *Salvar quadro* e `pelicula-cli quadro` em PNG/TIFF também
+  guardam o alfa.
+- **Sequências de imagens numeradas** (`plano_0001.png`…): ao importar, o app pergunta se entra como
+  sequência, mostra os quadros e os buracos na numeração e deixa escolher a velocidade. PNG, TIFF e
+  JPEG (EXR e DPX quando o ffmpeg lê).
+- **Chaves de animação** (keyframes) em posição, escala, rotação, opacidade, cor, luz, rodas, volume e
+  nos ajustes de película: losango ao lado de cada ajuste no inspetor e no painel do look (clique grava
+  a chave no cursor; setas para a anterior e a próxima; quatro curvas prontas), losangos na linha do
+  tempo (arrastar move, Delete apaga) e as chaves do look sob a prévia (Película) ou numa linha *Look*
+  no topo da linha do tempo (Edição).
+- **Tempo do clipe**: rampa de velocidade com seis formas prontas (Acelerar, Desacelerar, Impacto,
+  Câmera lenta no meio, Entrada e Saída em câmera lenta) e o som acompanhando sem mudar o tom;
+  **Reverso**, com o som ao contrário; **Congelar este quadro…** (Shift+F) põe o quadro do cursor parado
+  pelo tempo escolhido.
+- **Novo** na Mídia (módulo *Títulos e geradores*): cor sólida, degradê (linear ou radial), **ponta com
+  contagem regressiva** (8 a 2, com o bipe de 1 kHz no 2) e **títulos** com 11 famílias de fontes livres
+  (OFL) embutidas, que saem iguais no Windows e no Linux: seis estilos prontos e oito animações de
+  entrada e saída (Aparecer, Subir, Deslizar, Máquina de escrever, Letra por letra, Zoom suave, Revelar
+  com máscara e Créditos rolando).
+- **Transições de película** (módulo *Transições de película*): fusão ótica e surgir/escurecer na
+  exposição (misturam a luz, como numa copiadora), queima da película, emenda com clarão, ponta entre
+  os planos e íris, mais empurrar, cortina e zoom. Botão direito num clipe: *Transição*.
+- **Legendas** (módulo *Legendas*): painel (Ctrl+Shift+L) e faixa na linha do tempo, presas à fala do
+  arquivo (cortar não tira de sincronia); estilos YouTube, Reels (palavra a palavra) e Cinema;
+  importar e exportar `.srt` e `.vtt`; na exportação, faixa no arquivo, **gravada na cópia** (antes do
+  look, com grão e halação), **digital** (depois do look) ou arquivo ao lado. Terminal: `exportar
+  --legendas`.
+- **Legendas pela fala** (módulo Beta *Legendas automáticas*): transcrição no próprio computador pelo
+  whisper.cpp (placa de vídeo pela Vulkan ou processador), com os modelos *small* e *turbo* e a detecção
+  de voz Silero, baixados à parte em *Componentes* com SHA-256 conferido; roda pela fila. Com o tempo de
+  cada palavra, dá para **cortar pelo texto**.
+- **Remover silêncios** (módulo *Remover silêncios*): analisa o som, mostra a lista para revisar e tira
+  os trechos marcados num passo só do desfazer.
+- **Ferramentas de corte**: inserir ou sobrescrever (botão *Inserir*; Ctrl ao soltar inverte; `,` e `.`
+  no cursor), **faixa principal magnética** opcional, **Q/W** aparam até o cursor fechando o espaço,
+  **cortes J e L** (Alt ao aparar; menu *Corte J*/*Corte L*) e **J/K/L** para reproduzir para trás,
+  pausar e para a frente (2×, 4×, 8×; K segurado + J/L anda um quadro).
+- Projetos `.plc` no **formato 3**, gravado só quando o projeto usa um recurso da 1.5 (a 1.4 recusa com
+  aviso em vez de abrir errado); projetos antigos abrem, tocam e saem iguais e continuam gravando no
+  formato de antes.
+
+### Alterado
+- **Repetir** passou do L para **Ctrl+L** (o L agora reproduz para a frente).
+- Prévia, *Salvar quadro*, estimativa de tempo, exportação e terminal usam a mesma receita do quadro.
+
+### Corrigido
+- No Windows, a prévia da janela de exportação às vezes ficava "Prévia indisponível" e a leitura de
+  quadros pequenos falhava (o ffmpeg terminava antes de o app conectar ao pipe).
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).
