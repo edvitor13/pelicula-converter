@@ -48,8 +48,67 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 3. Vídeos com som entram como **dois clipes ligados** (imagem em V1 e som em A1): mover, cortar ou apagar
    um mexe no outro junto. Para separar, use **Desligar** na barra da linha do tempo.
 
-Colocar um clipe por cima de outro na mesma faixa **substitui** a parte coberta (como em qualquer editor).
-Para sobrepor sem apagar, use outra faixa (V2).
+Colocar um clipe por cima de outro na mesma faixa **substitui** a parte coberta (como em qualquer editor) —
+é o modo **sobrescrever**, o padrão. Para sobrepor sem apagar, use outra faixa (V2).
+
+### Inserir em vez de sobrescrever
+
+Com o botão **Inserir** ligado (na barra da linha do tempo, ao lado do ímã), soltar um arquivo ou mover um
+clipe **empurra o que vem depois** em vez de cobrir. Segurar **Ctrl** ao soltar (ou ao terminar de arrastar)
+faz o contrário do botão naquele momento; a linha do ponto de inserção ganha setas para a direita.
+
+- O clipe que estiver no ponto é **dividido** ali (imagem e som juntos) e a parte da direita anda.
+- Tudo o que começa no ponto ou depois anda, **em todas as faixas destravadas**, com os sons ligados — assim
+  nada sai de sincronia. Os marcadores depois do ponto andam junto.
+- O que **atravessa** o ponto em outra faixa (uma música de fundo, um título longo) continua inteiro.
+- Faixas **travadas** não mudam (e, se algo travado ficou depois do ponto, os marcadores ficam onde estão).
+- Mover inserindo deixa vazio o lugar de onde o clipe saiu (use **Excluir e fechar o espaço** ou a faixa
+  magnética para fechar).
+
+Na lista de **Mídia**, o botão direito num item (ou nos escolhidos) tem **Inserir no cursor** (tecla **,**)
+e **Sobrescrever no cursor** (tecla **.**): o arquivo entra no cursor, na V1 e na A1, e o cursor vai para o
+fim dele (para encaixar o próximo). As teclas valem com o modo Edição aberto, para os itens escolhidos na
+Mídia.
+
+### Faixa principal magnética
+
+Em **Sequência… → Montagem**, a opção **Faixa principal magnética** (desligada por padrão, também em
+projetos novos) deixa a **V1 sempre sem buracos**:
+
+- apagar, aparar ou mover um clipe da V1 **fecha o espaço** (até sem "fechar o espaço");
+- alongar um clipe da V1 (borda, velocidade mais lenta) e soltar algo no meio dela **empurram** o resto em
+  vez de cobrir;
+- o que está nas outras faixas (títulos, imagens, efeitos de som, músicas) **acompanha a imagem da V1 que
+  estava embaixo do começo dele**: se você move um clipe da V1, o título em cima dele vai junto; se a imagem
+  embaixo foi apagada, ele vai para o ponto do corte. O que você mesmo mexeu fica onde você deixou, e nada
+  cobre nada (se o lugar estiver ocupado, o clipe anda para a direita até caber);
+- os marcadores acompanham a imagem da V1 do mesmo jeito.
+
+Um ímã aparece no cabeçalho da V1 enquanto ela é magnética. Com a V1 **travada**, a regra espera (nada se
+fecha). Desligada, a linha do tempo volta a ser livre (nada muda de lugar ao desligar).
+
+### Aparar até o cursor (Q / W)
+
+**Q** tira o começo do clipe até o cursor e **W** tira o fim a partir do cursor, **fechando o espaço** (o que
+vem depois anda para a esquerda). Vale o clipe sob o cursor **na faixa do clipe selecionado**; sem seleção,
+o da faixa destravada mais de cima (V mais alta, V1, depois A1…). O som ligado vai junto. Com **Q**, o cursor
+vai para o novo começo do clipe — o quadro que estava na tela continua na tela. Como em *Excluir e fechar o
+espaço*, as outras faixas só andam se nada delas atravessa o trecho tirado.
+
+### Cortes J e L (som antes ou depois da imagem)
+
+Num corte entre dois clipes de vídeo com som ligado, o botão direito (perto do corte: metade esquerda do
+clipe = corte do começo, metade direita = corte do fim) tem:
+
+- **Corte J**: o som do clipe seguinte entra **1 s antes** da imagem dele;
+- **Corte L**: o som do clipe anterior **continua 1 s** depois do corte da imagem;
+- **Alinhar o som com o corte da imagem**: volta ao corte reto.
+
+Só o corte do som anda (um som cresce e o vizinho encolhe); a imagem fica igual. Cabe só o que sobra do
+arquivo além do corte — se faltar, o app avisa quanto coube. Para ajustar à mão, segure **Alt** enquanto
+arrasta a borda de um clipe: só ele muda (só a imagem ou só o som), sem o ligado. Os pares com entrada ou
+saída diferentes continuam ligados: mover, dividir, apagar e mudar a velocidade mantêm a imagem e o som em
+sincronia (na velocidade, a diferença muda na proporção).
 
 **Transparência**: vídeos e imagens com canal alfa — ProRes 4444 (como o recorte `_cutout.mov` do
 CorridorKey), PNG com transparência (inclusive com paleta) e WebM VP8/VP9 com alfa — deixam ver o que está
@@ -183,7 +242,8 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
   igual ao primeiro clipe ou personalizada;
 - **Quadros por segundo**: 23,976 / 24 / 25 / 29,97 / 30 / 50 / 59,94 / 60 — mudar mantém o tempo dos cortes;
 - **Cor do fundo**: o que aparece onde não há imagem (barras, clipes menores que o quadro);
-- **Fades curtos nas emendas de som**: veja *Som*, acima.
+- **Fades curtos nas emendas de som**: veja *Som*, acima;
+- **Faixa principal magnética**: veja *Montar*, acima.
 
 ## 5. Monitores
 
@@ -236,9 +296,16 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl+1 / Ctrl+2 | Modo Película / modo Edição |
 | Ctrl+I | Importar mídia |
 | Espaço | Reproduzir / pausar |
+| J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
+| K + J / K + L | Segurando o K: um quadro para trás / para a frente |
 | ← / → | Quadro anterior / próximo (Shift: 1 segundo) |
 | I / O | Marcar entrada / saída |
+| Ctrl+L | Repetir liga/desliga (antes era o L) |
 | S | Dividir no cursor |
+| Q / W | Aparar o começo / o fim do clipe até o cursor e fechar o espaço |
+| , / . | Inserir / sobrescrever no cursor (itens escolhidos na Mídia) |
+| Ctrl ao soltar ou mover | Inverte o botão Inserir naquele momento |
+| Alt ao aparar | Só a imagem ou só o som do par ligado (corte J/L à mão) |
 | B / V | Ferramenta Lâmina / Selecionar |
 | Delete | Excluir os clipes selecionados (ou o marcador selecionado) |
 | Shift+Delete | Excluir e fechar o espaço |
@@ -251,3 +318,10 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Esc | Tirar a seleção e voltar para Selecionar |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
+
+**J / K / L** (como no Premiere e no Resolve): **L** reproduz para a frente e **J** para trás; apertar de
+novo no mesmo sentido dobra a velocidade (1×, 2×, 4×, 8×) e o outro sentido volta a 1×. **K** (ou Espaço)
+para. A velocidade aparece ao lado do tempo (por exemplo, *◀◀ 2×*). Para trás, cada quadro é buscado no
+arquivo: pode ser mais lento e pular quadros, mas o quadro mostrado é sempre o certo e a janela não trava.
+**Fora de 1× para a frente o som fica mudo** (e o medidor de som espera). O **Repetir** passou do L para o
+**Ctrl+L**, porque o L agora é a reprodução para a frente.

@@ -5,13 +5,16 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 
 - "structure": clipes ou faixas mudaram (posição, duração, mudo…);
 - "values": só os ajustes de um clipe mudaram (cor, som, transição…);
-- "settings": resolução, fps, fundo ou fades curtos nas emendas de som da sequência;
+- "settings": resolução, fps, fundo, fades curtos nas emendas de som ou faixa principal magnética;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
 outro, e "Excluir" apaga o que estiver selecionado.
+
+Toda edição que mexe na estrutura passa por `Sequence.keep_main()`: com a faixa principal magnética ligada,
+a V1 fica sem buracos depois dela e o resto acompanha (`Sequence.settle_main`); sem ela, nada muda.
 """
 
 from __future__ import annotations
@@ -147,8 +150,11 @@ class TimelineModel(QObject):
         return clips[0] if clips else None
 
     # ------------------------------------------------------------ edição
-    def insert_media(self, src: Source, at: int | None = None, vtrack: int = 0, atrack: int = 0) -> list[Clip]:
-        made = self.seq.insert_media(src, at, vtrack, atrack)
+    def insert_media(self, src: Source, at: int | None = None, vtrack: int = 0, atrack: int = 0,
+                     insert: bool = False) -> list[Clip]:
+        """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o resto em vez de sobrescrever."""
+        with self.seq.keep_main():
+            made = self.seq.insert_media(src, at, vtrack, atrack, insert=insert)
         if made:
             self.selection = [c.id for c in made]
             self.selectionChanged.emit()
@@ -170,13 +176,20 @@ class TimelineModel(QObject):
             self._done("structure")
         return made
 
+    def _delete(self, ids: list[str], ripple: bool) -> None:
+        seq = self.seq
+        if ripple and seq._magnet_owns(seq.expand(ids)):
+            ripple = False  # V1 magnética: ela mesma fecha o espaço e o resto acompanha a imagem
+        with seq.keep_main():
+            seq.delete(ids, ripple=ripple)
+
     def delete_selected(self, ripple: bool = False) -> None:
         if self.marker_sel is not None:
             self.remove_marker(self.marker_sel)
             return
         if not self.selection:
             return
-        self.seq.delete(list(self.selection), ripple=ripple)
+        self._delete(list(self.selection), ripple)
         self.selection = []
         self.selectionChanged.emit()
         self._done("structure")
@@ -185,30 +198,72 @@ class TimelineModel(QObject):
         ids = list(ids)
         if not ids:
             return
-        self.seq.delete(ids, ripple=ripple)
+        self._delete(ids, ripple)
         self._done("structure")
 
-    def move_clip(self, cid: str, start: int, track: int | None = None) -> int:
+    def move_clip(self, cid: str, start: int, track: int | None = None, insert: bool = False) -> int:
+        """Move o clipe (e os ligados); `insert` abre espaço no destino em vez de sobrescrever."""
         c = self.seq.find(cid)
         if c is None:
             return 0
-        before = (c.start, c.track)
-        delta = self.seq.move(cid, int(start), track)
-        if (c.start, c.track) != before or delta:
+        before = self.history._dump(self.seq) if self.seq.magnetic else (c.start, c.track)
+        with self.seq.keep_main():
+            delta = (self.seq.move_insert if insert else self.seq.move)(cid, int(start), track)
+        after = self.history._dump(self.seq) if self.seq.magnetic else (c.start, c.track)
+        if after != before or delta:
             self._done("structure")
         return delta
 
-    def trim_start(self, cid: str, frame: int) -> int:
-        delta = self.seq.trim_start(cid, int(frame))
+    def trim_start(self, cid: str, frame: int, solo: bool = False) -> int:
+        """Apara o começo; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
+        seq = self.seq
+        with seq.keep_main():
+            if solo:
+                delta = seq.trim_start_only(cid, int(frame))
+            else:
+                delta = seq.trim_start(cid, seq.room_for_start(cid, int(frame)))
         if delta:
             self._done("structure")
         return delta
 
-    def trim_end(self, cid: str, frame: int) -> int:
-        delta = self.seq.trim_end(cid, int(frame))
+    def trim_end(self, cid: str, frame: int, solo: bool = False) -> int:
+        """Apara o fim; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
+        seq = self.seq
+        with seq.keep_main():
+            if solo:
+                delta = seq.trim_end_only(cid, int(frame))
+            else:
+                seq.room_for_end(cid, int(frame))
+                delta = seq.trim_end(cid, int(frame))
         if delta:
             self._done("structure")
         return delta
+
+    def trim_to_playhead(self, frame: int, side: str) -> int:
+        """Q (`side="start"`) / W (`"end"`): apara até o cursor o clipe sob ele — na faixa do clipe selecionado,
+        senão na faixa destravada mais de cima — e fecha o espaço. Devolve os quadros tirados (0 = nada)."""
+        prim = self.primary()
+        target = self.seq.trim_target(int(frame), (prim.kind, prim.track) if prim is not None else None)
+        if target is None:
+            return 0
+        with self.seq.keep_main():
+            if side == "start":
+                n = self.seq.ripple_trim_start(target.id, int(frame))
+            else:
+                n = self.seq.ripple_trim_end(target.id, int(frame))
+        if n:
+            self._done("structure")
+        return n
+
+    def split_edit(self, cid: str, left: bool, offset: int) -> int | None:
+        """Corte J (`offset` < 0) / L (> 0) / alinhado (0) no corte do começo (`left`) ou do fim do par ligado
+        de `cid`. Devolve o deslocamento que coube (None: ali não há um corte entre dois pares ligados)."""
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            got = self.seq.split_edit(cid, left, int(offset))
+        if got is not None and self.history._dump(self.seq) != before:
+            self._done("structure")
+        return got
 
     def set_clip_values(self, cid: str, values: dict[str, Any], record: bool = True) -> None:
         """Troca os ajustes do clipe. `record=False` (arrastando um slider) agrupa o histórico em 400 ms."""
@@ -217,7 +272,16 @@ class TimelineModel(QObject):
             return
         before = (c.start, c.dur, c.speed)
         old = copy.deepcopy(c.values)
-        self.seq.set_values(cid, values)
+        speed = values.get("velocidade", c.speed) if isinstance(values, dict) else c.speed
+        if self.seq.magnetic and abs(float(speed) - c.speed) > 1e-9:
+            whole = self.history._dump(self.seq)
+            with self.seq.keep_main():  # V1 magnética: mais lento empurra o resto, mais rápido puxa
+                self.seq.room_for_speed(cid, float(speed))
+                self.seq.set_values(cid, values)
+            if self.history._dump(self.seq) != whole:
+                before = None
+        else:
+            self.seq.set_values(cid, values)
         if c.values == old and (c.start, c.dur, c.speed) == before:
             return
         kind = "structure" if (c.start, c.dur, c.speed) != before else "values"
@@ -230,7 +294,9 @@ class TimelineModel(QObject):
             self.historyChanged.emit()
 
     def set_speed(self, cid: str, speed: float) -> None:
-        self.seq.set_speed(cid, speed)
+        with self.seq.keep_main():
+            self.seq.room_for_speed(cid, speed)
+            self.seq.set_speed(cid, speed)
         self._done("structure")
 
     def apply_look(self, cid: str, look: dict[str, Any]) -> None:
@@ -283,11 +349,13 @@ class TimelineModel(QObject):
         if len(self.seq.kind_tracks(kind)) <= 1:
             return
         self.seq.remove_track(kind, idx)
+        self.seq.settle_main()  # a faixa que virou V1 também fica sem buracos (se ela for magnética)
         self._done("structure")
 
     def close_gaps(self, kind: str, idx: int) -> None:
         """Junta os clipes da faixa, sem espaços entre eles."""
-        self.seq.close_gaps(kind, idx)
+        with self.seq.keep_main():
+            self.seq.close_gaps(kind, idx)
         self._done("structure")
 
     def set_track(self, kind: str, idx: int, **attrs) -> None:
@@ -308,12 +376,14 @@ class TimelineModel(QObject):
 
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,
-                     micro_fade: bool | None = None) -> None:
-        """Resolução, fps, fundo e fades curtos nas emendas de som. Ao mudar o fps, os clipes mantêm o
-        tempo (em segundos)."""
+                     micro_fade: bool | None = None, magnetic: bool | None = None) -> None:
+        """Resolução, fps, fundo, fades curtos nas emendas de som e faixa principal magnética. Ao mudar o fps,
+        os clipes mantêm o tempo (em segundos); ao ligar a faixa magnética, a V1 se fecha na hora."""
         seq = self.seq
         if micro_fade is not None:
             seq.micro_fade = bool(micro_fade)
+        if magnetic is not None:
+            seq.magnetic = bool(magnetic)
         old_fps = seq.fps
         fr = timeline.parse_fps(fps_str)
         seq.width = max(16, int(width))
@@ -332,6 +402,7 @@ class TimelineModel(QObject):
                 c.dur = max(1, min(c.dur, seq.max_dur(c)))
             for mk in seq.markers:
                 mk.frame = int(round(mk.frame * ratio))
+        seq.settle_main()
         self._done("settings")
 
     # ------------------------------------------------------------ transição de som

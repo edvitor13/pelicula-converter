@@ -15,6 +15,11 @@
   corta o arquivo no meio (sem estalo); a transição de som entre dois clipes vizinhos da faixa fica no
   clipe que entra (`values["transicao"]`) e o tempo dela sai de `audio_crossfade`. A mixagem em si é
   do `audiomix.py`.
+- **Ferramentas de corte** (1.5): inserir em vez de sobrescrever (`open_space`, `insert_media(insert=True)`,
+  `move_insert`), aparar até o cursor fechando o espaço (`ripple_trim_start`/`ripple_trim_end`, teclas Q/W),
+  cortes J/L (pares ligados com entrada e saída diferentes: `trim_start_only`/`trim_end_only`,
+  `split_edit`) e a **faixa principal magnética** (`Sequence.magnetic`: a V1 nunca fica com buracos e o
+  resto acompanha a imagem dela; `keep_main`/`settle_main`).
 
 Tudo aqui é determinístico e puro: o mesmo JSON gera sempre a mesma montagem, e a prévia e a
 exportação usam as mesmas funções (`src_frame`, `clips_at`, `layers_at`).
@@ -27,6 +32,7 @@ import json
 import math
 import os
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Callable, Iterable
@@ -59,6 +65,7 @@ MARKER_COLORS: list[tuple[str, str]] = [
 MARKER_COLOR_KEYS = tuple(k for k, _label in MARKER_COLORS)
 MARKER_TEXT_MAX = 500   # nome e nota de um marcador (caracteres)
 MICRO_FADE = 0.005      # s: fade automático nas emendas de som (some com o estalo e não se ouve como fade)
+SPLIT_EDIT_S = 1.0      # s: duração padrão do corte J / corte L criado pelo menu do corte
 
 
 def new_id() -> str:
@@ -371,6 +378,19 @@ class Marker:
                    name=d.get("nome") or "", note=d.get("nota") or "", chapter=d.get("capitulo") is True)
 
 
+@dataclass(frozen=True)
+class _Span:
+    """Um clipe da V1 antes de uma edição (para a faixa principal magnética saber onde a imagem foi parar)."""
+
+    id: str
+    start: int
+    end: int
+    src: str
+    src_in: float
+    speed: float
+    holds: bool   # imagem parada ou quadro congelado: não há tempo de arquivo para acompanhar
+
+
 # ------------------------------------------------------------------ sequência
 @dataclass
 class Sequence:
@@ -384,6 +404,7 @@ class Sequence:
     sources: dict[str, Source] = field(default_factory=dict)
     markers: list[Marker] = field(default_factory=list)
     micro_fade: bool = False  # fades curtos nas emendas de som (sequências novas ligam; projeto antigo = sem)
+    magnetic: bool = False    # faixa principal (V1) magnética: sem buracos (padrão desligado, também em projetos novos)
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -614,10 +635,20 @@ class Sequence:
 
     # -------------------------------------------------------- montagem
     def insert_media(self, src: Source, at: int | None = None, vtrack: int = 0, atrack: int = 0,
-                     with_audio: bool = True) -> list[Clip]:
-        """Põe um arquivo na sequência (vídeo + som ligado). `at=None` coloca no fim da faixa."""
+                     with_audio: bool = True, insert: bool = False) -> list[Clip]:
+        """Põe um arquivo na sequência (vídeo + som ligado). `at=None` coloca no fim da faixa.
+
+        Por padrão sobrescreve o que estiver no lugar; com `insert` (e um ponto `at`) abre o espaço antes
+        (`open_space`): o que vem depois anda para a direita."""
         self.add_source(src)
         dur = self.default_dur(src)
+        if insert and at is not None:
+            targets = set()
+            if src.has_video:
+                targets.add((VIDEO, vtrack))
+            if src.has_audio and with_audio:
+                targets.add((AUDIO, atrack))
+            self.open_space(max(0, int(at)), dur, targets, all_tracks=not self.magnet_active)
         made: list[Clip] = []
         link = new_id() if (src.has_video and src.has_audio and with_audio) else ""
         if src.has_video:
@@ -691,6 +722,11 @@ class Sequence:
             if c.link:
                 right.link = new_links.setdefault(c.link, new_id())
             made.append(right.id)
+        # Par ligado com entrada/saída diferentes (corte J/L): o ligado que não foi dividido e fica inteiro
+        # depois do ponto vai com as partes da direita (os de antes continuam com as da esquerda).
+        for c in self.clips:
+            if c.link in new_links and c.start >= t:
+                c.link = new_links[c.link]
         return made
 
     def _group_for_edit(self, cid: str) -> list[Clip]:
@@ -774,6 +810,9 @@ class Sequence:
             return
         p = editparams.VIDEO.params["velocidade"]
         speed = min(max(float(speed), p.min), p.max)
+        if len({(c.start, c.dur) for c in group}) > 1:
+            self._set_speed_offset(group, self.find(cid), speed)  # corte J/L: as diferenças acompanham
+            return
         new_durs = []
         for c in group:
             used = c.dur / self.fps * c.speed
@@ -847,6 +886,492 @@ class Sequence:
         lid = new_id()
         for c in clips:
             c.link = lid
+
+    # -------------------------------------------------------- ferramentas de corte: inserir
+    def _holds(self, c: Clip) -> bool:
+        """Imagem parada ou quadro congelado (não há tempo de arquivo para acompanhar)."""
+        src = self.sources.get(c.src)
+        return src is None or src.is_image or c.frozen
+
+    def _head_room(self, c: Clip) -> int:
+        """Quadros de arquivo antes da entrada do clipe (o quanto o começo pode voltar)."""
+        if self._holds(c):
+            return self.frames_for(MAX_HOLD_SECONDS)
+        return max(0, int(math.floor(c.src_in / c.speed * self.fps + EPS)))
+
+    def open_space(self, t: int, d: int, targets: Iterable[tuple[str, int]] = (), exclude: Iterable[str] = (),
+                   all_tracks: bool = True, split: bool = True) -> None:
+        """Abre `d` quadros no quadro `t` (edição de inserir).
+
+        - Nas faixas-alvo (`targets`, pares (tipo, faixa)) o clipe que atravessa `t` é dividido ali (com os
+          ligados), menos quando ele anda junto com um ligado que começa depois do ponto (corte J/L);
+          `split=False` não divide nada (só empurra).
+        - Tudo o que começa em `t` ou depois anda `d` para a direita — em todas as faixas destravadas
+          (`all_tracks`, para nada sair de sincronia) ou só nas faixas-alvo — e os ligados vão junto.
+        - O que atravessa `t` nas outras faixas (uma música de fundo, um título longo) continua inteiro.
+        - Faixas travadas e os clipes de `exclude` não mudam. Com `all_tracks`, os marcadores a partir do
+          ponto andam junto quando nenhum clipe travado ficou para trás depois dele. `all_tracks=False` é para
+          a faixa principal magnética, que acerta o resto depois (`settle_main`).
+        """
+        t, d = max(0, int(t)), int(d)
+        if d <= 0:
+            return
+        skip = set(exclude)
+        targets = set(targets)
+
+        def eligible(c: Clip) -> bool:
+            return c.id not in skip and not self.locked(c) and (all_tracks or (c.kind, c.track) in targets)
+
+        def with_links(ids: set[str]) -> set[str]:
+            out = set(ids)
+            for c in self.clips:
+                if c.id in ids and c.link:
+                    out.update(g.id for g in self.group(c) if g.id not in skip and not self.locked(g))
+            return out
+
+        movers = with_links({c.id for c in self.clips if eligible(c) and c.start >= t})
+        if split:
+            crossing = [c.id for c in self.clips if c.id not in skip and c.id not in movers and not self.locked(c)
+                        and (c.kind, c.track) in targets and c.start < t < c.end]
+            if crossing:
+                movers |= with_links(set(self.split(t, crossing)))
+        early = []
+        for c in self.clips:
+            if c.id in movers:
+                if c.start < t:
+                    early.append(c)
+                c.start += d
+        if not all_tracks:
+            return
+        for c in early:  # um ligado que começava antes do ponto (corte J/L) não cobre o que ficou parado
+            self._clear_range(c.kind, c.track, c.start, c.end, movers | skip)
+        if not any(self.locked(c) and c.start >= t for c in self.clips):
+            for mk in self.markers:
+                if mk.frame >= t:
+                    mk.frame += d
+
+    def move_insert(self, cid: str, new_start: int, new_track: int | None = None) -> int:
+        """Move inserindo: no destino o resto abre espaço (`open_space`) em vez de ser coberto; o lugar de onde
+        o clipe saiu fica vazio (na faixa principal magnética, ele se fecha). Devolve o deslocamento."""
+        group = self._group_for_edit(cid)
+        clip = self.find(cid)
+        if not group or clip not in group:
+            return 0
+        delta = max(int(new_start) - clip.start, -min(c.start for c in group))
+        track = clip.track
+        if new_track is not None and 0 <= new_track != clip.track:
+            self.ensure_track(clip.kind, new_track)
+            tr = self.track(clip.kind, new_track)
+            if tr is not None and not tr.locked:
+                track = new_track
+        if not delta and track == clip.track:
+            return 0
+        lo = min(c.start for c in group)
+        span = max(c.end for c in group) - lo
+        targets = {(c.kind, track if c is clip else c.track) for c in group}
+        self.open_space(lo + delta, span, targets, exclude={c.id for c in group}, all_tracks=not self.magnet_active)
+        return self.move(cid, clip.start + delta, track if track != clip.track else None)
+
+    # -------------------------------------------------------- ferramentas de corte: aparar só um, Q/W
+    def trim_start_only(self, cid: str, new_start: int) -> int:
+        """Apara o começo só deste clipe, sem o ligado (Alt ao arrastar a borda): o som pode começar antes ou
+        depois da imagem (corte J/L). Cobre o vizinho da faixa, como qualquer aparar."""
+        c = self.find(cid)
+        if c is None:
+            return 0
+        link, c.link = c.link, ""
+        try:
+            return self.trim_start(cid, new_start)
+        finally:
+            c.link = link
+
+    def trim_end_only(self, cid: str, new_end: int) -> int:
+        """Apara o fim só deste clipe, sem o ligado (o som pode continuar depois da imagem: corte L)."""
+        c = self.find(cid)
+        if c is None:
+            return 0
+        link, c.link = c.link, ""
+        try:
+            return self.trim_end(cid, new_end)
+        finally:
+            c.link = link
+
+    def trim_target(self, frame: int, prefer: tuple[str, int] | None = None) -> Clip | None:
+        """Clipe que Q/W aparam: o que está sob o cursor na faixa preferida (a do clipe selecionado); senão o da
+        faixa destravada mais de cima (V mais alta → V1 → A1 → …). O cursor precisa estar dentro do clipe (num
+        corte não há o que aparar)."""
+        frame = int(frame)
+
+        def under(kind: str, idx: int) -> Clip | None:
+            tr = self.track(kind, idx)
+            if tr is None or tr.locked:
+                return None
+            return next((c for c in self.clips_on(kind, idx) if c.start < frame < c.end), None)
+
+        if prefer is not None:
+            got = under(*prefer)
+            if got is not None:
+                return got
+        order = [(VIDEO, i) for i in reversed(range(len(self.kind_tracks(VIDEO))))]
+        order += [(AUDIO, i) for i in range(len(self.kind_tracks(AUDIO)))]
+        for kind, idx in order:
+            got = under(kind, idx)
+            if got is not None:
+                return got
+        return None
+
+    def _pull(self, thresholds: dict[tuple[str, int], int], a: int, b: int, n: int, group: set[str]) -> None:
+        """Fecha `n` quadros depois de aparar: nas faixas do grupo, o que começa a partir do limiar da faixa anda
+        para a esquerda; nas outras, só se o trecho [a, b) ficou livre em todas as faixas (como em "Excluir e
+        fechar o espaço") — e então os marcadores andam junto."""
+        free = not any(c.id not in group and c.start < b and c.end > a for c in self.clips)
+        for c in self.clips:
+            if self.locked(c):
+                continue
+            key = (c.kind, c.track)
+            if key in thresholds:
+                if c.start >= thresholds[key]:
+                    c.start -= n
+            elif free and c.start >= b:
+                c.start -= n
+        if free:
+            for mk in self.markers:
+                if mk.frame >= b:
+                    mk.frame -= n
+                elif mk.frame > a:
+                    mk.frame = a
+
+    def ripple_trim_start(self, cid: str, frame: int) -> int:
+        """Q: tira o começo do clipe (e dos ligados) até `frame` e fecha o espaço — o clipe e o que vem depois
+        andam para a esquerda. Devolve os quadros tirados."""
+        clip = self.find(cid)
+        group = self._group_for_edit(cid)
+        if clip is None or clip not in group or not clip.start < int(frame) < clip.end:
+            return 0
+        a = clip.start
+        n = self.trim_start(cid, int(frame))
+        if n <= 0:
+            return 0
+        if not self._magnet_owns(group):  # na V1 magnética a faixa se fecha sozinha (settle_main)
+            starts: dict[tuple[str, int], int] = {}
+            for c in group:
+                starts[(c.kind, c.track)] = min(starts.get((c.kind, c.track), c.start), c.start)
+            self._pull(starts, a, clip.start, n, {c.id for c in group})
+        return n
+
+    def ripple_trim_end(self, cid: str, frame: int) -> int:
+        """W: tira o fim do clipe (e dos ligados) a partir de `frame` e fecha o espaço — o que vem depois anda
+        para a esquerda. Devolve os quadros tirados."""
+        clip = self.find(cid)
+        group = self._group_for_edit(cid)
+        if clip is None or clip not in group or not clip.start < int(frame) < clip.end:
+            return 0
+        b = clip.end
+        ends: dict[tuple[str, int], int] = {}
+        for c in group:
+            ends[(c.kind, c.track)] = min(ends.get((c.kind, c.track), c.end), c.end)
+        n = -self.trim_end(cid, int(frame))
+        if n <= 0:
+            return 0
+        if not self._magnet_owns(group):
+            self._pull(ends, clip.end, b, n, {c.id for c in group})
+        return n
+
+    # -------------------------------------------------------- ferramentas de corte: cortes J e L
+    def cut_pair(self, clip: Clip, left: bool) -> tuple[Clip, Clip, Clip, Clip] | None:
+        """O corte entre dois pares imagem + som ligados, encostados na mesma faixa de vídeo e na mesma de som:
+        (imagem e som da esquerda, imagem e som da direita). `clip` é qualquer um dos dois do par; `left` escolhe
+        o corte do começo do par (True) ou o do fim. None se ali não há um corte assim (ou se algo está travado).
+        """
+        def pair(c: Clip | None) -> tuple[Clip, Clip] | None:
+            if c is None or not c.link:
+                return None
+            g = self.group(c)
+            vs = [x for x in g if x.kind == VIDEO]
+            aus = [x for x in g if x.kind == AUDIO]
+            return (vs[0], aus[0]) if len(vs) == 1 and len(aus) == 1 and len(g) == 2 else None
+
+        me = pair(clip)
+        if me is None:
+            return None
+        other = pair(self.previous_on_track(me[0]) if left else self.next_on_track(me[0]))
+        if other is None:
+            return None
+        (pv, pa), (nv, na) = (other, me) if left else (me, other)
+        if pa.track != na.track or pa.end != na.start or any(self.locked(x) for x in (pv, pa, nv, na)):
+            return None
+        return pv, pa, nv, na
+
+    def split_edit(self, cid: str, left: bool, offset: int) -> int | None:
+        """Corte J (`offset` < 0: o som da direita começa antes do corte da imagem) ou corte L (`offset` > 0: o
+        som da esquerda continua depois dele), com o corte do som a `offset` quadros do corte da imagem; 0 alinha
+        de novo. O corte do som rola (um som cresce e o vizinho encolhe) e a imagem não muda. Limitado pelo
+        arquivo que sobra além do corte e por 1 quadro de cada som. Devolve o deslocamento que coube, ou None se
+        ali não há um corte entre dois pares ligados (`cut_pair`)."""
+        c = self.find(cid)
+        pair = self.cut_pair(c, left) if c is not None else None
+        if pair is None:
+            return None
+        _pv, pa, nv, na = pair
+        here = na.start
+        target = nv.start + int(offset)
+        if target < here:
+            target = max(target, here - self._head_room(na), pa.start + 1)
+            if target < here:
+                self.trim_start_only(na.id, target)
+        elif target > here:
+            target = min(target, here + max(0, self.max_dur(pa) - pa.dur), na.end - 1)
+            if target > here:
+                self.trim_end_only(pa.id, target)
+        return na.start - nv.start
+
+    def _set_speed_offset(self, group: list[Clip], clip: Clip | None, speed: float) -> None:
+        """Velocidade de um par ligado com entrada ou saída diferentes (corte J/L): a imagem (ou o clipe pedido)
+        fica no lugar e as diferenças de começo e de fim mudam na proporção, para o som continuar em sincronia
+        com a imagem; o fim de todos encolhe junto se o arquivo acabar ou se encostar no clipe seguinte."""
+        anchor = next((c for c in group if c.kind == VIDEO), clip or group[0])
+        ratio = anchor.speed / speed
+        a0 = anchor.start
+        ids = {c.id for c in group}
+        plan: dict[str, tuple[int, int]] = {}
+        cut = 0
+        for c in group:
+            ns = max(0, a0 + int(round((c.start - a0) * ratio)))
+            ne = max(ns + 1, a0 + int(round((c.end - a0) * ratio)))
+            lim = ne
+            nxt = min((o.start for o in self.clips_on(c.kind, c.track) if o.id not in ids and o.start >= c.end),
+                      default=None)
+            if nxt is not None:
+                lim = min(lim, max(nxt, ns + 1))
+            if not self._holds(c):
+                left = max(0.0, self.sources[c.src].length - c.src_in)
+                lim = min(lim, ns + max(1, int(math.floor(left / speed * self.fps + EPS))))
+            plan[c.id] = (ns, ne)
+            cut = max(cut, ne - lim)
+        for c in group:
+            ns, ne = plan[c.id]
+            if abs(c.speed - speed) > 1e-12:
+                c.rescale_keys(c.speed / speed)  # a animação acompanha a imagem, como em set_speed
+            c.values["velocidade"] = speed
+            c.start = ns
+            c.dur = max(1, ne - cut - ns)
+        for c in group:
+            self._clear_range(c.kind, c.track, c.start, c.end, ids)
+
+    # -------------------------------------------------------- faixa principal magnética
+    @property
+    def magnet_active(self) -> bool:
+        """A faixa principal magnética está valendo (ligada e com a V1 destravada)."""
+        tr = self.track(VIDEO, 0)
+        return self.magnetic and not (tr is not None and tr.locked)
+
+    def _magnet_owns(self, group: Iterable[Clip]) -> bool:
+        """A edição deste grupo mexe na V1 magnética (então a V1 se acerta sozinha depois)."""
+        return self.magnet_active and any(c.kind == VIDEO and c.track == 0 for c in group)
+
+    def room_for_start(self, cid: str, new_start: int) -> int:
+        """V1 magnética: alongar o começo de um clipe da V1 não cobre o clipe de antes — o clipe fica no lugar,
+        mostra mais do arquivo e empurra o resto. Abre o espaço e devolve até onde aparar o começo."""
+        clip = self.find(cid)
+        group = self._group_for_edit(cid)
+        new_start = int(new_start)
+        if clip is None or clip not in group or new_start >= clip.start or not self._magnet_owns(group):
+            return new_start
+        d = min([clip.start - new_start] + [self._head_room(c) for c in group])
+        here = clip.start
+        if d > 0:
+            self.open_space(here, d, {(c.kind, c.track) for c in group}, all_tracks=False, split=False)
+        return here
+
+    def room_for_end(self, cid: str, new_end: int) -> None:
+        """V1 magnética: alongar o fim de um clipe da V1 empurra o que vem depois (em vez de cobrir)."""
+        clip = self.find(cid)
+        group = self._group_for_edit(cid)
+        if clip is None or clip not in group or int(new_end) <= clip.end or not self._magnet_owns(group):
+            return
+        d = min([int(new_end) - clip.end] + [self.max_dur(c) - c.dur for c in group])
+        if d > 0:
+            self.open_space(clip.end, d, {(c.kind, c.track) for c in group}, exclude={c.id for c in group},
+                            all_tracks=False, split=False)
+
+    def room_for_speed(self, cid: str, speed: float) -> None:
+        """V1 magnética: deixar um clipe da V1 mais lento (mais longo) empurra o que vem depois."""
+        clip = self.find(cid)
+        group = self._group_for_edit(cid)
+        if clip is None or clip not in group or not self._magnet_owns(group):
+            return
+        p = editparams.VIDEO.params["velocidade"]
+        speed = min(max(float(speed), p.min), p.max)
+        main = next(c for c in group if c.kind == VIDEO and c.track == 0)
+        want = max(1, int(round(main.dur * main.speed / speed)))
+        if not self._holds(main):
+            left = max(0.0, self.sources[main.src].length - main.src_in)
+            want = min(want, max(1, int(math.floor(left / speed * self.fps + EPS))))
+        if want > main.dur:
+            self.open_space(main.end, want - main.dur, {(c.kind, c.track) for c in group},
+                            exclude={c.id for c in group}, all_tracks=False, split=False)
+
+    def _snapshot(self) -> dict[str, Any]:
+        return {"clips": {c.id: (c.kind, c.track, c.start, c.dur, c.src_in) for c in self.clips},
+                "main": [_Span(c.id, c.start, c.end, c.src, c.src_in, c.speed, self._holds(c))
+                         for c in self.clips_on(VIDEO, 0)],
+                "markers": {m.id: m.frame for m in self.markers}}
+
+    @contextmanager
+    def keep_main(self):
+        """Bloco de edição: com a faixa principal magnética, no fim a V1 fica sem buracos e o resto acompanha
+        (`settle_main`). Sem ela, não faz nada."""
+        snap = self._snapshot() if self.magnet_active else None
+        yield
+        if snap is not None:
+            self.settle_main(snap)
+
+    def settle_main(self, snap: dict[str, Any] | None = None) -> None:
+        """Faixa principal magnética (regra completa em docs/ARQUITETURA.md, seção 13.1):
+
+        1. a V1 fica de ponta a ponta desde o quadro 0, na mesma ordem; o que é ligado a ela anda junto;
+        2. cada clipe das outras faixas (com os ligados a ele) que a edição não mexeu acompanha a imagem da V1
+           que estava sob o começo dele (`_main_warp`); se essa imagem sumiu, vai para o ponto do corte. O que a
+           edição mexeu (arrastou, aparou, acabou de entrar) fica onde ela deixou;
+        3. ninguém cobre ninguém: se o lugar estiver ocupado, o clipe anda para a direita até caber;
+        4. os marcadores que a edição não mexeu acompanham a V1 do mesmo jeito.
+
+        Faixas travadas não mudam; com a V1 travada nada acontece (a faixa espera). `snap` é o estado de antes
+        da edição (`_snapshot`); sem ele, só acerta a montagem atual (ao ligar a faixa magnética)."""
+        if not self.magnet_active:
+            return
+        snap = snap if snap is not None else self._snapshot()
+        before = snap["clips"]
+        order = {c.id: i for i, c in enumerate(self.clips)}
+        main = [c for c in self.clips if c.kind == VIDEO and c.track == 0]
+        main_groups: set[str] = set()
+        for c in main:
+            main_groups.update(g.id for g in self.group(c))
+        units: list[list[Clip]] = []
+        seen: set[str] = set()
+        for c in self.clips:
+            if c.id in main_groups or c.id in seen:
+                continue
+            members = self.group(c)
+            seen.update(g.id for g in members)
+            if not any(self.locked(g) for g in members):
+                units.append(members)
+        unit_ids = {g.id for u in units for g in u}
+        self.clips = [c for c in self.clips if c.id not in unit_ids]
+        # 1) V1 de ponta a ponta; os ligados a ela andam o mesmo que o primeiro clipe da V1 do grupo.
+        shift: dict[str, int] = {}
+        pos = 0
+        for c in sorted(main, key=lambda c: (c.start, order[c.id])):
+            shift[c.id] = pos - c.start
+            c.start = pos
+            pos = c.end
+        moved = []
+        for c in self.clips:
+            if c.id in main_groups and c.id not in shift and not self.locked(c):
+                firsts = [g for g in self.group(c) if g.id in shift]
+                d = shift[min(firsts, key=lambda g: g.start).id] if firsts else 0
+                if d:
+                    c.start = max(0, c.start + d)
+                    moved.append(c)
+        for c in moved:
+            self._clear_range(c.kind, c.track, c.start, c.end, {g.id for g in self.group(c)})
+        # 2) e 3) os conectados: primeiro o que a edição mexeu (fica onde ela deixou), depois o resto, na ordem
+        # de onde vai ficar.
+        warp = self._main_warp(snap["main"], set(before))
+        plans = []
+        for members in units:
+            p0 = min(g.start for g in members)
+            untouched = all(before.get(g.id) == (g.kind, g.track, g.start, g.dur, g.src_in) for g in members)
+            d = warp(p0) - p0 if untouched else 0
+            plans.append((untouched, p0 + d, p0, members, d))
+        plans.sort(key=lambda x: (x[0], x[1], x[2]))
+        for _untouched, _want, p0, members, d in plans:
+            d = self._fit_shift(members, max(d, -p0))
+            for g in members:
+                g.start += d
+            self.clips.extend(members)
+        self.clips.sort(key=lambda c: order.get(c.id, len(order)))
+        # 4) marcadores
+        marks = snap["markers"]
+        for mk in self.markers:
+            if marks.get(mk.id) == mk.frame:
+                mk.frame = max(0, warp(mk.frame))
+
+    def _fit_shift(self, members: list[Clip], d: int) -> int:
+        """O menor deslocamento a partir de `d` que põe os clipes sem cobrir nada nas faixas deles."""
+        ids = {g.id for g in members}
+        while True:
+            need = d
+            for g in members:
+                a, b = g.start + d, g.end + d
+                for o in self.clips:
+                    if o.id not in ids and o.kind == g.kind and o.track == g.track and o.start < b and o.end > a:
+                        need = max(need, o.end - g.start)
+            if need == d:
+                return d
+            d = need
+
+    def _main_warp(self, spans: list[_Span], known: set[str]):
+        """f(p): onde foi parar, depois da edição, a imagem que a V1 mostrava no quadro p antes dela.
+
+        Acompanha o conteúdo (o arquivo e o instante dentro dele), então vale para mover, dividir, aparar,
+        inserir e mudar a velocidade: procura o mesmo clipe, ou uma parte nova (divisão, clipe inserido), que
+        mostre o mesmo instante do mesmo arquivo. Imagem parada e quadro congelado acompanham o próprio clipe.
+        Imagem que sumiu (apagada, aparada) leva ao ponto do corte; um buraco da V1 também (ele se fechou);
+        depois do fim da V1, a distância até o fim fica."""
+        fps = self.fps
+        after = self.clips_on(VIDEO, 0)
+        by_id = {c.id: c for c in after}
+        fresh = [c for c in after if c.id not in known]
+
+        def cut_after(i: int) -> int:
+            for j in range(i, -1, -1):
+                c = by_id.get(spans[j].id)
+                if c is not None:
+                    return c.end
+            return 0
+
+        def shows(c: Clip, tau: float) -> int | None:
+            if self._holds(c):
+                return None
+            k = int(math.floor((tau - c.src_in) * fps / c.speed + 1e-6))
+            return c.start + k if 0 <= k < c.dur else None
+
+        def f(p: int) -> int:
+            if not spans:
+                return p
+            idx = next((i for i, s in enumerate(spans) if s.start <= p < s.end), None)
+            if idx is None:
+                prev = [i for i, s in enumerate(spans) if s.end <= p]
+                if not prev:
+                    return 0
+                if prev[-1] == len(spans) - 1:
+                    return cut_after(prev[-1]) + (p - spans[-1].end)
+                return cut_after(prev[-1])
+            s = spans[idx]
+            same = by_id.get(s.id)
+            if s.holds:
+                if same is None:
+                    return cut_after(idx - 1)
+                off = p - s.start
+                return same.start + off if off < same.dur else same.end
+            tau = s.src_in + (p - s.start) / fps * s.speed
+            if same is not None and same.src == s.src:
+                got = shows(same, tau)
+                if got is not None:
+                    return got
+            best = None
+            for c in fresh:
+                got = shows(c, tau) if c.src == s.src else None
+                if got is not None and (best is None or abs(got - p) < abs(best - p)):
+                    best = got
+            if best is not None:
+                return best
+            if same is not None:
+                return same.start if tau < same.src_in else same.end
+            return cut_after(idx - 1)
+
+        return f
 
     # -------------------------------------------------------- marcadores
     def marker(self, mid: str) -> Marker | None:
@@ -1075,6 +1600,8 @@ class Sequence:
             out["marcadores"] = [m.to_json() for m in self.sorted_markers()]
         if self.micro_fade:
             out["micro_fades"] = True
+        if self.magnetic:
+            out["faixa_magnetica"] = True
         return out
 
     @classmethod
@@ -1094,7 +1621,8 @@ class Sequence:
             w, h = 1920, 1080
         tracks = [t for t in (Track.from_json(x) for x in d.get("faixas") or [] if isinstance(x, dict)) if t]
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
-                  background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True)
+                  background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True,
+                  magnetic=d.get("faixa_magnetica") is True)
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)

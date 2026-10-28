@@ -6,8 +6,8 @@ import copy
 
 from PySide6.QtCore import QMimeData, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-                               QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
+                               QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import editparams
 from ..i18n import N_, _, decimal_sep
@@ -123,6 +123,7 @@ class MediaBin(QWidget):
     addRequested = Signal(str)
     removeRequested = Signal(str)
     filesDropped = Signal(list)
+    placeRequested = Signal(list, bool)   # (caminhos, inserir): no cursor, empurrando (True) ou cobrindo (False)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -161,6 +162,8 @@ class MediaBin(QWidget):
         self.list.itemDoubleClicked.connect(lambda it: self.addRequested.emit(it.data(Qt.ItemDataRole.UserRole)))
         self.list.itemSelectionChanged.connect(self._sync)
         self.list.filesDropped.connect(self.filesDropped)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._menu)
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.list)
         lay.addWidget(self.stack, 1)
@@ -223,6 +226,28 @@ class MediaBin(QWidget):
     def current_path(self) -> str | None:
         it = self.list.currentItem()
         return it.data(Qt.ItemDataRole.UserRole) if it is not None else None
+
+    def selected_paths(self) -> list[str]:
+        """Itens escolhidos, na ordem da lista."""
+        rows = sorted(self.list.row(it) for it in self.list.selectedItems())
+        return [self.list.item(r).data(Qt.ItemDataRole.UserRole) for r in rows]
+
+    def place(self, insert: bool) -> None:
+        """"Inserir no cursor" (`,`) / "Sobrescrever no cursor" (`.`) com os itens escolhidos."""
+        paths = self.selected_paths()
+        if paths:
+            self.placeRequested.emit(paths, bool(insert))
+
+    def _menu(self, pos) -> None:
+        if self.list.itemAt(pos) is None or not self.list.selectedItems():
+            return
+        menu = QMenu(self)
+        menu.addAction(_("Adicionar ao fim da linha do tempo"), self._add_current)
+        menu.addAction(_("Inserir no cursor (,)"), lambda: self.place(True))
+        menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.place(False))
+        menu.addSeparator()
+        menu.addAction(_("Tirar da lista"), self._remove_current)
+        menu.exec(self.list.viewport().mapToGlobal(pos))
 
     # -------------------------------------------------------- interno
     def _item(self, path: str) -> QListWidgetItem | None:

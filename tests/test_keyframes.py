@@ -240,6 +240,41 @@ def test_delete_and_ripple_keep_the_other_clips_animation():
     assert curve(seq, b, "opacidade") == {t - 48: x for t, x in before.items()}
 
 
+def test_cutting_tools_keep_the_animation_on_the_picture_and_the_sound():
+    """Ferramentas de corte da 1.5 (Q/W, corte J/L e a velocidade de um par com corte J/L): cada chave continua
+    no mesmo instante do arquivo."""
+    seq = tl.Sequence(W, H, "24/1")
+    for n in "AB":
+        seq.insert_media(tl.Source(f"C:/v/{n}.mp4", W, H, 24.0, "24/1", 200, 200 / 24, has_audio=True))
+    for c in [c for c in seq.clips if c.kind == tl.VIDEO]:
+        seq.trim_start(c.id, c.start + 50)
+        seq.trim_end(c.id, c.start + 100)
+    seq.close_gaps(tl.VIDEO, 0)
+    seq.close_gaps(tl.AUDIO, 0)
+    bv = next(c for c in seq.clips if c.kind == tl.VIDEO and c.src.endswith("B.mp4"))
+    ba = next(c for c in seq.clips if c.kind == tl.AUDIO and c.src.endswith("B.mp4"))
+    animated(seq, bv, keys=((20, 0.0, "linear"), (60, 1.0, "suavizar")))
+    animated(seq, ba, "volume", ((30, 0.0, "linear"), (80, -20.0, "suavizar")))
+
+    def anchors():
+        def at(c, t):
+            return round(c.src_in + (t - c.start) / seq.fps * c.speed, 6)
+        return ([(at(bv, t), v) for t, v, _e in seq.keys_of(bv, "opacidade")],
+                [(at(ba, t), v) for t, v, _e in seq.keys_of(ba, "volume")])
+
+    first = anchors()
+    assert seq.split_edit(bv.id, True, -24) == -24  # corte J: o som de B entra antes da imagem
+    assert anchors() == first
+    seq.set_speed(bv.id, 2.0)                       # par com corte J: as diferenças acompanham
+    assert ba.start != bv.start and bv.speed == ba.speed == 2.0
+    assert anchors() == first
+    seq.set_speed(bv.id, 1.0)
+    assert anchors() == first
+    assert seq.ripple_trim_start(bv.id, bv.start + 10) > 0  # Q
+    assert seq.ripple_trim_end(bv.id, bv.end - 10) > 0      # W
+    assert anchors() == first
+
+
 def test_relink_keeps_the_keys():
     seq, v = video_seq()
     animated(seq, v)

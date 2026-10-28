@@ -658,7 +658,7 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 - **Linha do tempo**: clique ou arraste; `Espaço` reproduz/pausa (a reprodução pula quadros se a
   prévia não acompanhar, mantendo o tempo real), `←`/`→` andam um quadro, `Shift+←/→` um segundo,
   `Home`/`End` vão para a entrada/saída (ou começo/fim).
-- **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `L` liga/desliga a repetição. O trecho
+- **Entrada e saída**: `I` e `O` marcam o trecho, `X` limpa, `Ctrl+L` liga/desliga a repetição. O trecho
   marcado pode ser exportado sozinho.
 - **Som**: a reprodução toca o áudio do vídeo, sincronizado com o quadro mostrado (o som se corrige
   sozinho se escorregar mais de 0,15 s, inclusive na repetição e ao buscar). O botão de alto-falante
@@ -795,12 +795,14 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | Atalho | Ação |
 |---|---|
 | `Espaço` | Reproduzir / pausar |
+| `J` / `K` / `L` | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (sem som fora de 1× para a frente) |
+| `K` + `J` / `K` + `L` | Segurando o K: um quadro para trás / para a frente |
 | `←` / `→` | Quadro anterior / próximo |
 | `Shift + ←` / `Shift + →` | Voltar / avançar 1 segundo |
 | `Home` / `End` | Ir para a entrada (ou início) / saída (ou fim) |
 | `I` / `O` | Marcar entrada / saída |
 | `X` | Limpar entrada e saída |
-| `L` | Repetir (liga/desliga) |
+| `Ctrl+L` | Repetir (liga/desliga; antes era o `L`) |
 | `C` | Trocar o modo de comparação |
 | `F` | Ajustar à janela |
 | `+` / `−` | Mais / menos zoom (de 10% a 1600%) |
@@ -824,6 +826,10 @@ Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 | `Ctrl+1` / `Ctrl+2` | Modo Película / modo Edição |
 | `Ctrl+I` | Importar para a edição |
 | `S` (Edição) | Dividir no cursor |
+| `Q` / `W` (Edição) | Aparar o começo / o fim do clipe até o cursor e fechar o espaço |
+| `,` / `.` (Edição) | Inserir / sobrescrever no cursor (itens escolhidos na Mídia) |
+| `Ctrl` ao soltar ou mover (linha do tempo) | Inverte o botão **Inserir** (empurrar × sobrescrever) |
+| `Alt` ao aparar (linha do tempo) | Só a imagem ou só o som do par ligado (corte J/L) |
 | `Delete` / `Shift+Delete` (Edição) | Apagar / apagar e fechar o espaço |
 | `B` / `V` / `N` (linha do tempo) | Lâmina / seleção / ímã |
 | `Ctrl` + roda (linha do tempo) | Zoom da linha do tempo |
