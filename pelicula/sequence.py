@@ -432,6 +432,7 @@ def missing_sources(seq: timeline.Sequence) -> list[str]:
 # ------------------------------------------------------------------ geradores que vêm com o app
 # Registram-se aqui (desenho, som e miniatura) para valer em todo lugar que lê uma montagem: janela, exportação
 # e terminal. Ficam registrados mesmo com o módulo desligado (a renderização nunca consulta `modules`).
-from . import generators as _generators  # noqa: E402
+from . import generators as _generators, titles as _titles  # noqa: E402
 
 _generators.register()
+_titles.register()

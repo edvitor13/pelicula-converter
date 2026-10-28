@@ -288,3 +288,76 @@ def test_bin_follows_the_generator_name_and_thumbnail(win):
     data = dict(win.model.seq.sources[path].data, nome="Fundo azul", cor="#0000ff")
     assert win.model.set_source_data(path, data)
     assert pump(lambda: "Fundo azul" in win.bin._item(path).text())
+
+
+# ------------------------------------------------------------------ títulos ("Novo ▸ Título…" e o editor)
+def test_new_title_from_the_menu(win):
+    win.new_project()
+    win.set_mode("edicao")
+    labels = [a.text() for a in win.bin.btn_new.menu().actions()]
+    assert labels == ["Cor sólida", "Degradê", "Ponta com contagem", "Título…"]
+    _menu_action(win, "cor").trigger()
+    win.seek(24)
+    _menu_action(win, "titulo").trigger()  # por cima da cor (V2), no cursor
+    seq = win.model.seq
+    clip = next(c for c in seq.clips if seq.sources[c.src].kind == "texto")
+    assert clip.start == 24 and clip.track == 1 and clip.dur == 5 * 24
+    ed = win.title_editor
+    APP.processEvents()
+    assert not ed.isHidden() and win.gen_editor.isHidden() and ed.path == clip.src
+    assert ed.text.toPlainText() == "Título" and ed.text.textCursor().hasSelection()
+    assert clip.src in win.bin.paths()
+
+
+def test_title_editor_text_style_preset_and_undo(win):
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "titulo").trigger()
+    ed = win.title_editor
+    path = ed.path
+    before = dict(win.model.seq.sources[path].data)
+    ed.text.setPlainText("Abertura\nsegunda linha")
+    assert pump(lambda: win.model.seq.sources[path].data["texto"] == "Abertura\nsegunda linha")
+    assert win.model.seq.sources[path].data["nome"] == "Abertura"
+    assert pump(lambda: "Abertura" in win.bin._item(path).text())  # a Mídia acompanha a primeira linha
+    ed.store.set("tamanho", 90.0)
+    ed.store.set("cor", [1.0, 0.0, 0.0])
+    style = win.model.seq.sources[path].data["estilo"]
+    assert style["tamanho"] == 90.0 and style["cor"] == "#ff0000" and style["fonte"] == "bebas"
+    ed.store.set("entrada", "subir")
+    assert win.model.seq.sources[path].data["entrada"] == "subir"
+    win.model.undo()  # digitar e arrastar agrupam: volta ao título novo
+    assert pump(lambda: win.model.seq.sources[path].data == before)
+    assert ed.text.toPlainText() == "Título" and ed.store.get("tamanho") == 170.0
+    # estilo pronto: troca letra, posição e animações, o texto fica
+    ed.text.setPlainText("Ana Lima")
+    i = ed.preset.findData("terco_inferior")
+    ed.preset.setCurrentIndex(i)
+    ed.preset.activated.emit(i)
+    data = win.model.seq.sources[path].data
+    assert data["texto"] == "Ana Lima" and data["estilo_pronto"] == "terco_inferior" and data["pos_x"] == 0.07
+    assert ed.store.get("alinhamento") == "esquerda" and ed.preset.currentIndex() == 0
+    win.model.undo()
+    assert win.model.seq.sources[path].data["estilo_pronto"] == "titulo_grande"
+
+
+def test_title_warns_about_characters_the_font_lacks(win):
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "titulo").trigger()
+    ed = win.title_editor
+    assert ed.warn.isHidden()
+    ed.text.setPlainText("Tóquio 東京")
+    assert pump(lambda: not ed.warn.isHidden())
+    assert "東" in ed.warn.text() and "Bebas Neue" in ed.warn.text()
+    ed.store.set("fonte", "atkinson")
+    ed.text.setPlainText("Tóquio")
+    assert pump(lambda: ed.warn.isHidden())
+
+
+def test_about_lists_the_font_licenses(win, monkeypatch):
+    from pelicula.ui import main_window
+    seen = []
+    monkeypatch.setattr(main_window.QMessageBox, "about", lambda parent, title, text: seen.append(text))
+    win.about()
+    assert seen and "SIL Open Font License 1.1" in seen[0] and "Atkinson Hyperlegible" in seen[0]

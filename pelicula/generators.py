@@ -353,9 +353,11 @@ def tones(seq: timeline.Sequence, clip: timeline.Clip) -> list[tuple[int, int, f
 
 
 def needs_text(seq: timeline.Sequence) -> bool:
-    """A montagem tem um gerador que desenha texto (a ponta: os números)? Quem roda sem janela (terminal) cria
-    a `QGuiApplication` antes (`textrender.ensure_app`)."""
+    """A montagem tem um clipe que desenha texto (a ponta, os números; um título)? Quem roda sem janela
+    (terminal) cria a `QGuiApplication` antes (`textrender.ensure_app`)."""
     for src in seq.sources.values():
+        if src.kind == "texto":
+            return True
         gen = generator_of(src) if not src.is_file else None
         if gen is not None and gen.id == LEADER:
             return True

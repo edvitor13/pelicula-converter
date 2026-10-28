@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
-               loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, timeline,
-               updater)
+               loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, textrender,
+               timeline, titles, updater)
 from ..i18n import N_, _
 from ..engine import Engine
 from ..frame import Recipe
@@ -39,7 +39,7 @@ from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
-from . import generators_ui
+from . import generators_ui, titles_panel
 from .scopes import Scopes
 from .timeline_view import TimelineEditor
 from . import notifier, prefs, welcome
@@ -877,6 +877,8 @@ class MainWindow(QMainWindow):
         self.inspector.autoRequested.connect(self.auto_adjust_clip)
         self.gen_editor = generators_ui.GeneratorEditor(self.model)
         self.inspector.add_source_editor(self.gen_editor)
+        self.title_editor = titles_panel.TitleEditor(self.model)
+        self.inspector.add_source_editor(self.title_editor)
         vl.addWidget(self.inspector, 1)
         return w
 
@@ -1501,6 +1503,8 @@ class MainWindow(QMainWindow):
         self.model.insert_media(src, at=at, vtrack=track)
         self.statusBar().showMessage(_("{nome} na faixa V{faixa}: ajuste no inspetor, à direita.").format(
             nome=src.name, faixa=track + 1), 6000)
+        if src.kind == titles.KIND and self.title_editor.isVisible():
+            self.title_editor.focus_text()  # já digitar o texto do título
 
     def _free_video_track(self, at: int, dur: int) -> int:
         """A faixa de vídeo mais baixa, destravada e sem nada em [at, at + dur) (uma nova acima de todas, se não há)."""
@@ -3200,7 +3204,9 @@ class MainWindow(QMainWindow):
                       "bloom, bitolas de 8 mm a IMAX, tremor de projetor, desgaste e moldura.") + "</p>"
             f"<p>GPU: {self.engine.renderer}<br>ffmpeg: {ff}</p>"
             "<p>" + _("Os presets com nomes de filmes são aproximações artísticas, sem relação com os fabricantes.")
-            + "</p>"))
+            + "</p>"
+            "<p>" + _("Fontes dos títulos e legendas ({licenca}): {fontes}.").format(
+                licenca="SIL Open Font License 1.1", fontes=", ".join(n for n, _l in textrender.credits())) + "</p>"))
 
     # ================================================================ teclado e janela
     def keyPressEvent(self, e):
