@@ -497,12 +497,150 @@ def test_window_recipe_carries_the_burn(win):
     set_module(win, "legendas", True)
 
 
+@pytest.fixture
+def fake_whisper(tmp_path, monkeypatch):
+    """O whisper-cli falso (tests/whisper_falso.py) instalado e um som de mentira no lugar do ffmpeg."""
+    import sys
+    from pathlib import Path
+    from pelicula import transcribe as tc
+    model, vad = tmp_path / "modelo.bin", tmp_path / "vad.bin"
+    model.write_bytes(b"m")
+    vad.write_bytes(b"v")
+    monkeypatch.delenv("PCTEST_WHISPER_MODO", raising=False)
+    monkeypatch.delenv("PCTEST_WHISPER_LOG", raising=False)
+    eng = tc.Engine((sys.executable, str(Path(__file__).with_name("whisper_falso.py"))), model, vad)
+    monkeypatch.setattr(tc, "missing", lambda model="small", root=None: [])
+    monkeypatch.setattr(tc, "engine", lambda model="small", root=None: eng)
+    monkeypatch.setattr(tc, "vulkan_available", lambda: False)
+    monkeypatch.setattr(tc, "temp_dir", lambda: tmp_path / "cache")
+    monkeypatch.setattr(tc, "extract_audio", lambda path, out, *a, **k: Path(out).write_bytes(b"RIFF"))
+    return tc
+
+
+def wait_job(dlg, timeout=30.0):
+    import time
+    job = dlg.job
+    assert job is not None and job.wait(timeout), "a transcrição não terminou"
+    end = time.monotonic() + 5
+    while dlg.progress_row.isVisible() or dlg.busy or not dlg.message.text():
+        APP.processEvents()                     # o fim chega pela ponte da fila (thread principal)
+        if time.monotonic() > end:
+            break
+    return job
+
+
+def test_generate_is_hidden_without_the_beta_module(win):
+    ui = win.subs_ui
+    set_module(win, "legendas_auto", False)
+    assert ui.panel.btn_generate.isHidden() and not ui.act_generate.isVisible() and ui.generate_dialog() is None
+    set_module(win, "legendas_auto", True)
+    assert not ui.panel.btn_generate.isHidden() and ui.act_generate.isVisible()
+
+
+def test_generate_offers_the_components_page_when_something_is_missing(win, monkeypatch):
+    from pelicula import tools, transcribe as tc
+    set_module(win, "legendas_auto", True)
+    load(win, model_with())
+    monkeypatch.setattr(tc, "missing", lambda model="small", root=None: [tools.get(tc.MODELS[model])])
+    pages = []
+    monkeypatch.setattr(win, "show_settings", lambda page="geral": pages.append(page))
+    dlg = win.subs_ui.generate_dialog()
+    try:
+        assert not dlg.missing_row.isHidden() and "Componentes" in dlg.missing.text()
+        assert not dlg.btn_run.isEnabled() and dlg.start() is None and dlg.job is None   # nada baixa sozinho
+        dlg.btn_components.click()
+        assert pages == ["componentes"]
+    finally:
+        dlg.hide()
+
+
+def test_generate_runs_in_the_queue_and_is_one_undo_step(win, fake_whisper):
+    tc = fake_whisper
+    set_module(win, "legendas_auto", True)
+    win.set_mode("edicao")
+    m = model_with(Cue(0.6, 0.9, "velha"), Cue(30, 31, "fora do trecho"))
+    load(win, m)
+    seq = win.model.seq
+    a = [c for c in seq.clips if c.kind == AUDIO][0]
+    win.model.select([a.id])
+    dlg = win.subs_ui.generate_dialog()
+    try:
+        assert dlg.missing_row.isHidden() and dlg.scope.currentData() == "montagem"
+        assert dlg.scope.findData("selecao") >= 0 and "20 s" in dlg.where.text()
+        dlg.language.setCurrentIndex(dlg.language.findData("pt"))
+        dlg.max_chars.setValue(16)
+        dlg.max_lines.setValue(1)
+        assert dlg.options() == tc.Options(model=dlg.model_box.currentData(), language="pt", gpu=dlg.gpu.isChecked(),
+                                           max_chars=16, max_lines=1)
+        undo_before = win.model.history._pos
+        job = dlg.start()
+        assert job.key == tc.JOB_KEY and job.kind == "cpu" and dlg.busy and not dlg.btn_run.isEnabled()
+        wait_job(dlg)
+        assert job.state == "concluido", job.error
+        cues = win.model.seq.subtitles.sources[PATH]
+        assert [c.text for c in cues] == ["Olá, pessoal.", "Tudo bem?", "fora do trecho"]   # 16 caracteres, 1 linha
+        assert dlg.applied == 2 and "2 legendas geradas" in dlg.message.text()
+        assert win.model.seq.subtitles.language == "pt" and not win.subs_ui.dock.isHidden()
+        assert win.model.history._pos == undo_before + 1
+        win.model.undo()                                      # um passo só: volta tudo
+        assert [c.text for c in win.model.seq.subtitles.sources[PATH]] == ["velha", "fora do trecho"]
+        win.model.redo()
+        assert len(win.model.seq.subtitles.sources[PATH]) == 3
+    finally:
+        dlg.hide()
+        win.set_mode("pelicula")
+
+
+def test_generate_reports_errors_and_cancel(win, fake_whisper, monkeypatch):
+    set_module(win, "legendas_auto", True)
+    load(win, model_with())
+    dlg = win.subs_ui.generate_dialog()
+    try:
+        monkeypatch.setenv("PCTEST_WHISPER_MODO", "falha")
+        dlg.start()
+        job = wait_job(dlg)
+        assert job.state == "erro" and dlg.message.text() and win.model.seq.subtitles is None
+        monkeypatch.setenv("PCTEST_WHISPER_MODO", "mudo")
+        dlg.start()
+        wait_job(dlg)
+        assert "Nenhuma fala" in dlg.message.text() and win.model.seq.subtitles is None
+        monkeypatch.setenv("PCTEST_WHISPER_MODO", "lento")
+        dlg.start()
+        dlg.cancel()
+        job = wait_job(dlg)
+        assert job.state == "cancelado" and "cancelada" in dlg.message.text()
+    finally:
+        dlg.hide()
+
+
+def test_generate_does_not_touch_another_project(win, fake_whisper, monkeypatch):
+    set_module(win, "legendas_auto", True)
+    load(win, model_with())
+    dlg = win.subs_ui.generate_dialog()
+    try:
+        monkeypatch.setenv("PCTEST_WHISPER_MODO", "lento")
+        job = dlg.start()
+        other = TimelineModel()
+        seq = tl.Sequence(1920, 1080, "24/1")
+        seq.insert_media(src("C:/v/outro.mp4"))
+        other.set_sequence(seq)
+        load(win, other)                                      # abriu outro projeto no meio da transcrição
+        monkeypatch.setenv("PCTEST_WHISPER_MODO", "ok")
+        wait_job(dlg, 60)
+        assert job.state == "concluido" and win.model.seq.subtitles is None
+        assert "projeto mudou" in dlg.message.text()
+    finally:
+        dlg.hide()
+
+
 def test_window_undo_goes_to_the_subtitles_with_the_panel_focused(win):
     ui = win.subs_ui
     win.set_mode("pelicula")
     load(win, model_with(Cue(1, 2, "oi")))
     ui.show_panel(True)
     ui.ctl.set_text(ui.ctl.items()[0], "olá")
+    win.activateWindow()                          # outra janela (Gerar legendas) pode ter ficado ativa
+    APP.processEvents()
     ui.panel.table.setFocus()
     APP.processEvents()
     assert ui.owns_focus()

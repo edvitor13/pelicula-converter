@@ -310,6 +310,7 @@ class SubtitlesUI(QObject):
         self.panel = SubtitlesPanel(self.ctl)
         self.panel.importRequested.connect(self.import_dialog)
         self.panel.exportRequested.connect(self.export_dialog)
+        self.panel.generateRequested.connect(self.generate_dialog)
         self.panel.previewToggled.connect(lambda _on: self._preview_toggled())
         self._burn_key: tuple | None = None
         self._burn = None
@@ -332,6 +333,8 @@ class SubtitlesUI(QObject):
         self.menu.addSeparator()
         self.menu.addAction(icon("open"), _("Importar .srt ou .vtt…"), self.import_dialog)
         self.act_export = self.menu.addAction(icon("export"), _("Exportar .srt ou .vtt…"), self.export_dialog)
+        self.act_generate = self.menu.addAction(icon("wand"), _("Gerar legendas pela fala…"), self.generate_dialog)
+        self.act_generate.setVisible(False)
         self.menu.aboutToShow.connect(self._sync_menu)
         win.btn_subs.setMenu(self.menu)
         win.btn_subs.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -395,7 +398,18 @@ class SubtitlesUI(QObject):
         if not self.enabled:
             self.dock.hide()
         self.panel.btn_generate.setVisible(self.enabled and self.auto)
+        self.act_generate.setVisible(self.enabled and self.auto)
+        dlg = getattr(self.win, "_transcribe_dialog", None)
+        if dlg is not None and not (self.enabled and self.auto):
+            dlg.hide()            # o trabalho que já está na fila continua e põe as legendas ao terminar
         self._sync()
+
+    def generate_dialog(self):
+        """"Gerar legendas pela fala…" (módulo Beta `legendas_auto`): janela não modal, trabalho na fila."""
+        if not (self.enabled and self.auto):
+            return None
+        from .transcribe_dialog import open_for
+        return open_for(self.win)
 
     # ------------------------------------------------------------ arquivos
     def _dir(self) -> str:
