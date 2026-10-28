@@ -1331,6 +1331,29 @@ requested by the user.
 O ffmpeg baixado pelo app não faz parte deste repositório e segue a licença do próprio ffmpeg
 (os builds *essentials* do gyan.dev e os builds do BtbN são GPL).
 
+### Fontes que acompanham o app (títulos e legendas)
+
+O texto dos títulos e das legendas usa só fontes que vêm junto com o app (`pelicula/data/fontes`),
+nunca as do sistema — por isso o mesmo texto sai igual em qualquer computador. Todas são da
+[SIL Open Font License 1.1](https://openfontlicense.org) (o texto da licença está no `OFL.txt` de cada
+pasta), sem nenhuma mudança nos arquivos, tiradas do repositório oficial do
+[Google Fonts](https://github.com/google/fonts) no commit `ddf386b` (SHA-256 de cada arquivo em
+`pelicula/data/fontes/SOURCE.txt`):
+
+| Família | Direitos (como no OFL.txt) | Estilos |
+|---|---|---|
+| Atkinson Hyperlegible | Braille Institute of America | normal, itálico, negrito, negrito itálico |
+| Poppins | The Poppins Project Authors (Indian Type Foundry) | normal, itálico, negrito, negrito itálico, black |
+| Barlow Condensed | The Barlow Project Authors (Jeremy Tribby) | normal, negrito |
+| Bebas Neue | Dharma Type | normal |
+| Anton | The Anton Project Authors (Vernon Adams) | normal |
+| Archivo Black | The Archivo Black Project Authors (Omnibus-Type) | normal |
+| DM Serif Display | Adobe (Source Serif, nome reservado "Source") e Google LLC; desenho da Colophon Foundry | normal, itálico |
+| Crimson Text | The Crimson Text Project Authors (Sebastian Kosch) | normal, itálico, negrito, negrito itálico |
+| Courier Prime | The Courier Prime Project Authors (Quote-Unquote Apps) | normal, itálico, negrito, negrito itálico |
+| Patrick Hand | Patrick Wagesreiter | normal |
+| Pacifico | The Pacifico Project Authors (Vernon Adams e outros) | normal |
+
 ### Créditos e licenças de terceiros (componentes baixados à parte)
 
 Nada disto vem no repositório, no pacote ou nas releases do PeliculaConverter: cada componente é
