@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import APP_NAME, __version__, params
+from . import APP_NAME, __version__, keyframes, params
 from .i18n import _
 
 EXT = ".plc"
@@ -51,6 +51,9 @@ class Project:
     thumbnail_jpeg: bytes = b""
     sequence: dict[str, Any] | None = None  # JSON de timeline.Sequence (modo Edição)
     mode: str = "pelicula"                  # "pelicula" | "edicao"
+    # Chaves de animação do look (`keyframes.to_json`: {ajuste: [[quadro, valor, curva?]…]}), em quadros do
+    # arquivo (modo Película) ou da montagem; {} = look fixo. No JSON, "chaves" (só quando há).
+    look_keys: dict[str, list] = field(default_factory=dict)
     path: str = ""  # onde o projeto está salvo (não vai para o arquivo)
 
     def to_json(self) -> dict[str, Any]:
@@ -83,6 +86,9 @@ class Project:
         }
         if edicao:
             data["edicao"] = edicao
+        keys = keyframes.to_json(keyframes.clean_keys(params.FILM, self.look_keys))
+        if keys:
+            data["chaves"] = keys
         if feats:
             data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3
         return data
@@ -99,7 +105,9 @@ class Project:
 # Recursos da 1.5 fora da montagem: id ASCII (nunca renomear) → teste do projeto. Os da montagem ficam em
 # `timeline.FEATURES`. Recurso novo: uma linha num dos dois (o campo dele no JSON só quando usado) e, se o
 # formato antigo precisa de algo para abrir nesta versão, um passo em `MIGRATIONS`.
-FEATURES_V3: dict[str, Callable[[Project], bool]] = {}
+FEATURES_V3: dict[str, Callable[[Project], bool]] = {
+    "chaves_look": lambda p: bool(keyframes.clean_keys(params.FILM, p.look_keys)),
+}
 
 
 def needed_format(features: set[str] | frozenset[str], has_sequence: bool) -> int:
@@ -257,6 +265,7 @@ def from_json(data: Any, path: str = "") -> Project:
         thumbnail_jpeg=thumb,
         sequence=sequence,
         mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
+        look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, data.get("chaves"))),
         path=str(Path(path).resolve()) if path else "",
     )
 

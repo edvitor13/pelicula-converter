@@ -998,6 +998,7 @@ class MainWindow(QMainWindow):
         self.stop_play()
         if detect:
             self._detect_profile(info)
+            self.store.clear_keys()  # as chaves do look estão no tempo do arquivo anterior
         self.file_info = info
         self.cur = None
         self._media_label = label or Path(path).name
@@ -1105,8 +1106,9 @@ class MainWindow(QMainWindow):
         out = []
         for li in fl.layers:
             clip = seq.find(li.layer.clip.id)
-            if clip is not None:
-                out.append(sequence.LayerImage(dataclasses.replace(li.layer, clip=clip), li.image))
+            if clip is not None:  # com as chaves de animação do clipe atual avaliadas neste quadro
+                layer = dataclasses.replace(li.layer, clip=clip, values=seq.values_at(clip, fl.frame))
+                out.append(sequence.LayerImage(layer, li.image))
         return sequence.FrameLayers(fl.frame, out)
 
     def frame_recipe(self, depth: int = 8, full: bool = False) -> Recipe:
@@ -1124,7 +1126,7 @@ class MainWindow(QMainWindow):
             size = self.preview_size() if info is not None else None
             values = None if (self.mode == "edicao" and not self.edit_film) else self.store.values
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
-                                 size=size)
+                                 size=size, keys=self._export_keys())
 
     def _compose_current(self) -> bool:
         """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
@@ -2219,7 +2221,7 @@ class MainWindow(QMainWindow):
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
                            perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
                            last_platform=str(self.settings.value("export_platform", "")),
-                           chapters=self._export_chapters())
+                           chapters=self._export_chapters(), look_keys=self._export_keys())
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2236,6 +2238,12 @@ class MainWindow(QMainWindow):
         if self.mode == "edicao" and not self.edit_film:
             return presets.builtin_values("original"), _("Sem película (só a edição)")
         return self.store.snapshot(), self.preset_name(self.preset_id)
+
+    def _export_keys(self) -> dict:
+        """As chaves de animação do look que vão com `_export_look` ({} no modo Edição sem película)."""
+        if self.mode == "edicao" and not self.edit_film:
+            return {}
+        return self.store.keys_json()
 
     def show_queue(self) -> None:
         if self.queue_dialog is None:
@@ -2319,7 +2327,7 @@ class MainWindow(QMainWindow):
     def _state(self) -> dict:
         seq = self._seq_json()
         return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
-                "preset": self.preset_id, "in": self.inp, "out": self.outp,
+                "keys": self.store.keys_json(), "preset": self.preset_id, "in": self.inp, "out": self.outp,
                 "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
     def is_dirty(self) -> bool:
@@ -2382,7 +2390,8 @@ class MainWindow(QMainWindow):
             frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
             preview=self.preview_q, export_quality=str(self.settings.value("export_quality", "")),
             name=Path(self.project_path).stem if self.project_path else "",
-            thumbnail_jpeg=b"" if backup else self._thumbnail(), sequence=seq, mode=self.mode)
+            thumbnail_jpeg=b"" if backup else self._thumbnail(), sequence=seq, mode=self.mode,
+            look_keys=self.store.keys_json())
 
     def save_project(self) -> bool:
         if self.info is None:
@@ -2477,7 +2486,7 @@ class MainWindow(QMainWindow):
             self.load_media(mediapath)
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
-        self.store.set_all(p.values)
+        self.store.set_all(p.values, keys=p.look_keys)
         self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
         self.preset_combo.blockSignals(False)
@@ -2537,7 +2546,7 @@ class MainWindow(QMainWindow):
             self._loading = False
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
-        self.store.set_all(p.values)
+        self.store.set_all(p.values, keys=p.look_keys)
         self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.preset_id)))
         self.preset_combo.blockSignals(False)

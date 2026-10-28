@@ -653,9 +653,10 @@ FramePipeline = Recipe
 
 
 def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=None, scale: float = 1.0,
-                   depth: int | None = None) -> Recipe:
+                   depth: int | None = None, keys: dict | None = None) -> Recipe:
     """A receita de um quadro desta exportação (`frame.Recipe`). `scale` < 1 reduz tudo (prévia): o quadro, o
-    encaixe e o tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura)."""
+    encaixe e o tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura). `keys`: as chaves de
+    animação do look (`Project.look_keys`)."""
     from . import fit as fitmod
     ow, oh = output_size(info, s)
     if scale != 1.0:
@@ -673,7 +674,8 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
     else:
         legal = media.legal_range(info)
     return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
-                  seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, src_fps=float(info.fps))
+                  seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, keys=dict(keys or {}),
+                  src_fps=float(info.fps))
 
 
 def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
@@ -694,10 +696,10 @@ def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, f
 
 
 def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: ExportSettings, frame: int, seq=None,
-                  scale: float = 1.0, depth: int = 8):
+                  scale: float = 1.0, depth: int = 8, keys: dict | None = None):
     """Um quadro do resultado da exportação (o mesmo caminho de `_encode`), para a prévia da janela de
     exportação. Com `scale` = 1 e a profundidade da exportação, é exatamente o quadro gravado."""
-    frames = frame_pipeline(info, values, s, seq, scale, depth)
+    frames = frame_pipeline(info, values, s, seq, scale, depth, keys)
     f = frames.fit
     frame = max(0, min(int(frame), info.frames - 1))
     if seq is not None:
@@ -738,6 +740,7 @@ class ExportJob:
     pass_index: int = 0      # passada atual (0 = primeira); `done`/`total` contam os quadros dela
     stage: str = ""          # etapa atual para a fila ("Medindo o volume…", "Passada 1 de 2"); "" = exportando
     chapters: list = field(default_factory=list)  # [(quadro, título)] dos capítulos (`chapters.points`)
+    look_keys: dict = field(default_factory=dict)  # chaves de animação do look (`Project.look_keys`)
 
     @property
     def progress(self) -> float:
@@ -748,11 +751,15 @@ class ExportJob:
 
     def to_dict(self) -> dict:
         """O que é preciso para refazer este trabalho depois (fila guardada pela recuperação automática)."""
-        return {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
-                "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
-                "config": self.settings.to_dict(), "midia": asdict(self.info),
-                "edicao": self.sequence.to_json() if self.sequence is not None else None,
-                "capitulos": [[int(q), str(t)] for q, t in self.chapters]}
+        out = {"id": self.id, "nome": self.name, "status": self.status, "saida": self.out_path,
+               "inicio": self.start_frame, "fim": self.end_frame, "valores": self.values,
+               "config": self.settings.to_dict(), "midia": asdict(self.info),
+               "edicao": self.sequence.to_json() if self.sequence is not None else None,
+               "capitulos": [[int(q), str(t)] for q, t in self.chapters]}
+        if self.look_keys:
+            from . import keyframes, params
+            out["chaves"] = keyframes.to_json(keyframes.clean_keys(params.FILM, self.look_keys))
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExportJob":
@@ -765,12 +772,13 @@ class ExportJob:
         if isinstance(d.get("edicao"), dict):
             from . import timeline
             seq = timeline.Sequence.from_json(d["edicao"])
-        from . import params
+        from . import keyframes, params
         return cls(info=media.MediaInfo(**{k: raw[k] for k in names}), values=params.sanitize(d.get("valores") or {}),
                    settings=ExportSettings.from_dict(d.get("config") or {}), out_path=str(d["saida"]),
                    start_frame=int(d.get("inicio") or 0), end_frame=int(d.get("fim", -1)),
                    name=str(d.get("nome") or ""), sequence=seq,
-                   chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []])
+                   chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []],
+                   look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, d.get("chaves"))))
 
 
 class ExportQueue:
@@ -996,7 +1004,7 @@ def _encode(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings, two_pa
                             pipe.name if pipe else "pipe:0", audio_path=run.mix_path, chapters_path=run.chapters_path,
                             two_pass=two_pass,
                             loudness_measured=run.loud)
-    frames = frame_pipeline(info, job.values, s, run.seq)
+    frames = frame_pipeline(info, job.values, s, run.seq, keys=job.look_keys)
     reader, skip = open_reader(info, frames, run.start, total, run.fps_out, perf, run.seq)
     enc = subprocess.Popen(cmd, stdin=None if pipe else subprocess.PIPE, stdout=subprocess.DEVNULL,
                            stderr=subprocess.PIPE, cwd=cwd, **perf.popen_kwargs())
@@ -1140,7 +1148,8 @@ def job_frames(info: media.MediaInfo, s: ExportSettings, start: int = 0, end: in
 
 
 def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings, cancel: threading.Event,
-                  frames: int = 60, limit: float = 15.0, sequence=None, stats: dict | None = None) -> float:
+                  frames: int = 60, limit: float = 15.0, sequence=None, stats: dict | None = None,
+                  keys: dict | None = None) -> float:
     """Exporta um trecho num arquivo temporário e devolve a velocidade real (quadros/s) de uma passada.
 
     Os primeiros quadros (abertura do ffmpeg e do codificador) ficam de fora da conta, e a
@@ -1158,7 +1167,7 @@ def measure_speed(info: media.MediaInfo, values: dict, settings: ExportSettings,
     start = 0 if info.frames <= frames * 2 else info.frames // 3
     out = os.path.join(tmp, "teste." + s.container)
     job = ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start,
-                    end_frame=min(info.frames - 1, start + frames - 1), sequence=sequence)
+                    end_frame=min(info.frames - 1, start + frames - 1), sequence=sequence, look_keys=dict(keys or {}))
     stop = threading.Event()
 
     def watch():

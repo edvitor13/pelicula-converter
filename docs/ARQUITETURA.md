@@ -97,6 +97,7 @@ Três ideias guiam o projeto:
 | `pelicula/shaders.py` | GLSL: `VERT`, `COMMON` (curvas, transferências log, look, cópia, LUT), `BASE`, `EXTRACT`, `BLUR`, `NOISE`, `FINAL`, `BAKE`. |
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
 | `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
+| `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
 | `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels. |
@@ -1564,3 +1565,82 @@ transparência (seção 22.4); em 1.4 ela cobria o fundo com preto.
 
 A cópia da recuperação automática guarda o JSON do projeto dentro do envelope dela (`recovery.FORMAT` continua
 1): o formato do projeto vai junto e a leitura passa pela mesma migração.
+
+### 22.3 Chaves de animação (`keyframes.py`)
+
+Uma **chave** é `(tempo, valor, curva)` (`keyframes.Key`). Entre duas chaves o valor é interpolado com a curva da
+chave **da esquerda**; antes da primeira e depois da última vale a ponta. São exatamente quatro curvas (ids ASCII
+gravados nos projetos, nunca renomear): `linear`, `suavizar_entrada` (s²), `suavizar_saida` (1 − (1 − s)²) e
+`suavizar` (3s² − 2s³). Números, cores `[r, g, b]` e rodas `[x, y]` interpolam componente a componente; escolhas
+e liga/desliga mudam de degrau (não precisamos de uma curva "constante").
+
+**Quem anima** é marcado no esquema (`Param.animatable`, padrão `False`):
+
+| Esquema | Ajustes animáveis |
+|---|---|
+| clipe de vídeo (`editparams.ANIMATABLE_VIDEO`) | `pos_x`, `pos_y`, `escala`, `rotacao`, `opacidade` e todo ajuste numérico ou roda das seções de cor (`COLOR_SECTIONS`: luz, cor, rodas, curva, HSL, detalhe, efeitos) |
+| clipe de som (`editparams.ANIMATABLE_AUDIO`) | `volume` |
+| look (`params.ANIMATABLE_KINDS`) | todo `float` e toda cor; escolhas (bitola, negativo…), liga/desliga, inteiros (sementes, eixos) e arquivos não |
+
+**JSON** (compacto, limpo pelo esquema na leitura, `keyframes.clean_keys`): `{"ajuste": [[tempo, valor],
+[tempo, valor, "curva"], …]}` — a curva só aparece quando não é `linear`, tempos inteiros saem inteiros, valores
+fora da faixa são limitados, entradas inválidas e ajustes que não animam são descartados e tempos repetidos ficam
+com a última chave. No clipe: `"chaves"` e `"chaves_ref"` (o `key_off`, só quando não é 0); no projeto, `"chaves"`
+no topo (look). Os dois só aparecem quando há chaves (registros `"chaves"` e `"chaves_look"`, seção 22.2).
+
+**Âncora das chaves do clipe**: tempo do clipe `τ = t − clip.start + clip.key_off`, em quadros da sequência
+(`Sequence.clip_time`/`seq_time`). Como `start` e `key_off` são inteiros, as edições comuns mudam τ só por soma de
+inteiros e a avaliação continua exata:
+
+| Edição | O que acontece com as chaves | Por quê |
+|---|---|---|
+| mover (`move`, `close_gaps`, apagar com ripple) | nada | τ anda com `start`: a animação vai junto |
+| aparar o começo (`trim_start`, corte da cabeça em `_clear_range`) | `key_off += delta` (`Clip.shift_head`) | a imagem fica no mesmo quadro da sequência; a animação também |
+| aparar o fim (`trim_end`) | nada | |
+| dividir (`_cut`/`split`, sobrescrever no meio) | as duas metades levam as chaves; a da direita com `key_off + (t − start)` | cada quadro avalia exatamente como antes |
+| velocidade (`set_speed`, e `set_values` quando muda a velocidade) | `τ' = (τ_chave − key_off) × v_antiga / v_nova`, `key_off = 0` (`Clip.rescale_keys`) | a animação acompanha a imagem (o mesmo instante do arquivo tem o mesmo valor) |
+| fps da sequência (`TimelineModel.set_settings`) | `rescale_keys(fps_novo / fps_antigo)` | o tempo em segundos fica |
+| relocalizar (`relink`), apagar | nada (as chaves vão com o clipe) | |
+| copiar/colar a cor (`copy_values`/`paste_values`) | as chaves das seções de cor vão presas ao começo do clipe (`local_keys`/`paste_keys`); colar sem animação tira a da cor do destino | |
+| desfazer/refazer | o histórico guarda o JSON da sequência, com as chaves | |
+
+Quadro congelado: τ continua andando (a imagem para; a animação, não). Uma operação nova que muda o começo de um
+clipe com a imagem parada no lugar chama `shift_head(delta)`; uma que estica o tempo do clipe chama
+`rescale_keys(ratio)`.
+
+**Avaliação, num lugar só**:
+
+- imagem: `Sequence.values_at(clip, t)` (sem chaves devolve o próprio `clip.values`) → `Layer.values`, preenchido
+  por `layers_at` (também na cauda do "dissolver") e lido por `compositor.clip_uniforms`/`transform`/`fit_box`/
+  `is_identity`; a prévia refaz `Layer.values` com o clipe atual (`MainWindow._live_layers`);
+- som: `audiomix._chain` troca `volume=XdB` por `volume='pow(10,(EXPR)/20)':eval=frame`, com `EXPR =
+  keyframes.ffmpeg_expr(chaves, τ)` (a mesma conta de `value_at`, escrita em `if(lt(…))` aninhados) e
+  `τ = (t − pre) × fps + key_off` (`t` é o tempo da cadeia do clipe, que começa `pre` segundos antes por causa da
+  transição de som); o volume da faixa soma em dB. A prévia e a exportação usam o mesmo grafo
+  (`build_graph`), e `mix_key` muda com as chaves (o JSON do clipe as inclui). `eval=frame` avalia a cada bloco de
+  som (~21 ms a 48 kHz);
+- look: `keyframes.look_values_at(values, keys, quadro)`, chamado por `frame.Recipe.look_values(index)` com o
+  quadro da fonte `index × src_fps / fps` (com troca de fps na exportação, o quadro da saída volta para o tempo da
+  fonte). As chaves do look estão em quadros do arquivo (modo Película) ou da montagem (modo Edição com película).
+
+`sequence.decode_size` decodifica o clipe na **maior** escala das chaves (`keyframes.max_value`): o tamanho não
+muda no meio do clipe.
+
+**Neutralidade**: sem chaves nada muda — `values_at` devolve o mesmo dicionário, o grafo do som é o mesmo texto,
+o JSON é o mesmo e os quadros são os mesmos bit a bit (`tests/test_keyframes.py`, `test_project_migration.py`).
+
+**Onde ficam e quem chama (sem interface ainda)**: as chaves do look vivem em `ParamStore.keys` (o mesmo passo de
+desfazer guarda valores e chaves), vão para `Project.look_keys`, `ExportJob.look_keys` (`"chaves"` na fila
+guardada), `export.frame_pipeline/preview_frame/measure_speed(..., keys=)`, a janela de exportação
+(`look_keys=`) e a linha de comando (`cli.look_keys`: um `--preset` tira a animação; um `--set` fixa o ajuste dado).
+Abrir outro arquivo (não um projeto) tira as chaves do look (estavam no tempo do arquivo anterior). A frente da
+interface (losangos na linha do tempo, botão de chave no inspetor) só desenha e chama:
+
+| Onde | API (tempos em quadros da sequência/do arquivo; cada mudança é um passo do desfazer) |
+|---|---|
+| `ui/edit_model.TimelineModel` | `add_key(cid, ajuste, quadro, valor=None, curva="linear")` (valor None = o valor que o ajuste tem ali; mesmo quadro troca a chave), `move_key(cid, ajuste, de, para)`, `remove_key(cid, ajuste, quadro)`, `clear_keys(cid, ajuste=None)`, `keys_of(cid, ajuste)` → `[(quadro, valor, curva)]`, `value_at(cid, ajuste, quadro)`; emitem `changed("values")` |
+| `ui/store.ParamStore` (look) | `add_key(ajuste, quadro, valor=None, curva)`, `move_key`, `remove_key`, `clear_keys`, `keys_of`, `value_at`, `values_at(quadro)`, `keys_json()`, `set_all(valores, keys=…)`; emitem `changed(ajuste)` |
+| `timeline.Sequence` | as mesmas operações sem histórico (`set_key`, `move_key`, `remove_key`, `clear_keys`, `keys_of`, `values_at`, `local_keys`, `paste_keys`) |
+
+Enquanto um ajuste tem chaves, o valor fixo dele (o do inspetor) não aparece; a frente da interface decide se
+mexer no controle cria ou troca a chave do quadro atual.

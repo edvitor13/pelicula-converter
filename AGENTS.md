@@ -47,6 +47,8 @@ pelicula/
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
                              exportação, prévia da exportação, medição de velocidade e linha de comando
+  keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
+                             value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
@@ -142,7 +144,9 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    na interface, só na exportação ou só no "Salvar quadro". No modo Edição vale o mesmo: ajuste de clipe só
    em `compositor.py` + `editshaders.py` / `Engine.compose()`; qual quadro de qual arquivo aparece só em
    `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
-   que a exportação grava).
+   que a exportação grava). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
+   `Layer.values` (imagem e volume do som) e `keyframes.look_values_at()` pela receita (look); nunca leia
+   `clip.values` para desenhar um quadro.
 2. **Determinismo por quadro.** Tudo o que muda no tempo deriva do **número do quadro**, do fps e
    das **sementes** (`_hash`/`_vnoise` em `look.py`; `pcg`/`rnd`/`vnoise2` no GLSL). Proibido
    `random`, `np.random`, `time.time()` ou estado acumulado entre quadros no caminho de render. O
@@ -278,6 +282,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico |
+| `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
+| `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
@@ -347,6 +353,28 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
    cadeia do clipe.
 3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
+4. Se ele deve aceitar chaves de animação, veja *Tornar um ajuste animável*.
+
+### Tornar um ajuste animável
+
+As chaves (`keyframes.py`, `docs/ARQUITETURA.md` seção 22.3) valem para ajustes marcados com
+`Param.animatable`. Antes de marcar, confira que o ajuste é **contínuo** (número, cor ou roda; escolhas e
+liga/desliga só mudam de degrau e quase nunca fazem sentido animados) e que o valor é lido **por quadro**:
+
+1. **Marque** no esquema: clipe de vídeo em `editparams.ANIMATABLE_VIDEO` (as seções de cor já entram todas),
+   som em `editparams.ANIMATABLE_AUDIO`, look em `params.ANIMATABLE_KINDS` (todo `float`/cor já anima; um
+   `int` ou uma escolha precisaria entrar à mão). Nunca desmarque um ajuste que já anima: projetos gravados
+   têm chaves dele (a leitura descartaria a animação).
+2. **Leia o valor avaliado**: na imagem, use `Layer.values` (`compositor.clip_uniforms` já faz — nunca
+   `clip.values` direto); no look, `build_plan` recebe os valores do quadro pela receita. Se o ajuste muda o
+   **tamanho** da decodificação (como `escala`), use o maior valor das chaves (`keyframes.max_value`, como
+   `sequence.decode_size`). No som, o filtro precisa avaliar por bloco: siga `audiomix.volume_envelope`
+   (`keyframes.ffmpeg_expr` + `eval=frame`) — um filtro do ffmpeg sem expressão por tempo não anima.
+3. **Edições**: nada a fazer; as operações da montagem já mantêm a âncora. Uma operação **nova** que muda o
+   começo do clipe com a imagem parada chama `clip.shift_head(delta)`; uma que estica o tempo do clipe,
+   `clip.rescale_keys(razão)`.
+4. **Teste** em `tests/test_keyframes.py`: o quadro com a chave no meio é bit a bit o de um clipe (ou look)
+   fixo com o valor interpolado, e sem chaves nada muda.
 
 ### Mudar a montagem (timeline)
 
@@ -354,7 +382,10 @@ Toda regra de tempo fica em `timeline.Sequence` (sem Qt): `src_frame()` decide o
 `layers_at()` resolve camadas e transições, `audio_clips()` o que toca. A interface só chama os
 métodos do `ui/edit_model.TimelineModel`, que grava o histórico (instantâneos JSON) e emite
 `changed("structure" | "values" | "settings" | "*")`. A janela reage: `"values"` só remonta o quadro
-atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`.
+atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.py`. Uma operação nova que
+muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de animação no lugar
+(`Clip.shift_head`/`rescale_keys`, receita *Tornar um ajuste animável*) e ganhar um teste de âncora em
+`tests/test_keyframes.py`.
 
 ### Adicionar um negativo ou uma cópia do Laboratório
 

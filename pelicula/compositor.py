@@ -87,22 +87,25 @@ def detail_active(v: dict[str, Any]) -> bool:
     return any(v.get(k) != _DEFAULTS[k] for k in DETAIL_KEYS)
 
 
-def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> tuple[float, float]:
-    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe."""
+def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
+            values: dict[str, Any] | None = None) -> tuple[float, float]:
+    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe. `values`: os ajustes no quadro
+    (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
     sw = float(src.width if src and src.width else canvas_w)
     sh = float(src.height if src and src.height else canvas_h)
-    mode = clip.values.get("encaixe", "ajustar")
+    mode = (values if values is not None else clip.values).get("encaixe", "ajustar")
     if mode == "esticar":
         return float(canvas_w), float(canvas_h)
     f = min(canvas_w / sw, canvas_h / sh) if mode == "ajustar" else max(canvas_w / sw, canvas_h / sh)
     return sw * f, sh * f
 
 
-def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> np.ndarray:
+def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
+              values: dict[str, Any] | None = None) -> np.ndarray:
     """Matriz 3×3 que leva um pixel da tela (x, y, 1) ao uv do clipe (0 a 1)."""
-    v = clip.values
-    bw, bh = fit_box(seq, clip, canvas_w, canvas_h)
+    v = values if values is not None else clip.values
+    bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
     s = float(v["escala"])
     th = math.radians(float(v["rotacao"]))
     cs, sn = math.cos(th), math.sin(th)
@@ -121,14 +124,14 @@ def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas
 
 
 def is_identity(seq: timeline.Sequence, clip: timeline.Clip, tex_w: int, tex_h: int, canvas_w: int,
-                canvas_h: int) -> bool:
+                canvas_h: int, values: dict[str, Any] | None = None) -> bool:
     """O clipe cobre a tela pixel a pixel (sem reamostrar): a saída pode ser bit a bit."""
     if (tex_w, tex_h) != (canvas_w, canvas_h):
         return False
-    v = clip.values
+    v = values if values is not None else clip.values
     if any(v[k] for k in ("corte_esq", "corte_dir", "corte_topo", "corte_base", "espelhar_h", "espelhar_v")):
         return False
-    m = transform(seq, clip, canvas_w, canvas_h)
+    m = transform(seq, clip, canvas_w, canvas_h, v)
     ref = np.array([[1.0 / canvas_w, 0, 0], [0, 1.0 / canvas_h, 0], [0, 0, 1]])
     return bool(np.allclose(m, ref, atol=1e-12, rtol=0))
 
@@ -141,15 +144,16 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     "original" da comparação no modo Edição).
     """
     clip = layer.clip
-    v = clip.values
-    bw, bh = fit_box(seq, clip, canvas_w, canvas_h)
+    # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
+    v = layer.values if layer.values is not None else clip.values
+    bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
     s = float(v["escala"])
     U: dict[str, Any] = {
         "u_canvas": (float(canvas_w), float(canvas_h)),
         "u_clip_px": (float(tex_w), float(tex_h)),
-        "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h)),
+        "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h, v)),
         "u_px_per_uv": (float(s * bw), float(s * bh)),
-        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h) else 0,
+        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
         "u_blend": BLEND_IDS.get(v["mesclagem"], 0),

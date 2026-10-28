@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Callable, Iterable
 
-from . import editparams
+from . import editparams, keyframes
 from .i18n import N_, _
 
 VIDEO = "video"
@@ -194,9 +194,27 @@ class Clip:
     link: str = ""           # clipes com o mesmo link andam juntos ("" = sozinho)
     name: str = ""
     values: dict[str, Any] = field(default_factory=dict)
+    # Chaves de animação ({ajuste: [keyframes.Key]}), no tempo do clipe τ = t − start + key_off (quadros da
+    # sequência; `Sequence.clip_time`). Aparar o começo e dividir mexem só em `key_off` (`shift_head`).
+    keys: dict[str, list] = field(default_factory=dict)
+    key_off: int = 0
 
     def __post_init__(self) -> None:
-        self.values = editparams.SCHEMAS[self.kind].sanitize(self.values)
+        schema = editparams.SCHEMAS[self.kind]
+        self.values = schema.sanitize(self.values)
+        self.keys = keyframes.clean_keys(schema, self.keys)
+        self.key_off = int(self.key_off)
+
+    def shift_head(self, delta: int) -> None:
+        """O começo do clipe andou `delta` quadros com a imagem parada no lugar (aparar o começo, sobrescrever,
+        dividir): as chaves ficam onde estavam em relação à imagem."""
+        self.key_off += int(delta)
+
+    def rescale_keys(self, ratio: float) -> None:
+        """O tempo do clipe esticou `ratio` vezes (velocidade ou fps): as chaves acompanham a imagem."""
+        if self.keys:
+            self.keys = keyframes.rescale(self.keys, self.key_off, ratio)
+        self.key_off = 0
 
     @property
     def end(self) -> int:
@@ -212,9 +230,14 @@ class Clip:
         return bool(self.values.get("congelar", False)) and self.kind == VIDEO
 
     def to_json(self) -> dict[str, Any]:
-        return {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
-                "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
-                "valores": copy.deepcopy(self.values)}
+        out = {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
+               "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
+               "valores": copy.deepcopy(self.values)}
+        if self.keys:  # só com animação (o clipe de uma montagem antiga grava igual)
+            out["chaves"] = keyframes.to_json(self.keys)
+            if self.key_off:
+                out["chaves_ref"] = self.key_off
+        return out
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Clip | None":
@@ -226,8 +249,10 @@ class Clip:
                        track=max(0, int(d.get("faixa", 0))), start=max(0, int(d.get("inicio", 0))),
                        dur=max(1, int(d.get("duracao", 1))), src_in=max(0.0, float(d.get("entrada", 0.0))),
                        link=str(d.get("ligacao") or ""), name=str(d.get("nome") or ""),
-                       values=d.get("valores") if isinstance(d.get("valores"), dict) else {})
-        except (TypeError, ValueError):
+                       values=d.get("valores") if isinstance(d.get("valores"), dict) else {},
+                       keys=d.get("chaves") if isinstance(d.get("chaves"), dict) else {},
+                       key_off=int(d.get("chaves_ref", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
             return None
 
 
@@ -266,6 +291,7 @@ class Layer:
     fade_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     fade: float = 0.0         # 0 = imagem; 1 = só a cor do fade (surgir/sumir no preto ou branco)
     extension: bool = False   # True = cauda do clipe anterior mostrada por baixo de um "dissolver"
+    values: dict[str, Any] | None = None  # ajustes neste quadro (`Sequence.values_at`); None = os do clipe
 
 
 # ------------------------------------------------------------------ marcadores
@@ -516,7 +542,8 @@ class Sequence:
                 if v["entrada_tipo"] == "dissolver":
                     prev = self.previous_on_track(c)
                     if prev is not None:
-                        out.append(Layer(prev, self.src_frame(prev, t), 1.0, extension=True))
+                        out.append(Layer(prev, self.src_frame(prev, t), 1.0, extension=True,
+                                         values=self.values_at(prev, t)))
                     alpha = k
                 else:
                     fade = 1.0 - k
@@ -529,7 +556,7 @@ class Sequence:
                 else:
                     color = (1.0, 1.0, 1.0) if v["saida_tipo"] == "branco" else (0.0, 0.0, 0.0)
                     fade = max(fade, 1.0 - k)
-            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade))
+            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade, values=self.values_at(c, t)))
         return out
 
     def audio_clips(self) -> list[Clip]:
@@ -597,11 +624,12 @@ class Sequence:
                 c.src_in = self.src_time(c, b)
                 c.start = b
                 c.dur -= cut
+                c.shift_head(cut)
 
     def _cut(self, c: Clip, t: int) -> Clip:
         """Divide o clipe no quadro t; devolve a parte da direita (já na sequência)."""
         right = Clip(new_id(), c.kind, c.src, c.track, t, c.end - t, self.src_time(c, t), "", c.name,
-                     copy.deepcopy(c.values))
+                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start))
         c.dur = t - c.start
         # A transição de entrada fica só na parte da esquerda; a de saída, só na da direita.
         if c.kind == VIDEO:
@@ -682,6 +710,7 @@ class Sequence:
                 c.src_in = max(0.0, self.src_time(c, c.start + delta))
             c.start += delta
             c.dur -= delta
+            c.shift_head(delta)
         keep = {c.id for c in group}
         for c in group:
             self._clear_range(c.kind, c.track, c.start, c.end, keep)
@@ -721,6 +750,8 @@ class Sequence:
             new_durs.append(nd)
         nd = min(new_durs)
         for c in group:
+            if abs(c.speed - speed) > 1e-12:
+                c.rescale_keys(c.speed / speed)  # a animação acompanha a imagem
             c.values["velocidade"] = speed
             c.dur = max(1, min(nd, self.max_dur(c)))
 
@@ -845,6 +876,101 @@ class Sequence:
                 self.move(c.id, pos)
             pos = c.end
 
+    # -------------------------------------------------------- chaves de animação (keyframes.py)
+    def clip_time(self, clip: Clip, t: float) -> float:
+        """Tempo das chaves do clipe no quadro t da sequência (τ = t − start + key_off)."""
+        return t - clip.start + clip.key_off
+
+    def seq_time(self, clip: Clip, tau: float) -> float:
+        """Quadro da sequência de um tempo de chave do clipe (o inverso de `clip_time`)."""
+        return tau - clip.key_off + clip.start
+
+    def values_at(self, clip: Clip, t: float) -> dict[str, Any]:
+        """Ajustes do clipe no quadro t: o único lugar onde as chaves viram valores (imagem e som).
+        Sem chaves, devolve o próprio `clip.values`."""
+        if not clip.keys:
+            return clip.values
+        return keyframes.values_at(editparams.SCHEMAS[clip.kind], clip.values, clip.keys, self.clip_time(clip, t))
+
+    def keys_of(self, clip: Clip, key: str) -> list[tuple[float, Any, str]]:
+        """Chaves de um ajuste do clipe em quadros da sequência: [(quadro, valor, curva)]."""
+        return [(self.seq_time(clip, k.t), keyframes._copy(k.v), k.e) for k in clip.keys.get(key, [])]
+
+    def _animatable(self, clip: Clip, key: str):
+        p = keyframes.animatable(editparams.SCHEMAS[clip.kind]).get(key)
+        if p is None:
+            raise KeyError(key)
+        return p
+
+    def set_key(self, cid: str, key: str, t: float, value: Any = None, easing: str = keyframes.LINEAR) -> bool:
+        """Chave no quadro t da sequência (`value` None = o valor que o ajuste tem ali). True se mudou."""
+        from .params import _clean
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        p = self._animatable(c, key)
+        if value is None:
+            value = self.values_at(c, t)[key]
+        track = keyframes.set_key(c.keys.get(key), float(self.clip_time(c, t)), _clean(p, value), easing)
+        return self._set_track(c, key, track)
+
+    def remove_key(self, cid: str, key: str, t: float) -> bool:
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        return self._set_track(c, key, keyframes.remove_key(c.keys.get(key), float(self.clip_time(c, t))))
+
+    def move_key(self, cid: str, key: str, t_from: float, t_to: float) -> bool:
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        track = keyframes.move_key(c.keys.get(key), float(self.clip_time(c, t_from)), float(self.clip_time(c, t_to)))
+        return self._set_track(c, key, track)
+
+    def clear_keys(self, cid: str, key: str | None = None) -> bool:
+        """Tira as chaves de um ajuste (ou todas, com `key` None); o valor fixo do ajuste volta a valer."""
+        c = self.find(cid)
+        if c is None or self.locked(c) or not c.keys:
+            return False
+        if key is None:
+            c.keys = {}
+        elif key in c.keys:
+            c.keys = {k: v for k, v in c.keys.items() if k != key}
+        else:
+            return False
+        return True
+
+    def _set_track(self, c: Clip, key: str, track: list) -> bool:
+        if track == c.keys.get(key, []):
+            return False
+        keys = dict(c.keys)
+        if track:
+            keys[key] = track
+        else:
+            keys.pop(key, None)
+        c.keys = keys
+        return True
+
+    def local_keys(self, clip: Clip, names: Iterable[str] | None = None) -> dict[str, list]:
+        """Chaves no tempo a partir do começo do clipe (para copiar para outro clipe: `paste_keys`)."""
+        keys = clip.keys if names is None else keyframes.keys_in(clip.keys, names)
+        return keyframes.shift(keys, -clip.key_off)
+
+    def paste_keys(self, cid: str, local: dict[str, list], names: Iterable[str]) -> bool:
+        """Troca as chaves dos ajustes `names` do clipe pelas de `local` (de `local_keys`), presas ao começo
+        deste clipe. Ajustes de `names` sem chave em `local` ficam sem animação."""
+        c = self.find(cid)
+        if c is None or self.locked(c):
+            return False
+        names = set(names)
+        keys = {k: v for k, v in c.keys.items() if k not in names}
+        keys.update(keyframes.shift(keyframes.keys_in(local, names), c.key_off))
+        keys = keyframes.clean_keys(editparams.SCHEMAS[c.kind], keys)
+        if keys == c.keys:
+            return False
+        c.keys = keys
+        return True
+
     # -------------------------------------------------------- estado
     def is_trivial(self) -> str | None:
         """Caminho do arquivo se a sequência é só "o arquivo inteiro, sem mudanças" (senão None).
@@ -857,7 +983,7 @@ class Sequence:
             return None
         v = vids[0]
         src = self.sources.get(v.src)
-        if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values):
+        if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values) or v.keys:
             return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
             return None
@@ -868,7 +994,7 @@ class Sequence:
         if auds:
             a = auds[0]
             if (a.src != v.src or a.start != 0 or a.dur != v.dur or a.src_in > EPS
-                    or not editparams.is_neutral(AUDIO, a.values) or not self.has_audio):
+                    or not editparams.is_neutral(AUDIO, a.values) or a.keys or not self.has_audio):
                 return None
             if any(abs(t.volume) > 1e-9 for t in self.kind_tracks(AUDIO)):
                 return None
@@ -979,6 +1105,7 @@ class FormatError(ValueError):
 # no módulo do recurso) e o campo dele no JSON só quando usado.
 FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
+    "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
 }
 

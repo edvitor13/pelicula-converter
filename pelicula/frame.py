@@ -48,6 +48,11 @@ class Recipe:
     keys: dict = field(default_factory=dict)  # chaves de animação do look ({chave: [[tempo, valor, curva]…]})
     src_fps: float = 0.0          # fps do arquivo/sequência, em que as chaves do look estão (0 = `fps`)
 
+    def __post_init__(self) -> None:
+        if self.keys:  # JSON do projeto ou chaves já limpas: sempre `keyframes.Key` só de ajustes animáveis
+            from . import keyframes, params
+            self.keys = keyframes.clean_keys(params.FILM, self.keys)
+
     # ---------------------------------------------------------------- campos derivados
     @classmethod
     def for_source(cls, values: dict | None, fps: float, depth: int, *, legal: bool, seq=None, dither=False,

@@ -207,6 +207,15 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
+def look_keys(proj, preset, sets) -> dict:
+    """Chaves de animação do look do projeto (`Project.look_keys`). Um --preset troca o look inteiro (sai sem
+    animação) e um --set fixa o ajuste dado (a chave dele sai)."""
+    if proj is None or preset or not proj.look_keys:
+        return {}
+    fixed = {item.split("=", 1)[0].strip() for item in sets or [] if "=" in item}
+    return {k: v for k, v in proj.look_keys.items() if k not in fixed}
+
+
 def project_sequence(proj):
     """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro)."""
     from . import sequence, timeline
@@ -380,7 +389,7 @@ def cmd_export(a) -> int:
     if values.get("scan_on"):
         _gui_app()
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq)
+                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set))
     if not a.json:
         w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
@@ -499,7 +508,8 @@ def cmd_frame(a) -> int:
         _gui_app()
     w, h = info.width, info.height
     # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
-    recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h))
+    recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
+                               keys=look_keys(proj, a.preset, a.set))
     engine = Engine()
     try:
         if seq is not None:

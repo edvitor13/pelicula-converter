@@ -88,14 +88,15 @@ class _PreviewWorker:
                 item = nxt
             if item is None:
                 break
-            token, (info, values, s, frame, seq, scale) = item
+            token, (info, values, s, frame, seq, scale, keys) = item
             img = None
             if not failed:
                 try:
                     if engine is None:
                         from ..engine import Engine
                         engine = Engine()
-                    img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8)
+                    img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8,
+                                               keys=keys)
                 except Exception:  # noqa: BLE001 — sem GPU ou arquivo ilegível: a janela diz "indisponível"
                     img = None
                     failed = engine is None
@@ -108,9 +109,10 @@ class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
-                 last_platform: str = "", chapters=None):
+                 last_platform: str = "", chapters=None, look_keys: dict | None = None):
         super().__init__(parent)
         self.info = info
+        self.look_keys = dict(look_keys or {})  # chaves de animação do look (`Project.look_keys`)
         self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
         self.chapters = list(chapters or [])  # [(quadro, título)] dos capítulos da montagem (`chapters.points`)
         self.values = values
@@ -875,12 +877,12 @@ class ExportDialog(QDialog):
         token = self._est_token
         cancel = threading.Event()
         self._est_cancel = cancel
-        info, values, seq = self.info, dict(self.values), self.sequence
+        info, values, seq, keys = self.info, dict(self.values), self.sequence, dict(self.look_keys)
 
         def run():
             stats: dict = {}
             try:
-                fps = export.measure_speed(info, values, s, cancel, sequence=seq, stats=stats)
+                fps = export.measure_speed(info, values, s, cancel, sequence=seq, stats=stats, keys=keys)
             except Exception:  # noqa: BLE001
                 fps = 0.0
             if not cancel.is_set():
@@ -925,7 +927,7 @@ class ExportDialog(QDialog):
         a, b = self._range()
         last = self.info.frames - 1 if b < 0 else b
         frame = max(a, min(self.frame_index, last))
-        return self.info, dict(self.values), s, frame, self.sequence, scale
+        return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys)
 
     def _start_preview(self) -> None:
         args = self._preview_args()
@@ -993,7 +995,8 @@ class ExportDialog(QDialog):
         return export.ExportJob(info=self.info, values=dict(self.values), settings=self.settings(),
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
-                                sequence=self.sequence, chapters=self.chapter_points())
+                                sequence=self.sequence, chapters=self.chapter_points(),
+                                look_keys=dict(self.look_keys))
 
     # ---------------------------------------------------------------- capítulos
     def _chapters_box(self) -> QCheckBox:
