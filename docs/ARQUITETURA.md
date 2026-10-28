@@ -865,8 +865,8 @@ de onda (com cache por arquivo).
   que já valia no começo do trecho passa a começar em 0) e o apaga no fim; `build_encoder_cmd(...,
   chapters_path=…)` põe `-f ffmetadata -i <arquivo>` antes do primeiro `-map` e `-map_chapters <n>` no fim.
 - `.plc`: a sequência vai em `"edicao"` (cada fonte com caminho absoluto e `"relativo"`, reencontrada
-  como a mídia principal) e o modo em `"modo"`. `"formato": 2` só quando há sequência; projetos simples
-  continuam `1` e abrem nas versões antigas.
+  como a mídia principal) e o modo em `"modo"`. O formato gravado é o menor que o projeto precisa: `1` sem
+  sequência, `2` com sequência, `3` com algum recurso da 1.5 (seção 22.2).
 - Terminal: `exportar`/`quadro` de um `.plc` com edição renderizam a montagem (`cli.project_sequence`); o
   comando `resolve` (`davinci`) instala ou grava o plugin do DaVinci Resolve.
 
@@ -1517,3 +1517,50 @@ Armadilha: o JSON da montagem grava `entrada` (início no arquivo) com 6 casas. 
 como 0,333333 s e o primeiro quadro de origem dele é o 7, não o 8. A prévia, a exportação, os projetos e a fila
 usam sempre uma cópia por JSON (`Sequence.copy()`), então concordam entre si; não compare uma montagem "viva"
 com a exportação dela (a exportação copia). Mudar isso mudaria quadros de projetos antigos.
+
+### 22.2 Formato 3 do `.plc` e migração (`project.py`, `timeline.py`)
+
+O app **lê** até `project.FORMAT` = 3 e **grava o menor formato** que o projeto precisa
+(`project.needed_format`), para o arquivo abrir nas versões antigas sempre que der:
+
+| `"formato"` | Quando | Quem abre |
+|---|---|---|
+| 1 | só o arquivo inteiro, sem montagem | todas as versões |
+| 2 | com o bloco `"edicao"` (montagem) e nada da 1.5 | 1.3 em diante |
+| 3 | usa algum recurso da 1.5, listado em `"recursos"` (ex.: `["alfa", "chaves"]`) | 1.5 em diante |
+
+Os recursos vêm de dois registros, cada um `id ASCII → teste`:
+
+- `timeline.FEATURES` (da montagem; `Sequence.features()`): `"alfa"` (alguma fonte usada com transparência),
+  `"gerador"` (alguma fonte que não é arquivo, seção 22.5), `"chaves"` (algum clipe com chaves de animação,
+  seção 22.3);
+- `project.FEATURES_V3` (do projeto; `Project.features()` junta os dois): `"chaves_look"` (chaves de animação
+  do look, seção 22.3).
+
+Uma frente nova (texto, legendas, gerador…) acrescenta **uma linha** num desses registros — por exemplo
+`timeline.FEATURES["legendas"] = lambda seq: any(s.kind == "legenda" for s in seq.used_sources())` — e grava o
+campo dela no JSON **só quando usado**. Com isso, um projeto que não usa nada novo continua no formato 1 ou 2
+(e a 1.4 abre), e um que usa vai para o 3 e a 1.4 recusa com "O projeto foi salvo por uma versão mais nova do
+app" em vez de abrir sem o recurso. O bloco `"edicao"` tem o próprio `"formato"` (`timeline.FORMAT` = 2 quando a
+montagem usa um recurso; `FORMAT_BASE` = 1 sem nada novo), conferido por `Sequence.from_json` (`FormatError`
+quando é mais novo; o projeto transforma em `ProjectError`) — vale também para a fila de exportação guardada
+pela recuperação, que leva só a montagem.
+
+**Abrir um formato antigo** passa por passos puros (recebem e devolvem um dicionário novo), um por formato:
+
+| Passo | O que faz |
+|---|---|
+| `project._v1_to_v2` | modo válido (`"pelicula"` quando falta, como nos projetos até a 1.2); bloco `"edicao"` quebrado sai |
+| `project._v2_to_v3` | o bloco `"edicao"` vai para o formato atual (`timeline.migrate`); `"recursos"` começa vazio |
+| `timeline._seq_v1_to_v2` | cada fonte ganha `"tipo": "arquivo"` e `"alfa"` deduzido do `pix_fmt` gravado (`media.pix_has_alpha`; a 1.4 não guardava) |
+
+`project.migrate`/`timeline.migrate` aplicam os passos do formato do arquivo até o atual. Os projetos gravados
+pela 1.4.0 em `tests/data/projetos_1_4/` (um simples e uma montagem com cortes, transições, velocidade, quadro
+congelado, imagem, fades e transição de som, marcadores e volume de faixa) e o que a 1.4 fez ao abri-los
+(`referencia.json`: valores, camadas e uniforms de cada quadro, planos do look, grafo do som e JSON da montagem)
+são conferidos por `tests/test_project_migration.py`. O único efeito visível da migração em projetos antigos é
+o de propósito: uma fonte com alfa (ProRes 4444, PNG com transparência…) passa a ser composta com a
+transparência (seção 22.4); em 1.4 ela cobria o fundo com preto.
+
+A cópia da recuperação automática guarda o JSON do projeto dentro do envelope dela (`recovery.FORMAT` continua
+1): o formato do projeto vai junto e a leitura passa pela mesma migração.

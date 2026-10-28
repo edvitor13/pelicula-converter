@@ -146,6 +146,17 @@ def pix_depth(pix: str) -> int:
     return int(m.group(1)) if m else 8
 
 
+# Formatos de pixel do ffmpeg com canal alfa (prefixos): yuva420p…/yuva444p10le (ProRes 4444), gbrap*, rgba/bgra/
+# argb/abgr (e rgba64*), ya8/ya16 (cinza com alfa), ayuv/vuya. "pal8" (paleta) pode ter transparência, mas o
+# formato sozinho não diz: só o ffprobe do arquivo (`probe`) decide. "rgb0"/"0rgb"/"bgr0" não têm alfa.
+ALPHA_PIX_PREFIXES = ("yuva", "gbrap", "rgba", "bgra", "argb", "abgr", "ya8", "ya16", "ayuv", "vuya")
+
+
+def pix_has_alpha(pix: str) -> bool:
+    """O formato de pixel tem canal alfa? (yuva444p10le → True, yuv420p → False)"""
+    return (pix or "").lower().startswith(ALPHA_PIX_PREFIXES)
+
+
 def _depth(pix: str, raw: str | None) -> int:
     d = pix_depth(pix)
     if d > 8:

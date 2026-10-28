@@ -5,8 +5,13 @@ todos os ajustes, o look escolhido, entrada/saída, quadro atual, opções da pr
 miniatura em JPEG (base64) para a lista de projetos recentes.
 
 Com o modo Edição, o projeto também guarda a sequência (`"edicao"`, ver `timeline.Sequence`) e o
-modo aberto (`"modo"`). Projetos sem sequência continuam com `"formato": 1` (abrem nas versões
-antigas); com sequência, `"formato": 2`.
+modo aberto (`"modo"`).
+
+Formato (`"formato"`): esta versão lê até `FORMAT` (3) e grava o **menor** formato que o projeto precisa, para
+abrir nas versões antigas sempre que der: 1 = só o arquivo (sem sequência); 2 = com sequência; 3 = usa algum
+recurso da 1.5 (`features()`: os testes de `FEATURES_V3` e de `timeline.FEATURES`), listado em `"recursos"`.
+Versões antigas recusam formato maior que o delas com aviso. Abrir um formato antigo passa pelos passos de
+`MIGRATIONS` (1 → 2 → 3), puros e testados (`tests/test_project_migration.py`).
 """
 
 from __future__ import annotations
@@ -17,14 +22,15 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import APP_NAME, __version__, params
 from .i18n import _
 
 EXT = ".plc"
-FORMAT = 2          # maior formato que esta versão lê
+FORMAT = 3          # maior formato que esta versão lê
 FORMAT_SIMPLE = 1   # projeto sem sequência do modo Edição
+FORMAT_EDIT = 2     # projeto com sequência, sem nada da 1.5
 MODES = ("pelicula", "edicao")
 
 
@@ -56,9 +62,10 @@ class Project:
             for src in edicao.get("fontes") or []:
                 if isinstance(src, dict):
                     src["relativo"] = _relative(str(src.get("caminho") or ""), base)
+        feats = self.features()
         data = {
             "app": APP_NAME,
-            "formato": FORMAT if edicao else FORMAT_SIMPLE,
+            "formato": needed_format(feats, bool(edicao)),
             "versao_app": __version__,
             "salvo_em": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.saved_at or time.time())),
             "nome": self.name,
@@ -76,7 +83,73 @@ class Project:
         }
         if edicao:
             data["edicao"] = edicao
+        if feats:
+            data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3
         return data
+
+    def features(self) -> set[str]:
+        """Recursos da 1.5 que o projeto usa: os de `FEATURES_V3` e os da montagem (`timeline.FEATURES`)."""
+        found = {fid for fid, check in FEATURES_V3.items() if check(self)}
+        if self.sequence:
+            from . import timeline
+            found |= timeline.Sequence.from_json(self.sequence).features()
+        return found
+
+
+# Recursos da 1.5 fora da montagem: id ASCII (nunca renomear) → teste do projeto. Os da montagem ficam em
+# `timeline.FEATURES`. Recurso novo: uma linha num dos dois (o campo dele no JSON só quando usado) e, se o
+# formato antigo precisa de algo para abrir nesta versão, um passo em `MIGRATIONS`.
+FEATURES_V3: dict[str, Callable[[Project], bool]] = {}
+
+
+def needed_format(features: set[str] | frozenset[str], has_sequence: bool) -> int:
+    """O menor formato que guarda o projeto: 3 com recursos da 1.5, 2 com sequência, 1 só com o arquivo."""
+    if features:
+        return FORMAT
+    return FORMAT_EDIT if has_sequence else FORMAT_SIMPLE
+
+
+def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Formato 1 (projeto simples; até a 1.2 sem `"modo"`) → 2: modo válido e nenhum bloco "edicao" quebrado."""
+    out = dict(data)
+    if out.get("modo") not in MODES:
+        out["modo"] = "pelicula"
+    if not isinstance(out.get("edicao"), dict):
+        out.pop("edicao", None)
+    out["formato"] = 2
+    return out
+
+
+def _v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """Formato 2 → 3: o bloco "edicao" vai para o formato atual da montagem (`timeline.migrate`: tipo e
+    transparência das fontes) e a lista de recursos começa vazia."""
+    from . import timeline
+    out = dict(data)
+    if isinstance(out.get("edicao"), dict):
+        out["edicao"] = timeline.migrate(out["edicao"])
+    out.setdefault("recursos", [])
+    out["formato"] = 3
+    return out
+
+
+# formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3}
+
+
+def migrate(data: dict[str, Any]) -> dict[str, Any]:
+    """O JSON de um projeto de qualquer formato até `FORMAT`, levado ao formato atual passo a passo.
+    ProjectError se ele é de uma versão mais nova."""
+    try:
+        fmt = int(data.get("formato", FORMAT_SIMPLE))
+    except (TypeError, ValueError):
+        fmt = FORMAT_SIMPLE
+    if fmt > FORMAT:
+        raise ProjectError(_("O projeto foi salvo por uma versão mais nova do app. Atualize o PeliculaConverter."))
+    fmt = max(fmt, FORMAT_SIMPLE)
+    while fmt < FORMAT:
+        data = MIGRATIONS[fmt](data)
+        fmt += 1
+    return data
 
 
 def _relative(path: str, base: Path | None) -> str:
@@ -141,8 +214,7 @@ def from_json(data: Any, path: str = "") -> Project:
     """
     if not isinstance(data, dict) or data.get("app") != APP_NAME:
         raise ProjectError(_("O arquivo não é um projeto do PeliculaConverter."))
-    if int(data.get("formato", 1)) > FORMAT:
-        raise ProjectError(_("O projeto foi salvo por uma versão mais nova do app. Atualize o PeliculaConverter."))
+    data = migrate(data)
     midia = data.get("midia") or {}
     media = str(midia.get("caminho") or "")
     rel = str(midia.get("relativo") or "")
@@ -164,6 +236,11 @@ def from_json(data: Any, path: str = "") -> Project:
     def opt_int(v):
         return int(v) if isinstance(v, (int, float)) else None
 
+    from . import timeline
+    try:
+        sequence = _relink_sequence(data.get("edicao"), path)
+    except timeline.FormatError as exc:
+        raise ProjectError(str(exc)) from exc
     return Project(
         media_path=media,
         values=params.sanitize(data.get("valores") or {}),
@@ -178,7 +255,7 @@ def from_json(data: Any, path: str = "") -> Project:
         saved_at=saved,
         app_version=str(data.get("versao_app") or ""),
         thumbnail_jpeg=thumb,
-        sequence=_relink_sequence(data.get("edicao"), path),
+        sequence=sequence,
         mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
         path=str(Path(path).resolve()) if path else "",
     )

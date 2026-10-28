@@ -29,15 +29,22 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from . import editparams
-from .i18n import N_
+from .i18n import N_, _
 
 VIDEO = "video"
 AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
-FORMAT = 1               # versão do bloco "edicao" dentro do projeto .plc
+# Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
+# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes). Veja `features()` e `migrate()`.
+FORMAT = 2
+FORMAT_BASE = 1
+# Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
+# ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
+SOURCE_FILE = "arquivo"
+SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste")
 IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
 EPS = 1e-6
@@ -92,6 +99,13 @@ class Source:
     color_primaries: str = ""
     audio_codec: str = ""
     container: str = ""
+    has_alpha: bool = False   # imagem com transparência (canal alfa); "alfa" no JSON, só quando ligado
+    kind: str = SOURCE_FILE   # SOURCE_KINDS; "tipo" no JSON, só quando não é "arquivo"
+
+    @property
+    def is_file(self) -> bool:
+        """Fonte que é um arquivo de mídia (as outras são desenhadas por `sequence.RENDERERS`)."""
+        return self.kind == SOURCE_FILE
 
     @property
     def length(self) -> float:
@@ -127,12 +141,20 @@ class Source:
             has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image)
 
     def to_json(self) -> dict[str, Any]:
-        return {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
-                "quadros": self.frames, "duracao": round(self.duration, 6), "imagem": self.is_image,
-                "tem_video": self.has_video, "tem_audio": self.has_audio, "pix_fmt": self.pix_fmt,
-                "bits": self.bit_depth, "codec": self.codec, "perfil": self.profile, "taxa": self.bitrate,
-                "cor_matriz": self.color_space, "cor_faixa": self.color_range, "cor_transferencia": self.color_transfer,
-                "cor_primarias": self.color_primaries, "codec_audio": self.audio_codec, "recipiente": self.container}
+        out = {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
+               "quadros": self.frames, "duracao": round(self.duration, 6), "imagem": self.is_image,
+               "tem_video": self.has_video, "tem_audio": self.has_audio, "pix_fmt": self.pix_fmt,
+               "bits": self.bit_depth, "codec": self.codec, "perfil": self.profile, "taxa": self.bitrate,
+               "cor_matriz": self.color_space, "cor_faixa": self.color_range, "cor_transferencia": self.color_transfer,
+               "cor_primarias": self.color_primaries, "codec_audio": self.audio_codec, "recipiente": self.container}
+        # Campos da 1.5: só quando usados (a fonte de uma montagem antiga grava igual). "alfa" também sai quando
+        # o formato de pixel tem alfa e a fonte não usa (a migração do formato 1 deduz pelo formato de pixel).
+        from .media import pix_has_alpha
+        if self.has_alpha or pix_has_alpha(self.pix_fmt):
+            out["alfa"] = self.has_alpha
+        if self.kind != SOURCE_FILE:
+            out["tipo"] = self.kind
+        return out
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Source":
@@ -155,7 +177,8 @@ class Source:
                    color_space=str(d.get("cor_matriz") or ""), color_range=str(d.get("cor_faixa") or ""),
                    color_transfer=str(d.get("cor_transferencia") or ""),
                    color_primaries=str(d.get("cor_primarias") or ""), audio_codec=str(d.get("codec_audio") or ""),
-                   container=str(d.get("recipiente") or ""))
+                   container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
+                   kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE)
 
 
 # ------------------------------------------------------------------ clipes e faixas
@@ -856,10 +879,19 @@ class Sequence:
     def copy(self) -> "Sequence":
         return Sequence.from_json(self.to_json())
 
+    def features(self) -> set[str]:
+        """Recursos da 1.5 que esta montagem usa (`FEATURES`): com algum, o projeto vai para o formato 3."""
+        return {fid for fid, check in FEATURES.items() if check(self)}
+
+    def used_sources(self) -> list[Source]:
+        """As fontes que algum clipe usa (na ordem de `sources`)."""
+        used = {c.src for c in self.clips}
+        return [s for p, s in self.sources.items() if p in used]
+
     def to_json(self) -> dict[str, Any]:
         used = {c.src for c in self.clips}
         out = {
-            "formato": FORMAT,
+            "formato": FORMAT if self.features() else FORMAT_BASE,
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
             "faixas": [t.to_json() for t in self.tracks],
@@ -876,7 +908,9 @@ class Sequence:
 
     @classmethod
     def from_json(cls, d: dict[str, Any] | None) -> "Sequence":
-        d = d if isinstance(d, dict) else {}
+        """Montagem a partir do JSON de `to_json` (de qualquer formato até `FORMAT`: passa por `migrate`).
+        `FormatError` se o bloco foi gravado por uma versão mais nova."""
+        d = migrate(d if isinstance(d, dict) else {})
         try:
             bg = tuple(min(max(float(x), 0.0), 1.0) for x in list(d.get("fundo") or (0, 0, 0))[:3])
             if len(bg) != 3:
@@ -932,6 +966,58 @@ class Sequence:
         if with_media:
             seq.insert_media(src, 0)
         return seq
+
+
+# ------------------------------------------------------------------ formato do bloco "edicao" (1.5)
+class FormatError(ValueError):
+    """Montagem gravada por uma versão mais nova do app (o bloco "edicao" tem `formato` maior que `FORMAT`)."""
+
+
+# Recursos da 1.5 que uma montagem pode usar: id ASCII (nunca renomear) → teste. Usar qualquer um grava o
+# bloco "edicao" no formato 2 e o projeto no formato 3 (`project.needed_format`), que as versões antigas
+# recusam com aviso em vez de abrir sem o recurso. Recurso novo: uma linha aqui (ou `FEATURES[id] = teste`
+# no módulo do recurso) e o campo dele no JSON só quando usado.
+FEATURES: dict[str, Callable[[Sequence], bool]] = {
+    "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
+    "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
+}
+
+
+def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
+    do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
+    from .media import pix_has_alpha
+    out = dict(d)
+    fontes = []
+    for s in d.get("fontes") or []:
+        if isinstance(s, dict):
+            s = dict(s)
+            s.setdefault("tipo", SOURCE_FILE)
+            s.setdefault("alfa", pix_has_alpha(str(s.get("pix_fmt") or "")))
+        fontes.append(s)
+    out["fontes"] = fontes
+    out["formato"] = 2
+    return out
+
+
+# formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2}
+
+
+def migrate(d: dict[str, Any]) -> dict[str, Any]:
+    """O JSON de uma montagem de qualquer formato até `FORMAT`, levado ao formato atual passo a passo.
+    `FormatError` se ele é de uma versão mais nova."""
+    try:
+        fmt = int(d.get("formato", FORMAT_BASE))
+    except (TypeError, ValueError):
+        fmt = FORMAT_BASE
+    if fmt > FORMAT:
+        raise FormatError(_("A montagem foi salva por uma versão mais nova do app. Atualize o PeliculaConverter."))
+    fmt = max(fmt, FORMAT_BASE)
+    while fmt < FORMAT:
+        d = MIGRATIONS[fmt](d)
+        fmt += 1
+    return d
 
 
 class History:

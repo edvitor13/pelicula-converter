@@ -36,7 +36,8 @@ pelicula/
   modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
-  project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura
+  project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
+                             (needed_format, FEATURES_V3) e migração passo a passo (MIGRATIONS)
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
@@ -188,11 +189,15 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** Mantenha `project.FORMAT` e a leitura compatível com
-    arquivos antigos; aumente `FORMAT` só com migração. Valores passam por `params.sanitize()`.
-    Projetos com montagem do modo Edição gravam o bloco `"edicao"` (JSON de `timeline.Sequence`) e
-    `"formato": 2`; projetos simples (só o arquivo inteiro, sem mudanças) continuam `"formato": 1`
-    para abrir nas versões antigas.
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (3) é o maior formato que o app lê; o
+    gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
+    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5, listado
+    em `"recursos"`. Recurso novo que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES`
+    (da montagem) ou `project.FEATURES_V3` (do projeto) e o campo dele no JSON só quando usado — assim um
+    projeto que não usa nada novo continua abrindo nas versões antigas, e um que usa é recusado com aviso
+    em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
+    `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 em `tests/data/projetos_1_4/`);
+    aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
     recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
     com os do CI, e cada pacote leva `pelicula-install.json` com o tipo de instalação.

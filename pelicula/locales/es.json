@@ -72,6 +72,7 @@
   "A instalação ficou para depois e o app continua aberto. Clique em \"Atualizar agora\" quando quiser instalar.": "La instalación quedó para después y la app sigue abierta. Haz clic en \"Actualizar ahora\" cuando quieras instalar.",
   "A lista de bibliotecas do componente não foi encontrada: {arquivo}": "No se encontró la lista de bibliotecas del componente: {arquivo}",
   "A maior qualidade do ProRes, com cor 4:4:4. Arquivos muito grandes.": "La máxima calidad de ProRes, con color 4:4:4. Archivos muy grandes.",
+  "A montagem foi salva por uma versão mais nova do app. Atualize o PeliculaConverter.": "El montaje se guardó con una versión más nueva de la app. Actualiza PeliculaConverter.",
   "A partir de quantos stops acima do cinza médio brilha.": "A partir de cuántos stops sobre el gris medio brilla.",
   "A pasta já tem uma sequência de quadros com este nome:\n{caminho}\n\nSubstituir? Os quadros antigos só são trocados quando a exportação terminar.": "La carpeta ya tiene una secuencia de fotogramas con este nombre:\n{caminho}\n\n¿Reemplazarla? Los fotogramas antiguos solo se cambian cuando termina la exportación.",
   "A pasta {pasta} já existe e não foi criada pelo PeliculaConverter. Apague ou renomeie essa pasta e tente de novo.": "La carpeta {pasta} ya existe y no la creó PeliculaConverter. Elimina esa carpeta o cámbiale el nombre e inténtalo de nuevo.",
