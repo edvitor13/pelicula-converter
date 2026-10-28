@@ -32,6 +32,7 @@ from . import icons, theme
 from .edit_model import TimelineModel
 from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
+from . import tempo_ui
 from .keyframes_ui import merged_marks, paint_diamond, param_names
 from .widgets import FilmSlider, timecode
 
@@ -361,6 +362,8 @@ class TimelineCanvas(QWidget):
             extra.append(f"{c.speed:g}".replace(".", decimal_sep()) + "×")
         if c.frozen:
             extra.append(_("congelado"))
+        if c.ramp and not c.frozen:
+            extra.append(_("rampa"))
         if muted:
             extra.append(_("mudo"))
         full = label + (("  •  " + "  ".join(extra)) if extra else "")
@@ -461,7 +464,11 @@ class TimelineCanvas(QWidget):
         n = int(x1 - x0) + 1
         xs = np.linspace(x0, x1, n)
         frames = self.scroll + (xs - HEADER_W) / self.ppf
-        t = c.src_in + (frames - c.start) / self.seq.fps * c.speed
+        if c.retimed:  # rampa ou reverso: o segundo do arquivo vem do mapa do clipe (o mesmo do som)
+            m = self.seq.time_map(c)
+            t = np.array([m.src_at((f - c.start) / self.seq.fps) for f in frames])
+        else:
+            t = c.src_in + (frames - c.start) / self.seq.fps * c.speed
         idx = np.clip((t * PEAKS_PER_SECOND).astype(np.int64), 0, len(peaks) - 1)
         step = max(1, int(round(c.speed * PEAKS_PER_SECOND / (self.seq.fps * self.ppf))))
         if step > 1:
@@ -1214,6 +1221,7 @@ class TimelineCanvas(QWidget):
                 act = menu.addAction(_("Colar ajustes de cor"), lambda: m.paste_values(m.selection))
                 act.setEnabled(m.has_clipboard())
             menu.addAction(_("Velocidade…"), lambda: self.ask_speed(clip.id))
+            tempo_ui.add_clip_actions(menu, self, clip)  # rampa, reverso, congelar este quadro
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())

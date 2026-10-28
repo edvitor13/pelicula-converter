@@ -17,6 +17,7 @@ from .edit_model import TimelineModel
 from .flow import flow_widget
 from .keyframes_ui import ClipKeys, KeyRows
 from .store import ParamStore
+from .tempo_ui import TempoPanel
 from .timeline_view import MIME_SOURCE
 from .widgets import SectionCard, Segmented, timecode
 
@@ -368,6 +369,8 @@ class ClipInspector(QWidget):
         self.akeys = KeyRows(self.astore, target, self.acards, self)
         for rows in (self.vkeys, self.akeys):
             rows.seekRequested.connect(self.seekRequested)
+        self.vtempo = self._tempo_panel(self.vcards)  # rampa (e reverso) no fim do cartão "Velocidade"
+        self.atempo = self._tempo_panel(self.acards)
         model.selectionChanged.connect(self._selection_changed)
         model.changed.connect(self._model_changed)
         self._selection_changed()
@@ -396,6 +399,14 @@ class ClipInspector(QWidget):
         scroll.setWidget(inner)
         pl.addWidget(scroll, 1)
         return page, cards
+
+    def _tempo_panel(self, cards: list[SectionCard]) -> TempoPanel | None:
+        card = next((c for c in cards if c.section.key == "tempo"), None)
+        if card is None:
+            return None
+        panel = TempoPanel(self.model, lambda: self.clip_id)
+        card.body.layout().addWidget(panel)
+        return panel
 
     def _tools(self) -> QWidget:
         w = QWidget()
@@ -486,6 +497,9 @@ class ClipInspector(QWidget):
             self.kind_seg.setVisible(False)
             return
         self.stack.setCurrentWidget(self.video_page if c.kind == VIDEO else self.audio_page)
+        for panel in (self.vtempo, self.atempo):
+            if panel is not None:
+                panel.refresh()
         src = self.model.seq.sources.get(c.src)
         self.title.setText(c.name or (src.name if src else ""))
         kind = _("Imagem parada") if (src is not None and src.is_image) else (

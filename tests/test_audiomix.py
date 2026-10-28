@@ -96,7 +96,7 @@ def test_long_graph_uses_script(tmp_path, monkeypatch):
     monkeypatch.setattr(media, "ffmpeg", lambda: "ffmpeg")
     script = tmp_path / "grafo.txt"
     cmd = audiomix.build_mix_cmd(seq, str(tmp_path / "o.wav"), script_path=str(script))
-    assert "-filter_complex_script" in cmd and "amix" in script.read_text(encoding="utf-8")
+    assert "-/filter_complex" in cmd and "amix" in script.read_text(encoding="utf-8")
     cmd = audiomix.build_mix_cmd(seq, str(tmp_path / "o.wav"))
     assert cmd[cmd.index("-filter_complex") + 1].endswith("[out]")
     assert cmd[-1].endswith("o.wav") and "pcm_s24le" in cmd

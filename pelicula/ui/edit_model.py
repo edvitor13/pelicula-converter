@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import editparams, timeline
+from .. import editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
@@ -298,6 +298,30 @@ class TimelineModel(QObject):
             self.seq.room_for_speed(cid, speed)
             self.seq.set_speed(cid, speed)
         self._done("structure")
+
+    # ------------------------------------------------------------ tempo: rampa, reverso
+    def set_ramp(self, cid: str, ramp) -> bool:
+        """Troca a rampa de velocidade do clipe (e dos ligados do mesmo arquivo): um passo do desfazer."""
+        return self._retime(cid, ramp=ramp)
+
+    def apply_ramp_preset(self, cid: str, preset: str, amount: float = timemap.AMOUNT_DEFAULT,
+                          ramp_s: float = timemap.RAMP_S_DEFAULT) -> bool:
+        """Rampa pronta (`timemap.PRESETS`) no trecho do arquivo que o clipe mostra agora."""
+        c = self.seq.find(cid)
+        if c is None or self.seq._holds(c):
+            return False
+        lo, hi = self.seq.source_range(c)
+        return self.set_ramp(cid, timemap.preset_anchors(preset, lo, hi, c.reverse, amount, ramp_s))
+
+    def _retime(self, cid: str, ramp=None, reverse=None) -> bool:
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            self.seq.room_for_retime(cid, ramp=ramp, reverse=reverse)
+            self.seq.retime(cid, ramp=ramp, reverse=reverse)
+        if self.history._dump(self.seq) == before:
+            return False
+        self._done("structure")
+        return True
 
     def apply_look(self, cid: str, look: dict[str, Any]) -> None:
         """Ajuste rápido: zera a cor e a luz do clipe e aplica os valores do look."""

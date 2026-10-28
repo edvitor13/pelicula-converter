@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Callable, Iterable
 
-from . import editparams, keyframes
+from . import editparams, keyframes, timemap
 from .i18n import N_, _
 
 VIDEO = "video"
@@ -240,12 +240,23 @@ class Clip:
     # sequência; `Sequence.clip_time`). Aparar o começo e dividir mexem só em `key_off` (`shift_head`).
     keys: dict[str, list] = field(default_factory=dict)
     key_off: int = 0
+    # Tempo (`timemap.py`): rampa de velocidade (âncoras (segundo do arquivo, velocidade relativa), presas à
+    # imagem) e reverso (o arquivo toca para trás a partir de `src_in`, que aí é a ponta mais alta do trecho).
+    ramp: list = field(default_factory=list)
+    reverse: bool = False
 
     def __post_init__(self) -> None:
         schema = editparams.SCHEMAS[self.kind]
         self.values = schema.sanitize(self.values)
         self.keys = keyframes.clean_keys(schema, self.keys)
         self.key_off = int(self.key_off)
+        self.ramp = timemap.clean_ramp(self.ramp)
+        self.reverse = bool(self.reverse)
+
+    @property
+    def retimed(self) -> bool:
+        """Tem rampa de velocidade ou reverso (o tempo passa por `timemap.TimeMap`)."""
+        return bool(self.ramp) or self.reverse
 
     def shift_head(self, delta: int) -> None:
         """O começo do clipe andou `delta` quadros com a imagem parada no lugar (aparar o começo, sobrescrever,
@@ -279,6 +290,10 @@ class Clip:
             out["chaves"] = keyframes.to_json(self.keys)
             if self.key_off:
                 out["chaves_ref"] = self.key_off
+        if self.ramp:  # só com rampa / reverso (idem)
+            out["rampa"] = timemap.ramp_json(self.ramp)
+        if self.reverse:
+            out["reverso"] = True
         return out
 
     @classmethod
@@ -293,7 +308,9 @@ class Clip:
                        link=str(d.get("ligacao") or ""), name=str(d.get("nome") or ""),
                        values=d.get("valores") if isinstance(d.get("valores"), dict) else {},
                        keys=d.get("chaves") if isinstance(d.get("chaves"), dict) else {},
-                       key_off=int(d.get("chaves_ref", 0) or 0))
+                       key_off=int(d.get("chaves_ref", 0) or 0),
+                       ramp=d.get("rampa") if isinstance(d.get("rampa"), list) else [],
+                       reverse=d.get("reverso") is True)
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -389,6 +406,13 @@ class _Span:
     src_in: float
     speed: float
     holds: bool   # imagem parada ou quadro congelado: não há tempo de arquivo para acompanhar
+    ramp: tuple = ()
+    reverse: bool = False
+
+    def src_at(self, p: int, fps: float) -> float:
+        if self.ramp or self.reverse:
+            return timemap.TimeMap(self.src_in, self.speed, self.ramp, self.reverse).src_at((p - self.start) / fps)
+        return self.src_in + (p - self.start) / fps * self.speed
 
 
 # ------------------------------------------------------------------ sequência
@@ -491,30 +515,81 @@ class Sequence:
     def frames_for(self, seconds: float) -> int:
         return max(1, int(math.floor(seconds * self.fps + EPS)))
 
+    def time_map(self, clip: Clip, src_in: float | None = None, speed: float | None = None) -> timemap.TimeMap:
+        """O mapa de tempo do clipe (velocidade, rampa e reverso; `timemap.py`)."""
+        return timemap.TimeMap(clip.src_in if src_in is None else src_in, clip.speed if speed is None else speed,
+                               clip.ramp, clip.reverse)
+
     def src_time(self, clip: Clip, t: int) -> float:
-        """Segundos no arquivo de origem mostrados no quadro t da sequência."""
+        """Segundos no arquivo de origem no começo do quadro t da sequência (a fronteira: é por ela que se apara e
+        divide). Com rampa ou reverso, pelo `time_map` (o único lugar onde o tempo do clipe é calculado)."""
         if clip.frozen:
             return clip.src_in
+        if clip.retimed:
+            return self.time_map(clip).src_at((t - clip.start) / self.fps)
         return clip.src_in + (t - clip.start) / self.fps * clip.speed
 
     def src_frame(self, clip: Clip, t: int) -> int:
-        """Quadro do arquivo de origem para o quadro t da sequência (o mesmo na prévia e na exportação)."""
+        """Quadro do arquivo de origem para o quadro t da sequência (o mesmo na prévia e na exportação).
+
+        No reverso o quadro é o que fica logo antes da fronteira seguinte (`src_time(t + 1)`): é o espelho exato do
+        clipe para a frente com o mesmo trecho (o último quadro dele aparece primeiro, o primeiro por último)."""
         src = self.sources.get(clip.src)
         if src is None or src.is_image:
             return 0
-        f = int(math.floor(self.src_time(clip, t) * src.fps + EPS))
+        s = self.src_time(clip, t + 1) if clip.reverse and not clip.frozen else self.src_time(clip, t)
+        f = int(math.floor(s * src.fps + EPS))
         return min(max(f, 0), max(0, src.frames - 1))
 
     def max_dur(self, clip: Clip, src_in: float | None = None) -> int:
-        """Maior duração (quadros) que o arquivo permite a partir de `src_in`."""
+        """Maior duração (quadros) que o arquivo permite a partir de `src_in` (no sentido em que o clipe toca)."""
         src = self.sources.get(clip.src)
         if src is None:
             return clip.dur
         if src.is_image or clip.frozen:
             return self.frames_for(MAX_HOLD_SECONDS)
         a = clip.src_in if src_in is None else src_in
+        if clip.retimed:
+            room = self.time_map(clip, a).room_after(src.length)
+            return max(1, int(math.floor(room * self.fps + EPS)))
         left = max(0.0, src.length - a)
         return max(1, int(math.floor(left / clip.speed * self.fps + EPS)))
+
+    def _frames_left(self, c: Clip, speed: float) -> int:
+        """Quadros de arquivo do começo do clipe até o fim (no sentido em que toca), na velocidade `speed`."""
+        length = self.sources[c.src].length
+        if c.retimed:
+            room = self.time_map(c, speed=speed).room_after(length)
+        else:
+            room = max(0.0, length - c.src_in) / speed
+        return max(1, int(math.floor(room * self.fps + EPS)))
+
+    def source_room(self, c: Clip) -> tuple[float, float]:
+        """(antes, depois): segundos da saída que o arquivo ainda tem antes do começo e depois do fim do clipe."""
+        src = self.sources.get(c.src)
+        if src is None or self._holds(c):
+            return 0.0, 0.0
+        if c.retimed:
+            m = self.time_map(c)
+            return m.room_before(src.length), max(0.0, m.room_after(src.length) - c.dur / self.fps)
+        head = c.src_in / c.speed
+        tail = max(0.0, src.length - (c.src_in + c.dur / self.fps * c.speed)) / c.speed
+        return head, tail
+
+    def source_range(self, c: Clip) -> tuple[float, float]:
+        """(menor, maior): o trecho do arquivo, em segundos, que o clipe mostra (nas duas direções). Se o clipe
+        termina a menos de um quadro da ponta do arquivo (a duração foi arredondada ou presa a ela), a ponta conta
+        como mostrada: tirar a rampa ou o reverso depois volta ao clipe inteiro, sem perder um quadro."""
+        lo, hi = sorted((self.src_time(c, c.start), self.src_time(c, c.end)))
+        src = self.sources.get(c.src)
+        if src is None or self._holds(c) or src.length <= 0:
+            return lo, hi
+        step = abs(self.src_time(c, c.end) - self.src_time(c, c.end - 1)) if c.dur > 1 else 1.0 / src.fps
+        if c.reverse:
+            lo = 0.0 if lo < step - EPS else lo
+        elif src.length - hi < step - EPS:
+            hi = src.length
+        return lo, hi
 
     def default_dur(self, src: Source) -> int:
         if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS
@@ -553,8 +628,10 @@ class Sequence:
         exato onde `a` parou e na mesma velocidade (um corte que não foi mexido: não há estalo ali)."""
         if a.kind != b.kind or a.track != b.track or a.end != b.start or a.src != b.src or a.frozen or b.frozen:
             return False
-        if abs(a.speed - b.speed) > 1e-9:
+        if abs(a.speed - b.speed) > 1e-9 or a.ramp != b.ramp or a.reverse != b.reverse:
             return False
+        if a.retimed:
+            return abs(self.src_time(a, a.end) - b.src_in) < 1e-4
         return abs(a.src_in + a.dur / self.fps * a.speed - b.src_in) < 1e-4
 
     def audio_crossfade(self, clip: Clip) -> tuple[Clip | None, float, float]:
@@ -573,9 +650,13 @@ class Sequence:
             return None, 0.0, 0.0
         fps = self.fps
         head = clip.src_in / clip.speed  # arquivo antes da entrada do que entra (s da sequência)
+        if clip.retimed:
+            head = self.source_room(clip)[0]
         src = self.sources.get(prev.src)
         tail = 0.0                       # arquivo depois da saída do que sai
-        if src is not None:
+        if src is not None and prev.retimed:
+            tail = self.source_room(prev)[1]
+        elif src is not None:
             tail = max(0.0, src.length - (prev.src_in + prev.dur / fps * prev.speed)) / prev.speed
         room_a, room_b = prev.dur / fps / 2, clip.dur / fps / 2
         before = min(d / 2, head, room_a)
@@ -695,7 +776,7 @@ class Sequence:
     def _cut(self, c: Clip, t: int) -> Clip:
         """Divide o clipe no quadro t; devolve a parte da direita (já na sequência)."""
         right = Clip(new_id(), c.kind, c.src, c.track, t, c.end - t, self.src_time(c, t), "", c.name,
-                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start))
+                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start), list(c.ramp), c.reverse)
         c.dur = t - c.start
         # A transição de entrada fica só na parte da esquerda; a de saída, só na da direita.
         if c.kind == VIDEO:
@@ -772,8 +853,8 @@ class Sequence:
             hold = src is None or src.is_image or c.frozen
             lo = -c.start
             if not hold:
-                # Não dá para voltar antes do começo do arquivo.
-                lo = max(lo, -int(math.floor(c.src_in / c.speed * self.fps + EPS)))
+                # Não dá para voltar antes do começo do arquivo (no reverso: depois do fim).
+                lo = max(lo, -self._head_room(c))
             hi = c.dur - 1
             delta = min(max(delta, lo), hi)
         for c in group:
@@ -828,6 +909,82 @@ class Sequence:
                 c.rescale_keys(c.speed / speed)  # a animação acompanha a imagem
             c.values["velocidade"] = speed
             c.dur = max(1, min(nd, self.max_dur(c)))
+
+    # -------------------------------------------------------- tempo: rampa e reverso
+    def _retime_members(self, cid: str) -> tuple[list[Clip], Clip | None]:
+        """(clipes que mudam, âncora): o clipe e os ligados do mesmo arquivo; a âncora é a imagem (ou o próprio
+        clipe). Ligados de outro arquivo (uma música ligada à mão) continuam tocando como estão."""
+        group = self._group_for_edit(cid)
+        clip = self.find(cid)
+        if not group or clip not in group:
+            return [], None
+        members = [c for c in group if c.src == clip.src]
+        if any(self._holds(c) for c in members):
+            return [], None
+        return members, next((c for c in members if c.kind == VIDEO), clip)
+
+    def _retime_plan(self, members: list[Clip], anchor: Clip, ramp: list, reverse: bool):
+        """{id: (início, fim, entrada)} com a rampa e o reverso novos, sem limite nenhum: o trecho do arquivo que
+        cada um mostra fica, e todos seguem o mapa da âncora (o som ligado acompanha a imagem quadro a quadro)."""
+        fps = self.fps
+        lo, hi = self.source_range(anchor)
+        m = timemap.TimeMap(hi if reverse else lo, anchor.speed, ramp, reverse)
+        plan = {}
+        for c in members:
+            a, b = self.source_range(c)
+            x0, x1 = sorted((m.out_at(a), m.out_at(b)))
+            start = anchor.start + int(round(x0 * fps))
+            end = max(start + 1, anchor.start + int(round(x1 * fps)))
+            plan[c.id] = (start, end, max(0.0, m.src_at((start - anchor.start) / fps)))
+        return plan
+
+    def retime(self, cid: str, ramp: Any = None, reverse: bool | None = None) -> bool:
+        """Troca a rampa de velocidade (`ramp`: âncoras; [] tira) e/ou o reverso do clipe e dos ligados do mesmo
+        arquivo. O trecho do arquivo que eles mostram fica; a duração acompanha, sem invadir o clipe seguinte nem
+        passar das pontas do arquivo (o fim encolhe junto). As chaves esticam com a duração. None = não muda."""
+        members, anchor = self._retime_members(cid)
+        if not members:
+            return False
+        ramp = anchor.ramp if ramp is None else timemap.clean_ramp(ramp)
+        reverse = anchor.reverse if reverse is None else bool(reverse)
+        if all(c.ramp == ramp and c.reverse == reverse for c in members):
+            return False
+        plan = self._retime_plan(members, anchor, ramp, reverse)
+        ids = {c.id for c in members}
+        cut = 0
+        for c in members:
+            start, end, src_in = plan[c.id]
+            nxt = min((o.start for o in self.clips_on(c.kind, c.track) if o.id not in ids and o.start >= c.end),
+                      default=None)
+            lim = end if nxt is None else min(end, max(nxt, start + 1))
+            room = timemap.TimeMap(src_in, c.speed, ramp, reverse).room_after(self.sources[c.src].length)
+            lim = min(lim, start + max(1, int(math.floor(room * self.fps + EPS))))
+            cut = max(cut, end - lim)
+        for c in members:
+            start, end, src_in = plan[c.id]
+            dur = max(1, end - cut - max(0, start))
+            if dur != c.dur:
+                c.rescale_keys(dur / c.dur)
+            c.start, c.dur, c.src_in = max(0, start), dur, src_in
+            c.ramp, c.reverse = list(ramp), reverse
+        for c in members:
+            self._clear_range(c.kind, c.track, c.start, c.end, ids)
+        return True
+
+    def room_for_retime(self, cid: str, ramp: Any = None, reverse: bool | None = None) -> None:
+        """V1 magnética: uma rampa mais lenta (mais longa) empurra o que vem depois, como `room_for_speed`."""
+        members, anchor = self._retime_members(cid)
+        if not members or not self._magnet_owns(members):
+            return
+        main = next((c for c in members if c.kind == VIDEO and c.track == 0), None)
+        if main is None:
+            return
+        ramp = anchor.ramp if ramp is None else timemap.clean_ramp(ramp)
+        reverse = anchor.reverse if reverse is None else bool(reverse)
+        start, end, _src_in = self._retime_plan(members, anchor, ramp, reverse)[main.id]
+        if end > main.end:
+            self.open_space(main.end, end - main.end, {(c.kind, c.track) for c in members},
+                            exclude={c.id for c in members}, all_tracks=False, split=False)
 
     def set_values(self, cid: str, values: dict[str, Any]) -> None:
         """Troca os ajustes de um clipe (a velocidade passa por `set_speed` para manter os ligados juntos)."""
@@ -897,6 +1054,8 @@ class Sequence:
         """Quadros de arquivo antes da entrada do clipe (o quanto o começo pode voltar)."""
         if self._holds(c):
             return self.frames_for(MAX_HOLD_SECONDS)
+        if c.retimed:
+            return max(0, int(math.floor(self.source_room(c)[0] * self.fps + EPS)))
         return max(0, int(math.floor(c.src_in / c.speed * self.fps + EPS)))
 
     def open_space(self, t: int, d: int, targets: Iterable[tuple[str, int]] = (), exclude: Iterable[str] = (),
@@ -1144,8 +1303,7 @@ class Sequence:
             if nxt is not None:
                 lim = min(lim, max(nxt, ns + 1))
             if not self._holds(c):
-                left = max(0.0, self.sources[c.src].length - c.src_in)
-                lim = min(lim, ns + max(1, int(math.floor(left / speed * self.fps + EPS))))
+                lim = min(lim, ns + self._frames_left(c, speed))
             plan[c.id] = (ns, ne)
             cut = max(cut, ne - lim)
         for c in group:
@@ -1205,15 +1363,14 @@ class Sequence:
         main = next(c for c in group if c.kind == VIDEO and c.track == 0)
         want = max(1, int(round(main.dur * main.speed / speed)))
         if not self._holds(main):
-            left = max(0.0, self.sources[main.src].length - main.src_in)
-            want = min(want, max(1, int(math.floor(left / speed * self.fps + EPS))))
+            want = min(want, self._frames_left(main, speed))
         if want > main.dur:
             self.open_space(main.end, want - main.dur, {(c.kind, c.track) for c in group},
                             exclude={c.id for c in group}, all_tracks=False, split=False)
 
     def _snapshot(self) -> dict[str, Any]:
         return {"clips": {c.id: (c.kind, c.track, c.start, c.dur, c.src_in) for c in self.clips},
-                "main": [_Span(c.id, c.start, c.end, c.src, c.src_in, c.speed, self._holds(c))
+                "main": [_Span(c.id, c.start, c.end, c.src, c.src_in, c.speed, self._holds(c), tuple(c.ramp), c.reverse)
                          for c in self.clips_on(VIDEO, 0)],
                 "markers": {m.id: m.frame for m in self.markers}}
 
@@ -1334,6 +1491,9 @@ class Sequence:
         def shows(c: Clip, tau: float) -> int | None:
             if self._holds(c):
                 return None
+            if c.retimed:
+                k = int(math.floor(self.time_map(c).out_at(tau) * fps + 1e-6))
+                return c.start + k if 0 <= k < c.dur else None
             k = int(math.floor((tau - c.src_in) * fps / c.speed + 1e-6))
             return c.start + k if 0 <= k < c.dur else None
 
@@ -1355,7 +1515,7 @@ class Sequence:
                     return cut_after(idx - 1)
                 off = p - s.start
                 return same.start + off if off < same.dur else same.end
-            tau = s.src_in + (p - s.start) / fps * s.speed
+            tau = s.src_at(p, fps)
             if same is not None and same.src == s.src:
                 got = shows(same, tau)
                 if got is not None:
@@ -1368,7 +1528,7 @@ class Sequence:
             if best is not None:
                 return best
             if same is not None:
-                return same.start if tau < same.src_in else same.end
+                return same.start if (tau < same.src_in) != same.reverse else same.end
             return cut_after(idx - 1)
 
         return f
@@ -1553,6 +1713,8 @@ class Sequence:
         src = self.sources.get(v.src)
         if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values) or v.keys:
             return None
+        if v.retimed or any(a.retimed for a in auds):
+            return None
         if not src.is_file:  # clipe sem arquivo (gerador, texto…): não há o que ler direto
             return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
@@ -1690,6 +1852,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
 }
+FEATURES["rampa"] = lambda seq: any(c.ramp for c in seq.clips)        # rampa de velocidade (`Clip.ramp`)
 
 
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
