@@ -2087,7 +2087,10 @@ fica (`source_range`: se o clipe termina a menos de um quadro da ponta do arquiv
 mostrada — sem isso, tirar uma rampa presa ao fim do arquivo perdia um quadro); a posição de cada ligado sai do
 mapa da âncora (um corte J/L continua em sincronia; no reverso, o som que sobrava depois da imagem vem antes
 dela, sem entrar no clipe de som anterior). A duração acompanha, sem invadir o clipe seguinte nem passar da
-ponta do arquivo (o fim encolhe igual para todos); as chaves esticam junto (`rescale_keys`). Na V1 magnética,
+ponta do arquivo (o fim encolhe igual para todos); as chaves esticam junto (`rescale_keys`, como na mudança
+de velocidade): ficam na mesma fração do tempo do clipe, e no reverso não trocam de lugar (um fade de entrada
+animado continua no começo). Prender cada chave ao quadro do arquivo inverteria a animação no reverso, o que
+surpreende mais do que ajuda. Na V1 magnética,
 `room_for_retime` abre o espaço antes (como `room_for_speed`). Imagens e clipes congelados não têm rampa nem
 reverso. Rampa e reverso combinam: as âncoras são do arquivo, então no reverso o trecho lento fica no mesmo
 pedaço da imagem (uma entrada lenta vira uma saída lenta). Aparar, dividir (`_cut` copia `ramp`/`reverse`),

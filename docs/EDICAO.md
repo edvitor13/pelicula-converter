@@ -229,8 +229,9 @@ juntos; parar o mouse em cima diz quais). **Clique** leva o cursor até a chave;
 tempo (gruda no cursor e fica dentro do clipe); **Shift** ou **Alt** escolhe várias; **Delete** apaga as
 chaves escolhidas (antes dos clipes); **Esc** tira a escolha. Cada ação é um passo do desfazer.
 
-As chaves andam com o clipe: mover, aparar, dividir, mudar a velocidade ou pôr uma rampa mantêm cada chave
-no mesmo ponto da imagem.
+As chaves andam com o clipe: mover, aparar, dividir e mudar a velocidade mantêm cada chave no mesmo ponto da
+imagem. Ao pôr ou tirar uma rampa, ou ligar o reverso, as chaves ficam na mesma fração do tempo do clipe (um
+aumento de luz no começo continua no começo).
 
 ### Tempo do clipe: rampa, reverso e congelar
 
