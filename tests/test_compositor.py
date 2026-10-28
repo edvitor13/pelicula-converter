@@ -178,8 +178,9 @@ def test_compose_neutral_is_bit_exact(gl_engine, test_rgb, depth):
 
 @pytest_gpu
 def test_compose_every_param_runs(gl_engine, test_rgb):
+    transition_keys = {p.key for s in editparams.VIDEO_SECTIONS if s.key == "transicao" for p in s.params}
     for key, p in editparams.VIDEO.params.items():
-        if key in ("velocidade", "congelar", "entrada_tipo", "entrada_dur", "saida_tipo", "saida_dur"):
+        if key in ("velocidade", "congelar") or key in transition_keys:  # transições: tests/test_transitions.py
             continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)

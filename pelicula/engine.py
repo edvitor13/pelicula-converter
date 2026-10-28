@@ -307,14 +307,24 @@ class Engine:
         t.write(np.ascontiguousarray(img))
         return t
 
+    def _lazy_program(self, name: str, src: str) -> None:
+        """Compila um programa só na primeira vez que ele é usado (os das transições da 1.5)."""
+        if name not in self.progs:
+            prog = self.ctx.program(vertex_shader=shaders.VERT, fragment_shader=src)
+            self.progs[name] = prog
+            self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, "2f", "in_pos")])
+
     def compose(self, frame_layers, seq, canvas_w: int, canvas_h: int, depth: int = 8,
-                neutral: bool = False, crop: tuple[int, int, int, int] | None = None) -> np.ndarray:
+                neutral: bool = False, crop: tuple[int, int, int, int] | None = None,
+                light: tuple[int, bool] | None = None) -> np.ndarray:
         """Monta um quadro da sequência (modo Edição) e devolve (h, w, 3) uint8 ou uint16.
 
         `frame_layers` é um `sequence.FrameLayers` (imagens já decodificadas, de baixo para cima).
         Cada camada é desenhada por `editshaders.CLIP` com os valores de `compositor.clip_uniforms`
         sobre uma tela RGBA de 32 bits (alterna entre dois alvos). Só na thread dona do contexto.
         `crop` (x, y, largura, altura) devolve só esse recorte da tela (exportação com "cortar", `fit.py`).
+        `light`: em que luz as transições da 1.5 misturam (`transitions.light_of`; None = rec709); as camadas
+        com uma delas são desenhadas por `editshaders.CLIP_TR`.
         """
         from . import compositor
         size = (int(canvas_w), int(canvas_h))
@@ -328,13 +338,17 @@ class Engine:
             img = li.image
             tex = self._clip_texture(slot, img)
             U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral,
-                                              tex_alpha=tex.components == 4)
+                                              tex_alpha=tex.components == 4, light=light)
             if mip:
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
                 tex.build_mipmaps()
             else:
                 tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            self._run("clip", dst, {"t_clip": tex, "t_dst": src[0]}, U)
+            program = "clip"
+            if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
+                program = "clip_tr"
+                self._lazy_program(program, editshaders.CLIP_TR)
+            self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         out_dtype = "u1" if depth == 8 else "u2"
         osize, offset = size, (0, 0)

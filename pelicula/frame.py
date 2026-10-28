@@ -85,7 +85,9 @@ class Recipe:
             return img
         w, h = self.montage_size()
         crop = self.fit.canvas_crop if self.fit is not None else None
-        return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop)
+        from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
+        return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop,
+                              light=light_of(self.values, self.legal))
 
     def look_values(self, index: int) -> dict:
         """Passo 3: os ajustes do look no quadro `index` da saída (com as chaves de animação avaliadas)."""

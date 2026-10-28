@@ -551,5 +551,32 @@ class TimelineModel(QObject):
     def kinds_selected(self) -> set[str]:
         return {c.kind for c in self.selected_clips()}
 
+    # ------------------------------------------------------------ transições de película (1.5)
+    last_transition_s = 1.0  # duração do menu do corte: a última usada (1 s no começo)
+
+    def set_transition(self, cid: str, side: str, kind: str, seconds: float | None = None) -> bool:
+        """Transição `kind` na entrada ou na saída (`side`) do clipe de vídeo `cid`, num passo só do desfazer.
+        A duração é `seconds`, a que o lado já tinha (se tinha transição) ou a última usada. Faixa travada ou
+        tipo desconhecido: nada (False)."""
+        c = self.seq.find(cid)
+        if c is None or c.kind != VIDEO or side not in ("entrada", "saida") or self.seq.locked(c):
+            return False
+        if kind not in {v for v, _label in editparams.VIDEO.params[f"{side}_tipo"].choices}:
+            return False
+        vals = dict(c.values)
+        if seconds is None:
+            seconds = float(vals[f"{side}_dur"]) if vals.get(f"{side}_tipo", "corte") != "corte" \
+                else self.last_transition_s
+        vals[f"{side}_tipo"] = kind
+        if kind != "corte":
+            p = editparams.VIDEO.params[f"{side}_dur"]
+            vals[f"{side}_dur"] = min(max(float(seconds), p.min), p.max)
+            self.last_transition_s = vals[f"{side}_dur"]
+        if vals == c.values:
+            return False
+        self.seq.set_values(cid, vals)
+        self._done("values")
+        return True
+
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

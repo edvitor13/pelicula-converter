@@ -274,7 +274,7 @@ class Clip:
     def to_json(self) -> dict[str, Any]:
         out = {"id": self.id, "tipo": self.kind, "fonte": self.src, "faixa": self.track, "inicio": self.start,
                "duracao": self.dur, "entrada": round(self.src_in, 6), "ligacao": self.link, "nome": self.name,
-               "valores": copy.deepcopy(self.values)}
+               "valores": editparams.stored_values(self.kind, self.values)}  # ajustes da 1.5 só fora do padrão
         if self.keys:  # só com animação (o clipe de uma montagem antiga grava igual)
             out["chaves"] = keyframes.to_json(self.keys)
             if self.key_off:
@@ -334,6 +334,27 @@ class Layer:
     fade: float = 0.0         # 0 = imagem; 1 = só a cor do fade (surgir/sumir no preto ou branco)
     extension: bool = False   # True = cauda do clipe anterior mostrada por baixo de um "dissolver"
     values: dict[str, Any] | None = None  # ajustes neste quadro (`Sequence.values_at`); None = os do clipe
+    # Transições da 1.5 nesta camada (`editparams.EXTRA_IN`/`EXTRA_OUT`, desenhadas por `transitions.py`); vazio =
+    # só as de antes (alpha/fade acima), no caminho de sempre.
+    transitions: tuple["Transition", ...] = ()
+
+
+@dataclass(frozen=True)
+class Transition:
+    """Uma transição da 1.5 numa camada, no quadro pedido a `Sequence.layers_at`.
+
+    `progress` vai de 0 a 1 (1 = terminou): no clipe que entra (`role` "entra") é o quanto ele já apareceu; na
+    cauda do clipe anterior que fica por baixo (`role` "base", nas de dois clipes: `editparams.EXTRA_TWO_CLIP`) é o
+    mesmo andamento da transição do clipe que entra; na saída do clipe (`role` "sai"), o quanto ele já sumiu.
+    """
+
+    kind: str        # tipo (`entrada_tipo`/`saida_tipo` do clipe dono)
+    side: str        # "entrada" ou "saida": de qual lado do clipe dono vêm os parâmetros
+    role: str        # "entra", "sai" ou "base"
+    progress: float  # 0 → 1, como o `k` das transições antigas: (quadro + 1) / (duração + 1)
+    index: int       # quadro dentro da transição (0 = o primeiro)
+    frames: int      # duração da transição em quadros
+    owner: str       # id do clipe que tem a transição (os parâmetros e a semente do ruído vêm dele)
 
 
 # ------------------------------------------------------------------ marcadores
@@ -593,7 +614,10 @@ class Sequence:
             pos = t - c.start
             n_in = max(1, int(round(v["entrada_dur"] * fps)))
             n_out = max(1, int(round(v["saida_dur"] * fps)))
-            if v["entrada_tipo"] != "corte" and pos < n_in:
+            trs: list[Transition] = []
+            if v["entrada_tipo"] in editparams.EXTRA_IN:  # 1.5: transições novas (`transitions.py`)
+                trs += self._extra_transition_in(c, t, out)
+            elif v["entrada_tipo"] != "corte" and pos < n_in:
                 k = (pos + 1) / (n_in + 1)
                 if v["entrada_tipo"] == "dissolver":
                     prev = self.previous_on_track(c)
@@ -605,15 +629,59 @@ class Sequence:
                     fade = 1.0 - k
                     color = (1.0, 1.0, 1.0) if v["entrada_tipo"] == "branco" else (0.0, 0.0, 0.0)
             rest = c.end - 1 - t
-            if v["saida_tipo"] != "corte" and rest < n_out:
+            if v["saida_tipo"] in editparams.EXTRA_OUT:  # 1.5: transições novas (`transitions.py`)
+                trs += self._extra_transition_out(c, t)
+            elif v["saida_tipo"] != "corte" and rest < n_out:
                 k = (rest + 1) / (n_out + 1)
                 if v["saida_tipo"] == "transparente":
                     alpha *= k
                 else:
                     color = (1.0, 1.0, 1.0) if v["saida_tipo"] == "branco" else (0.0, 0.0, 0.0)
                     fade = max(fade, 1.0 - k)
-            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade, values=self.values_at(c, t)))
+            out.append(Layer(c, self.src_frame(c, t), alpha, color, fade, values=self.values_at(c, t),
+                             transitions=tuple(trs)))
         return out
+
+    # -------------------------------------------------------- transições da 1.5
+    def transition_frames(self, clip: Clip, side: str) -> int:
+        """Duração em quadros da transição de entrada ou de saída (`side`) do clipe. A "emenda" conta quadros
+        (`entrada_quadros`, 1 a 3); as outras, segundos (`entrada_dur`/`saida_dur`), como as de antes."""
+        v = clip.values
+        if side == "entrada" and v["entrada_tipo"] == "emenda":
+            return max(1, int(round(float(v["entrada_quadros"]))))
+        return max(1, int(round(float(v[f"{side}_dur"]) * self.fps)))
+
+    def _extra_transition_in(self, c: Clip, t: int, out: list[Layer]) -> list[Transition]:
+        """Transição nova de entrada de `c` no quadro t (ou nada fora dela). Nas de dois clipes
+        (`editparams.EXTRA_TWO_CLIP`) a cauda do clipe anterior da faixa entra em `out` por baixo, como no
+        "dissolver" (`extension`), com a mesma transição no papel "base"."""
+        n = self.transition_frames(c, "entrada")
+        pos = t - c.start
+        if pos >= n:
+            return []
+        kind = c.values["entrada_tipo"]
+        tr = Transition(kind, "entrada", "entra", (pos + 1) / (n + 1), pos, n, c.id)
+        if kind in editparams.EXTRA_TWO_CLIP:
+            prev = self.previous_on_track(c)
+            if prev is not None:
+                base = Transition(kind, "entrada", "base", tr.progress, pos, n, c.id)
+                out.append(Layer(prev, self.src_frame(prev, t), 1.0, extension=True, values=self.values_at(prev, t),
+                                 transitions=(base,)))
+        return [tr]
+
+    def _extra_transition_out(self, c: Clip, t: int) -> list[Transition]:
+        """Transição nova de saída de `c` no quadro t (ou nada fora dela)."""
+        n = self.transition_frames(c, "saida")
+        rest = c.end - 1 - t
+        if rest >= n:
+            return []
+        return [Transition(c.values["saida_tipo"], "saida", "sai", 1.0 - (rest + 1) / (n + 1), n - 1 - rest, n,
+                           c.id)]
+
+    def uses_extra_transitions(self) -> bool:
+        """Algum clipe de vídeo usa uma transição da 1.5 (formato 3 do projeto; módulo "transicoes")."""
+        return any(c.kind == VIDEO and (c.values.get("entrada_tipo") in editparams.EXTRA_IN
+                                        or c.values.get("saida_tipo") in editparams.EXTRA_OUT) for c in self.clips)
 
     def audio_clips(self) -> list[Clip]:
         """Clipes de som que tocam (respeita mudo e solo das faixas e o mudo do clipe)."""
@@ -1681,6 +1749,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
     "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
+    "transicoes": lambda seq: seq.uses_extra_transitions(),
 }
 
 

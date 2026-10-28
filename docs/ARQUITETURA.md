@@ -29,6 +29,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 21. [Componentes de IA: receitas com o uv e o CorridorKey](#21-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
 22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
 23. [Texto, legendas e transcrição](#23-texto-legendas-e-transcrição)
+26. [Transições de película](#26-transições-de-película)
 
 ---
 
@@ -2018,3 +2019,115 @@ a montagem.
 **Testes**: `tests/test_silences.py` com som sintético determinístico (senos e ruído com semente):
 níveis, limiar relativo igual com ganho diferente, absoluto diferente, duração mínima, folga, estalo,
 tudo mudo, leitura pelo ffmpeg igual à da memória, arquivo sem som, cancelar e os cortes pelo texto.
+
+---
+
+## 26. Transições de película
+
+Transições da 1.5 (issue #37), módulo `transicoes` ("Transições de película"). As de antes (corte,
+dissolver, surgir do preto/branco, sumir no preto/branco, sumir mostrando a faixa de baixo) continuam
+exatamente como eram: mesmas camadas, mesmos uniforms e o mesmo programa `editshaders.CLIP`, bit a bit.
+
+### 26.1 Modelo
+
+- **Tipos** (`editparams`): acrescentados no **fim** das escolhas, nunca renomeados nem reordenados.
+  `entrada_tipo` ganhou `fusao`, `exposicao`, `queima`, `emenda`, `ponta`, `iris`, `empurrar`, `cortina`,
+  `zoom` (`EXTRA_IN`); `saida_tipo` ganhou `exposicao`, `queima`, `iris` (`EXTRA_OUT`). Os de dois clipes
+  (`EXTRA_TWO_CLIP`: fusão, queima, íris, empurrar, cortina, zoom) mostram a cauda do clipe anterior da faixa
+  por baixo, como o "dissolver".
+- **Ajustes por tipo** (chaves novas, padrão neutro, na seção "Transições"): `entrada_direcao`,
+  `entrada_suavidade` (px@1080), `entrada_centro_x`/`_y` (fração da tela, y para baixo), `entrada_anel`
+  (px@1080, 0 = sem anel), `entrada_ponta` (preta/clara), `entrada_zoom` (×), `entrada_quadros` (1–3, a
+  emenda conta quadros) e `entrada_clarao` (EV); na saída, `saida_suavidade`, `saida_centro_x`/`_y` e
+  `saida_anel`. `transitions.PARAMS` diz quais o inspetor mostra para cada tipo.
+- **JSON enxuto** (`editparams.SPARSE_KEYS`, `stored_values`): ajuste de clipe que veio depois da 1.4 só
+  vai para o JSON quando fora do padrão; um clipe de montagem antiga grava exatamente o JSON de antes e a
+  leitura completa com o padrão. Ajuste novo de clipe (de qualquer frente) entra nesse conjunto.
+- **Camadas** (`Sequence.layers_at`): `Layer.transitions` é uma tupla de `Transition(kind, side, role,
+  progress, index, frames, owner)` — vazia nas camadas sem transição nova (o caminho de sempre). `role` é
+  `entra` (o clipe que entra), `sai` (o clipe que sai pela saída) ou `base` (a cauda do clipe anterior, com o
+  mesmo andamento). Andamento como o `k` de antes: entrada `(quadro + 1)/(n + 1)`, saída `1 − (resto + 1)/(n
+  + 1)`; nunca chega a 0 nem a 1 na linha do tempo. `transition_frames(clipe, lado)` dá `n` (a emenda usa
+  `entrada_quadros`). Um tipo antigo de um lado e novo do outro funcionam juntos (o antigo continua no
+  `alpha`/`fade`).
+- **Formato 3**: `timeline.FEATURES["transicoes"]` (`Sequence.uses_extra_transitions`) — algum clipe de
+  vídeo com um tipo novo. Um ajuste novo fora do padrão com um tipo antigo não pede a 1.5 (a 1.4 o ignora e
+  desenha igual).
+
+### 26.2 Uniforms e geometria (`transitions.py`)
+
+Puro (sem GPU nem Qt). `compositor.clip_uniforms(..., light=)` chama `transitions.apply` quando a camada
+traz transições; `active()` descarta as que não mudam nada no quadro (entra com andamento ≥ 1, sai ou base
+com ≤ 0, e a base dos tipos que não mexem na geometria) e aí a camada volta ao `CLIP`. Com alguma ativa,
+os uniforms são os do programa `CLIP_TR` (`u_tr_*`, duas vagas: entrada e saída).
+
+- **Geometria na CPU**, composta na matriz `u_xf` (com `u_exact = 0`): empurrar desloca o clipe novo de
+  `(1 − e)·L` e o anterior de `−e·L` (L = largura ou altura, e = 3p² − 2p³); zoom amplia o novo `Z^(1−e)`
+  e o anterior `Z^e` em volta do centro (e `u_px_per_uv` acompanha); a emenda desce a imagem 8 e 3 px@1080
+  nos dois primeiros quadros. Andamento 0 de um tipo de dois clipes: `u_alpha = 0` (só o que está por baixo, exato).
+- **Desfoque de movimento** (`u_tr_blur`): obturador de 180°, meio quadro do movimento, em 9 amostras (reto
+  no empurrar, radial no zoom); só quando passa de 0,75 px.
+- **Semente**: `seed_of(id do dono)` = crc32 do id; o ruído usa a semente e `Transition.index` (o quadro
+  dentro da transição): o mesmo clipe dá o mesmo quadro em qualquer ponto da linha do tempo, reaberto ou não.
+  Posições sorteadas na CPU (linha da emenda, furo da ponta) usam `_unit(semente, k)`, também por crc32.
+
+### 26.3 Luz (`CLIP_TR`, `light_of`)
+
+`CLIP_TR` é o cabeçalho do `CLIP` (uniforms, detalhe, cor, mesclagem; o mesmo texto) + as curvas de câmera
+de `shaders.COMMON` (de `D_SLOPE` até a parte de cor) + as funções das transições + um `main` novo. As
+misturas acontecem na **luz da curva de entrada do look**: `transitions.light_of(valores do look, legal)`
+dá `(look.INPUT_IDS[entrada], código de 10 bits)` com o domínio da curva (`look.INPUT_DOMAIN`) e a faixa do
+arquivo, como em `look.build_plan(..., legal=)`; sem look (modo Edição sem película) é rec709, o mesmo do
+look "Original" da exportação sem película. `frame.Recipe.montage` passa `light=` a `Engine.compose`, que
+compila o `CLIP_TR` na primeira vez (`_lazy_program`) e o usa só nas camadas com `u_tr_kind`.
+
+As fórmulas mantêm as pontas exatas e o cinza neutro (canal a canal), sem depender de a curva voltar exata
+(a de exibição do vídeo comum não volta: o preto vira ~0,0008):
+
+- `lightMix(a, b, w) = mix(a, b, w) + E(mix(D(a), D(b), w)) − mix(E(D(a)), E(D(b)), w)`;
+- `lightGain(c, g)`: a mesma mistura com o "preto da curva" (luz 0; 0 no vídeo comum);
+- `lightAffine(c, m, add) = c + E(D(c)·m + add) − E(D(c))` (clarão, brilho da queima, anel da íris).
+
+A opacidade e o alfa do clipe continuam misturando no código como no `CLIP` (o fim da transição emenda sem
+pulo no caminho de sempre); a transição mistura na luz por cima disso.
+
+### 26.4 Cada tipo
+
+- **Fusão ótica**: `lightMix(tela, clipe, p)` — as exposições somam, as altas luzes atravessam primeiro.
+- **Exposição** (entrada e saída): `lightGain` com ganho `p` (ou `1 − p`): a luz da copiadora sobe ou desce.
+- **Queima**: distância irregular ao centro (fbm fixo na transição + borbulhas que mudam a cada quadro,
+  sempre ≥ a distância real, até 176 px@1080 a mais); o furo cresce com `p^1,4` até passar do canto; em
+  volta, borda branca, halo laranja e película chamuscada somados na luz (`lightAffine`), com força que
+  nasce e some nas pontas (`smoothstep`). Na saída o furo mostra a faixa de baixo.
+- **Emenda**: 1 a 3 quadros com clarão (ganho `2^(EV·f)` e véu, f = 1; 0,45; 0,18), a linha da emenda e o
+  véu da fita no primeiro quadro (perto do topo ou da base, sorteado) e o pulo da imagem.
+- **Ponta**: os quadros viram ponta preta (ou clara) em luz, com poeira por células, 1 a 3 riscos que tremem
+  e, no quadro do meio, o furo de perfuração (luz do projetor).
+- **Íris**: círculo de borda suave que abre (ou fecha, na saída) no centro escolhido; anel preto opcional
+  logo fora dele.
+- **Empurrar** (4 direções), **cortina** (4 direções, borda suave em px@1080) e **zoom** (troca em
+  `smoothstep(0,35; 0,65; p)` na luz): mesmo modelo e mesmo programa.
+
+### 26.5 Interface e módulo
+
+`ui/transitions_ui.py` com três ganchos pequenos: `ClipInspector.transitions` (ícones e dicas nos tipos,
+só os ajustes do tipo escolhido, tipos novos escondidos com o módulo desligado — o do clipe continua), o
+submenu "Transição" no menu de contexto do clipe (`add_menu`: metade esquerda = entrada do clipe; metade
+direita = entrada do próximo clipe colado ou a saída do último) e `paint` no `TimelineCanvas.paintEvent`
+(a faixa da transição com ícone e nome; os triângulos antigos ficam para os tipos antigos).
+`TimelineModel.set_transition(cid, lado, tipo, segundos=None)` troca tipo e duração (a que já havia ou a
+última usada, `last_transition_s`, 1 s no começo) num passo só do desfazer e respeita faixa travada. O som
+não muda: a transição de som continua sendo a de sempre. Módulo estável, ligado em Criador, Cinema e Tudo;
+`modules.used_by` avisa quando a montagem usa um tipo novo com ele desligado; `MainWindow.apply_modules`
+chama `transitions_ui.apply_module`. A renderização nunca consulta o módulo.
+
+### 26.6 Testes
+
+`tests/test_transitions.py`: modelo (ordem das escolhas, JSON enxuto e ida e volta, formato 3, camadas e
+andamentos de cada tipo, divisão do clipe), uniforms de `CLIP_TR` completos, geometria, luz do look; na GPU,
+pontas 0/1 iguais aos clipes puros em 8 e 16 bits, determinismo (também reaberto e mais tarde na linha do
+tempo), cinza neutro em rec709/S-Log3/LogC3, fusão e exposição conferidas com as fórmulas das curvas,
+prévia = exportação (FFV1 16 bits, `grab`, `SequenceReader` em 8 bits) e as transições antigas iguais à
+BASE (`tests/transicoes_base.py` + `tests/data/transicoes_base.json`: camadas, uniforms e o texto do `CLIP`
+em qualquer máquina; os hashes dos quadros na placa em que foram gravados). `tests/transicoes_ui_cases.py`:
+inspetor, menu do corte, desfazer, faixa travada, desenho e o módulo na janela.

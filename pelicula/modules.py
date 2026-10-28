@@ -80,12 +80,16 @@ MODULES: tuple[Module, ...] = (
     Module("recuperacao", N_("Recuperação automática"),
            N_("Guarda cópias de segurança do projeto para recuperar o trabalho depois de um travamento."),
            "sistema"),
+    Module("transicoes", N_("Transições de película"),
+           N_("Queima da película, emenda com clarão, ponta, íris, fusão ótica e exposição, mais empurrar, cortina "
+              "e zoom, no menu do corte e no inspetor do clipe."), "edicao"),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
 _CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som"}
+_CRIADOR = _CRIADOR | {"transicoes"}  # 1.5
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
@@ -195,4 +199,6 @@ def used_by(values: dict | None = None, sequence=None) -> set[str]:
     trivial = getattr(sequence, "is_trivial", lambda: True)
     if sequence is not None and getattr(sequence, "clips", True) and not trivial():
         used.add("edicao")
+    if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
+        used.add("transicoes")
     return used
