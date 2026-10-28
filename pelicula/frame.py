@@ -16,6 +16,10 @@ a medição de velocidade (`export.measure_speed`, que exporta de verdade) e a l
 5. **Desenho** (`Recipe.look`): `Engine.render`, ou `Engine.render_fit` quando o encaixe compõe o quadro
    (bordas desfocadas ou coloridas, `fit.py`).
 
+Legendas gravadas no vídeo (`Recipe.burn`, um `subtitles.Burn`) entram no passo 5: "gravada na cópia" por cima
+da imagem montada *antes* do look (no tamanho do conteúdo: grão, halação e tremor passam por elas) e "digital"
+por cima do quadro final *depois* do look (no tamanho da saída, com o encaixe). O instante é `index / fps`.
+
 O que muda entre quem chama são só os campos: a prévia usa o tamanho reduzido, 8 bits e o pontilhado do
 look; a exportação usa o tamanho e a profundidade da saída. Com os mesmos campos, o quadro é bit a bit o mesmo
 (`tests/test_frame.py`). Montar uma receita com a faixa e o LUT certos: `export.frame_pipeline` (com os ajustes
@@ -47,6 +51,7 @@ class Recipe:
     size: tuple[int, int] | None = None  # tamanho da montagem sem encaixe (prévia: o tamanho reduzido)
     keys: dict = field(default_factory=dict)  # chaves de animação do look ({chave: [[tempo, valor, curva]…]})
     src_fps: float = 0.0          # fps do arquivo/sequência, em que as chaves do look estão (0 = `fps`)
+    burn: Any = None              # subtitles.Burn: legendas gravadas no vídeo (antes ou depois do look); None = sem
 
     def __post_init__(self) -> None:
         if self.keys:  # JSON do projeto ou chaves já limpas: sempre `keyframes.Key` só de ajustes animáveis
@@ -56,10 +61,10 @@ class Recipe:
     # ---------------------------------------------------------------- campos derivados
     @classmethod
     def for_source(cls, values: dict | None, fps: float, depth: int, *, legal: bool, seq=None, dither=False,
-                   size: tuple[int, int] | None = None, keys: dict | None = None) -> "Recipe":
+                   size: tuple[int, int] | None = None, keys: dict | None = None, burn=None) -> "Recipe":
         """Receita sem encaixe (prévia, "Salvar quadro", `pelicula-cli quadro`), com o LUT dos ajustes."""
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
-                   None, 0.0, size, dict(keys or {}), float(fps))
+                   None, 0.0, size, dict(keys or {}), float(fps), burn)
 
     def with_(self, **kw) -> "Recipe":
         """Cópia com alguns campos trocados (ex.: a prévia em 16 bits para comparar com a exportação)."""
@@ -101,17 +106,32 @@ class Recipe:
                                legal=self.legal, net_grain=self.net_grain)
 
     def look(self, engine, img, index: int, upload: bool = True):
-        """Passo 5: aplica o look à imagem montada. `upload=False` quando a imagem já está na entrada do
-        `engine` (a prévia reaproveita o envio enquanto só os ajustes mudam)."""
+        """Passo 5: aplica o look à imagem montada (e as legendas gravadas, antes ou depois dele). `upload=False`
+        quando a imagem já está na entrada do `engine` (a prévia reaproveita o envio enquanto só os ajustes
+        mudam; com legenda gravada na cópia neste quadro, a imagem é enviada de novo)."""
+        burn = self.burn
+        if burn is not None and burn.mode == "copia":
+            burned = burn.apply(img, self.time(index))
+            upload = upload or burned is not img
+            img = burned
         if self.values is None:
-            return img
-        if upload:
-            engine.set_input(img)
-        h, w = img.shape[:2]
-        plan = self.plan(w, h, index)
-        if self.fit is not None and self.fit.composite:
-            return engine.render_fit(plan, self.depth, self.fit)
-        return engine.render(plan, self.depth)
+            out = img
+        else:
+            if upload:
+                engine.set_input(img)
+            h, w = img.shape[:2]
+            plan = self.plan(w, h, index)
+            if self.fit is not None and self.fit.composite:
+                out = engine.render_fit(plan, self.depth, self.fit)
+            else:
+                out = engine.render(plan, self.depth)
+        if burn is not None and burn.mode == "digital":
+            out = burn.apply(out, self.time(index))
+        return out
+
+    def time(self, index: int) -> float:
+        """O instante (s) do quadro `index` da saída: o das legendas gravadas."""
+        return index / self.fps if self.fps else 0.0
 
     def render(self, engine, img, index: int):
         """O quadro inteiro: montagem (se `img` são camadas) e look. `index` é o número do quadro na saída."""

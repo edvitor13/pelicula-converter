@@ -90,6 +90,19 @@ def test_history_snapshots_include_the_subtitles():
     assert h.redo().subtitles is None
 
 
+def test_json_is_stable_through_a_round_trip():
+    """Números inteiros (tempos, margem do estilo pronto) saem como no JSON relido: desfazer e logo depois
+    gravar o estado não cria um passo novo (que apagaria o refazer)."""
+    subs = sb.Subtitles(sources={"C:/videos/a.mp4": [Cue(1, 2, "oi", (Word(1, 2, "oi"),))]}, cues=[Cue(3, 4, "x")])
+    for style_id in sb.STYLES:
+        subs.style = sb.STYLES[style_id]
+        once = json.dumps(subs.to_json(), sort_keys=True)
+        assert json.dumps(sb.Subtitles.from_json(json.loads(once)).to_json(), sort_keys=True) == once, style_id
+    seq = seq_with(subs)
+    h = tl.History(seq)
+    assert not h.push(tl.Sequence.from_json(seq.to_json()))
+
+
 def test_used_by_flags_the_subtitles_module():
     assert "legendas" in modules.used_by(None, seq_with(sample()))
     assert "legendas" in modules.used_by(None, None, subtitles=sample())

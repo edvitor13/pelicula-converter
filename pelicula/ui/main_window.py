@@ -42,6 +42,7 @@ from .edit_panels import ClipInspector, MediaBin
 from .scopes import Scopes
 from .timeline_view import TimelineEditor
 from . import notifier, prefs, welcome
+from .subtitles_ui import SubtitlesUI
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -355,6 +356,7 @@ class MainWindow(QMainWindow):
         self.meter_timer.timeout.connect(self._meter_tick)
 
         self._build_ui()
+        self.subs_ui = SubtitlesUI(self)  # legendas: painel, faixa e menu (antes de ligar o model: limpa o cache)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -544,6 +546,9 @@ class MainWindow(QMainWindow):
                                     _("Salvar quadro"))
         self.btn_frame.clicked.connect(self.save_frame)
         hl.addWidget(self.btn_frame)
+        self.btn_subs = self._flat("captions", _("Legendas: painel, importar e exportar .srt e .vtt (Ctrl+Shift+L)"),
+                                   _("Legendas"))  # menu: ui/subtitles_ui.SubtitlesUI
+        hl.addWidget(self.btn_subs)
         self.btn_queue = self._flat("queue", _("Fila de exportação"), _("Fila"))
         self.btn_queue.clicked.connect(self.show_queue)
         hl.addWidget(self.btn_queue)
@@ -589,7 +594,7 @@ class MainWindow(QMainWindow):
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
         # Janela estreita: os botões ficam só com o ícone e o nome do app some.
-        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue],
+        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue, self.btn_subs],
                          optional=[self._brand])
         return bar
 
@@ -1141,7 +1146,12 @@ class MainWindow(QMainWindow):
             size = self.preview_size() if info is not None else None
             values = None if (self.mode == "edicao" and not self.edit_film) else self.store.values
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
-                                 size=size, keys=self._export_keys())
+                                 size=size, keys=self._export_keys(), burn=self._subtitle_burn(full))
+
+    def _subtitle_burn(self, full: bool = False):
+        """Legendas gravadas da receita (`SubtitlesUI.burn`; nenhuma antes de a interface delas existir)."""
+        ui = getattr(self, "subs_ui", None)
+        return ui.burn(full) if ui is not None else None
 
     def _compose_current(self) -> bool:
         """Monta o quadro atual da sequência (com e, no modo Edição, sem os ajustes de cor dos clipes)."""
@@ -1638,10 +1648,11 @@ class MainWindow(QMainWindow):
         h, w = self.cur.shape[:2]
         recipe = self.frame_recipe()
         if recipe.values is None:
-            # Só a edição: o quadro montado já é o resultado.
-            self.viewer.set_images(self.cur_q, self.cur_neutral_q or self.cur_q)
-            self.hist.set_image(self.cur)
-            self.edit_scopes.set_image(self.cur)
+            # Só a edição: o quadro montado já é o resultado (com as legendas gravadas, se houver).
+            img = recipe.look(self.engine, self.cur, self.cur_frame) if recipe.burn is not None else self.cur
+            self.viewer.set_images(self.cur_q if img is self.cur else qimage_from(img), self.cur_neutral_q or self.cur_q)
+            self.hist.set_image(img)
+            self.edit_scopes.set_image(img)
             self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
             self.st_render.setText("")
             return
@@ -2227,14 +2238,14 @@ class MainWindow(QMainWindow):
         self.btn_edit_redo.setEnabled(self.model.can_redo())
 
     def undo(self) -> None:
-        """Ctrl+Z: desfaz na linha do tempo (modo Edição) ou nos ajustes do look (modo Película)."""
-        if self.mode == "edicao":
+        """Ctrl+Z: desfaz na linha do tempo (modo Edição ou foco no painel de legendas) ou nos ajustes do look."""
+        if self.mode == "edicao" or self.subs_ui.owns_focus():
             self.model.undo()
         else:
             self.store.undo()
 
     def redo(self) -> None:
-        if self.mode == "edicao":
+        if self.mode == "edicao" or self.subs_ui.owns_focus():
             self.model.redo()
         else:
             self.store.redo()
@@ -2372,7 +2383,8 @@ class MainWindow(QMainWindow):
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
                            perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
                            last_platform=str(self.settings.value("export_platform", "")),
-                           chapters=self._export_chapters(), look_keys=self._export_keys())
+                           chapters=self._export_chapters(), look_keys=self._export_keys(),
+                           subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues())
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2940,6 +2952,7 @@ class MainWindow(QMainWindow):
             "curva": [self.curve_label, self.curve_switch],
             "medidor_som": [self.meter],
             "davinci": [self.act_resolve_sep, self.act_resolve],
+            "legendas": [self.btn_subs],  # e o painel e a faixa (SubtitlesUI.apply_modules)
         }
 
     def apply_modules(self) -> None:
@@ -2965,6 +2978,7 @@ class MainWindow(QMainWindow):
         self._meter_source()  # desligado: nem decodifica nem mede
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
+        self.subs_ui.apply_modules(on)
         self._check_modules()
 
     def _check_modules(self) -> None:

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDou
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import chapters as chapters_mod, export, media, platforms, system
+from .. import chapters as chapters_mod, export, media, platforms, subtitles as subs_mod, system
 from .. import fit as fitmod
 from ..i18n import N_, _, fmt_decimal, fmt_int
 from . import icons, theme
@@ -43,6 +43,11 @@ LOUDNESS = ((0.0, N_("Desligado (volume original)")), (-14.0, N_("−14 LUFS (re
 PLATFORM_KEYS = ("platform", "frame", "fit", "target_mb", "maxrate", "loudness", "true_peak")
 PREVIEW_BOX = 200  # px do quadrado onde a prévia do resultado aparece
 PREVIEW_MAX = 400  # maior lado (px) do quadro renderizado para a prévia
+# Legendas na exportação (`subtitles.DELIVERY`): chave → rótulo.
+SUBTITLE_LABELS = {"nao": N_("Sem legendas"), "faixa": N_("Faixa de legenda no arquivo (dá para ligar e desligar)"),
+                   "copia": N_("Gravada na cópia (antes do look: com grão, halação e tremor)"),
+                   "digital": N_("Digital (gravada depois do look, nítida)"), "srt": N_("Arquivo .srt ao lado do vídeo"),
+                   "vtt": N_("Arquivo .vtt ao lado do vídeo")}
 
 def fmt_dur(sec: float) -> str:
     sec = int(round(max(sec, 1)))
@@ -88,7 +93,7 @@ class _PreviewWorker:
                 item = nxt
             if item is None:
                 break
-            token, (info, values, s, frame, seq, scale, keys) = item
+            token, (info, values, s, frame, seq, scale, keys, burn) = item
             img = None
             if not failed:
                 try:
@@ -96,7 +101,7 @@ class _PreviewWorker:
                         from ..engine import Engine
                         engine = Engine()
                     img = export.preview_frame(engine, info, values, s, frame, seq=seq, scale=scale, depth=8,
-                                               keys=keys)
+                                               keys=keys, burn=burn)
                 except Exception:  # noqa: BLE001 — sem GPU ou arquivo ilegível: a janela diz "indisponível"
                     img = None
                     failed = engine is None
@@ -109,9 +114,13 @@ class ExportDialog(QDialog):
     def __init__(self, parent, info: media.MediaInfo, values: dict, preset_name: str,
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
-                 last_platform: str = "", chapters=None, look_keys: dict | None = None):
+                 last_platform: str = "", chapters=None, look_keys: dict | None = None, subtitles=None,
+                 subtitle_cues=None):
         super().__init__(parent)
         self.info = info
+        # legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência
+        self.subs_doc = subtitles
+        self.subs_cues = list(subtitle_cues or [])
         self.look_keys = dict(look_keys or {})  # chaves de animação do look (`Project.look_keys`)
         self.sequence = sequence  # timeline.Sequence quando o que sai é a montagem do modo Edição
         self.chapters = list(chapters or [])  # [(quadro, título)] dos capítulos da montagem (`chapters.points`)
@@ -265,6 +274,8 @@ class ExportDialog(QDialog):
             self.r_sel.toggled.connect(self._summary)
         self.chapters_box = self._chapters_box()
         lay.addWidget(self.chapters_box)
+        self.subs_row = self._subtitles_row()
+        lay.addWidget(self.subs_row)
         lay.addStretch(1)
 
         foot = QWidget()
@@ -319,6 +330,7 @@ class ExportDialog(QDialog):
             w.currentIndexChanged.connect(self._custom)
         self.container.currentIndexChanged.connect(self._fix_ext)
         self.container.currentIndexChanged.connect(self._sync_chapters)
+        self.container.currentIndexChanged.connect(self._sync_subtitles)
         for w in (self.qval, self.bitrate):
             w.valueChanged.connect(self._custom)
         for w in (self.grain, self.dither):
@@ -340,6 +352,7 @@ class ExportDialog(QDialog):
             self._set_combo(self.platform, last_platform)  # a última plataforma usada preenche tudo de novo
         self._update_mem()
         self._sync_chapters()
+        self._init_subtitles()
 
     # ------------------------------------------------------------ plataforma
     def _platform_group(self) -> QGroupBox:
@@ -927,12 +940,13 @@ class ExportDialog(QDialog):
         a, b = self._range()
         last = self.info.frames - 1 if b < 0 else b
         frame = max(a, min(self.frame_index, last))
-        return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys)
+        return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys), self.burn()
 
     def _start_preview(self) -> None:
         args = self._preview_args()
         s = args[2]
-        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3])
+        key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3],
+               self.subtitle_choice())
         if key == self._preview_key:
             return
         self._preview_key = key
@@ -996,7 +1010,9 @@ class ExportDialog(QDialog):
                                 out_path=self.path.text().strip(), start_frame=a, end_frame=b,
                                 name=f"{Path(self.path.text()).name}  •  {self.preset_name}",
                                 sequence=self.sequence, chapters=self.chapter_points(),
-                                look_keys=dict(self.look_keys))
+                                look_keys=dict(self.look_keys),
+                                **subs_mod.delivery_fields(self.subtitle_choice(), self.subs_doc, self.subs_cues,
+                                                           self.container.currentData()))
 
     # ---------------------------------------------------------------- capítulos
     def _chapters_box(self) -> QCheckBox:
@@ -1011,6 +1027,52 @@ class ExportDialog(QDialog):
         ok = self.container.currentData() in chapters_mod.CONTAINERS
         self.chapters_box.setEnabled(ok)
         self.chapters_box.setToolTip("" if ok else _("Só MP4, MOV e MKV guardam capítulos."))
+
+    # ---------------------------------------------------------------- legendas
+    def _subtitles_row(self) -> QWidget:
+        """Legendas: aparece só quando a montagem tem legendas (padrão: o que o projeto pede)."""
+        w = QWidget()
+        hl = QHBoxLayout(w)
+        hl.setContentsMargins(0, 0, 0, 0)
+        lab = QLabel(_("Legendas"))
+        hl.addWidget(lab)
+        self.subs_box = QComboBox()
+        for key in subs_mod.DELIVERY:
+            self.subs_box.addItem(_(SUBTITLE_LABELS[key]), key)
+        self.subs_box.setToolTip(_("Faixa no arquivo: o player liga e desliga (MP4, MOV, MKV e WebM). Gravada na "
+                                   "cópia: entra antes do look, como numa cópia de cinema legendada. Digital: entra "
+                                   "depois do look, nítida. Arquivo ao lado: .srt ou .vtt com o mesmo nome do vídeo."))
+        self.subs_box.currentIndexChanged.connect(self._schedule_preview)
+        hl.addWidget(self.subs_box, 1)
+        w.setVisible(bool(self.subs_cues) and self.subs_doc is not None)
+        return w
+
+    def _init_subtitles(self) -> None:
+        self._set_combo(self.subs_box, subs_mod.default_delivery(self.subs_doc if self.subs_cues else None,
+                                                                  self.container.currentData()))
+        self._sync_subtitles()
+
+    def _sync_subtitles(self, *_args) -> None:
+        """A faixa só nos recipientes que guardam legenda; escolhida num que não guarda, vira o .srt ao lado."""
+        ok = self.container.currentData() in subs_mod.EMBED_CODECS
+        item = self.subs_box.model().item(self.subs_box.findData("faixa"))
+        if item is not None:
+            item.setEnabled(ok)
+            item.setToolTip("" if ok else _("Só MP4, MOV, MKV e WebM guardam faixa de legenda."))
+        if not ok and self.subs_box.currentData() == "faixa":
+            self._set_combo(self.subs_box, "srt")
+
+    def subtitle_choice(self) -> str:
+        if not self.subs_cues or self.subs_doc is None or self.subs_row.isHidden():
+            return "nao"
+        return str(self.subs_box.currentData() or "nao")
+
+    def burn(self):
+        """As legendas gravadas que a prévia do resultado mostra (`subtitles.Burn`), ou None."""
+        choice = self.subtitle_choice()
+        if choice not in ("copia", "digital"):
+            return None
+        return subs_mod.Burn.make(choice, self.subs_doc.style, self.subs_cues)
 
     def chapter_points(self) -> list[tuple[int, str]]:
         """Capítulos que vão para o arquivo (vazio se a opção está desligada ou o recipiente não guarda)."""

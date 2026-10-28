@@ -233,6 +233,19 @@ def project_sequence(proj):
     return seq
 
 
+def project_subtitles(proj):
+    """Legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência — as mesmas da
+    janela, também quando a montagem é só o arquivo inteiro. (None, []) sem legendas."""
+    from . import timeline
+    if not proj or not proj.sequence:
+        return None, []
+    full = timeline.Sequence.from_json(proj.sequence)
+    subs = full.subtitles
+    if subs is None or subs.is_empty():
+        return None, []
+    return subs, (subs.timeline_cues(full) if full.clips else subs.timeline_cues(None, proj.media_path))
+
+
 def _source_and_values(path: str, preset, sets):
     """Entrada pode ser vídeo/imagem ou um projeto .plc. Devolve (arquivo, valores, preset, projeto, sequência)."""
     from . import project
@@ -341,7 +354,7 @@ def _export_notes(plat, s, info, duration: float) -> list[str]:
 
 # ------------------------------------------------------------------ comandos
 def cmd_export(a) -> int:
-    from . import export, media, platforms
+    from . import export, media, platforms, subtitles
     from .engine import Engine
     resolution = parse_resolution(a.resolucao) if a.resolucao is not None else None
     _need_ffmpeg()
@@ -399,10 +412,14 @@ def cmd_export(a) -> int:
                 caminho=export.output_target(out, s)))
         raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=out))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    if values.get("scan_on"):
-        _gui_app()
+    subs, cues = project_subtitles(proj)
+    choice = subtitles.default_delivery(subs, s.container) if a.legendas in (None, "projeto") else a.legendas
+    sub_fields = subtitles.delivery_fields(choice, subs, cues, s.container)
+    if values.get("scan_on") or sub_fields["burn"]:
+        _gui_app()  # texto da borda do scan e legendas gravadas: desenhados pelo Qt
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set))
+                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set),
+                           **sub_fields)
     if not a.json:
         w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
@@ -410,6 +427,8 @@ def cmd_export(a) -> int:
             preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
         for line in _export_notes(plat, s, info, duration):
             print(line, file=sys.stderr)
+        if cues:
+            print(_("Legendas: {modo} ({n})").format(modo=choice, n=len(cues)), file=sys.stderr)
 
     def on_sigint(*_args):
         job.cancel.set()
@@ -500,6 +519,7 @@ def cmd_frame(a) -> int:
     from . import export, media
     from .engine import Engine
     from .frame import Recipe
+    from .subtitles import Burn
     _need_ffmpeg()
     src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
     if seq is not None:
@@ -517,12 +537,14 @@ def cmd_frame(a) -> int:
     ext = Path(path).suffix.lower()
     if ext not in export.STILL_ARGS:
         raise CliError(_("Formato de imagem não suportado: {ext} (use .png, .tif ou .jpg)").format(ext=ext))
-    if values.get("scan_on"):
+    subs, cues = project_subtitles(proj)
+    burn = Burn.make(subs.burn, subs.style, cues) if subs is not None else None  # gravadas, como o projeto pede
+    if values.get("scan_on") or burn is not None:
         _gui_app()
     w, h = info.width, info.height
     # A receita única do quadro (`frame.Recipe`): a mesma da exportação no tamanho original.
     recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
-                               keys=look_keys(proj, a.preset, a.set))
+                               keys=look_keys(proj, a.preset, a.set), burn=burn)
     engine = Engine()
     try:
         if seq is not None:
@@ -844,6 +866,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--fim", help=_("fim: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--trecho", action="store_true", help=_("usa a entrada e a saída marcadas no projeto"))
+    p.add_argument("--legendas", choices=["projeto", "nao", "faixa", "copia", "digital", "srt", "vtt"],
+                   help=_("legendas do projeto: projeto (o que ele pede; padrão), nao, faixa (no arquivo), copia "
+                          "(gravadas antes do look), digital (depois do look), srt ou vtt (arquivo ao lado)"))
     p.add_argument("--threads", type=int, help=_("núcleos do processador (0 = todos)"))
     p.add_argument("--prioridade", choices=["baixa", "normal", "alta"])
     p.add_argument("--hwaccel", help=_("decodificação por hardware (none, auto, cuda, d3d11va, qsv)"))
