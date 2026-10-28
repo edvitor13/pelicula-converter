@@ -341,14 +341,17 @@ class NamedPipe:
             try:
                 self._w.ConnectNamedPipe(self.handle, self._w.NULL)
             except OSError as exc:
-                if getattr(exc, "winerror", 0) != 535:
+                # 535: o ffmpeg abriu o pipe antes desta chamada. 232: ele já gravou tudo e fechou (um quadro
+                # pequeno cabe no buffer); os dados continuam no pipe para ler.
+                if getattr(exc, "winerror", 0) not in (535, 232):
                     errs.append(exc)
             done.set()
 
         threading.Thread(target=run, daemon=True).start()
         t0 = time.time()
         while not done.wait(0.05):
-            if proc.poll() is not None or time.time() - t0 > timeout:
+            # O ffmpeg pode ter terminado depois de gravar: dá tempo para a conexão acontecer antes de desistir.
+            if (proc.poll() is not None and not done.wait(0.5)) or time.time() - t0 > timeout:
                 try:
                     # O outro lado do pipe precisa do acesso oposto: quem lê (inbound) é destravado
                     # por alguém que escreve, e vice-versa.
