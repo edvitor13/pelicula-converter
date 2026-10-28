@@ -29,6 +29,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 21. [Componentes de IA: receitas com o uv e o CorridorKey](#21-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
 22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
 23. [Texto, legendas e transcrição](#23-texto-legendas-e-transcrição)
+24. [Chaves na interface e tempo](#24-chaves-na-interface-e-tempo)
 
 ---
 
@@ -123,6 +124,7 @@ Três ideias guiam o projeto:
 | `pelicula/edgetext.py` | Máscara do texto impresso na borda da película. |
 | `pelicula/testimage.py` | Cena de teste (cartela de 24 cores, janela clara, lâmpadas, faixa de matiz, rampa de cinza). |
 | `pelicula/timeline.py` | Modo Edição: `Source`, `Clip`, `Track`, `Layer`, `Marker`, `Sequence` (montagem, tempo, transições, marcadores, emendas de som, JSON) e `History` (desfazer). Sem Qt. |
+| `pelicula/timemap.py` | Tempo de um clipe: `TimeMap` (velocidade, rampa por âncoras, reverso; forma fechada e inversa exata; `pieces` para o som), `clean_ramp`, presets de rampa. Sem Qt (seção 24.2). |
 | `pelicula/chapters.py` | Capítulos a partir dos marcadores: texto para o YouTube (com as regras dele) e arquivo FFMETADATA para a exportação (MP4, MOV, MKV). Sem Qt. |
 | `pelicula/loudness.py` | Loudness ITU-R BS.1770-4 / EBU R128 em numpy: ponderação K, momentânea, curto prazo, integrada (portões), LRA, pico e true peak (`LoudnessMeter`, `measure`). Sem Qt. |
 | `pelicula/editparams.py` | Esquemas dos ajustes por clipe (`VIDEO`, `AUDIO`), cores do HSL, ajustes rápidos. |
@@ -137,6 +139,8 @@ Três ideias guiam o projeto:
 | `pelicula/ui/markers.py` | `MarkerDialog` (nome, nota, cor, capítulo) e `ChaptersDialog` (copiar os capítulos para o YouTube, com os avisos). |
 | `pelicula/ui/meter.py` | `AudioMeter`: picos L/R em dBFS com retenção e as leituras M, S, I e TP ao lado da prévia (módulo `medidor_som`). |
 | `pelicula/ui/edit_panels.py` | `MediaBin` (Mídia) e `ClipInspector` (ajustes do clipe gerados de `editparams`). |
+| `pelicula/ui/keyframes_ui.py` | Losangos das chaves: `KeyRows` (inspetor e look), `KeyStrip` (faixas do look), desenho e junção das chaves (seção 24.1). |
+| `pelicula/ui/tempo_ui.py` | Tempo do clipe na interface: `TempoPanel` (rampa, reverso), menu do clipe e "Congelar este quadro" (seções 24.2 e 24.5). |
 | `pelicula/ui/scopes.py` | Medidores: histograma, forma de onda, parada RGB e vetorscópio. |
 | `pelicula/ui/sequence_dialog.py` / `resolve_dialog.py` | Resolução e fps da sequência; instalação do plugin do DaVinci. |
 | `pelicula/ui/corridorkey_dialog.py` | Janela não modal "Recorte por IA (CorridorKey)": arquivo, opções e o trabalho GPU na fila (seção 21). |
@@ -2018,3 +2022,178 @@ a montagem.
 **Testes**: `tests/test_silences.py` com som sintético determinístico (senos e ruído com semente):
 níveis, limiar relativo igual com ganho diferente, absoluto diferente, duração mínima, folga, estalo,
 tudo mudo, leitura pelo ffmpeg igual à da memória, arquivo sem som, cancelar e os cortes pelo texto.
+
+## 24. Chaves na interface e tempo
+
+As chaves de animação da 1.5 (seção 22.3) ganham a interface (losangos no inspetor, no look e na linha do
+tempo) e o clipe ganha tempo variável: rampa de velocidade, reverso e "Congelar este quadro". A conta do tempo
+continua num lugar só (`timeline.Sequence` com `timemap.TimeMap`); a interface só chama o modelo.
+
+### 24.1 Losangos das chaves (`ui/keyframes_ui.py`)
+
+| Peça | O que faz |
+|---|---|
+| `KeyButton` | o losango: **cheio** (chave no cursor), **vazado** (ajuste animado), **apagado** (fixo); dica em PT-BR por estado |
+| `KeyControl` | losango + setas ◀ ▶ (só aparecem com o ajuste animado); vai no cabeçalho de cada linha (`row.top` de `NumberRow`, `ColorRow`, `WheelRow`) |
+| `KeyRows(store, target, cards)` | os controles de um painel: `set_frame` (atualiza só as linhas animadas: barato na reprodução), estados, adicionar/apagar/limpar, curva (`menu_for`: "Curva até a próxima chave" com as 4 curvas de `keyframes.EASING_LABELS`), anterior/próxima (`seekRequested`) |
+| `ClipKeys(model, clip_id)` | alvo do clipe: as chaves vão pelo `TimelineModel` (tempo da montagem; fora de `[start, end)` ou em faixa travada não grava) |
+| `ParamStore` como alvo | o look: as chaves ficam no `ParamStore` (tempo do arquivo no modo Película, da montagem na Edição) |
+| `KeyStrip` | faixa fina de losangos com mapeamento tempo ↔ x injetado: clique (Shift/Alt soma) vai até a chave, arrastar move com ímã de 8 px no cursor, Delete apaga, Esc tira a escolha |
+
+O valor mostrado no cursor vem de `ParamStore.shown(key)` (`keyframes.value_at` no `view_frame`); sem
+`view_frame` (nada escolhido, cursor fora do clipe) os controles mostram o valor fixo, como antes. **Chave
+automática**: com o ajuste animado, `ParamStore.set` grava a chave no `view_frame` (mantendo a curva que já
+estava ali); no inspetor do clipe isso vira `TimelineModel.add_key(..., record=False)`, que só grava no
+histórico quando o arraste termina (o mesmo temporizador dos ajustes comuns: um arraste = um passo).
+
+**Linha do tempo** (`TimelineCanvas`, métodos novos e separados da pintura dos clipes: `_paint_keys`,
+`key_marks`, `key_at`, `key_press`/`key_drag`/`key_release`, `delete_keys`, `key_tooltip`): as chaves de todos
+os ajustes do clipe escolhido, juntas por quadro (`merged_marks`), a 55% da altura do clipe; a lâmina ignora os
+losangos. Arrastar move todas as chaves escolhidas de uma vez (`TimelineModel.move_keys` → `keyframes.move_keys`,
+na ordem que não atropela; um passo do desfazer), preso ao clipe e com ímã no cursor. O Delete da janela tenta
+`canvas.delete_keys()` antes de apagar clipes.
+
+**Onde ficam as chaves do look.** No modo Película, numa faixa sob a barra da prévia (`MainWindow.look_strip`,
+dentro de `scrub_box`), que usa a mesma conta de x da barra: o tempo das chaves do look é o do arquivo, o mesmo
+da barra, então a chave fica embaixo do quadro que ela anima. No modo Edição, na linha **Look** no topo da
+linha do tempo (`look_lane`, via `TimelineEditor.add_lane`), com o mapeamento da linha do tempo, porque ali o
+look anima a montagem; ela só aparece com *Com película* ligado e com chaves. Separar as faixas dos clipes
+evita misturar losangos de duas coisas diferentes no corpo de um clipe. As duas somem sem chaves
+(`_sync_look_strips`).
+
+### 24.2 Mapa de tempo do clipe (`timemap.py`)
+
+`TimeMap(src_in, speed, ramp, reverse)` responde nos dois sentidos, em forma fechada (a conta está no
+cabeçalho do módulo): `src_at(x)` (segundo do arquivo no instante x desde o começo do clipe), `out_at(s)` (o
+inverso), `rate_at(x)` (velocidade efetiva V·r), `room_after/room_before(length)` (quanto a saída ainda pode
+andar até a ponta do arquivo) e `pieces(x0, x1)` (para o som, 24.3).
+
+- **Rampa** = âncoras `(s, r)` em segundos do arquivo: r² linear em s entre âncoras ⇒ velocidade linear no
+  tempo da saída; G(s) = ∫ds/r tem forma fechada e inversa exata por trecho; fora das âncoras a velocidade é
+  constante. `clean_ramp` ordena, limita (r de 0,05 a 20, até 64 âncoras), arredonda a 6 casas e devolve `[]`
+  se tudo é 1×.
+- **Reverso**: o arquivo corre para trás desde `src_in`, que no reverso é o ponto **mais alto** do trecho. O
+  quadro mostrado é o de `src_time(t + 1)` (`Sequence.src_frame`): o espelho exato do clipe para a frente com o
+  mesmo trecho. Congelado em reverso, o primeiro quadro que ele mostrava.
+- **Um lugar só**: `Sequence.time_map(clip)` e `src_time`/`src_frame`. Quem precisava de "src_in + V·x" agora
+  pergunta a eles quando o clipe tem rampa ou reverso (`Clip.retimed`): `max_dur`, `source_room` (sobra do
+  arquivo antes/depois, para a transição e os fades curtos do som), `_head_room`, `_frames_left`, `continues`,
+  `audio_crossfade`, `_main_warp` (V1 magnética), a forma de onda (`TimelineCanvas._paint_wave`) e o som. Sem
+  rampa nem reverso, os caminhos são os de antes (mesmos bits, mesmo grafo de som, mesmo JSON).
+
+**Aplicar** (`Sequence.retime(cid, ramp=, reverse=)`): o clipe e os ligados **do mesmo arquivo** mudam juntos
+(ligados de outro arquivo continuam como estão); a âncora é o vídeo. O trecho do arquivo que cada um mostra
+fica (`source_range`: se o clipe termina a menos de um quadro da ponta do arquivo, a ponta conta como
+mostrada — sem isso, tirar uma rampa presa ao fim do arquivo perdia um quadro); a posição de cada ligado sai do
+mapa da âncora (um corte J/L continua em sincronia; no reverso, o som que sobrava depois da imagem vem antes
+dela, sem entrar no clipe de som anterior). A duração acompanha, sem invadir o clipe seguinte nem passar da
+ponta do arquivo (o fim encolhe igual para todos); as chaves esticam junto (`rescale_keys`). Na V1 magnética,
+`room_for_retime` abre o espaço antes (como `room_for_speed`). Imagens e clipes congelados não têm rampa nem
+reverso. Rampa e reverso combinam: as âncoras são do arquivo, então no reverso o trecho lento fica no mesmo
+pedaço da imagem (uma entrada lenta vira uma saída lenta). Aparar, dividir (`_cut` copia `ramp`/`reverse`),
+mover e mudar a velocidade não mexem nas âncoras: a rampa fica presa à imagem.
+
+**Presets** (`PRESETS`, ids ASCII; só geram âncoras — o projeto guarda as âncoras): intensidade i dá lento =
+1/(1+3i) e rápido = 1+3i (padrão 50%: 0,4× e 2,5×); a duração de cada transição é em segundos do arquivo
+(padrão 0,5 s). `u` vai de 0 a 1 na ordem em que o clipe toca.
+
+| id | Rótulo | Forma (u → r) |
+|---|---|---|
+| `acelerar` | Acelerar | 1× até o meio, rápido depois |
+| `desacelerar` | Desacelerar | 1× até o meio, lento depois |
+| `impacto` | Impacto (rápido–lento–rápido) | rápido, lento de 0,4 a 0,6, rápido |
+| `lento_meio` | Câmera lenta no meio | 1×, lento de 0,35 a 0,65, 1× |
+| `entrada_lenta` | Entrada em câmera lenta | lento até 0,3, 1× depois |
+| `saida_lenta` | Saída em câmera lenta | 1×, lento a partir de 0,7 |
+
+**JSON** (só quando usados; nada muda num projeto sem eles): `"rampa": [[s, r], ...]` e `"reverso": true` no
+clipe; `timeline.FEATURES["rampa"]` e `FEATURES["reverso"]` (formato 3). A `"entrada"` de um clipe com rampa ou
+reverso vai com 12 casas: com 6 (o de sempre, armadilha da 22.1) o espelho do reverso trocava um quadro depois
+de salvar ou copiar (`Sequence.copy()` passa pelo JSON).
+
+**Interface** (`ui/tempo_ui.py`): `TempoPanel` no fim do cartão *Velocidade* do inspetor (imagem e som):
+**Reverso**, preset, **Intensidade**, **Transição**, **Aplicar rampa** / **Tirar a rampa** e uma linha de estado;
+`add_clip_actions` põe **Reverso**, o submenu **Rampa de velocidade** e **Congelar este quadro…** no botão
+direito do clipe; o rótulo do clipe mostra *rampa*/*reverso*. Cada ação é um passo do desfazer
+(`TimelineModel.set_ramp`, `apply_ramp_preset`, `set_reverse`, `freeze_frame`).
+
+### 24.3 Som com rampa e reverso (`audiomix._retimed_chain`)
+
+Escolha: o som **acompanha** a imagem com o tom preservado (calar o som numa rampa seria mais simples, mas
+quebraria o uso mais comum — fala e música em câmera lenta). Como o `atempo` do ffmpeg não aceita velocidade
+que muda com o tempo (o `asendcmd` + `atempo` testado escorregava segundos), o som vira **pedaços de
+velocidade constante**:
+
+1. `TimeMap.pieces(−pre, dur + post)`: um pedaço onde a velocidade não muda; pedaços de até 0,1 s da saída numa
+   transição (até 400). As pontas caem exatamente no mapa, então o erro não se acumula.
+2. `_groups`: os pedaços em blocos de até `GROUP_S` = 10 s do arquivo; cada bloco é uma entrada do ffmpeg
+   (`-ss/-t -i`), com `aresample`, `aformat`, `areverse` no reverso (o tempo do bloco corre do fim) e `asplit`.
+   No reverso um pedaço longo é partido (o `areverse` guarda o bloco inteiro): **a memória fica no bloco**.
+3. Cada pedaço: `atrim` da janela (com sobra de `MARGIN_S` para o `atempo` estabilizar), `atempo` (cadeia de
+   `_atempo`) na velocidade |sb − sa| / (xb − xa), recorte no ponto exato, cruzamento linear de `XFADE_S` = 8 ms
+   com os vizinhos (não nas pontas de fora) e `adelay` em **amostras** até o instante dele.
+4. O atraso do `atempo` é compensado: cada filtro adianta cerca de `ATEMPO_LAG_S` = 15 ms da própria entrada
+   (meia janela; medido no ffmpeg 9, de 0,25× a 4×), e o filtro k da cadeia recebe o tempo já multiplicado
+   pelos anteriores (`_atempo_lag`).
+5. `amix normalize=0` dos pedaços, `asetpts=N/SR/TB` (o primeiro bloco de silêncio do `adelay` sai sem tempo,
+   NOPTS, e o `apad`/`atrim` seguinte se perdia: o som inteiro saía mudo), `apad` + `atrim` na duração da cadeia
+   e o mesmo fim de cadeia de um clipe comum (`_chain_tail`: volume e chaves, equalizador, voz, ruído,
+   normalizar, balanço, fades, recorte, atraso).
+
+Medido (`tests/test_tempo_media.py`, estalos de 20 ms): cada estalo no quadro certo (erro < 1/24 s, sem
+acumular ao longo da rampa, volume igual). Um clipe comum gera o mesmo grafo de antes (`_chain` só ganhou o
+índice da entrada, que muda só quando há clipes com rampa/reverso antes dele). Grafos longos vão para um
+arquivo por **`-/filter_complex`** (o `-filter_complex_script` saiu do ffmpeg 8; o `-/opção` existe desde o 7.0,
+a mínima do app).
+
+### 24.4 Reverso na leitura (`sequence._ReverseStream`)
+
+`grab` já está certo (o quadro vem de `src_frame`). A leitura em ordem (`SequenceReader`, usada pela prévia
+tocando e pela exportação) não pode buscar quadro a quadro para trás num clipe longo (cada busca decodifica do
+quadro-chave). `_ReverseStream` lê **blocos para a frente** — um `FrameReader` que termina no quadro pedido, de
+até `REVERSE_MAX_FRAMES` = 48 quadros e `REVERSE_BUDGET` = 192 MB — e entrega de trás para a frente; enquanto um
+bloco é mostrado, o anterior do arquivo é decodificado ao fundo (uma thread por clipe). Memória: dois blocos.
+Custo: uma busca por bloco em vez de uma por quadro (em 4K 16 bits o bloco cai para poucos quadros, e cada
+busca volta ao quadro-chave). Câmera lenta e rampa no reverso repetem/pulam quadros dentro do bloco sem
+decodificar de novo; pedir um quadro fora dos dois blocos (outro clipe, salto) lê um bloco novo terminando nele.
+
+### 24.5 Congelar este quadro (`Sequence.freeze_frame`)
+
+`freeze_target(cid, t)` escolhe o vídeo (o próprio clipe, o vídeo ligado a um som, ou o de cima no cursor);
+recusa imagens, clipes já congelados, faixas travadas e cursor fora do clipe. `freeze_frame(cid, t, dur,
+insert)`:
+
+- o quadro é `src_frame(clip, t)` (com rampa, reverso e velocidade) e os ajustes são `values_at(clip, t)` (o
+  look animado daquele instante), sem chaves, rampa nem reverso; `congelar` ligado, transições em corte;
+- `src_in = (quadro + 0,5) / fps`: o meio do quadro, para o arredondamento do JSON (6 casas) não trocar de quadro;
+- **inserir** (`open_space` nas faixas do clipe e do som ligado que atravessa o cursor; todas as faixas fora da
+  V1 magnética, como `insert_media(insert=True)`): o resto do clipe e tudo depois andam `dur`;
+- **sobrescrever**: divide o grupo no cursor e em `t + dur` (os ligados continuam ligados) e limpa o trecho
+  nas mesmas faixas; o resto fica no lugar;
+- o som ligado fica com um buraco (silêncio) no trecho e continua em sincronia depois.
+
+`TimelineModel.freeze_frame` (um passo do desfazer, o quadro parado fica escolhido) é chamado por
+`tempo_ui.freeze_at`: o menu pergunta a duração (padrão `FREEZE_SECONDS` = 2 s, guardada em
+`canvas.freeze_seconds` durante a sessão); o **Shift+F** do modo Edição usa a última. Inserir ou sobrescrever
+segue o botão **Inserir** da linha do tempo (`canvas.insert_mode`). A caixa *Congelar quadro* do inspetor não
+mudou (congela o clipe inteiro em `src_in`).
+
+### 24.6 Testes
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/test_chaves_ui.py` (`chaves_ui_cases.py`) | losangos do inspetor e do look, chave automática, arraste = um passo, setas, menu de curvas, linha do tempo (juntas, dica, clique, arrastar com ímã, Shift, Delete, desfazer), `KeyStrip`, janela |
+| `tests/test_timemap.py` | o mapa (linha reta, monótono, inversa exata, forma fechada = integral numérica), presets, JSON, rampa presa à imagem, V1 magnética, reverso = espelho (velocidade, dividir, aparar, J/L, rampa), blocos do som |
+| `tests/test_freeze.py` | inserir/sobrescrever, silêncio e sincronia, look do instante, JSON, recusas, V1 magnética, desfazer |
+| `tests/test_tempo_media.py` | ffmpeg (+ GPU): quadros da rampa e do reverso por `SequenceReader` e `grab` (blocos de 5), sincronia do som da rampa, som do reverso = arquivo ao contrário (com emenda de blocos), quadro congelado igual ao do arquivo e ao quadro de antes na tela |
+| `tests/test_tempo_ui.py` (`tempo_ui_cases.py`) | cartão Velocidade, aplicar/tirar com desfazer, menu, Reverso, congelado, "Congelar este quadro…" e Shift+F na janela |
+
+### 24.7 Limitações conhecidas
+
+- `subtitles.map_cues` (legendas presas ao arquivo, levadas para a montagem) ainda supõe velocidade
+  constante: num clipe com rampa ou reverso o tempo das legendas não acompanha (precisa usar
+  `Sequence.time_map(clip).out_at`).
+- Num trecho muito rápido (4×) o `atempo` borra sons curtos; o tempo continua certo.
+- O som de um clipe comum com velocidade constante continua com o atraso do `atempo` de sempre (até ~30 ms em
+  0,5×): compensar mudaria o som de projetos antigos.
+- A duração do "Congelar este quadro" não fica salva entre sessões.
