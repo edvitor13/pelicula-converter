@@ -362,9 +362,11 @@ def render(seq: timeline.Sequence, clip: timeline.Clip, frame: int, w: int, h: i
 def thumbnail_frame(src: timeline.Source) -> int:
     """Miniatura: o título já de pé (depois da entrada; nos créditos, no meio dos 5 s iniciais)."""
     t = title_of(src.data)
-    if t.enter == "creditos":
+    enter = t.enter_s if t.enter != "nenhuma" else 0.0
+    leave = t.leave_s if t.leave != "nenhuma" else 0.0
+    if t.enter == "creditos" or enter + leave >= timeline.IMAGE_SECONDS - 0.2:  # sem folga: o meio
         return int(round(timeline.IMAGE_SECONDS / 2 * src.fps))
-    return int(math.ceil(t.enter_s * src.fps)) + 1
+    return int(math.ceil(enter * src.fps)) + 1
 
 
 def register() -> None:

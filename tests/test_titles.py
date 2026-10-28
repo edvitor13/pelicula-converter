@@ -340,3 +340,10 @@ def test_used_by_sees_titles_and_generators():
     assert "titulos_geradores" not in modules.used_by(None, plain)
     plain.insert_media(generators.new_source("cor", plain), at=48)
     assert "titulos_geradores" in modules.used_by(None, plain)
+
+
+def test_thumbnail_with_long_animations_is_not_empty():
+    seq = tl.Sequence(width=W, height=H, fps_str="24/1")
+    src = titles.new_source(seq, "titulo_grande", "Película")
+    src.data.update(entrada="aparecer", dur_entrada=4.0, saida="aparecer", dur_saida=4.0)
+    assert sequence.source_thumbnail(src, 160, 90, rgba=True)[..., 3].max() > 0

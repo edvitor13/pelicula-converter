@@ -193,10 +193,11 @@ class TitleEditor(QWidget):
     def sync(self) -> None:
         """Mostra o título do clipe escolhido (ou esconde o editor)."""
         src = self._clip_source()
-        if src is None:
-            self._text_timer.stop()
-        elif self._text_timer.isActive() and src.path == self.path:
-            return  # digitando: o texto ainda vai para o projeto
+        if self._text_timer.isActive():
+            if src is not None and src.path == self.path:
+                return  # digitando: o texto ainda vai para o projeto
+            self._push_pending()  # outro clipe escolhido: o que foi digitado fica no título de antes
+            src = self._clip_source()
         self.path = src.path if src is not None else None
         self.setVisible(src is not None and self.allowed)
         if src is None or not self.allowed:

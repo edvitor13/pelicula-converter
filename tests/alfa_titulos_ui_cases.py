@@ -389,3 +389,26 @@ def test_module_off_hides_the_tools_but_not_the_picture(win):
         win.settings_changed.emit("modulos")
         APP.processEvents()
     assert not win.bin.btn_new.isHidden() and not win.title_editor.isHidden()
+
+
+def test_typing_then_choosing_another_title_keeps_each_text(win):
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "titulo").trigger()
+    first = win.title_editor.path
+    win.seek(200)
+    _menu_action(win, "titulo").trigger()
+    second = win.title_editor.path
+    assert first != second
+    seq = win.model.seq
+    clip1 = next(c for c in seq.clips if c.src == first)
+    win.model.selection = [clip1.id]
+    win.model.selectionChanged.emit()
+    assert win.title_editor.path == first
+    win.title_editor.text.setPlainText("Primeiro")  # e já escolhe o outro, antes de o texto ir para o projeto
+    clip2 = next(c for c in seq.clips if c.src == second)
+    win.model.selection = [clip2.id]
+    win.model.selectionChanged.emit()
+    assert win.model.seq.sources[first].data["texto"] == "Primeiro"
+    assert win.model.seq.sources[second].data["texto"] == "Título"
+    assert win.title_editor.path == second and win.title_editor.text.toPlainText() == "Título"
