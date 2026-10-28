@@ -101,11 +101,39 @@ class Source:
     container: str = ""
     has_alpha: bool = False   # imagem com transparência (canal alfa); "alfa" no JSON, só quando ligado
     kind: str = SOURCE_FILE   # SOURCE_KINDS; "tipo" no JSON, só quando não é "arquivo"
+    # Parâmetros de uma fonte sem arquivo (o que o gerador desenha: cor, texto…); "dados" no JSON, só quando há.
+    # Só valores de JSON; chaves sem acento. "nome" é o nome mostrado na Mídia e no clipe.
+    data: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_file(self) -> bool:
         """Fonte que é um arquivo de mídia (as outras são desenhadas por `sequence.RENDERERS`)."""
         return self.kind == SOURCE_FILE
+
+    @classmethod
+    def virtual(cls, kind: str, width: int, height: int, fps_str: str = "24/1", seconds: float | None = None,
+                data: dict[str, Any] | None = None, alpha: bool = True) -> "Source":
+        """Fonte sem arquivo (clipe gerado: título, cor, contagem…), desenhada por `sequence.RENDERERS[kind]`.
+
+        O caminho é um id (`"<tipo>:<hex>"`, nunca um arquivo): é a chave em `Sequence.sources` e `Clip.src`.
+        `seconds=None` = sem fim (como uma imagem: entra com `IMAGE_SECONDS` e pode ser esticada até
+        `MAX_HOLD_SECONDS`), mas o quadro anda com o tempo (`src_frame`), para geradores animados. `alpha`: o
+        gerador desenha com transparência (RGBA); False = opaco. Sem som."""
+        if kind not in SOURCE_KINDS or kind == SOURCE_FILE:
+            raise ValueError(f"tipo de fonte sem arquivo desconhecido: {kind!r}")
+        fr = parse_fps(fps_str)
+        secs = MAX_HOLD_SECONDS if seconds is None else max(1.0 / float(fr), float(seconds))
+        frames = max(1, int(math.floor(secs * float(fr) + EPS)))
+        return cls(path=f"{kind}:{uuid.uuid4().hex[:12]}", width=max(2, int(width)), height=max(2, int(height)),
+                   fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}", frames=frames,
+                   duration=frames / float(fr), has_video=True, has_audio=False, pix_fmt="rgba" if alpha else "rgb24",
+                   color_space="gbr", color_range="pc", color_transfer="iec61966-2-1", color_primaries="bt709",
+                   has_alpha=bool(alpha), kind=kind, data=copy.deepcopy(dict(data or {})))
+
+    @property
+    def unbounded(self) -> bool:
+        """Fonte sem fim natural: imagem parada ou gerador sem duração (`virtual(seconds=None)`)."""
+        return self.is_image or (not self.is_file and self.length >= MAX_HOLD_SECONDS - 1e-3)
 
     @property
     def length(self) -> float:
@@ -118,6 +146,8 @@ class Source:
 
     @property
     def name(self) -> str:
+        if not self.is_file:
+            return str(self.data.get("nome") or self.kind)
         return os.path.basename(self.path)
 
     @classmethod
@@ -156,6 +186,8 @@ class Source:
             out["alfa"] = self.has_alpha
         if self.kind != SOURCE_FILE:
             out["tipo"] = self.kind
+        if self.data:
+            out["dados"] = copy.deepcopy(self.data)
         return out
 
     @classmethod
@@ -180,7 +212,8 @@ class Source:
                    color_transfer=str(d.get("cor_transferencia") or ""),
                    color_primaries=str(d.get("cor_primarias") or ""), audio_codec=str(d.get("codec_audio") or ""),
                    container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
-                   kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE)
+                   kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
+                   data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {})
 
 
 # ------------------------------------------------------------------ clipes e faixas
@@ -463,7 +496,7 @@ class Sequence:
         return max(1, int(math.floor(left / clip.speed * self.fps + EPS)))
 
     def default_dur(self, src: Source) -> int:
-        if src.is_image:
+        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS
             return self.frames_for(IMAGE_SECONDS)
         return self.frames_for(src.length)
 
@@ -1085,8 +1118,9 @@ class Sequence:
         return seq
 
     def relink(self, old: str, new: str) -> None:
-        """Troca o caminho de um arquivo (projeto aberto em outro computador ou pasta)."""
-        if old == new or old not in self.sources:
+        """Troca o caminho de um arquivo (projeto aberto em outro computador ou pasta). Fontes sem arquivo
+        (`Source.is_file` falso) não mudam."""
+        if old == new or old not in self.sources or not self.sources[old].is_file:
             return
         src = self.sources.pop(old)
         src.path = new

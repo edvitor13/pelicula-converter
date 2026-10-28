@@ -30,6 +30,8 @@ def fmt_seconds(sec: float) -> str:
 
 
 def source_kind(src: Source) -> str:
+    if not src.is_file:
+        return "gerado"  # clipe sem arquivo (título, cor, contagem…: `sequence.RENDERERS`)
     if src.is_image:
         return "imagem"
     if not src.has_video:
@@ -37,7 +39,7 @@ def source_kind(src: Source) -> str:
     return "video"
 
 
-KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem")}
+KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem"), "gerado": N_("gerado")}
 
 
 # ------------------------------------------------------------------ mídia
@@ -106,7 +108,7 @@ def _kind_pixmap(kind: str, thumb: QImage | None) -> QPixmap:
         y = (img.height() - THUMB.height()) // 2
         p.drawImage(0, 0, img, x, y, THUMB.width(), THUMB.height())
     else:
-        name = {"video": "film_mode", "audio": "music", "imagem": "image"}[kind]
+        name = {"video": "film_mode", "audio": "music", "imagem": "image", "gerado": "wand"}[kind]
         color = theme.CLIP_AUDIO_HI if kind == "audio" else theme.ACCENT
         ic = icons.icon(name, color, 22).pixmap(QSize(22, 22))
         p.drawPixmap((THUMB.width() - 22) // 2, (THUMB.height() - 22) // 2, ic)
@@ -184,8 +186,11 @@ class MediaBin(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, src.path)
             self.list.addItem(item)
         kind = source_kind(src)
-        dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
-        item.setText(f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
+        if kind == "gerado" and src.unbounded:
+            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])}")
+        else:
+            dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
+            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
         item.setToolTip(src.path)
         item.setData(Qt.ItemDataRole.UserRole + 1, kind)
         item.setIcon(QIcon(_kind_pixmap(kind, thumb)))

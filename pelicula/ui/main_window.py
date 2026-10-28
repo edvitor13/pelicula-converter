@@ -1400,6 +1400,9 @@ class MainWindow(QMainWindow):
         """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
         if path in self._peaks:
             return self._peaks[path]
+        src = self.model.seq.sources.get(path)
+        if src is not None and not src.is_file:
+            return None  # clipe sem arquivo: sem som
         if path not in self._peaks_pending:
             self._peaks_pending.add(path)
 
@@ -1431,11 +1434,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
                     nome=Path(path).name, erro=exc))
                 return None
-        if path not in self._sources:
-            self._sources[path] = src
+        return self.adopt_source(src)
+
+    def adopt_source(self, src: timeline.Source) -> timeline.Source:
+        """Põe uma fonte na Mídia (uma vez só), com miniatura: arquivo aberto ou clipe sem arquivo
+        (`timeline.Source.virtual`, desenhado por `sequence.RENDERERS`). Inserir na linha do tempo continua
+        sendo `model.insert_media(src, …)` (ou arrastar da Mídia)."""
+        if src.path not in self._sources:
+            self._sources[src.path] = src
             self.bin.add_source(src)
             self._request_thumb(src)
-        return src
+        return self._sources[src.path]
 
     def _request_thumb(self, src: timeline.Source) -> None:
         if not src.has_video:
@@ -1445,8 +1454,11 @@ class MainWindow(QMainWindow):
             try:
                 tw = 192
                 th = max(2, int(round(tw * src.height / max(1, src.width))))
-                f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
-                img = media.grab_frame(src.to_info(), f, tw, th, 8)
+                if not src.is_file:  # clipe sem arquivo: o próprio gerador, no começo
+                    img = sequence.source_thumbnail(src, tw, th)
+                else:
+                    f = 0 if src.is_image else min(src.frames - 1, int(src.fps))
+                    img = media.grab_frame(src.to_info(), f, tw, th, 8)
             except Exception:  # noqa: BLE001
                 return
             self._mix_bridge.thumb.emit(src.path, qimage_from(img))
@@ -1460,7 +1472,7 @@ class MainWindow(QMainWindow):
             return
         ref = timeline.Sequence.for_source(src, with_media=False)
         self.model.set_settings(ref.width, ref.height, ref.fps_str)
-        if not src.is_image:
+        if not src.is_image and src.is_file:  # clipe sem arquivo não tem metadados de câmera
             self._detect_profile(src)
 
     def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0):
@@ -2384,7 +2396,8 @@ class MainWindow(QMainWindow):
         if not backup:
             self.store.commit()
         seq = self._seq_json()
-        media_path = self.file_info.path if self.file_info else next(iter(self.model.seq.sources), "")
+        media_path = self.file_info.path if self.file_info else next(
+            (p for p, s in self.model.seq.sources.items() if s.is_file), "")
         return project.Project(
             media_path=media_path, values=self.store.snapshot(), preset_id=self.preset_id,
             frame=self.frame_idx, in_point=self.inp, out_point=self.outp, compare=self.viewer.mode,
@@ -2514,8 +2527,8 @@ class MainWindow(QMainWindow):
         seq = timeline.Sequence.from_json(p.sequence)
         changed = False
         for path in list(seq.sources):
-            if os.path.exists(path):
-                continue
+            if not seq.sources[path].is_file or os.path.exists(path):
+                continue  # clipes sem arquivo não têm o que localizar
             r = QMessageBox.question(self, _("Abrir projeto"),
                                      _("Um arquivo da edição não foi encontrado:\n{caminho}\n\nQuer localizá-lo agora?")
                                      .format(caminho=path))

@@ -63,7 +63,7 @@ class Project:
         if self.sequence:
             edicao = json.loads(json.dumps(self.sequence))
             for src in edicao.get("fontes") or []:
-                if isinstance(src, dict):
+                if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":  # sem arquivo: nada
                     src["relativo"] = _relative(str(src.get("caminho") or ""), base)
         feats = self.features()
         data = {
@@ -182,7 +182,7 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
             for s in data.get("fontes") or [] if isinstance(s, dict)}
     for old in list(seq.sources):
         rel = rels.get(old, "")
-        if not os.path.exists(old) and rel:
+        if seq.sources[old].is_file and not os.path.exists(old) and rel:
             cand = os.path.normpath(os.path.join(folder, rel))
             if os.path.exists(cand):
                 seq.relink(old, cand)

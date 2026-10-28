@@ -1709,6 +1709,7 @@
   "fim: segundos, 00:01:02.5 ou #quadro": "fin: segundos, 00:01:02.5 o #fotograma",
   "formato de cor (yuv420p, yuv422p10le…)": "formato de color (yuv420p, yuv422p10le…)",
   "gera o código C++ do plugin OpenFX nesta pasta (desenvolvimento)": "genera el código C++ del plugin OpenFX en esta carpeta (desarrollo)",
+  "gerado": "generado",
   "grava a cor de um look num LUT .cube": "graba el color de un look en un LUT .cube",
   "grava o pacote do plugin nesta pasta (para instalar em outro computador)": "graba el paquete del plugin en esta carpeta (para instalarlo en otro equipo)",
   "grão com tamanho mínimo no quadro de saída, para sobreviver à recompressão das redes": "grano con tamaño mínimo en el cuadro de salida, para sobrevivir a la recompresión de las redes",

@@ -80,7 +80,8 @@ pelicula/
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
-                             de som: micro_fade, audio_crossfade; sem Qt), History
+                             de som: micro_fade, audio_crossfade; sem Qt), History; Source.virtual (clipe sem
+                             arquivo: kind/SOURCE_KINDS, data)
   chapters.py                capítulos dos marcadores: texto do YouTube (com as regras) e FFMETADATA da exportação
   loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
@@ -88,7 +89,8 @@ pelicula/
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
                              pré-multiplicada, alfa na cobertura) e a saída da tela
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
-                             canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
+                             canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
+                             RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo)
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
                              (som do arquivo para o medidor)
@@ -289,6 +291,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
+| `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
@@ -390,6 +393,26 @@ atual; o resto recarrega a fonte da prévia. Teste novo em `tests/test_timeline.
 muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de animação no lugar
 (`Clip.shift_head`/`rescale_keys`, receita *Tornar um ajuste animável*) e ganhar um teste de âncora em
 `tests/test_keyframes.py`.
+
+### Novo tipo de clipe sem arquivo
+
+Título, cor sólida, degradê, contagem regressiva, legenda… (detalhes em `docs/ARQUITETURA.md`, seção 22.5):
+
+1. **Tipo**: use um id reservado de `timeline.SOURCE_KINDS` (`"cor"`, `"gerador"`, `"texto"`, `"legenda"`,
+   `"ajuste"`) ou acrescente um no fim (nunca renomeie). Parâmetros do gerador vão em `Source.data` (chaves
+   sem acento, só valores de JSON; `"nome"` é o nome mostrado). Ajustes que o usuário mexe no clipe
+   (posição, escala, opacidade, cor) continuam em `editparams.py` — o gerador não os aplica.
+2. **Gerador**: `sequence.RENDERERS[tipo] = fn(seq, clip, quadro_da_fonte, w, h, profundidade)` → h × w × 4
+   RGBA pré-multiplicado (uint8 em 8 bits, uint16 em 16). Puro e determinístico (regra 2), sem OpenGL e sem
+   widgets (roda na thread de quem lê, às vezes em duas); `QImage`/`QPainter` serve. Registre onde o recurso
+   é importado; se for opcional, o recurso é um módulo (regra dos módulos), mas o gerador fica registrado
+   mesmo desligado — a renderização nunca consulta `modules` e um projeto salvo sai igual.
+3. **Criar e inserir**: `src = timeline.Source.virtual(tipo, seq.width, seq.height, seq.fps_str, data={…})`;
+   na janela, `MainWindow.adopt_source(src)` (Mídia) e `model.insert_media(src, at=…, vtrack=…)` (ou arrastar
+   da Mídia). Nada mais muda: arquivos que faltam, relocalizar, som, forma de onda e o `.plc` já ignoram a
+   fonte sem arquivo, e o projeto vai para o formato 3 (recurso `"gerador"`).
+4. **Teste**: como `tests/test_virtual_sources.py` — `grab` = `SequenceReader` quadro a quadro, a saída em 8 e
+   16 bits e, na GPU, o clipe gerado sobre um arquivo igual na prévia e na exportação.
 
 ### Adicionar um negativo ou uma cópia do Laboratório
 

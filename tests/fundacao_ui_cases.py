@@ -314,3 +314,54 @@ def test_alpha_file_opened_in_film_mode_is_composed_over_the_background(win, ffm
     assert np.array_equal(win.still_frame(0), _export_frame(win, 0))
     p = win._make_project()
     assert p.sequence is None and p.media_path == png
+
+
+# ------------------------------------------------------------------ clipes sem arquivo
+def _test_generator(seq, clip, frame, w, h, depth):
+    """Gerador só de teste (registrado neste subprocesso): metade direita laranja, opaca; o resto transparente."""
+    img = np.zeros((h, w, 4), np.uint8 if depth == 8 else np.uint16)
+    mx = 255 if depth == 8 else 65535
+    img[:, w // 2:] = (mx, mx // 2, 0, mx)
+    return img
+
+
+def test_virtual_source_in_the_bin_timeline_and_project(win, sample_video, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMessageBox
+
+    from pelicula import project, sequence
+    monkeypatch.setitem(sequence.RENDERERS, "gerador", _test_generator)
+    _open(win, sample_video)
+    win.set_mode("edicao")
+    src = tl.Source.virtual("gerador", 320, 180, "24/1", data={"nome": "Teste gerado"})
+    assert win.adopt_source(src) is src and win.adopt_source(src) is src  # uma vez só na Mídia
+    item = win.bin._item(src.path)
+    assert item is not None and item.text().splitlines() == ["Teste gerado", "gerado"]
+    assert item.data(Qt.ItemDataRole.UserRole + 1) == "gerado"
+    win.drop_on_timeline([src.path], 0, tl.VIDEO, 1)  # arrastado da Mídia para a V2
+    seq = win.model.seq
+    clip = next(c for c in seq.clips if c.src == src.path)
+    assert clip.kind == tl.VIDEO and clip.track == 1 and not any(c.src == src.path for c in seq.clips
+                                                                  if c.kind == tl.AUDIO)
+    assert win._peaks_for(src.path) is None
+    win._set_edit_film(False)
+    win._refresh_source()
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None)
+    img = win.still_frame(0)
+    assert np.array_equal(img, _export_frame(win, 0)), "a prévia e a exportação desenham igual"
+    top = np.abs(img[:, 200:].astype(int) - (65535, 32767, 0)).max()
+    assert top <= 128, f"o gerador por cima, opaco ({top})"  # meio código de 8 bits: a saída da tela
+    # projeto: abre sem pedir para "localizar" a fonte sem arquivo
+    p = win._make_project()
+    assert p.media_path == sample_video
+    path = str(tmp_path / "gerado.plc")
+    project.save(p, path)
+
+    def no_prompt(*a, **k):
+        raise AssertionError("pediu para localizar uma fonte sem arquivo")
+
+    monkeypatch.setattr(QMessageBox, "question", no_prompt)
+    win._open_sequence_project(project.load(path), remember=False)
+    assert src.path in win.model.seq.sources and win.bin._item(src.path) is not None

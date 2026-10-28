@@ -1709,6 +1709,7 @@
   "fim: segundos, 00:01:02.5 ou #quadro": "end: seconds, 00:01:02.5 or #frame",
   "formato de cor (yuv420p, yuv422p10le…)": "pixel format (yuv420p, yuv422p10le…)",
   "gera o código C++ do plugin OpenFX nesta pasta (desenvolvimento)": "generates the OpenFX plugin's C++ code in this folder (development)",
+  "gerado": "generated",
   "grava a cor de um look num LUT .cube": "writes a look's color to a .cube LUT",
   "grava o pacote do plugin nesta pasta (para instalar em outro computador)": "writes the plugin package to this folder (to install on another computer)",
   "grão com tamanho mínimo no quadro de saída, para sobreviver à recompressão das redes": "grain with a minimum size in the output frame, to survive the platforms' recompression",

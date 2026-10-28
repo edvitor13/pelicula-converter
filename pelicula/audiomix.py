@@ -85,8 +85,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
     out = []
     for c in playing:
         src = seq.sources.get(c.src)
-        if src is None or not src.has_audio or not os.path.exists(c.src):
-            continue
+        if src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
+            continue  # clipes sem arquivo (geradores) não têm som
         head, tail = heads.get(c.id), tails.get(c.id)
         pre = head[0] if head else 0.0    # o clipe começa antes (transição com o anterior)
         post = tail[1] if tail else 0.0   # e termina depois (transição com o próximo)
