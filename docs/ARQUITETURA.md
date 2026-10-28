@@ -29,6 +29,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 21. [Componentes de IA: receitas com o uv e o CorridorKey](#21-componentes-de-ia-receitas-com-o-uv-e-o-corridorkey)
 22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
 23. [Texto, legendas e transcrição](#23-texto-legendas-e-transcrição)
+25. [Sequências de imagens, exportar com transparência, geradores e títulos](#25-sequências-de-imagens-exportar-com-transparência-geradores-e-títulos)
 
 ---
 
@@ -1104,6 +1105,7 @@ em `_module_tools()` (widgets e `QAction`s que recebem `setVisible`); os casos e
 | `curva` | A chave *Curva* e o gráfico (a preferência `show_curve` fica como estava). |
 | `davinci` | *Plugin para o DaVinci Resolve…* no menu de Configurações. |
 | `medidor_som` | O medidor de som ao lado da prévia (`AudioMeter`); desligado, também não decodifica nem mede. |
+| `titulos_geradores` | O botão **Novo** da Mídia; os editores de gerador e de título no inspetor não aparecem (`set_allowed`, em `apply_modules`). Os clipes que já estão na montagem saem iguais (seção 25.5). |
 | `notificacoes`, `recuperacao` | Ainda sem ferramenta na janela: entram em `_module_tools()` quando ganharem uma. |
 
 **Notificações e Recuperação** não escondem nada na janela; as páginas delas em Configurações explicam o
@@ -1767,14 +1769,13 @@ isso o fundo sai **bit a bit** onde o alfa é 0 (`tests/test_alpha.py`).
 
 **Película**: um arquivo com alfa aberto direto no modo Película passa pela montagem (`Sequence.direct_file()` é
 None para ele; `is_trivial` continua dizendo "sem edição", então o projeto segue simples, formato 1) e sai sobre
-o fundo da sequência (preto por padrão). A linha de comando faz o mesmo (`cli.alpha_sequence`). Não há
-exportação com alfa nem sequência de imagens (fora do escopo da 1.5).
+o fundo da sequência (preto por padrão). A linha de comando faz o mesmo (`cli.alpha_sequence`). A exportação
+com alfa ("Fundo transparente") e as sequências de imagens estão na seção 25.
 
 ### 22.5 Clipes sem arquivo (`Source.virtual`, `sequence.RENDERERS`)
 
-Títulos, geradores (cor sólida, degradê, contagem regressiva) e legendas chegam depois; a casa deles já
-existe. Só o gancho: nenhum gerador de verdade vem nesta versão (o de `tests/test_virtual_sources.py` é de
-teste).
+A casa dos clipes gerados. Os geradores do app (cor sólida, degradê, ponta com contagem) e os títulos usam este
+gancho e estão na seção 25; o gerador de `tests/test_virtual_sources.py` é só de teste.
 
 **A fonte** (`timeline.Source`): `kind` (`"tipo"` no JSON, só quando não é `"arquivo"`) é um dos
 `SOURCE_KINDS` reservados — `"cor"`, `"gerador"`, `"texto"`, `"legenda"`, `"ajuste"` (nunca renomear) —, e
@@ -2018,3 +2019,168 @@ a montagem.
 **Testes**: `tests/test_silences.py` com som sintético determinístico (senos e ruído com semente):
 níveis, limiar relativo igual com ganho diferente, absoluto diferente, duração mínima, folga, estalo,
 tudo mudo, leitura pelo ffmpeg igual à da memória, arquivo sem som, cancelar e os cortes pelo texto.
+
+## 25. Sequências de imagens, exportar com transparência, geradores e títulos
+
+Quatro peças da 1.5 que usam a base da seção 22 (receita do quadro, transparência e clipes sem arquivo) e o
+`textrender` da 23. Nenhuma muda o que já existia: sem sequência de imagens, sem "Fundo transparente", sem
+gerador e sem título, os comandos do ffmpeg, o grafo do som e os quadros são os de antes.
+
+### 25.1 Sequências de imagens (`media.py`, `timeline.Source.seq_start`)
+
+**Detecção** (`media.find_sequence(caminho)`): de um arquivo `plano_0001.png` (prefixo + número + extensão de
+`SEQUENCE_EXT`: PNG, TIFF, JPEG e, só se o ffmpeg desta máquina tem o decodificador, EXR e DPX) ou de uma pasta
+(o maior grupo de imagens numeradas). Com zeros à esquerda vira `%0Nd` (só os números de N dígitos); sem, `%d`.
+A sequência é o trecho **seguido** que contém o arquivo escolhido (`ImageSequence(padrão, primeiro, quadros,
+números)`; `gaps` são os buracos, que a janela mostra); menos de dois quadros seguidos não é sequência. O `%` de
+um nome de arquivo vira `%%` no padrão.
+
+**Leitura**: `probe_sequence(achada, fps)` faz o `MediaInfo` pelo primeiro quadro (tamanho, cor, alfa) com a
+velocidade escolhida; `sequence_input(info, quadro)` são as opções antes do `-i`
+(`-f image2 -framerate F -start_number N`): o `FrameReader` e o `grab_frame` começam **no número do quadro
+pedido**, sem `-ss` (buscar por tempo numa image2 não é exato). EXR entra como o ffmpeg o entrega (sem
+`-apply_trc`: linear).
+
+**Fonte** (`Source.seq_start`, `"sequencia": {"inicio": n}` no JSON só quando é sequência; recurso
+`"sequencia_imagens"` do formato 3): o caminho guardado é o padrão (`…/plano_%04d.png`). `media.path_exists` e
+`sequence.present` conferem o primeiro quadro (no lugar de `os.path.exists`); relocalizar recebe um quadro da
+pasta nova (`relink(..., seq_start=)`); `direct_file()` é None para ela (a velocidade escolhida só existe na
+fonte), então o modo Película abre a sequência pela montagem, com `is_trivial` dizendo "sem edição". Nomes
+derivados (exportação, quadro salvo) usam `sequence_stem` (sem o `%04d`).
+
+**Janela** (`ui/imageseq_dialog.py`): importar ou soltar imagens numeradas pergunta "sequência ou só esta
+imagem" (com quadros, buracos e a velocidade, padrão a da montagem); `MainWindow._offer_sequences` faz isso
+para cada grupo e deixa passar o que não é imagem numerada.
+
+### 25.2 Exportar com transparência
+
+**O pedido**: `Sequence.transparent` (*Fundo transparente* em Configurar a sequência; `"fundo_transparente"` no
+JSON e recurso do formato 3 só quando ligado) e um formato com alfa escolhido na janela Exportar (*Manter a
+transparência*). `frame.Recipe(alpha=True)` (`export.frame_pipeline` liga quando `wants_alpha(s)`; "Salvar
+quadro" em PNG/TIFF também) faz a receita inteira devolver RGBA de **cor direta**.
+
+**Montagem** (`Engine.compose(alpha=True)`): a tela começa com alfa 0 só com `seq.transparent`; o `CLIP` já
+mistura a cobertura no alfa da tela (22.4). Na saída (`alphashaders.PREMUL` + `CANVAS_OUT`), os pixels
+totalmente transparentes recebem a cor dos vizinhos visíveis (mipmap da tela pré-multiplicada): os desfoques do
+look (difusão, halação, bloom) não puxam a cor do fundo para dentro da borda.
+
+**Look** (`Engine.render(plan, alpha=True)` com entrada RGBA): a **cor sai bit a bit igual** à da exportação
+opaca (o `ALPHA` lê a cor pronta com `texelFetch`). O alfa é a cobertura da montagem movida pela geometria do
+look: o próprio `shaders.BASE` desenha a transparência da entrada (1 − alfa) com os uniforms neutros de cor de
+`alphashaders.ALPHA_GEOMETRY`. Regras:
+
+| Efeito | Alfa |
+|---|---|
+| Tremor, zoom, giro, lente, quadro do scan | andam junto com a imagem |
+| Tira do scan, furos, borda, lado de fora do filme | opacos |
+| Moldura | barras transparentes (fora da janela da moldura) |
+| Grão, halação, bloom, névoa, vinheta, defeitos | só cor (o alfa não muda) |
+| Intensidade do look (`mix_geral`) | mistura o alfa como a cor |
+| Encaixe (`render_fit`) | bordas: transparente fora da caixa; fundo desfocado: opaco |
+| Entrada sem alfa (arquivo opaco direto) | alfa todo opaco (`frame.opaque_alpha`) |
+
+**Formatos** (`export.ALPHA_PIX`, o par opaco → com alfa; o com alfa entra no fim de `CODECS[c]["pix"]`):
+Apple ProRes → `yuva444p10le` com o perfil 4 (4444) forçado; VP9 (WebM) → `yuva420p` (o libvpx só tem alfa em
+8 bits); PNG/TIFF (sequência e quadro) → `rgba`/`rgba64`. O codificador recebe `rgba`/`rgba64le` só quando
+`wants_alpha(s)`; os comandos opacos não mudam. `save_still` com RGBA usa `STILL_ALPHA_ARGS` (PNG/TIFF; outra
+extensão é `ValueError`). Na linha de comando, `--pix` com alfa pede o mesmo; `pelicula-cli quadro` guarda a
+transparência em PNG/TIFF quando a montagem do projeto é transparente.
+
+**Prévia** (`ui/alphaview.py`): o quadro RGBA aparece sobre um xadrez (`over_checker`, células de 8 px), e as
+miniaturas da Mídia de fontes com alfa também. A prévia da exportação usa a mesma receita.
+
+### 25.3 Geradores (`generators.py`)
+
+| Item do menu | Fonte | Duração | Campos (`Source.data`) |
+|---|---|---|---|
+| Cor sólida | `"cor"` (opaca) | sem fim (5 s) | `cor` (#rrggbb) |
+| Degradê | `"gerador"`, `gerador: "degrade"` (opaco) | sem fim (5 s) | `forma` (linear/radial), `angulo` (0° esquerda → direita, 90° cima → baixo), `cores` ("2"/"3"), `cor1`, `cor2`, `cor3`, `meio` |
+| Ponta com contagem | `"gerador"`, `gerador: "contagem"` (opaco) | 8 s no fps da sequência | `bipe` (bool) |
+
+Os campos são `Field`s (chave ASCII, padrão, limites, `when` para mostrar só quando outro campo pede); o que vier
+errado no projeto volta ao padrão (`values`). Os geradores se registram **ao importar `sequence`**
+(`generators.register()`: `RENDERERS`, `audiomix.TONES`, `sequence.THUMBNAIL_FRAME`), na janela e no terminal.
+
+- **Degradê**: guardado por tamanho (não anda com o tempo); em 8 bits, pontilhado ordenado (Bayer 4 × 4) para
+  não fazer faixas.
+- **Ponta**: 8 → 3, um número por segundo, com o ponteiro varrendo no sentido horário a partir do alto, cruz e
+  dois círculos; o **2** fica um quadro (`two_frame(fps) = ceil(6 × fps)`) e depois é preto até os 8 s. Os
+  números são do `textrender` (Atkinson Hyperlegible, negrito), centrados pela tinta. Cinza num canal só,
+  repetido nos três. Não tem hash fixo nos testes (usa ângulo e raio do numpy, que podem variar de um ulp
+  entre sistemas): é conferida por medidas.
+- **O bipe** (`audiomix.TONES[tipo] = fn(seq, clip) -> [(quadro_da_fonte, n_quadros, Hz, dBFS)]`): 1 kHz a
+  −20 dBFS durante o quadro do 2. `audiomix.tones(seq, a, b)` acha os quadros da **sequência** que mostram
+  aquele quadro da fonte (`src_frame`: aparar, velocidade) e vira cada tom numa entrada `aevalsrc` estéreo
+  (amplitude exata, fase contínua) + `atrim=end_sample` + `adelay=…S` (atraso em amostras): começa na amostra
+  do quadro (±1 a 48 kHz), na prévia e na exportação (o mesmo `build_graph`). Faixa de vídeo escondida ou *Bipe
+  no 2* desligado: sem tom. Sem tons, o grafo e a impressão do som (`mix_key`) são os de antes.
+
+**Janela** (`ui/generators_ui.py`): o botão **Novo** da Mídia (`MediaBin.set_new_menu`) lista os geradores
+(`MENU_ORDER`) e os itens de `EXTRA_ITEMS` (o título). `MainWindow.new_generated(id)` passa para o modo Edição,
+cria a fonte, põe na Mídia (`adopt_source`) e insere no cursor (no começo, se a montagem está vazia) na faixa
+de vídeo mais baixa destravada e livre em `[cursor, cursor + duração)` (`_free_video_track`; nenhuma: uma faixa
+nova em cima), já escolhida. O `GeneratorEditor` (no alto do inspetor, `ClipInspector.add_source_editor`) monta
+os controles dos `Field`s com o mesmo `SectionCard` dos ajustes; cada mudança vai para
+`TimelineModel.set_source_data(caminho, dados, record=False)` (desfazer; arrastar agrupa em 400 ms; faixa
+travada recusa e o painel volta ao projeto). `_sync_generated_sources` (250 ms depois de cada mudança da
+montagem) atualiza nome e miniatura na Mídia, também depois de desfazer.
+
+### 25.4 Títulos (`titles.py`, `ui/titles_panel.py`)
+
+**Dados** (`Source.virtual("texto", …, seconds=None, alpha=True)`; `title_of(data)` confere tudo):
+
+| Chave | O que é |
+|---|---|
+| `texto`, `nome` | o texto (Enter quebra a linha) e o nome na Mídia (a primeira linha com texto, até 40 caracteres) |
+| `estilo` | o JSON de `textrender.TextStyle` (`fonte`, `peso`, `italico`, `tamanho` px@1080, `cor`, `contorno`, `sombra`, `caixa`, `alinhamento`, `entrelinha`, `espacamento`, `largura`, `maiusculas`…) |
+| `pos_x`, `pos_y` | frações do quadro: na horizontal, a borda esquerda, o centro ou a borda direita do bloco (conforme o alinhamento); na vertical, o meio do bloco |
+| `entrada`, `saida`, `dur_entrada`, `dur_saida` | animações (`ANIMATIONS`) e durações em segundos |
+| `estilo_pronto` | de que estilo pronto o título partiu (informativo) |
+
+**Estilos prontos** (`PRESETS`, ids ASCII): `titulo_grande`, `terco_inferior`, `cartela_cinema`, `creditos`,
+`legenda_filme`, `maquina`. Trocar o estilo na janela muda letra, posição e animações e mantém o texto.
+
+**Animações** (`ANIMATIONS`, ids ASCII; nunca renomear, acrescente no fim): `aparecer` (opacidade), `subir`
+(40 px@1080 + opacidade), `deslizar` (160 px@1080 + opacidade), `maquina` (um glifo por vez, em ordem de leitura),
+`letra` (cada letra aparece em 4 letras de sobreposição), `zoom` (0,8 → 1 na entrada, 1 → 1,1 na saída, em volta
+do centro do bloco, + opacidade), `revelar` (máscara com borda suave de 60 px@1080 da esquerda para a direita) e
+`creditos` (o bloco sobe do pé ao alto do quadro durante o clipe inteiro). A curva é cúbica (desacelera no fim),
+um polinômio. **Tempo**: `clip_time` conta em quadros da fonte entre o primeiro e o último quadro que o clipe
+mostra (`src_frame`): a entrada começa no primeiro quadro (opacidade 0) e a saída termina no último (opacidade 0),
+com aparar e velocidade; quadro congelado mostra o título inteiro.
+
+**Desenho** (`draw`): o `textrender.render(..., depth=16, offset=fração)` desenha o bloco com alfa **direto**; o
+título pré-multiplica (o contrato de `RENDERERS`) e aplica a animação só com contas elemento a elemento em
+float32 (opacidade, máscaras, zoom bilinear `_resample`; o deslocamento usa a fração de pixel do próprio
+`textrender`) e arredonda para 8 ou 16 bits. Sem seno, ângulo nem aleatório: o mesmo quadro no Windows e no
+Linux (`tests/test_titles.py` guarda hashes de 10 casos). A ordem de leitura das letras (`_glyph_map`) vem do
+layout do `textrender` (glifos por linha, a coluna de cada um). As chaves de animação e os ajustes do clipe
+(posição, escala, opacidade, cor) entram depois, no `CLIP`, como em todo clipe. Custo a 1080p: ~4 ms parado
+(o `textrender` guarda a imagem), 10–35 ms com deslocamento, zoom ou créditos.
+
+**Editor** (`TitleEditor`, no alto do inspetor quando o clipe escolhido é um título): texto (`QPlainTextEdit`;
+digitar agrupa em 120 ms + 400 ms do modelo), *Estilo pronto* e os controles em seções (Letra, Contorno e sombra,
+Caixa, Posição, Animação), tudo por `set_source_data`. Avisa os caracteres que a fonte não tem
+(`titles.missing` → `textrender.missing_chars`). **Novo ▸ Título…** põe o cursor no texto, já escolhido. A tela
+*Sobre* lista as fontes do app com a licença (`textrender.credits()`, SIL OFL 1.1). `generators.needs_text(seq)`
+diz ao terminal que crie a `QGuiApplication` (`textrender.ensure_app`) antes de exportar um projeto com títulos
+ou ponta.
+
+### 25.5 Módulo "Títulos e geradores"
+
+`titulos_geradores` (grupo Edição, **estável**): ligado por padrão para quem já usava o app (regra dos
+estáveis), fora do perfil *Simples* e dentro do *Criador* (e, por herança, *Cinema* e *Tudo*) — títulos, cartelas
+e fundos são o dia a dia de quem faz vídeo para redes, e o *Simples* fica com o mínimo. Desligado: some o botão
+**Novo** da Mídia (`_module_tools`) e os editores do inspetor não aparecem (`set_allowed`, em `apply_modules`);
+a renderização não consulta o módulo, e `modules.used_by` conta uma montagem com clipe sem arquivo como uso do
+módulo (o aviso oferece religar). **Sequências de imagens e exportação com transparência ficam no núcleo**: são
+formas de abrir e de gravar arquivos, como um formato a mais, sem ferramenta própria na janela para esconder.
+
+### 25.6 Testes
+
+`tests/test_image_sequences.py`, `tests/test_transparency_export.py`, `tests/test_generators.py`,
+`tests/test_titles.py` e os casos de interface de `tests/alfa_titulos_ui_cases.py` (rodados por
+`tests/test_alfa_titulos_ui.py`, num subprocesso *offscreen*). Pontos que valem lembrar: as idas e voltas com alfa
+gravam e leem de verdade com o ffmpeg (ProRes 4444, PNG 8/16, TIFF 16, VP9); o bipe é medido no som mixado; os
+hashes dos títulos são os mesmos no Windows e no Linux (mudou o desenho de propósito: confira a imagem, atualize
+e explique no commit).

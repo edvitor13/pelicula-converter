@@ -52,11 +52,13 @@ pelicula/
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
-                             transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph)
+                             transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
+                             sequências de imagens: find_sequence, probe_sequence, sequence_input (image2)
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
                              alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
-                             exportação; FramePipeline = frame.Recipe), measure_speed(), save_still()
+                             exportação; FramePipeline = frame.Recipe), measure_speed(), save_still();
+                             saída com alfa: ALPHA_PIX, supports_alpha(), wants_alpha(), STILL_ALPHA_ARGS
   platforms.py               exportação por plataforma (sem Qt): PLATFORMS (YouTube, Instagram, TikTok, WhatsApp,
                              Discord… com fonte oficial), settings_for() → ExportSettings, limites, avisos, SAFE_AREAS
   fit.py                     encaixe num quadro de outra proporção (cortar, bordas, fundo desfocado): plan() → Fit
@@ -100,12 +102,19 @@ pelicula/
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
                              pré-multiplicada, alfa na cobertura) e a saída da tela
+  alphashaders.py            GLSL da saída com transparência: PREMUL/CANVAS_OUT (tela RGBA de cor direta) e ALPHA
+                             (alfa do look com a geometria do BASE, ALPHA_GEOMETRY)
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
-                             RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo)
+                             RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo),
+                             THUMBNAIL_FRAME + source_thumbnail()
+  generators.py              geradores (sem Qt de interface): GENERATORS (cor, degrade, contagem) com Field (campos em
+                             Source.data), desenho determinístico, o bipe da ponta (audiomix.TONES), needs_text()
+  titles.py                  títulos (RENDERERS["texto"]): title_of(data), PRESETS, ANIMATIONS, motion(), draw()
+                             (textrender → RGBA pré-multiplicado), missing()
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
-                             (som do arquivo para o medidor)
+                             (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -118,6 +127,8 @@ pelicula/
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
+                             generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
                              corridorkey_dialog (Recorte por IA, Beta);
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
@@ -307,6 +318,11 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
+| `tests/test_image_sequences.py` | imagens numeradas: padrão `%0Nd`/`%d`, buracos, pasta, leitura a partir de um quadro, JSON `"sequencia"`, relocalizar, exportação |
+| `tests/test_transparency_export.py` | fundo transparente: tela RGBA (8/16), cor do look igual à opaca, alfa com a geometria do look (Moldura, scan, tremor, força geral), encaixe, ida e volta em ProRes 4444, PNG 8/16, TIFF e VP9, "Salvar quadro", prévia da exportação = arquivo |
+| `tests/test_generators.py` | cor, degradê e ponta em 8/16 bits, `grab` = `SequenceReader`, thread, miniatura e o bipe medido no som mixado (±1 amostra a 48 kHz em 24, 25 e 29,97 fps, com aparar) |
+| `tests/test_titles.py` | títulos: dados conferidos, estilos prontos, pré-multiplicação, posição, animações em quadros fixos, tempo do clipe (aparar, velocidade, congelar), **hashes fixos** (iguais no Windows e no Linux), módulo e `used_by` |
+| `tests/test_alfa_titulos_ui.py` | casos de `alfa_titulos_ui_cases.py`: imagens numeradas, Fundo transparente, janela Exportar com alfa, xadrez, menu Novo, campos do gerador e editor de títulos com desfazer, aviso de caractere, Sobre, módulo desligado |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
@@ -441,6 +457,20 @@ Título, cor sólida, degradê, contagem regressiva, legenda… (detalhes em `do
 4. **Teste**: como `tests/test_virtual_sources.py` — `grab` = `SequenceReader` quadro a quadro, a saída em 8 e
    16 bits e, na GPU, o clipe gerado sobre um arquivo igual na prévia e na exportação.
 
+Os geradores e títulos do app (`docs/ARQUITETURA.md`, seção 25) mostram o resto do caminho:
+
+- **Gerador com campos**: um `Generator` em `generators.GENERATORS` (id ASCII, `Field`s com padrão neutro) já
+  ganha o item do menu **Novo** da Mídia (`ui/generators_ui.MENU_ORDER`) e os controles no inspetor
+  (`GeneratorEditor`). Outro tipo (como o título) entra em `generators_ui.EXTRA_ITEMS` e tem o seu editor,
+  posto com `ClipInspector.add_source_editor(widget)`.
+- **Mudar o gerador** é sempre `TimelineModel.set_source_data(caminho, dados, record=False)` (desfazer;
+  arrastar agrupa; faixa travada recusa); a janela atualiza nome e miniatura da Mídia sozinha.
+- **Som**: `audiomix.TONES[tipo] = fn(seq, clip) -> [(quadro_da_fonte, n_quadros, Hz, dBFS)]` toca o tom nos
+  quadros da sequência que mostram aquele quadro da fonte, exato à amostra, na prévia e na exportação.
+- **Miniatura**: `sequence.THUMBNAIL_FRAME[tipo] = fn(src) -> quadro` (o padrão é o quadro 0).
+- **Texto**: quem desenha com o `textrender` precisa da `QGuiApplication`; o terminal a cria quando
+  `generators.needs_text(seq)` (acrescente o tipo novo lá).
+
 ### Adicionar um negativo ou uma cópia do Laboratório
 
 `look.py` (tabelas do Laboratório: curvas características, sensibilidade das camadas, diafonia dos
@@ -547,6 +577,9 @@ Todo recurso que dá para dispensar é um módulo (regra 17). Para criar um:
    `media.encoder_works()`; mantenha esse padrão para qualquer codificador que "aparece mas não
    funciona".
 7. Teste em `tests/test_export_cmd.py` (estrutura do comando) e documente no README.
+8. **Transparência**: se o formato guarda alfa, ponha o par opaco → com alfa em `export.ALPHA_PIX` (o com alfa
+   entra no fim de `pix`; a janela o oferece só por "Manter a transparência"); o codificador recebe
+   `rgba`/`rgba64le` quando `wants_alpha(s)`. Teste a ida e volta em `tests/test_transparency_export.py`.
 
 ### Nova plataforma de exportação
 

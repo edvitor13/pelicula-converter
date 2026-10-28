@@ -176,6 +176,56 @@ chama "Capítulo 1", "Capítulo 2"…).
   capítulos no arquivo; os players mostram a lista de capítulos. Exportando só um trecho (entrada e saída),
   os tempos contam a partir da entrada.
 
+### Imagens numeradas (sequências de imagens)
+
+Renders, animações e scans costumam vir como uma imagem por quadro: `plano_0001.png`, `plano_0002.png`…
+Importe **uma delas** (ou arraste a pasta) e o app pergunta se é uma **sequência** — um clipe só, um quadro por
+arquivo — ou só aquela imagem parada. A janela mostra quantos quadros achou, os **buracos** da numeração
+(o clipe vai até o primeiro buraco) e a **velocidade** (padrão: a da montagem; 24, 25, 29,97…). Valem PNG,
+TIFF, JPEG e, se o ffmpeg desta máquina lê, EXR e DPX. PNG e TIFF com transparência entram transparentes.
+No modo Película, abrir uma imagem numerada (ou a pasta) também abre a sequência inteira. Se a pasta mudar de
+lugar, ao abrir o projeto é só apontar um quadro da pasta nova.
+
+### Novo: títulos, cor sólida, degradê e ponta
+
+O botão **Novo** da Mídia cria clipes que não vêm de um arquivo. Eles entram **no cursor**, na faixa de vídeo
+mais baixa que está livre ali (por cima do que já aparece), e ficam escolhidos para ajustar no painel da
+direita — cada mudança se desfaz com Ctrl+Z e a Mídia acompanha o nome e a miniatura.
+
+- **Cor sólida**: uma cor que preenche o quadro (fundo, cartela, fade para uma cor com a opacidade).
+- **Degradê**: linear (com ângulo) ou radial, com 2 ou 3 cores (e o ponto da cor do meio).
+- **Ponta com contagem**: a contagem regressiva do cinema, de 8 a 2, um número por segundo com o ponteiro
+  girando; no **2** há um bipe de 1 kHz de um quadro (desligue em **Bipe no 2**) e depois preto. Tem 8 s; serve
+  para conferir a sincronia do som numa cópia ou numa sala.
+- **Título…**: veja abaixo.
+
+Cor, degradê e título começam com 5 s e esticam como uma imagem. Para esconder o botão Novo e os painéis,
+desligue **Títulos e geradores** em Configurações › Recursos (os clipes que já estão na montagem continuam
+iguais na imagem e na exportação).
+
+### Títulos
+
+**Novo ▸ Título…** põe um título no cursor, com o texto já escolhido para você digitar por cima. No painel da
+direita:
+
+- **Texto**: Enter quebra a linha. Se a fonte não tiver algum caractere (um ideograma, por exemplo), o painel
+  avisa quais são — eles apareceriam como um retângulo — e é só escolher outra fonte.
+- **Estilo pronto**: *Título grande*, *Terço inferior* (nome e função, com caixa), *Cartela de cinema*,
+  *Créditos* (rolando), *Legenda de filme* e *Máquina de escrever*. Trocar o estilo muda a letra, a posição e as
+  animações; o texto fica.
+- **Letra**: fonte (as que vêm com o app, de licença livre: o título sai igual em qualquer computador), peso,
+  itálico, tamanho (em pixels de um quadro de 1080 linhas: acompanha a resolução), cor, alinhamento,
+  entrelinha, espaço entre letras, largura máxima (quebra automática) e maiúsculas.
+- **Contorno e sombra**, **Caixa** (uma por linha ou uma para o texto todo) e **Posição** (horizontal e
+  vertical, em % do quadro).
+- **Animação**: entrada e saída com a duração de cada uma — *Aparecer*, *Subir*, *Deslizar*, *Máquina de
+  escrever*, *Letra por letra*, *Zoom suave*, *Revelar com máscara* e *Créditos rolando* (sobe o texto do pé ao
+  alto do quadro durante o clipe inteiro). A entrada começa no primeiro quadro do clipe e a saída termina no
+  último: aparar ou mudar a velocidade do clipe acompanha.
+
+A prévia é a de sempre: o que se vê é o que sai na exportação, com o look de película por cima. Posição,
+escala, opacidade e as chaves de animação do clipe (painel Imagem) continuam valendo sobre o título.
+
 ## 3. Ajustar o clipe (painel "Clipe")
 
 Selecione um clipe e use o painel da direita. Quando o vídeo tem som ligado, escolha **Imagem** ou **Som**
@@ -243,7 +293,10 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 - **Quadros por segundo**: 23,976 / 24 / 25 / 29,97 / 30 / 50 / 59,94 / 60 — mudar mantém o tempo dos cortes;
 - **Cor do fundo**: o que aparece onde não há imagem (barras, clipes menores que o quadro);
 - **Fades curtos nas emendas de som**: veja *Som*, acima;
-- **Faixa principal magnética**: veja *Montar*, acima.
+- **Faixa principal magnética**: veja *Montar*, acima;
+- **Fundo transparente**: onde nada cobre a tela, a montagem fica transparente em vez da cor do fundo. A
+  prévia mostra um xadrez nesses lugares; para gravar a transparência, exporte em um formato com alfa (veja
+  *Depois da edição*).
 
 ## 5. Monitores
 
@@ -284,6 +337,11 @@ desligue **Medidor de som** em Configurações › Recursos.
   ou sobre um fundo desfocado, sempre com o look desenhado no quadro final; o **volume alvo** mede e acerta
   o som mixado. A **área segura** (botão na barra da prévia) mostra onde a interface do TikTok, do Reels ou
   do Shorts cobre o vídeo vertical — só na tela, nunca no arquivo.
+- **Exportar com transparência**: com **Fundo transparente** ligado na Sequência, escolha **Apple ProRes**
+  (sai em ProRes 4444), **VP9 (WebM)**, **Sequência PNG** ou **Sequência TIFF** e deixe **Manter a transparência (canal alfa)**
+  ligado. A cor sai igual à exportação normal; o alfa acompanha o que o look faz com a imagem (tremor, zoom,
+  moldura com barras transparentes, a tira do scan opaca). Grão, halação e defeitos só mudam a cor. **Salvar
+  quadro** em PNG ou TIFF também guarda a transparência.
 - **Projeto → Salvar** (Ctrl+S) guarda a edição no arquivo `.plc` junto com o look. Se um arquivo usado na
   edição mudar de lugar, o app pergunta onde ele está ao abrir o projeto.
 - Com marcadores de capítulo, a exportação em MP4, MOV ou MKV grava os capítulos no arquivo
