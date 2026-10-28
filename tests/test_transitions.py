@@ -59,6 +59,20 @@ def test_clip_shader_text_is_the_one_of_the_base():
     assert hashlib.sha256(editshaders.OUT.encode("utf-8")).hexdigest() == REF["shader_out"]
 
 
+def _flat(u: dict) -> dict:
+    """Uniforms com listas (u_canvas, matrizes) desdobrados em números: o `pytest.approx` 9.2 não compara
+    dicionários com listas dentro."""
+    out = {}
+    for k, v in u.items():
+        if isinstance(v, (list, tuple)):
+            vals = list(np.ravel(np.asarray(v, dtype=float)))
+            out.update({f"{k}[{i}]": x for i, x in enumerate(vals)})
+            out[f"{k}#"] = len(vals)
+        else:
+            out[k] = v
+    return out
+
+
 def test_old_layers_and_uniforms_are_the_ones_of_the_base():
     seq = base.scenario()
     now = json.loads(json.dumps(base.layers_and_uniforms(seq)))
@@ -69,8 +83,10 @@ def test_old_layers_and_uniforms_are_the_ones_of_the_base():
         for a, b in zip(rows, now["quadros"][t]):
             strip = lambda d: {k: v for k, v in d.items() if k not in ("uniforms", "neutral")}  # noqa: E731
             assert strip(b) == strip(a), f"quadro {t}"
-            assert now["uniforms"][b["uniforms"]] == pytest.approx(old["uniforms"][a["uniforms"]], rel=1e-12), t
-            assert now["uniforms"][b["neutral"]] == pytest.approx(old["uniforms"][a["neutral"]], rel=1e-12), t
+            assert _flat(now["uniforms"][b["uniforms"]]) == pytest.approx(_flat(old["uniforms"][a["uniforms"]]),
+                                                                          rel=1e-12), t
+            assert _flat(now["uniforms"][b["neutral"]]) == pytest.approx(_flat(old["uniforms"][a["neutral"]]),
+                                                                         rel=1e-12), t
     for layers in (seq.layers_at(t) for t in base.FRAMES):
         assert all(layer.transitions == () for layer in layers)
 

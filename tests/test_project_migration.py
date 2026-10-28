@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -53,11 +54,29 @@ def test_values_and_state_are_the_same(opened, name):
     assert now[name]["estado"] == ref[name]["estado"]
 
 
+def _same_numbers(old, new, where: str = "") -> None:
+    """Igual, com números de ponto flutuante até o arredondamento: as matrizes de gamut passam por
+    `np.linalg.inv`, cujo resultado muda na última casa conforme o processador (o OpenBLAS escolhe o código
+    pela CPU); a referência foi gravada numa máquina e o CI roda em outras."""
+    if isinstance(old, dict):
+        assert isinstance(new, dict) and new.keys() == old.keys(), where
+        for k in old:
+            _same_numbers(old[k], new[k], f"{where}/{k}")
+    elif isinstance(old, list):
+        assert isinstance(new, list) and len(new) == len(old), where
+        for i, (a, b) in enumerate(zip(old, new)):
+            _same_numbers(a, b, f"{where}[{i}]")
+    elif isinstance(old, float) or isinstance(new, float):
+        assert math.isclose(new, old, rel_tol=1e-12, abs_tol=1e-12), f"{where}: {new} != {old}"
+    else:
+        assert new == old, where
+
+
 @pytest.mark.ffmpeg
 @pytest.mark.parametrize("name", ["simples", "edicao"])
 def test_look_plans_are_the_same(opened, name):
     ref, now, *_ = opened
-    assert now[name]["look"] == ref[name]["look"]
+    _same_numbers(ref[name]["look"], now[name]["look"], name)
 
 
 # Uniforms do shader CLIP que vieram depois da 1.4, com o valor que deixa tudo como era (sem transparência).

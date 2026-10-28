@@ -421,22 +421,38 @@ def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[
     return inputs, ";".join(chains + [mix])
 
 
+_SCRIPT_OPTION: dict[str, str] = {}
+
+
+def script_option(ffmpeg_path: str) -> str:
+    """A opção que lê o grafo de um arquivo: `-/filter_complex` desde o ffmpeg 7.0 (o antigo
+    `-filter_complex_script` saiu no 8); num ffmpeg 6 (o do Ubuntu 24.04, abaixo da versão recomendada mas
+    ainda aceito), a antiga. Versão desconhecida (build de desenvolvimento): a nova."""
+    opt = _SCRIPT_OPTION.get(ffmpeg_path)
+    if opt is None:
+        from . import deps
+        info = deps.inspect(ffmpeg_path)
+        old = info is not None and info.version is not None and info.version < (7, 0)
+        opt = _SCRIPT_OPTION[ffmpeg_path] = "-filter_complex_script" if old else "-/filter_complex"
+    return opt
+
+
 def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
                   script_path: str | None = None) -> list[str] | None:
     """Comando do ffmpeg que grava o som do trecho [start, end) num WAV (None se não há som).
 
-    Com `script_path`, o grafo é gravado nesse arquivo e passado por `-/filter_complex` (grafos longos passam do
-    limite da linha de comando do Windows; o antigo `-filter_complex_script` saiu do ffmpeg 8, e o `-/opção`
-    existe desde o 7.0, a versão mínima do app).
+    Com `script_path`, o grafo é gravado nesse arquivo e passado pela opção de `script_option` (grafos longos
+    passam do limite da linha de comando do Windows).
     """
     g = build_graph(seq, start, end)
     if g is None:
         return None
     inputs, graph = g
-    cmd = [media.ffmpeg(), "-y", "-v", "error", "-nostdin", "-hide_banner", *inputs]
+    ff = media.ffmpeg()
+    cmd = [ff, "-y", "-v", "error", "-nostdin", "-hide_banner", *inputs]
     if script_path:
         Path(script_path).write_text(graph, encoding="utf-8")
-        cmd += ["-/filter_complex", script_path]
+        cmd += [script_option(ff), script_path]
     else:
         cmd += ["-filter_complex", graph]
     cmd += ["-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(RATE), "-ac", "2", out_path]
