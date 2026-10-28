@@ -426,6 +426,7 @@ class Sequence:
     markers: list[Marker] = field(default_factory=list)
     micro_fade: bool = False  # fades curtos nas emendas de som (sequências novas ligam; projeto antigo = sem)
     magnetic: bool = False    # faixa principal (V1) magnética: sem buracos (padrão desligado, também em projetos novos)
+    subtitles: Any = None     # legendas do projeto (`subtitles.Subtitles`); None = sem legendas
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -1670,6 +1671,8 @@ class Sequence:
             out["micro_fades"] = True
         if self.magnetic:
             out["faixa_magnetica"] = True
+        if self.subtitles is not None and not self.subtitles.is_default():
+            out["legendas"] = self.subtitles.to_json()  # presas aos arquivos: acompanham a montagem
         return out
 
     @classmethod
@@ -1711,6 +1714,9 @@ class Sequence:
                 continue
             seen.add(mk.id)
             seq.markers.append(mk)
+        if isinstance(d.get("legendas"), dict):
+            from .subtitles import Subtitles
+            seq.subtitles = Subtitles.from_json(d["legendas"])
         return seq
 
     def relink(self, old: str, new: str) -> None:
@@ -1724,6 +1730,8 @@ class Sequence:
         for c in self.clips:
             if c.src == old:
                 c.src = new
+        if self.subtitles is not None:
+            self.subtitles.relink(old, new)
 
     @classmethod
     def for_source(cls, src: Source, with_media: bool = True) -> "Sequence":
@@ -1750,6 +1758,7 @@ FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "chaves": lambda seq: any(c.keys for c in seq.clips),
     "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
     "transicoes": lambda seq: seq.uses_extra_transitions(),
+    "legendas": lambda seq: seq.subtitles is not None and not seq.subtitles.is_empty(),  # subtitles.FEATURE_ID
 }
 
 

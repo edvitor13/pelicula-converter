@@ -663,10 +663,10 @@ FramePipeline = Recipe
 
 
 def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=None, scale: float = 1.0,
-                   depth: int | None = None, keys: dict | None = None) -> Recipe:
+                   depth: int | None = None, keys: dict | None = None, burn=None) -> Recipe:
     """A receita de um quadro desta exportação (`frame.Recipe`). `scale` < 1 reduz tudo (prévia): o quadro, o
     encaixe e o tamanho mínimo do "Grão para redes" (px@1080 já acompanha a altura). `keys`: as chaves de
-    animação do look (`Project.look_keys`)."""
+    animação do look (`Project.look_keys`). `burn`: legendas gravadas no vídeo (`subtitles.Burn`)."""
     from . import fit as fitmod
     ow, oh = output_size(info, s)
     if scale != 1.0:
@@ -685,7 +685,7 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
         legal = media.legal_range(info)
     return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
                   seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, keys=dict(keys or {}),
-                  src_fps=float(info.fps))
+                  src_fps=float(info.fps), burn=burn)
 
 
 def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
@@ -706,10 +706,10 @@ def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, f
 
 
 def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: ExportSettings, frame: int, seq=None,
-                  scale: float = 1.0, depth: int = 8, keys: dict | None = None):
+                  scale: float = 1.0, depth: int = 8, keys: dict | None = None, burn=None):
     """Um quadro do resultado da exportação (o mesmo caminho de `_encode`), para a prévia da janela de
     exportação. Com `scale` = 1 e a profundidade da exportação, é exatamente o quadro gravado."""
-    frames = frame_pipeline(info, values, s, seq, scale, depth, keys)
+    frames = frame_pipeline(info, values, s, seq, scale, depth, keys, burn)
     f = frames.fit
     frame = max(0, min(int(frame), info.frames - 1))
     if seq is not None:
@@ -752,6 +752,8 @@ class ExportJob:
     chapters: list = field(default_factory=list)  # [(quadro, título)] dos capítulos (`chapters.points`)
     look_keys: dict = field(default_factory=dict)  # chaves de animação do look (`Project.look_keys`)
     subtitles: dict = field(default_factory=dict)  # legendas em tempo da sequência (`subtitles.job_payload`)
+    burn: dict = field(default_factory=dict)       # legendas gravadas no vídeo (`subtitles.Burn.to_json`)
+    subtitle_file: dict = field(default_factory=dict)  # .srt/.vtt ao lado (`subtitle_file_payload`)
 
     @property
     def progress(self) -> float:
@@ -768,6 +770,10 @@ class ExportJob:
                "edicao": self.sequence.to_json() if self.sequence is not None else None,
                "capitulos": [[int(q), str(t)] for q, t in self.chapters],
                "legendas": self.subtitles}
+        if self.burn:
+            out["legendas_gravadas"] = self.burn
+        if self.subtitle_file:
+            out["legendas_arquivo"] = self.subtitle_file
         if self.look_keys:
             from . import keyframes, params
             out["chaves"] = keyframes.to_json(keyframes.clean_keys(params.FILM, self.look_keys))
@@ -794,7 +800,9 @@ class ExportJob:
                    name=str(d.get("nome") or ""), sequence=seq,
                    chapters=[(int(q), str(t)) for q, t in d.get("capitulos") or []],
                    look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, d.get("chaves"))),
-                   subtitles=d.get("legendas") if isinstance(d.get("legendas"), dict) else {})
+                   subtitles=d.get("legendas") if isinstance(d.get("legendas"), dict) else {},
+                   burn=d.get("legendas_gravadas") if isinstance(d.get("legendas_gravadas"), dict) else {},
+                   subtitle_file=d.get("legendas_arquivo") if isinstance(d.get("legendas_arquivo"), dict) else {})
 
 
 class ExportQueue:
@@ -901,6 +909,11 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
         run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
                    seq, mix_path, chapters_path, subs_embed)
+        if job.burn:
+            from . import subtitles, textrender
+            run.burn = subtitles.Burn.from_json(job.burn)
+            if run.burn is not None:
+                textrender.ensure_app()  # o texto é desenhado pelo Qt (a janela e o pelicula-cli já têm a dela)
         if wants_loudness(s) and not _measure_loudness(job, run, s):
             return
         if _encode_passes(job, engine, run, s):
@@ -915,6 +928,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                     destino=output_target(job.out_path, s), erro=exc, parcial=partial_output(job.out_path, s))
             else:
                 job.status = "concluido"
+                _write_subtitle_file(job, start, end + 1)
     finally:
         if job.status != "concluido" and not keep_partial:
             _discard_output(job.out_path, s)
@@ -947,6 +961,21 @@ class _Run:
     chapters_path: str | None = None  # FFMETADATA dos capítulos (apagado no fim do run_job)
     subtitles: Any = None             # faixa de legenda (subtitles.Embed; o arquivo é apagado no fim do run_job)
     loud: dict | None = None  # volume medido (loudnorm.measure) para o loudnorm da gravação
+    burn: Any = None          # legendas gravadas no vídeo (subtitles.Burn, de `ExportJob.burn`)
+
+
+def _write_subtitle_file(job: ExportJob, start: int, end: int) -> None:
+    """Legendas num .srt/.vtt ao lado do vídeo exportado (`ExportJob.subtitle_file`), no tempo do trecho. Se não
+    der para gravar, o vídeo fica e o trabalho diz o que faltou."""
+    if not job.subtitle_file:
+        return
+    from . import subtitles
+    try:
+        subtitles.write_sidecar(job.subtitle_file, job.out_path, start, end, job.info.fps)
+    except OSError as exc:
+        job.status = "erro"
+        job.error = _("O vídeo foi exportado, mas não foi possível gravar o arquivo de legendas: {erro}").format(
+            erro=exc)
 
 
 def _measure_loudness(job: ExportJob, run: _Run, s: ExportSettings) -> bool:
@@ -1027,7 +1056,7 @@ def _encode(job: ExportJob, engine: Engine, run: _Run, s: ExportSettings, two_pa
                             pipe.name if pipe else "pipe:0", audio_path=run.mix_path, chapters_path=run.chapters_path,
                             two_pass=two_pass,
                             loudness_measured=run.loud, subtitles=run.subtitles)
-    frames = frame_pipeline(info, job.values, s, run.seq, keys=job.look_keys)
+    frames = frame_pipeline(info, job.values, s, run.seq, keys=job.look_keys, burn=run.burn)
     reader, skip = open_reader(info, frames, run.start, total, run.fps_out, perf, run.seq)
     enc = subprocess.Popen(cmd, stdin=None if pipe else subprocess.PIPE, stdout=subprocess.DEVNULL,
                            stderr=subprocess.PIPE, cwd=cwd, **perf.popen_kwargs())

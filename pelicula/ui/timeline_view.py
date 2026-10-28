@@ -82,6 +82,7 @@ class TimelineCanvas(QWidget):
         self._hover_x: float | None = None
         self._snap_x: float | None = None
         self._drop: tuple[float, str, int, bool] | None = None
+        self.lane = None          # faixa "Legendas" (`subtitle_lane.SubtitleLane`), embaixo do som; None = sem
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -111,7 +112,7 @@ class TimelineCanvas(QWidget):
 
     def content_height(self) -> float:
         return (len(self.seq.kind_tracks(VIDEO)) * VIDEO_H + GAP_H
-                + len(self.seq.kind_tracks(AUDIO)) * AUDIO_H)
+                + len(self.seq.kind_tracks(AUDIO)) * AUDIO_H + (self.lane.height() if self.lane else 0.0))
 
     def lanes_width(self) -> float:
         return max(1.0, self.width() - HEADER_W)
@@ -282,6 +283,8 @@ class TimelineCanvas(QWidget):
         self._paint_audio_transitions(p, x_min, x_max)
         transitions_ui.paint(self, p, x_min, x_max)  # 1.5: transições de película sobre o corte
         self._paint_ghosts(p)
+        if self.lane is not None:
+            self.lane.paint(p, w, h)
         if not self.seq.clips:
             p.setPen(QColor(theme.FAINT))
             p.setFont(theme.font(9.5))
@@ -312,6 +315,8 @@ class TimelineCanvas(QWidget):
         p.restore()
         self._paint_ruler(p, w)
         self._paint_headers(p, rows, h)
+        if self.lane is not None:
+            self.lane.paint_header(p)
         p.end()
 
     def _paint_inout_lanes(self, p: QPainter, h: float) -> None:
@@ -767,6 +772,8 @@ class TimelineCanvas(QWidget):
     def mousePressEvent(self, e):
         pos = e.position()
         self.setFocus()
+        if self.lane is not None and self.lane.press(e):
+            return
         if e.button() == Qt.MouseButton.RightButton:
             self._context_menu(e)
             return
@@ -834,6 +841,8 @@ class TimelineCanvas(QWidget):
     def mouseMoveEvent(self, e):
         pos = e.position()
         self._hover_x = pos.x()
+        if self._drag is None and self.lane is not None and self.lane.move(e):
+            return
         d = self._drag
         if d is None:
             self._update_cursor(pos)
@@ -905,6 +914,8 @@ class TimelineCanvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self.lane is not None and self.lane.release(e):
+            return
         d = self._drag
         self._drag = None
         self._snap_x = None
@@ -956,6 +967,8 @@ class TimelineCanvas(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         pos = e.position()
+        if self.lane is not None and self.lane.double_click(e):
+            return
         mk = self.marker_at(pos)
         if mk is not None:
             self._drag = None
@@ -1197,6 +1210,8 @@ class TimelineCanvas(QWidget):
     def keyPressEvent(self, e):
         k = e.key()
         mods = e.modifiers()
+        if self.lane is not None and self.lane.key(e):
+            return
         if mods & Qt.KeyboardModifier.ControlModifier:
             if k == Qt.Key.Key_A:
                 self.model.select([c.id for c in self.seq.clips])
@@ -1391,6 +1406,11 @@ class TimelineEditor(QWidget):
         self.btn_add_a.clicked.connect(lambda: m.add_track(AUDIO))
         hl.addWidget(self.btn_add_v)
         hl.addWidget(self.btn_add_a)
+        # "Remover silêncios…" (módulo "silencios"): a janela principal liga e abre a janela (ui/silences_dialog.py)
+        self.btn_silences = self._btn("volume", _("Remover silêncios: acha os trechos sem fala e tira de uma vez"),
+                                      _("Silêncios"))
+        self.btn_silences.setVisible(False)
+        hl.addWidget(self.btn_silences)
         hl.add_stretch()
         zo = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também."))
         zo.clicked.connect(lambda: c.set_ppf(c.ppf * 0.8))

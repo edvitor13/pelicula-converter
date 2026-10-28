@@ -44,6 +44,7 @@ do projeto é `FEATURE_ID`.
 
 from __future__ import annotations
 
+import bisect
 import html
 import math
 import os
@@ -102,7 +103,7 @@ class Word:
     text: str
 
     def to_json(self) -> list:
-        return [round(self.start, 4), round(self.end, 4), self.text]
+        return [float(round(self.start, 4)), float(round(self.end, 4)), self.text]  # float: ida e volta igual
 
     @classmethod
     def from_json(cls, d: Any) -> "Word | None":
@@ -133,7 +134,8 @@ class Cue:
                        words=tuple(Word(w.start + dt, w.end + dt, w.text) for w in self.words))
 
     def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"inicio": round(self.start, 4), "fim": round(self.end, 4), "texto": self.text}
+        out: dict[str, Any] = {"inicio": float(round(self.start, 4)), "fim": float(round(self.end, 4)),
+                               "texto": self.text}
         if self.words:
             out["palavras"] = [w.to_json() for w in self.words]
         if self.italic:
@@ -233,23 +235,35 @@ def clips_for(seq, path: str) -> list:
     return [c for c in seq.clips if c.src == path and c.kind == VIDEO and not c.frozen]
 
 
-def map_cues(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE) -> list[Cue]:
-    """Legendas presas ao arquivo `path` (segundos do arquivo) → segundos da sequência, uma cópia para cada
-    clipe que mostra aquele trecho. O que fica fora do clipe é cortado; com palavras, ficam só as que têm o
-    meio dentro do clipe (e o texto passa a ser o delas). Um pedaço cortado mais curto que `min_piece` some."""
+@dataclass(frozen=True)
+class Mapping:
+    """Como um clipe mostra o arquivo: o segundo `a` do arquivo aparece no segundo `t0` da sequência e o tempo
+    anda `speed` vezes mais rápido no arquivo (o mesmo de `Sequence.src_time`)."""
+    clip: str
+    a: float
+    t0: float
+    speed: float
+
+    def to_seq(self, x: float) -> float:
+        return self.t0 + (x - self.a) / self.speed
+
+    def to_file(self, t: float) -> float:
+        return self.a + (t - self.t0) * self.speed
+
+
+def mapped(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE):
+    """Cada pedaço visível das legendas presas ao arquivo `path`: (índice da legenda em `cues`, `Mapping` do clipe,
+    legenda em segundos da sequência), na ordem dos clipes. É a regra de `map_cues` (que junta e tira as
+    repetidas); a interface usa isto para saber de onde veio cada legenda que aparece."""
     fps = seq.fps
     cues = list(cues)
-    out: list[Cue] = []
     for c in clips_for(seq, path):
         a, b = seq.src_time(c, c.start), seq.src_time(c, c.end)   # trecho do arquivo que o clipe mostra
         if b <= a + EPS:
             continue
-        t0, k = c.start / fps, c.speed
-
-        def to_seq(x: float) -> float:
-            return t0 + (x - a) / k
-
-        for cue in cues:
+        m = Mapping(c.id, a, c.start / fps, c.speed)
+        to_seq = m.to_seq
+        for i, cue in enumerate(cues):
             lo, hi = max(cue.start, a), min(cue.end, b)
             if hi <= lo + EPS:
                 continue
@@ -262,11 +276,23 @@ def map_cues(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE) 
             if cut and e - s < min_piece:
                 continue
             text = cue.text if len(words) == len(cue.words) else " ".join(w.text for w in words)
-            out.append(Cue(s, e, text, words, cue.italic, cue.bold))
+            yield i, m, Cue(s, e, text, words, cue.italic, cue.bold)
+
+
+def cue_key(cue: Cue) -> tuple:
+    """Duas legendas iguais na tela (som em duas faixas do mesmo arquivo) contam uma vez só."""
+    return round(cue.start, 3), round(cue.end, 3), cue.text
+
+
+def map_cues(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE) -> list[Cue]:
+    """Legendas presas ao arquivo `path` (segundos do arquivo) → segundos da sequência, uma cópia para cada
+    clipe que mostra aquele trecho. O que fica fora do clipe é cortado; com palavras, ficam só as que têm o
+    meio dentro do clipe (e o texto passa a ser o delas). Um pedaço cortado mais curto que `min_piece` some."""
+    out = [cue for _i, _m, cue in mapped(seq, path, cues, min_piece)]
     seen: set[tuple] = set()
     uniq = []
     for cue in sort_cues(out):  # som em duas faixas do mesmo arquivo: a mesma legenda uma vez só
-        key = (round(cue.start, 3), round(cue.end, 3), cue.text)
+        key = cue_key(cue)
         if key not in seen:
             seen.add(key)
             uniq.append(cue)
@@ -291,14 +317,16 @@ class SubStyle:
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"id": self.id, "texto": self.text.to_json(), "posicao": self.position,
-                               "margem": round(self.margin, 3), "largura": round(self.width, 4),
+                               "margem": float(round(self.margin, 3)), "largura": float(round(self.width, 4)),
                                "palavras_por_tela": self.max_words}
         if self.highlight is not None:
             h = self.highlight
             out["destaque"] = {"cor": textrender.color_hex(h.color) if h.color else None,
-                               "escala": round(h.scale, 4),
+                               "escala": float(round(h.scale, 4)),
                                "caixa": textrender.color_hex(h.box_color) if h.box_color else None,
-                               "caixa_opacidade": round(h.box_opacity, 4)}
+                               "caixa_opacidade": float(round(h.box_opacity, 4))}
+        elif STYLES.get(self.id) is not None and STYLES[self.id].highlight is not None:
+            out["destaque"] = None   # destaque do estilo pronto desligado
         return out
 
     @classmethod
@@ -372,6 +400,10 @@ class Subtitles:
 
     def is_empty(self) -> bool:
         return not self.cues and not any(self.sources.values())
+
+    def is_default(self) -> bool:
+        """Nada a guardar: sem legendas e com as opções padrão (o bloco "legendas" fica fora do projeto)."""
+        return self.is_empty() and self.to_json() == Subtitles().to_json()
 
     def relink(self, old: str, new: str) -> None:
         """O arquivo mudou de lugar (`Sequence.relink`): as legendas dele vão junto."""
@@ -666,6 +698,70 @@ def job_payload(cues: Iterable[Cue], language: str = "") -> dict[str, Any]:
     return {"idioma": language, "legendas": [c.to_json() for c in cues]} if cues else {}
 
 
+SIDECAR_FORMATS = ("srt", "vtt")
+# Como as legendas saem numa exportação (janela Exportar e `pelicula-cli exportar --legendas`).
+DELIVERY = ("nao", "faixa", "copia", "digital", "srt", "vtt")
+
+
+def default_delivery(subs: "Subtitles | None", container: str) -> str:
+    """O padrão do projeto: gravadas no vídeo (se o projeto pede), senão a faixa no arquivo quando o recipiente
+    guarda legenda, senão o .srt ao lado. "nao" sem legendas."""
+    if subs is None or subs.is_empty():
+        return "nao"
+    if subs.burn in ("copia", "digital"):
+        return subs.burn
+    if not subs.embed:
+        return "nao"
+    return "faixa" if container in EMBED_CODECS else "srt"
+
+
+def delivery_fields(choice: str, subs: "Subtitles | None", cues: Iterable[Cue], container: str) -> dict[str, Any]:
+    """Os campos do `export.ExportJob` para a escolha: `subtitles` (faixa), `burn` (gravadas) e `subtitle_file`
+    (.srt/.vtt ao lado). Faixa num recipiente que não guarda legenda vira o .srt ao lado."""
+    out: dict[str, Any] = {"subtitles": {}, "burn": {}, "subtitle_file": {}}
+    cues = list(cues)
+    if subs is None or not cues or choice not in DELIVERY or choice == "nao":
+        return out
+    if choice == "faixa" and container not in EMBED_CODECS:
+        choice = "srt"
+    if choice == "faixa":
+        out["subtitles"] = job_payload(cues, subs.language)
+    elif choice in ("copia", "digital"):
+        burn = Burn.make(choice, subs.style, cues)
+        out["burn"] = burn.to_json() if burn is not None else {}
+    else:
+        out["subtitle_file"] = sidecar_payload(cues, choice, subs.language)
+    return out
+
+
+def sidecar_payload(cues: Iterable[Cue], fmt: str, language: str = "") -> dict[str, Any]:
+    """O .srt/.vtt ao lado do vídeo exportado (`ExportJob.subtitle_file`): formato e legendas da sequência."""
+    out = job_payload(cues, language)
+    if out and fmt in SIDECAR_FORMATS:
+        out["formato"] = fmt
+        return out
+    return {}
+
+
+def sidecar_path(out_path: str, fmt: str) -> str:
+    """O arquivo de legendas ao lado do vídeo: o mesmo nome com .srt ou .vtt."""
+    return os.path.splitext(out_path)[0] + "." + fmt
+
+
+def write_sidecar(payload: dict[str, Any] | None, out_path: str, start: int, end: int, fps: float) -> str | None:
+    """Grava o trecho [start, end) quadros (tempo contado do começo do trecho) ao lado de `out_path`. Devolve o
+    caminho, ou None sem legendas no trecho. OSError se não der para gravar."""
+    if not payload or payload.get("formato") not in SIDECAR_FORMATS or end <= start:
+        return None
+    fps = fps if fps and fps > 0 else 24.0
+    cues = relative(cues_from_json(payload.get("legendas")), start / fps, end / fps)
+    if not cues:
+        return None
+    path = sidecar_path(out_path, payload["formato"])
+    save(path, cues)
+    return path
+
+
 def export_file(payload: dict[str, Any] | None, container: str, start: int, end: int, fps: float) -> Embed | None:
     """Grava o trecho [start, end) quadros das legendas do trabalho num WebVTT temporário (o ffmpeg converte para
     o formato do recipiente; o WebVTT tem escape, então "<" e "&" chegam intactos). None quando o recipiente
@@ -743,7 +839,11 @@ def overlay(cues: Iterable[Cue], frame: int, fps: float, st: SubStyle, width: in
     `width` × `height`. None quando não há legenda nesse quadro. Precisa de `textrender.ensure_app()`."""
     fps = fps if fps and fps > 0 else 24.0
     t = frame / fps
-    act = active(cues, t)
+    return draw(active(cues, t), t, st, width, height, depth)
+
+
+def draw(act: list[Cue], t: float, st: SubStyle, width: int, height: int, depth: int = 8) -> Overlay | None:
+    """As legendas `act` (as que estão na tela no instante t, em ordem) desenhadas com o estilo."""
     if not act:
         return None
     parts: list[str] = []
@@ -771,3 +871,95 @@ def overlay(cues: Iterable[Cue], frame: int, fps: float, st: SubStyle, width: in
     else:
         y = height - st.margin * scale - lay.height
     return Overlay(img, x, int(round(y)))
+
+
+def composite(frame, ov: Overlay):
+    """Uma cópia do quadro com a legenda por cima (o quadro dado não muda). Quadro RGB (h × w × 3, uint8 ou
+    uint16): a imagem do texto é pré-multiplicada pelo alfa e composta "por cima" em float32 e arredondada;
+    quadro RGBA (alfa direto): `textrender.paste`. Mesma entrada → mesmos bits."""
+    import numpy as np
+    out = np.array(frame, copy=True)
+    if out.ndim != 3 or out.shape[2] not in (3, 4):
+        return out
+    if out.shape[2] == 4:
+        textrender.paste(out, ov.image, ov.x, ov.y)
+        return out
+    img = ov.image
+    h, w = out.shape[:2]
+    ax, ay = ov.x + img.left, ov.y + img.top
+    x0, y0, x1, y1 = max(0, ax), max(0, ay), min(w, ax + img.width), min(h, ay + img.height)
+    if x0 >= x1 or y0 >= y1:
+        return out
+    peak = np.float32(65535.0 if out.dtype == np.uint16 else 255.0)
+    src_peak = np.float32(65535.0 if img.rgba.dtype == np.uint16 else 255.0)
+    src = img.rgba[y0 - ay:y1 - ay, x0 - ax:x1 - ax].astype(np.float32) / src_peak
+    a = src[..., 3:4]
+    cur = out[y0:y1, x0:x1].astype(np.float32) / peak
+    res = src[..., :3] * a + cur * (np.float32(1.0) - a)   # pré-multiplicado, "por cima"
+    out[y0:y1, x0:x1] = np.round(np.clip(res, 0.0, 1.0) * peak).astype(out.dtype)
+    return out
+
+
+@dataclass(frozen=True)
+class Burn:
+    """Legendas gravadas no vídeo, para `frame.Recipe.burn`: o modo ("copia", antes do look, ou "digital",
+    depois), o estilo e as legendas em segundos da saída (a sequência). `apply` desenha as do instante t num
+    quadro; a prévia, "Salvar quadro", a exportação e a linha de comando usam a mesma receita.
+
+    Desenhar precisa de uma `QGuiApplication` (`textrender.ensure_app`, criada na thread principal)."""
+    mode: str
+    style: SubStyle
+    cues: tuple[Cue, ...]
+
+    @classmethod
+    def make(cls, mode: str, style: SubStyle, cues: Iterable[Cue]) -> "Burn | None":
+        """None quando não há o que gravar (modo "nao" ou sem legendas)."""
+        cues = tuple(c for c in sort_cues(cues) if c.end > c.start + EPS and c.text)
+        if mode not in BURN_MODES or mode == "nao" or not cues:
+            return None
+        return cls(mode, style, cues)
+
+    @classmethod
+    def for_project(cls, subs: "Subtitles | None", seq=None, path: str | None = None,
+                    mode: str | None = None) -> "Burn | None":
+        """Das legendas do projeto no tempo da montagem (`Subtitles.timeline_cues`), no modo do projeto (ou no
+        modo dado)."""
+        if subs is None:
+            return None
+        return cls.make(subs.burn if mode is None else mode, subs.style, subs.timeline_cues(seq, path))
+
+    def to_json(self) -> dict[str, Any]:
+        """O que o trabalho de exportação guarda (`ExportJob.burn`, "legendas_gravadas" no JSON)."""
+        return {"modo": self.mode, "estilo": self.style.to_json(), "legendas": [c.to_json() for c in self.cues]}
+
+    @classmethod
+    def from_json(cls, d: Any) -> "Burn | None":
+        if not isinstance(d, dict) or not d:
+            return None
+        mode = d.get("modo") if isinstance(d.get("modo"), str) else "nao"
+        return cls.make(mode, SubStyle.from_json(d.get("estilo")), cues_from_json(d.get("legendas")))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_starts", [c.start for c in self.cues])   # para achar as ativas com bisect
+        object.__setattr__(self, "_longest", max((c.end - c.start for c in self.cues), default=0.0))
+
+    def active(self, t: float) -> list[Cue]:
+        """As legendas na tela no instante t (as mesmas de `active`, sem percorrer a lista toda)."""
+        hi = bisect.bisect_right(self._starts, t + EPS)
+        lo = bisect.bisect_left(self._starts, t - self._longest - EPS)
+        return [c for c in self.cues[lo:hi] if c.start - EPS <= t < c.end - EPS]
+
+    def overlay(self, t: float, width: int, height: int, depth: int = 8) -> Overlay | None:
+        """A legenda do instante t (s) desenhada para um quadro de `width` × `height` (None: nada na tela)."""
+        act = self.active(t)
+        if not act:
+            return None
+        textrender.ensure_app()
+        return draw(act, t, self.style, width, height, depth)
+
+    def apply(self, frame, t: float):
+        """O quadro com a legenda do instante t por cima; sem legenda nesse instante, o mesmo objeto."""
+        import numpy as np
+        h, w = frame.shape[:2]
+        ov = self.overlay(t, w, h, 16 if frame.dtype == np.uint16 else 8)
+        return frame if ov is None else composite(frame, ov)

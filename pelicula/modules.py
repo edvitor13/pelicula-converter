@@ -67,7 +67,7 @@ MODULES: tuple[Module, ...] = (
               "parte em Componentes."), "edicao", BETA, requires=("corridorkey",)),
     Module("legendas_auto", N_("Legendas automáticas"),
            N_("Transcreve a fala dos vídeos neste computador, sem enviar nada para a internet, e cria as legendas "
-              "com o tempo de cada palavra; também acha os silêncios e corta trechos pelo texto. Precisa do "
+              "com o tempo de cada palavra; com as palavras, dá para cortar trechos pelo texto. Precisa do "
               "whisper.cpp, de um modelo de fala e do Silero VAD, baixados à parte em Componentes."),
            "edicao", BETA, requires=("whisper_cpp", "silero_vad")),
     Module("medidor_som", N_("Medidor de som"),
@@ -83,20 +83,26 @@ MODULES: tuple[Module, ...] = (
     Module("transicoes", N_("Transições de película"),
            N_("Queima da película, emenda com clarão, ponta, íris, fusão ótica e exposição, mais empurrar, cortina "
               "e zoom, no menu do corte e no inspetor do clipe."), "edicao"),
+    Module("legendas", N_("Legendas"),
+           N_("Painel e faixa de legendas: escrever e acertar o tempo, estilos prontos (YouTube, Reels e Cinema), "
+              "importar e exportar .srt e .vtt e gravar as legendas no vídeo."), "edicao"),
+    Module("silencios", N_("Remover silêncios"),
+           N_("Acha os trechos sem fala no som da montagem e tira todos de uma vez, depois que você revisa a "
+              "lista."), "edicao"),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
-_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som"}
-_CRIADOR = _CRIADOR | {"transicoes"}  # 1.5
+_CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios"}
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
 # nunca são ligados por perfil, só um a um.
 PROFILES: tuple[tuple[str, str, str, frozenset[str]], ...] = (
     ("simples", N_("Simples"), N_("O essencial: looks prontos, cortes simples e exportação."), _SIMPLES),
-    ("criador", N_("Criador"), N_("Para vídeos de redes sociais e YouTube: defeitos, LUTs, scopes e medidor de som."),
+    ("criador", N_("Criador"), N_("Para vídeos de redes sociais e YouTube: defeitos, LUTs, scopes, medidor de som, "
+                                  "transições de película, legendas e remover silêncios."),
      _CRIADOR),
     ("cinema", N_("Cinema"), N_("Tudo do Criador mais o Laboratório, o scan, a curva, LUTs e o plugin do DaVinci."),
      _CINEMA),
@@ -182,8 +188,9 @@ def visible(settings) -> list[Module]:
     return [m for m in MODULES if m.status == ESTAVEL or tests or is_enabled(settings, m.id)]
 
 
-def used_by(values: dict | None = None, sequence=None) -> set[str]:
-    """Módulos que um look (valores) ou uma montagem usam de fato.
+def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[str]:
+    """Módulos que um look (valores), uma montagem ou as legendas do projeto (`subtitles.Subtitles`, também
+    lidas de `sequence.subtitles`) usam de fato.
 
     Serve para avisar ao abrir um projeto ou aplicar um preset que depende de um módulo
     desligado. A renderização não muda: o aviso só oferece religar a ferramenta.
@@ -201,4 +208,7 @@ def used_by(values: dict | None = None, sequence=None) -> set[str]:
         used.add("edicao")
     if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
         used.add("transicoes")
+    for subs in (subtitles, getattr(sequence, "subtitles", None)):
+        if subs is not None and not subs.is_empty():
+            used.add("legendas")
     return used

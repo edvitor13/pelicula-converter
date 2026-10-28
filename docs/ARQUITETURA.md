@@ -30,6 +30,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 22. [Base da 1.5: receita do quadro, formato 3, chaves, transparência e clipes sem arquivo](#22-base-da-15-receita-do-quadro-formato-3-chaves-transparência-e-clipes-sem-arquivo)
 23. [Texto, legendas e transcrição](#23-texto-legendas-e-transcrição)
 26. [Transições de película](#26-transições-de-película)
+27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 
 ---
 
@@ -114,6 +115,9 @@ Três ideias guiam o projeto:
 | `pelicula/subtitles.py` | Legendas: `Word`, `Cue`, `Subtitles` (presas ao arquivo ou da sequência), `map_cues` pela montagem, `cues_from_words`, SRT/WebVTT, estilos prontos (`STYLES`), faixa na exportação (`export_file`, `encoder_args`) e `overlay` gravado no vídeo. Sem Qt (seção 23.2). |
 | `pelicula/transcribe.py` | Transcrição local pelo whisper.cpp (módulo Beta `legendas_auto`): WAV 16 kHz, linha de comando, progresso, volta para a CPU, leitura do JSON, `transcribe_file`/`transcribe_sequence`, `make_job`. Sem Qt (seção 23.3). |
 | `pelicula/silences.py` | Silêncios (níveis RMS/pico por janela, limiar relativo, duração mínima, folga) e "Cortar pelo texto" (palavras escolhidas → trechos do arquivo). Sem Qt (seção 23.4). |
+| `pelicula/subedit.py` | Edição das legendas no tempo da montagem, guardadas no tempo do arquivo (`items`, `Mapping`, mover, aparar, dividir, juntar, busca e troca, importar, `remove_time`, `words`). Sem Qt (seção 27.1). |
+| `pelicula/subauto.py` | Legendas automáticas da montagem: trechos de cada arquivo com som (`spans_for`), vários trechos num trabalho da fila (`make_job`), junção (`apply`). Sem Qt (seção 27.5). |
+| `pelicula/rangecut.py` | Tirar trechos de tempo de todas as faixas destravadas (`remove_ranges`, `to_frames`), silêncios no som mixado (`find_silences`) e cortar pelo texto (`text_ranges`). Sem Qt (seção 27.6). |
 | `pelicula/corridorkey.py` | CorridorKey (módulo Beta `recorte_ia`): requisitos da placa (`nvidia-smi`, capacidade 8.0+), linha de comando e progresso do `infer.py`, `run()` num processo separado com pasta parcial, aviso de entrada (log/HDR/RAW). Sem Qt (seção 21). |
 | `pelicula/data/` | Dados lidos em tempo de execução: listas travadas com hash e manifestos de código das receitas (`corridorkey/`); fontes OFL (`fontes/`, com `SOURCE.txt`). Gerados por `uv pip compile` e `tools/gerar_manifesto.py`. |
 | `pelicula/jobs.py` | Fila de tarefas em segundo plano: `Job`, `JobQueue` (limite por tipo, GPU 1 por vez), `shared()` (seção 18). |
@@ -141,6 +145,8 @@ Três ideias guiam o projeto:
 | `pelicula/ui/scopes.py` | Medidores: histograma, forma de onda, parada RGB e vetorscópio. |
 | `pelicula/ui/sequence_dialog.py` / `resolve_dialog.py` | Resolução e fps da sequência; instalação do plugin do DaVinci. |
 | `pelicula/ui/corridorkey_dialog.py` | Janela não modal "Recorte por IA (CorridorKey)": arquivo, opções e o trabalho GPU na fila (seção 21). |
+| `pelicula/ui/subtitles_ui.py` / `subtitle_lane.py` / `subtitles_panel.py` / `subtitle_style.py` | Legendas na janela: `SubtitleController` (seleção e edições, um passo de desfazer cada), `SubtitlesUI` (botão, menu, painel encaixável, receita com a legenda gravada), faixa Legendas da linha do tempo, painel e editor de estilo (seção 27.2). |
+| `pelicula/ui/transcribe_dialog.py` / `silences_dialog.py` / `text_cut.py` | "Gerar legendas" (Beta, não modal, pela fila), "Remover silêncios" (análise na fila, lista para revisar) e a aba "Cortar pelo texto" (seções 27.5 e 27.6). |
 | `pelicula/sequence.py` | Quadros da sequência: `grab` (acesso direto), `SequenceReader` (em ordem, com pré-abertura), `media_info`; geradores dos clipes sem arquivo (`RENDERERS`, `render_source`, seção 22.5). |
 | `pelicula/audiomix.py` | Mixagem do som da sequência com o ffmpeg (`render_mix`), fades nas emendas e transição de som, chave da prévia (`mix_key`), forma de onda (`peaks`), som do arquivo para o medidor (`decode_wav`, `WavReader`). |
 | `pelicula/ui/main_window.py` | Janela principal, carregamento de quadros, reprodução, presets, LUTs, exportação, atalhos, checagem de dependências. |
@@ -2131,3 +2137,186 @@ prévia = exportação (FFV1 16 bits, `grab`, `SequenceReader` em 8 bits) e as t
 BASE (`tests/transicoes_base.py` + `tests/data/transicoes_base.json`: camadas, uniforms e o texto do `CLIP`
 em qualquer máquina; os hashes dos quadros na placa em que foram gravados). `tests/transicoes_ui_cases.py`:
 inspetor, menu do corte, desfazer, faixa travada, desenho e o módulo na janela.
+
+## 27. Legendas na interface, transcrição e silêncios
+
+A interface da 1.5 em cima do núcleo da [seção 23](#23-texto-legendas-e-transcrição): editar as legendas na
+linha do tempo e num painel, estilos, gravar no vídeo, entregar na exportação, gerar pela fala e tirar trechos
+da montagem (silêncios e pelo texto). Os módulos sem Qt ficam em `subedit.py`, `subauto.py` e `rangecut.py`; a
+interface em `ui/subtitles_ui.py` (controle e integração com a janela), `ui/subtitle_lane.py`,
+`ui/subtitles_panel.py`, `ui/subtitle_style.py`, `ui/transcribe_dialog.py`, `ui/silences_dialog.py` e
+`ui/text_cut.py`. Módulos: `legendas` (painel, faixa, estilos, arquivos, gravar), `legendas_auto` (Beta: gerar
+pela fala e cortar pelo texto) e `silencios` (remover silêncios).
+
+### 27.1 Editar no tempo da montagem, guardar no tempo do arquivo (`subedit.py`)
+
+O que aparece na tela é `Subtitles.timeline_cues(seq)` (tempo da sequência); o que fica guardado são as
+legendas presas aos arquivos (`sources`, segundos do arquivo) e as da sequência (`cues`). `subedit` faz a ponte:
+
+- `subtitles.mapped(seq, caminho, legendas)` dá, para cada pedaço na tela, o índice da legenda e o `Mapping`
+  do clipe que a mostra (`to_seq`/`to_file`: `t0 + (a_arquivo − a) / velocidade`); `map_cues` usa o mesmo
+  caminho, então `subedit.items(seq, subs)` é exatamente o que a exportação desenha;
+- `Item(ref, cue, mapping)`: `Ref(caminho | None, índice)` aponta para a legenda guardada; `fixed` = da
+  sequência (sem clipe por baixo);
+- `set_times`/`move` voltam pelo `Mapping` (só a borda que mudou; arrastar numa parte com velocidade 2× anda
+  o dobro no arquivo), `split` (palavras pelo meio, senão o texto na proporção), `merge` (só da mesma lista),
+  `set_text` (mantém os tempos das palavras quando o número delas não muda; texto vazio apaga), `add`
+  (presa ao arquivo sob o cursor, `anchor_at`: o som do arquivo, senão o vídeo de cima; imagens, geradores e
+  congelados não), `delete`, `matches`/`replace_all`, `import_cues` (num arquivo ou na sequência; trocar o
+  que já há no tempo ou juntar);
+- `remove_time(subs, a, b)`: as legendas **da sequência** acompanham uma remoção de tempo (as presas aos
+  arquivos acompanham sozinhas, pelos clipes);
+- `words(itens)`: as palavras na tela, em ordem (a transcrição do "Cortar pelo texto").
+
+Toda mudança passa por `TimelineModel.edit_subtitles(fn)` (um passo de desfazer, aviso `"subtitles"`). Os
+números do JSON das legendas são sempre `float` (`float(round(x, 6))`): o histórico compara instantâneos em
+texto, e `1` × `1.0` faria o desfazer criar um passo novo e perder o refazer (`tests/test_legendas_projeto.py`).
+O `SubtitleController` (Qt, sem widgets) guarda a seleção como pares (caminho, legenda) e a reencontra por
+igualdade depois de cada mudança ou desfazer; `apply(fn)` é o caminho único das edições da interface.
+
+**Desfazer nos dois modos**: as legendas estão no histórico da montagem. Ctrl+Z / Ctrl+Y vão para o modelo no
+modo Edição ou quando o foco está no painel (`SubtitlesUI.owns_focus`, também no modo Película); o painel tem
+ainda os botões Desfazer/Refazer.
+
+### 27.2 Faixa, painel e estilos
+
+- **Faixa "Legendas"** (`SubtitleLane`): desenhada pela `TimelineCanvas` por ganchos pequenos (`canvas.lane`:
+  `paint`, `paint_header`, `press`/`move`/`release`/`double_click`/`key` no começo de cada evento, e a altura
+  em `content_height`). Fica embaixo da última faixa, só quando o módulo está ligado **e** há legendas ou o
+  painel está aberto: sem legendas a geometria da linha do tempo não muda (`rows()` não muda nunca). Clicar
+  escolhe e leva o cursor; arrastar o corpo move, as bordas aparam (ímã nos cortes, no cursor e nas outras
+  legendas, `canvas.snap_frame`; Shift inverte); duplo clique edita (ou cria no vazio); Delete/Enter/Esc com
+  a faixa ativa; menu com Nova legenda aqui, Editar o texto, Dividir no cursor, Juntar com a próxima e
+  Excluir. As da sequência aparecem tracejadas.
+- **Painel** (`SubtitlesPanel`, num `QDockWidget` "SubtitlesDock", Ctrl+Shift+L ou o botão Legendas da
+  barra): lista (Início/Fim/Texto) com busca e "Substituir todas", editor com início, fim, itálico, negrito,
+  texto (aplica ao sair ou com Ctrl+Enter) e as palavras com o tempo de cada uma; Nova (Ctrl+Shift+Enter),
+  Dividir, Juntar, Excluir (Delete), Importar, Exportar, "Gerar…" (Beta); "Gravar no vídeo" (o modo do
+  projeto) e "Ver na prévia".
+- **Estilos** (`StyleEditor`, aba Estilo): parte de um pronto (`youtube`, `reels`, `cinema`) e ajusta fonte,
+  peso, maiúsculas, tamanho, cor, contorno, caixa, sombra, posição, margem, largura, palavras por tela e
+  destaque; cada mudança é um passo de desfazer e a prévia mostra na hora. `SubStyle.to_json` grava
+  `"destaque": null` quando o destaque foi desligado num pronto que tem (senão voltaria ao abrir). O aviso de
+  letras que a fonte não tem usa `textrender.missing_chars` sobre o texto de todas as legendas.
+
+### 27.3 Gravadas no vídeo: `frame.Recipe.burn`
+
+`subtitles.Burn(mode, style, cues)` (congelado, JSON `{"modo", "estilo", "legendas"}`) é o campo `burn` da
+receita do quadro, então prévia, "Salvar quadro", exportação, `pelicula-cli quadro` e `exportar` passam pelo
+mesmo código (`Recipe.look`):
+
+1. `"copia"`: `burn.apply(img, t)` por cima da **imagem montada, antes do look**, no tamanho do conteúdo — a
+   legenda ganha grão, halação, tremor e a cor da película, como numa cópia de cinema legendada. Se o quadro
+   tem legenda, a imagem é enviada de novo à GPU (a prévia reaproveita o envio quando só os ajustes mudam);
+2. o look (ou nada, no modo Edição sem película);
+3. `"digital"`: `burn.apply(out, t)` por cima do **quadro final**, no tamanho da saída (com o encaixe) — nítida.
+
+`t = índice / fps` da saída. `Burn.active(t)` acha a legenda por busca binária (`_starts` + a mais longa);
+`overlay` desenha com `textrender` (precisa da `QGuiApplication`: a exportação chama `textrender.ensure_app()`
+quando há legenda gravada). `subtitles.composite(quadro, overlay)` devolve uma cópia: em RGB **pré-multiplica**
+(`rgb·a + fundo·(1 − a)` em float32, arredondado; a saída do `textrender` é alfa direto), em RGBA usa
+`textrender.paste`. Sem legenda no instante, `apply` devolve o mesmo objeto (nada é copiado).
+
+Na janela, `MainWindow.frame_recipe(depth, full)` pede `SubtitlesUI.burn(full)`: o modo do projeto; na prévia,
+sem gravar e com "Ver na prévia", as legendas aparecem como "digital" (como num player) — o "Salvar quadro"
+(`full`) sai como a exportação. O `Burn` fica guardado enquanto a lista de itens (mesma identidade), o modo e o
+estilo não mudam. Desligar o módulo `legendas` não muda o que sai (a renderização não consulta `modules`).
+
+### 27.4 Na exportação e no terminal
+
+`subtitles.DELIVERY = ("nao", "faixa", "copia", "digital", "srt", "vtt")`; a janela de exportação mostra a
+linha "Legendas" só quando o projeto tem legendas, começando por `default_delivery(subs, recipiente)` (o modo
+gravado do projeto; senão a faixa, se ele pede e o recipiente guarda; senão o `.srt`). "Faixa" fica desligada
+nos recipientes sem faixa (`EMBED_CODECS`: MP4/MOV `mov_text`, MKV `srt`, WebM `webvtt`) e vira `.srt` ao
+lado. `delivery_fields(escolha, subs, legendas, recipiente)` dá os três campos do `ExportJob`:
+
+| Campo | JSON do trabalho | Quando |
+|---|---|---|
+| `subtitles` | `"legendas"` (já existia) | faixa no arquivo |
+| `burn` | `"legendas_gravadas"` (`Burn.to_json`) | gravada na cópia ou digital |
+| `subtitle_file` | `"legendas_arquivo"` (`sidecar_payload`: legendas, idioma, `formato`) | `.srt`/`.vtt` ao lado |
+
+As chaves novas só vão para o JSON quando usadas (trabalhos antigos na fila abrem iguais). O arquivo ao lado
+(`write_sidecar`: mesmo nome do vídeo, tempos do trecho exportado por `relative`) é gravado **depois** de o
+vídeo ser confirmado no lugar; se falhar, o trabalho termina em erro com a mensagem "O vídeo foi exportado, mas
+não foi possível gravar o arquivo de legendas". A prévia da janela de exportação passa o mesmo `Burn`
+(`preview_frame(..., burn=)`); `measure_speed` não desenha legendas.
+
+`pelicula-cli exportar --legendas {projeto,nao,faixa,copia,digital,srt,vtt}` (padrão `projeto` =
+`default_delivery`) e `pelicula-cli quadro` (grava como o projeto pede) usam `cli.project_subtitles(projeto)`
+— a sequência inteira, mesmo quando ela é só o arquivo.
+
+### 27.5 Legendas automáticas (`subauto.py`, `ui/transcribe_dialog.py`)
+
+Módulo Beta `legendas_auto`. A janela "Gerar legendas" não é modal (pode ser fechada; o trabalho segue na
+fila e o fim chega pela `JobBridge`):
+
+- **o que ouvir**: no modo Película com o arquivo sem montagem, o arquivo inteiro (`whole_file`); senão a
+  montagem inteira ou os clipes escolhidos (`spans_for(seq, ids)`): para cada arquivo com som que a montagem
+  mostra (os clipes de `subtitles.clips_for`, sem faixas mudas, com a velocidade de cada clipe), a união dos
+  trechos usados, juntando os que ficam a menos de `GAP` = 30 s. **Decisão**: transcrever por arquivo, não a
+  mixagem da sequência (`transcribe_sequence`), porque as legendas saem presas aos arquivos e acompanham os
+  cortes que vierem depois — cortar um silêncio depois de gerar não desalinha nada;
+- idioma (`languages()`: detectar, português, inglês, espanhol, francês, italiano, alemão, japonês), modelo
+  Rápido/Preciso com o tamanho do download, caracteres por linha e linhas (`Options.max_chars`/`max_lines`),
+  placa de vídeo; preferências em `transcricao/*` do QSettings;
+- faltando o motor, o modelo ou o VAD (`transcribe.missing`), a janela diz o quê e "Abrir Componentes…" abre
+  Configurações › Componentes — nada é baixado sem o usuário pedir;
+- `subauto.make_job(opções, título, trechos)`: um trecho é o próprio `transcribe.make_job` (resultado em
+  lista); vários rodam um depois do outro no mesmo trabalho (mesma chave `legendas_auto` e mesmo tipo
+  GPU/CPU; um Cancelar para tudo; "Trecho N de M • etapa" no progresso; a volta da placa para o processador é
+  a de `transcribe.run_engine`);
+- no fim, `subauto.apply(doc, resultados)` (`transcribe.merge` de cada um: troca só o que havia nos trechos
+  ouvidos) dentro de **um** `edit_subtitles`; resultados de arquivos que não estão mais na sequência (outro
+  projeto aberto no meio) não entram. O painel abre; a mensagem diz quantas, o idioma e onde rodou.
+
+### 27.6 Remover silêncios e cortar pelo texto (`rangecut.py`)
+
+Os dois terminam em `TimelineModel.remove_ranges(quadros)` → `rangecut.remove_ranges(seq, quadros)` dentro de
+`Sequence.keep_main()`, **um** passo de desfazer:
+
+- cada trecho [a, b) sai de **todas as faixas destravadas** e o que vem depois encosta (do último trecho para o
+  primeiro, para os quadros de antes não mudarem): clipe dentro some; que cruza o começo perde o fim; que
+  cruza o fim perde o começo (`src_in`, `shift_head`: as chaves ficam com a imagem); que atravessa vira duas
+  partes encostadas (`Sequence._cut`, emenda seca, as partes da direita ligadas entre si; um ligado inteiro
+  depois do corte vai com elas, como em `Sequence.split`). Som e imagem continuam em sincronia;
+- marcadores depois andam junto, os de dentro ficam no ponto do corte; as legendas da sequência seguem por
+  `subedit.remove_time`, as presas aos arquivos pelos clipes; faixas travadas não mudam (ficam fora de
+  sincronia por escolha do usuário, como numa exclusão com fechamento);
+- `to_frames(seq, segundos)` arredonda para dentro (nunca tira um quadro a mais do que o trecho pede).
+
+**Remover silêncios** (módulo estável `silencios`, botão "Silêncios" na barra da linha do tempo,
+`TimelineEditor.btn_silences`): `find_silences(seq, ids, limiar, duração mínima, folga)` mixa o som da montagem
+(`audiomix.render_mix`, o mesmo da exportação) — com clipes escolhidos, numa cópia só com o som deles, e os
+silêncios ficam dentro deles — e mede com `silences.levels` + `detect` (limiar relativo ao volume do trecho).
+Tudo mudo não vira "cortar tudo": erro "Não há som neste trecho da montagem". A janela roda a análise na fila
+(`jobs.CPU`, chave `silencios`, numa cópia da sequência), lista os trechos com caixas de marcar (clicar leva o
+cursor), mostra o total e "Tirar os marcados" aplica. **Decisão**: módulo próprio e estável, fora do
+`legendas_auto`, porque não precisa de transcrição nem de componente baixado.
+
+**Cortar pelo texto** (aba do painel, com `legendas_auto` e o modo Edição ligados, `ui/text_cut.py`): o texto
+corrido das palavras na tela (`silences.transcript`; o HTML das marcas não muda as posições do texto puro);
+selecionar e "Marcar" (de novo desmarca), clicar numa palavra leva o cursor; "Cortar os marcados" →
+`text_ranges` (`silences.text_cut_ranges`, segundos da sequência) → `remove_ranges`. Só legendas com o tempo
+de cada palavra (as da transcrição) aparecem; qualquer mudança limpa as marcas.
+
+### 27.7 Testes
+
+- `tests/test_subedit.py`: itens = `timeline_cues`, cortes, velocidade e aparo, âncora, texto, tempo,
+  dividir/juntar, busca e troca, importação, `remove_time`, `map_cues` depois de edições e cortes;
+- `tests/test_legendas_projeto.py`: JSON estável no vaivém (o desfazer não perde o refazer);
+- `tests/test_legendas_gravadas.py`: `Burn` (JSON, busca), composição pré-multiplicada (8/16 bits, RGBA, fora do
+  quadro), escolhas da exportação, arquivo ao lado (tempo do trecho, erro de gravação); na GPU, "cópia" =
+  look(imagem + legenda) e "digital" = look + legenda; exportação (FFV1 16 bits) = `preview_frame` = `quadro`
+  do terminal, nos dois modos; `exportar` com faixa (o ffprobe vê `subrip` no MKV) e `--legendas srt`;
+- `tests/test_subauto.py`: trechos (cortes, perto/longe, velocidade, seleção, faixa muda, sem som, imagem e
+  gerador), fila com o `whisper-cli` falso (um trecho, vários com a placa falhando, cancelar, componentes
+  faltando);
+- `tests/test_rangecut.py`: arredondamento, todas as faixas e sincronia, trechos sobrepostos, faixa travada,
+  chaves/marcadores/legendas, corte J/L, cortar pelo texto, silêncios de verdade (tom, silêncio, tom pelo
+  ffmpeg) na montagem e só nos clipes escolhidos, tudo mudo;
+- `tests/legendas_ui_cases.py` (subprocesso *offscreen*, `tests/test_legendas_ui.py`): controle, faixa (altura,
+  clique, arrasto, aparo, ímã, duplo clique, Delete), painel, estilos, janela de exportação, janela principal
+  (botão, painel, faixa, módulo desligado, receita com a legenda, desfazer com o foco no painel), "Gerar
+  legendas" (módulo, componentes faltando, fila, um passo de desfazer, erros, cancelar, outro projeto),
+  "Remover silêncios" e "Cortar pelo texto".
