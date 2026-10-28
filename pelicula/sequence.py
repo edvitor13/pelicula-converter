@@ -28,6 +28,9 @@ from . import media, timeline
 
 @dataclass
 class LayerImage:
+    """Imagem de uma camada: h × w × 3 (RGB) ou, de fontes com transparência, h × w × 4 com o RGB
+    **pré-multiplicado** pelo alfa (`media.FrameReader(alpha=True)`), uint8 ou uint16. `editshaders.CLIP`
+    desfaz a multiplicação depois de amostrar e usa o alfa como cobertura."""
     layer: timeline.Layer
     image: np.ndarray
 
@@ -82,13 +85,13 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
         mtime = os.path.getmtime(src.path)
     except OSError:
         mtime = 0.0
-    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq)
+    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq, src.has_alpha)
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
         if hit is not None:
             _CACHE.move_to_end(key)
             return hit
-    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq)
+    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq, alpha=src.has_alpha)
     img.setflags(write=False)
     with _CACHE_LOCK:
         _CACHE[key] = img
@@ -126,7 +129,7 @@ class _ClipStream:
     def _open(self, f: int) -> None:
         self.close()
         self.reader = media.FrameReader(self.src.to_info(), self.w, self.h, self.depth, max(0, f), None,
-                                        hq=self.hq, perf=self.perf)
+                                        hq=self.hq, perf=self.perf, alpha=self.src.has_alpha)
         self.next = max(0, f)
 
     def get(self, f: int, jump: int) -> np.ndarray:
@@ -219,7 +222,7 @@ class SequenceReader:
         img = self._images.get(key)
         if img is None:
             try:
-                img = media.grab_frame(src.to_info(), 0, w, h, self.depth, hq=self.hq)
+                img = media.grab_frame(src.to_info(), 0, w, h, self.depth, hq=self.hq, alpha=src.has_alpha)
             except Exception as exc:  # noqa: BLE001
                 self._errors.append(str(exc))
                 img = _blank(w, h, self.depth)

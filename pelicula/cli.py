@@ -224,7 +224,7 @@ def project_sequence(proj):
     seq = timeline.Sequence.from_json(proj.sequence)
     if not seq.clips:
         return None
-    trivial = seq.is_trivial()
+    trivial = seq.direct_file()  # um arquivo com transparência passa pela montagem
     if trivial and (not proj.media_path or os.path.abspath(trivial) == os.path.abspath(proj.media_path)):
         return None
     missing = sequence.missing_sources(seq)
@@ -249,11 +249,24 @@ def _source_and_values(path: str, preset, sets):
             return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
         if not proj.media_path or not os.path.exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        return proj.media_path, values, pid or proj.preset_id, proj, None
+        return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
     if not os.path.exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
-    return path, values, pid, None, None
+    return path, values, pid, None, alpha_sequence(path)
+
+
+def alpha_sequence(path: str):
+    """Arquivo com transparência aberto direto: a montagem só com ele (o alfa sai sobre o fundo da montagem,
+    como na janela; lido direto, o alfa se perderia). None para os outros arquivos."""
+    from . import media, timeline
+    try:
+        info = media.probe(path)
+    except Exception:  # noqa: BLE001 — quem chamou mostra o erro ao ler o arquivo
+        return None
+    if not info.has_alpha:
+        return None
+    return timeline.Sequence.for_source(timeline.Source.from_info(info))
 
 
 def _need_ffmpeg() -> None:

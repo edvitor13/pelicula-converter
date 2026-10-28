@@ -137,11 +137,12 @@ def is_identity(seq: timeline.Sequence, clip: timeline.Clip, tex_w: int, tex_h: 
 
 
 def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex_h: int, canvas_w: int,
-                  canvas_h: int, neutral: bool = False) -> tuple[dict[str, Any], bool]:
+                  canvas_h: int, neutral: bool = False, tex_alpha: bool = False) -> tuple[dict[str, Any], bool]:
     """Uniforms de uma camada. Devolve (uniforms, precisa_de_mipmap).
 
     `neutral=True` mantém enquadramento, opacidade e transições, mas desliga cor e detalhe (a imagem
-    "original" da comparação no modo Edição).
+    "original" da comparação no modo Edição). `tex_alpha`: a imagem tem 4 canais (RGBA pré-multiplicado de
+    uma fonte com transparência, `sequence.LayerImage`).
     """
     clip = layer.clip
     # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
@@ -156,6 +157,7 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
         "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
+        "u_tex_alpha": 1 if tex_alpha else 0,
         "u_blend": BLEND_IDS.get(v["mesclagem"], 0),
         "u_fade": tuple(float(c) for c in layer.fade_color) + (float(layer.fade),),
     }
@@ -206,9 +208,15 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
 
 # ------------------------------------------------------------------ ajuste automático
 def _to_float(img: np.ndarray, step: int = 4) -> np.ndarray:
-    sub = np.asarray(img)[::step, ::step, :3]
+    sub = np.asarray(img)[::step, ::step]
     scale = 65535.0 if sub.dtype == np.uint16 else 255.0 if sub.dtype == np.uint8 else 1.0
-    return sub.reshape(-1, 3).astype(np.float64) / scale
+    px = sub.reshape(-1, sub.shape[-1]).astype(np.float64) / scale
+    if px.shape[1] == 4:  # transparência (RGBA pré-multiplicado): só a parte quase opaca, com a cor do clipe
+        keep = px[px[:, 3] >= 0.5]
+        if len(keep):
+            return keep[:, :3] / keep[:, 3:4]
+        px = px[:, :3]
+    return px[:, :3]
 
 
 def _snap(v: float, key: str) -> float:

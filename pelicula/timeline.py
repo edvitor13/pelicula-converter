@@ -128,7 +128,8 @@ class Source:
                    has_audio=info.has_audio, pix_fmt=info.pix_fmt, bit_depth=info.bit_depth, codec=info.codec,
                    profile=info.profile, bitrate=info.bitrate, color_space=info.color_space,
                    color_range=info.color_range, color_transfer=info.color_transfer,
-                   color_primaries=info.color_primaries, audio_codec=info.audio_codec, container=info.container)
+                   color_primaries=info.color_primaries, audio_codec=info.audio_codec, container=info.container,
+                   has_alpha=bool(getattr(info, "has_alpha", False)))
 
     def to_info(self):
         """`media.MediaInfo` equivalente (para o FrameReader e o grab_frame)."""
@@ -138,7 +139,8 @@ class Source:
             frames=max(1, self.frames), duration=self.duration, pix_fmt=self.pix_fmt, bit_depth=self.bit_depth,
             codec=self.codec, profile=self.profile, bitrate=self.bitrate, color_space=self.color_space,
             color_range=self.color_range, color_transfer=self.color_transfer, color_primaries=self.color_primaries,
-            has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image)
+            has_audio=self.has_audio, audio_codec=self.audio_codec, container=self.container, is_image=self.is_image,
+            has_alpha=self.has_alpha)
 
     def to_json(self) -> dict[str, Any]:
         out = {"caminho": self.path, "largura": self.width, "altura": self.height, "fps": self.fps_str,
@@ -985,6 +987,8 @@ class Sequence:
         src = self.sources.get(v.src)
         if src is None or v.start != 0 or v.src_in > EPS or not editparams.is_neutral(VIDEO, v.values) or v.keys:
             return None
+        if not src.is_file:  # clipe sem arquivo (gerador, texto…): não há o que ler direto
+            return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
             return None
         if not src.is_image and v.dur != src.frames:
@@ -1001,6 +1005,14 @@ class Sequence:
         elif src.has_audio:
             return None
         return src.path
+
+    def direct_file(self) -> str | None:
+        """O arquivo que o modo Película lê direto, sem montar: o de `is_trivial`, se ele não tem transparência
+        (com alfa a imagem passa pela montagem e sai sobre o fundo dela; lido direto, o alfa se perderia). Um
+        arquivo com alfa sem mudanças continua "sem edição" para o projeto (`is_trivial`)."""
+        path = self.is_trivial()
+        src = self.sources.get(path) if path else None
+        return path if src is not None and not src.has_alpha else None
 
     def copy(self) -> "Sequence":
         return Sequence.from_json(self.to_json())

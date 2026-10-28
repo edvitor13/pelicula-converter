@@ -60,10 +60,21 @@ def test_look_plans_are_the_same(opened, name):
     assert now[name]["look"] == ref[name]["look"]
 
 
+# Uniforms do shader CLIP que vieram depois da 1.4, com o valor que deixa tudo como era (sem transparência).
+NEW_UNIFORMS = {"u_tex_alpha": 0}
+
+
+def _without_new(u: dict) -> dict:
+    for k, neutral in NEW_UNIFORMS.items():
+        assert u.get(k, neutral) == neutral, k
+    return {k: v for k, v in u.items() if k not in NEW_UNIFORMS}
+
+
 @pytest.mark.ffmpeg
 def test_edit_layers_and_uniforms_are_the_same(opened):
     ref, now, *_ = opened
     a, b = ref["edicao"]["montagem"], now["edicao"]["montagem"]
+    b = {**b, "uniforms": [_without_new(u) for u in b["uniforms"]]}
     assert (b["canvas"], b["duration"], b["legal"], b["trivial"]) == (a["canvas"], a["duration"], a["legal"],
                                                                       a["trivial"])
     assert len(b["frames"]) == len(a["frames"])

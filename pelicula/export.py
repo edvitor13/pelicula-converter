@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -765,9 +765,12 @@ class ExportJob:
     def from_dict(cls, d: dict) -> "ExportJob":
         """Trabalho novo (aguardando, do começo) a partir de `to_dict()`. ValueError se faltar algo."""
         names = {f.name for f in fields(media.MediaInfo)}
+        # Campos novos do MediaInfo têm padrão (has_alpha, 1.5): uma fila guardada por uma versão anterior abre.
+        needed = {f.name for f in fields(media.MediaInfo) if f.default is MISSING and f.default_factory is MISSING}
         raw = d.get("midia") if isinstance(d, dict) else None
-        if not isinstance(raw, dict) or not names <= set(raw) or not d.get("saida"):
+        if not isinstance(raw, dict) or not needed <= set(raw) or not d.get("saida"):
             raise ValueError(_("Trabalho de exportação incompleto."))
+        names &= set(raw)
         seq = None
         if isinstance(d.get("edicao"), dict):
             from . import timeline

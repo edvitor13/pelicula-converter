@@ -1209,7 +1209,7 @@ class MainWindow(QMainWindow):
             return False
         if self.mode == "edicao" or self.file_info is None:
             return True
-        return seq.is_trivial() != self.file_info.path
+        return seq.direct_file() != self.file_info.path  # arquivo com transparência: sempre pela montagem
 
     def _refresh_source(self, reset: bool = False) -> None:
         """Escolhe a fonte da prévia (arquivo ou montagem) e atualiza linha do tempo, rótulos e som."""

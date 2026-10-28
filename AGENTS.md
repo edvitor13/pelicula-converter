@@ -51,7 +51,8 @@ pelicula/
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
-  media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders
+  media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
+                             transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph)
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
                              alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
@@ -84,7 +85,8 @@ pelicula/
   loudness.py                loudness BS.1770-4 / EBU R128 em numpy (ponderação K, M/S/I, LRA, true peak)
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
-  editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela) e a saída da tela
+  editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
+                             pré-multiplicada, alfa na cobertura) e a saída da tela
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem)
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
@@ -146,7 +148,8 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
    que a exportação grava). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
    `Layer.values` (imagem e volume do som) e `keyframes.look_values_at()` pela receita (look); nunca leia
-   `clip.values` para desenhar um quadro.
+   `clip.values` para desenhar um quadro. Imagem de camada com 4 canais é sempre RGBA **pré-multiplicado**
+   (transparência: `media.FrameReader(alpha=)` e geradores de `sequence.RENDERERS`); com 3 canais, opaca.
 2. **Determinismo por quadro.** Tudo o que muda no tempo deriva do **número do quadro**, do fps e
    das **sementes** (`_hash`/`_vnoise` em `look.py`; `pcg`/`rnd`/`vnoise2` no GLSL). Proibido
    `random`, `np.random`, `time.time()` ou estado acumulado entre quadros no caminho de render. O
@@ -286,6 +289,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
+| `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
@@ -579,6 +583,10 @@ Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem 
 
 - Procura: `media.configure()` (pasta escolhida → `deps.ffmpeg_dir()` → `PATH` → pastas comuns).
   Depois de trocar o ffmpeg chame `media.configure()` (que limpa o cache de codificadores).
+- Transparência: não troque os filtros de `media._alpha_graph` sem rodar `tests/test_alpha.py`. O swscale
+  converte yuva420p de 8 bits errado para formatos com alfa (cores trocadas no VP9 com alfa); por isso a cor
+  vai por `rgb24` e o alfa à parte (`alphaextract`/`alphamerge`). O VP8/VP9 com alfa precisa do `libvpx` antes
+  do `-i` (`alpha_decoder`).
 - Download: `deps.SOURCES` (URL do pacote + URL do hash). Toda fonte nova precisa de hash publicado e
   conferido antes de instalar; nada de executar instaladores, nada de pedir administrador. A extração
   passa por `deps.extract_archive()` (recusa caminhos que saem da pasta).

@@ -252,3 +252,65 @@ def test_animated_clip_in_edit_mode_is_the_exported_frame(win, sample_video):
     if live is not None and live.layers:
         layer = live.layers[0].layer
         assert layer.values == win.model.seq.values_at(layer.clip, live.frame)
+
+
+# ------------------------------------------------------------------ transparência
+ALPHA_W, ALPHA_H = 320, 180
+
+
+def _alpha_media(ffmpeg, folder):
+    """Um PNG com alfa (transparente à esquerda, rampa, opaco à direita) e um PNG de cor sólida para a V1."""
+    import subprocess
+    png, bg = os.path.join(folder, "recorte.png"), os.path.join(folder, "fundo_azul.png")
+    geq = "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X,100),0,if(lt(X,220),255*(X-100)/120,255))'"
+    for out, args in ((png, ["-f", "lavfi", "-i", f"testsrc2=s={ALPHA_W}x{ALPHA_H}:d=0.1", "-vf", geq]),
+                      (bg, ["-f", "lavfi", "-i", f"color=c=0x3366CC:s={ALPHA_W}x{ALPHA_H}"])):
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-nostdin", *args, "-frames:v", "1", out], check=True)
+    return png, bg
+
+
+def test_alpha_file_through_the_bin_and_a_drop_on_the_timeline(win, ffmpeg_ok, tmp_path):
+    png, bg = _alpha_media(ffmpeg_ok, str(tmp_path))
+    win.set_mode("edicao")
+    win._loading = True
+    try:
+        win.model.set_sequence(tl.Sequence(width=ALPHA_W, height=ALPHA_H, fps_str="24/1"))
+    finally:
+        win._loading = False
+    win._sources = {}
+    win.bin.clear()
+    win._refresh_source(reset=True)
+    win._bin_files([png])  # soltos na Mídia
+    assert win._sources[png].has_alpha and win.bin._sources[png].has_alpha
+    win.drop_on_timeline([bg], 0, tl.VIDEO, 0)
+    win.drop_on_timeline([png], 0, tl.VIDEO, 1)  # da Mídia para a V2
+    seq = win.model.seq
+    assert seq.sources[png].has_alpha and not seq.sources[bg].has_alpha
+    assert sorted(c.track for c in seq.clips if c.kind == tl.VIDEO) == [0, 1]
+    win._set_edit_film(False)
+    win._refresh_source(reset=True)
+    win.cur = None
+    win.request_frame(0)
+    assert pump(lambda: win.cur is not None), "o quadro da montagem não carregou"
+    img = win.still_frame(0)
+    assert np.array_equal(img, _export_frame(win, 0)), "a prévia e a exportação veem a mesma transparência"
+    top = next(c for c in seq.clips if c.src == png)
+    win.model.set_clip_values(top.id, {**top.values, "opacidade": 0.0})  # só o fundo, pelo mesmo caminho
+    win._refresh_source()
+    fundo = win.still_frame(0)
+    assert np.array_equal(img[:, :95], fundo[:, :95]), "o fundo aparece igual onde o recorte é transparente"
+    assert not np.array_equal(img[:, 230:], fundo[:, 230:]), "o recorte cobre o fundo onde é opaco"
+    seq = win.model.seq
+    d = seq.to_json()
+    assert any(s.get("alfa") for s in d["fontes"]) and "alfa" in seq.features()
+
+
+def test_alpha_file_opened_in_film_mode_is_composed_over_the_background(win, ffmpeg_ok, tmp_path):
+    png, _bg = _alpha_media(ffmpeg_ok, str(tmp_path))
+    _open(win, png)
+    assert win.file_info.has_alpha and win.model.seq.sources[png].has_alpha
+    assert win.src_seq is not None, "com alfa a prévia passa pela montagem (lido direto o alfa se perderia)"
+    assert win._seq_json() is None, "sem edições o projeto continua simples"
+    assert np.array_equal(win.still_frame(0), _export_frame(win, 0))
+    p = win._make_project()
+    assert p.sequence is None and p.media_path == png

@@ -294,12 +294,13 @@ class Engine:
     # ------------------------------------------------------------ modo Edição
     def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:
         h, w = img.shape[:2]
+        comps = 4 if img.ndim == 3 and img.shape[2] == 4 else 3  # 4 = RGBA pré-multiplicado (transparência)
         dtype = "f1" if img.dtype == np.uint8 else "nu2"
         t = self._clip_tex.get(slot)
-        if t is None or t.size != (w, h) or t.dtype != dtype:
+        if t is None or t.size != (w, h) or t.dtype != dtype or t.components != comps:
             if t is not None:
                 t.release()
-            t = self.ctx.texture((w, h), 3, dtype=dtype, alignment=1)
+            t = self.ctx.texture((w, h), comps, dtype=dtype, alignment=1)
             t.repeat_x = False
             t.repeat_y = False
             self._clip_tex[slot] = t
@@ -326,7 +327,8 @@ class Engine:
         for slot, li in enumerate(frame_layers.layers):
             img = li.image
             tex = self._clip_texture(slot, img)
-            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral)
+            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral,
+                                              tex_alpha=tex.components == 4)
             if mip:
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
                 tex.build_mipmaps()
