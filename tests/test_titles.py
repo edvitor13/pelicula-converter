@@ -317,3 +317,26 @@ def test_title_hashes():
         got[name] = hashlib.sha256(img.tobytes()).hexdigest()[:20]
         assert np.array_equal(img, titles.draw(t, el, TOTAL, FPS, W, H, depth))  # mesmo pedido, mesma imagem
     assert got == HASHES, f"hashes novos: {got}"
+
+
+# ------------------------------------------------------------------ módulo "Títulos e geradores"
+def test_module_is_stable_in_creator_cinema_and_all():
+    from pelicula import modules
+    m = modules.get("titulos_geradores")
+    assert m.status == modules.ESTAVEL and m.group == "edicao"
+    sets = {pid: ids for pid, _n, _d, ids in modules.PROFILES}
+    assert "titulos_geradores" not in sets["simples"]
+    assert all("titulos_geradores" in sets[p] for p in ("criador", "cinema", "tudo"))
+
+
+def test_used_by_sees_titles_and_generators():
+    from pelicula import modules
+    seq, src, clip = seq_with_title()
+    assert {"edicao", "titulos_geradores"} <= modules.used_by(None, seq)
+    plain = tl.Sequence(width=W, height=H, fps_str="24/1")
+    video = tl.Source("C:/v/a.mp4", W, H, 24.0, "24/1", 48, 2.0, has_audio=False)
+    plain.insert_media(video, at=0)
+    plain.split(12)
+    assert "titulos_geradores" not in modules.used_by(None, plain)
+    plain.insert_media(generators.new_source("cor", plain), at=48)
+    assert "titulos_geradores" in modules.used_by(None, plain)

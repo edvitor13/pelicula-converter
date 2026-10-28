@@ -89,6 +89,7 @@ class GeneratorEditor(QWidget):
         self.model = model
         self.path: str | None = None
         self.gen: generators.Generator | None = None
+        self.allowed = True  # módulo "Títulos e geradores" ligado (`set_allowed`)
         self._pages: dict[str, tuple[ParamStore, SectionCard]] = {}
         self._loading = False
         self.lay = QVBoxLayout(self)
@@ -126,8 +127,8 @@ class GeneratorEditor(QWidget):
         self.gen = gen
         for gid, (_store, card) in self._pages.items():
             card.setVisible(gen is not None and gid == gen.id)
-        self.setVisible(gen is not None)
-        if gen is None:
+        self.setVisible(gen is not None and self.allowed)
+        if gen is None or not self.allowed:
             return
         store, card = self._page(gen)
         card.setVisible(True)
@@ -139,6 +140,11 @@ class GeneratorEditor(QWidget):
             finally:
                 self._loading = False
         self._visibility(gen, src.data, card)
+
+    def set_allowed(self, on: bool) -> None:
+        """Módulo "Títulos e geradores" desligado: o painel não aparece (o clipe continua igual na imagem)."""
+        self.allowed = bool(on)
+        self.sync()
 
     def _visibility(self, gen: generators.Generator, data: dict, card: SectionCard) -> None:
         vals = generators.values(gen, data)

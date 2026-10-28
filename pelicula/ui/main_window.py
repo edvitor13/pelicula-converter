@@ -1503,7 +1503,7 @@ class MainWindow(QMainWindow):
         self.model.insert_media(src, at=at, vtrack=track)
         self.statusBar().showMessage(_("{nome} na faixa V{faixa}: ajuste no inspetor, à direita.").format(
             nome=src.name, faixa=track + 1), 6000)
-        if src.kind == titles.KIND and self.title_editor.isVisible():
+        if src.kind == titles.KIND and not self.title_editor.isHidden():
             self.title_editor.focus_text()  # já digitar o texto do título
 
     def _free_video_track(self, at: int, dur: int) -> int:
@@ -3111,6 +3111,7 @@ class MainWindow(QMainWindow):
             "curva": [self.curve_label, self.curve_switch],
             "medidor_som": [self.meter],
             "davinci": [self.act_resolve_sep, self.act_resolve],
+            "titulos_geradores": [self.bin.btn_new],  # e os editores no inspetor (`apply_modules`)
         }
 
     def apply_modules(self) -> None:
@@ -3136,6 +3137,8 @@ class MainWindow(QMainWindow):
         self._meter_source()  # desligado: nem decodifica nem mede
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
+        for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
+            editor.set_allowed("titulos_geradores" in on)
         self._check_modules()
 
     def _check_modules(self) -> None:

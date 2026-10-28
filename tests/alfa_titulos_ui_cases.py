@@ -361,3 +361,31 @@ def test_about_lists_the_font_licenses(win, monkeypatch):
     monkeypatch.setattr(main_window.QMessageBox, "about", lambda parent, title, text: seen.append(text))
     win.about()
     assert seen and "SIL Open Font License 1.1" in seen[0] and "Atkinson Hyperlegible" in seen[0]
+
+
+# ------------------------------------------------------------------ módulo "Títulos e geradores"
+def test_module_off_hides_the_tools_but_not_the_picture(win):
+    from pelicula import modules, sequence
+    win.new_project()
+    win.set_mode("edicao")
+    _menu_action(win, "titulo").trigger()
+    seq = win.model.seq
+    clip = next(c for c in seq.clips if seq.sources[c.src].kind == "texto")
+    before = sequence.grab(seq, clip.start + 30, 96, 54, 8).layers[0].image
+    assert not win.title_editor.isHidden()
+    try:
+        modules.set_enabled(win.settings, "titulos_geradores", False)
+        win.settings_changed.emit("modulos")
+        APP.processEvents()
+        assert win.bin.btn_new.isHidden() and win.title_editor.isHidden() and win.gen_editor.isHidden()
+        win.model.selection = [clip.id]
+        win.model.selectionChanged.emit()
+        assert win.title_editor.isHidden()  # o clipe escolhido não traz o editor de volta
+        assert "titulos_geradores" in modules.used_by(None, seq)  # o aviso oferece religar
+        after = sequence.grab(win.model.seq, clip.start + 30, 96, 54, 8).layers[0].image
+        assert np.array_equal(before, after)  # a imagem não muda
+    finally:
+        modules.set_enabled(win.settings, "titulos_geradores", True)
+        win.settings_changed.emit("modulos")
+        APP.processEvents()
+    assert not win.bin.btn_new.isHidden() and not win.title_editor.isHidden()

@@ -133,6 +133,7 @@ class TitleEditor(QWidget):
         self.model = model
         self.path: str | None = None
         self._loading = False
+        self.allowed = True  # módulo "Títulos e geradores" ligado (`set_allowed`)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
@@ -197,8 +198,8 @@ class TitleEditor(QWidget):
         elif self._text_timer.isActive() and src.path == self.path:
             return  # digitando: o texto ainda vai para o projeto
         self.path = src.path if src is not None else None
-        self.setVisible(src is not None)
-        if src is None:
+        self.setVisible(src is not None and self.allowed)
+        if src is None or not self.allowed:
             return
         self._loading = True
         try:
@@ -215,6 +216,11 @@ class TitleEditor(QWidget):
         finally:
             self._loading = False
         self._update_warning(src.data)
+
+    def set_allowed(self, on: bool) -> None:
+        """Módulo "Títulos e geradores" desligado: o editor não aparece (o título continua igual na imagem)."""
+        self.allowed = bool(on)
+        self.sync()
 
     def _update_warning(self, data: dict) -> None:
         miss = titles.missing(data)
