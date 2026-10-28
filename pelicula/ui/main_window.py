@@ -1292,6 +1292,10 @@ class MainWindow(QMainWindow):
         if kind == "markers":
             # Marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução).
             self._sync_film_markers()
+        elif kind == "subtitles":
+            # Legendas também não: só o desenho delas gravado no vídeo muda (`frame.Recipe.burn`).
+            self._uploaded = None
+            self.render_now()
         elif kind == "values" and self.src_seq is not None and self._use_sequence():
             self.src_seq = self.model.seq.copy()
             if self._compose_current():
@@ -2464,10 +2468,11 @@ class MainWindow(QMainWindow):
     def _seq_json(self) -> dict | None:
         """A montagem para o projeto, ou None se ela é só o arquivo inteiro (projeto simples, formato 1).
 
-        Marcadores contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
+        Marcadores e legendas contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
+        subs = seq.subtitles is not None and not seq.subtitles.is_default()
         if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
-                             and not seq.markers):
+                             and not seq.markers and not subs):
             return None
         return seq.to_json()
 
@@ -2966,7 +2971,8 @@ class MainWindow(QMainWindow):
         """Aviso discreto se o look ou a montagem usam módulos desligados (a imagem não muda)."""
         seq = self.model.seq
         edited = bool(seq.clips) and not (self.file_info is not None and seq.is_trivial() == self.file_info.path)
-        off = modules.used_by(self.store.values, seq if edited else None) - modules.enabled_ids(self.settings)
+        off = (modules.used_by(self.store.values, seq if edited else None, subtitles=seq.subtitles)
+               - modules.enabled_ids(self.settings))
         new = off - self._notice_muted  # fechado nesta sessão: só volta com um módulo novo na lista
         self.module_notice.show_modules(sorted(off) if new and not self.preview_fullscreen else [])
 

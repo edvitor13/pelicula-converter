@@ -373,6 +373,10 @@ class Subtitles:
     def is_empty(self) -> bool:
         return not self.cues and not any(self.sources.values())
 
+    def is_default(self) -> bool:
+        """Nada a guardar: sem legendas e com as opções padrão (o bloco "legendas" fica fora do projeto)."""
+        return self.is_empty() and self.to_json() == Subtitles().to_json()
+
     def relink(self, old: str, new: str) -> None:
         """O arquivo mudou de lugar (`Sequence.relink`): as legendas dele vão junto."""
         if old in self.sources and old != new:

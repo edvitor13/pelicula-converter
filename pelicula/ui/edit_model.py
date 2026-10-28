@@ -8,6 +8,8 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 - "settings": resolução, fps, fundo, fades curtos nas emendas de som ou faixa principal magnética;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
+- "subtitles": só as legendas mudaram (`edit_subtitles`; a montagem e o som não mudam, só o desenho das
+  legendas gravadas no vídeo), inclusive ao desfazer/refazer;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
@@ -34,6 +36,13 @@ AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo 
 def _without_markers(seq: Sequence) -> dict[str, Any]:
     d = seq.to_json()
     d.pop("marcadores", None)
+    return d
+
+
+def _without_subtitles(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("legendas", None)
+    d.pop("formato", None)  # o recurso "legendas" muda o formato do bloco
     return d
 
 
@@ -82,9 +91,11 @@ class TimelineModel(QObject):
         if seq is None:
             return
         only_markers = _without_markers(seq) == _without_markers(self.seq)
+        only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
         self.seq = seq
         self._filter_selection()
-        self.changed.emit("markers" if only_markers else "*")  # desfazer um marcador não recarrega a prévia
+        # Desfazer um marcador ou uma legenda não recarrega a prévia.
+        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles else "*")
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -550,6 +561,29 @@ class TimelineModel(QObject):
 
     def kinds_selected(self) -> set[str]:
         return {c.kind for c in self.selected_clips()}
+
+    # ------------------------------------------------------------ legendas (subtitles.py, ui/subtitles_ui.py)
+    def subtitles(self):
+        """As legendas da sequência (`subtitles.Subtitles`; um bloco vazio, fora da sequência, se ainda não há)."""
+        from .. import subtitles as sb
+        return self.seq.subtitles if self.seq.subtitles is not None else sb.Subtitles()
+
+    def edit_subtitles(self, fn) -> bool:
+        """Uma mudança nas legendas num passo de desfazer: `fn(subs)` mexe no `subtitles.Subtitles` da sequência
+        (devolver False desiste). Avisa com "subtitles": a montagem e o som não mudam. True se mudou algo."""
+        from .. import subtitles as sb
+        self.commit()
+        before = self.seq.subtitles
+        subs = sb.Subtitles.from_json(before.to_json()) if before is not None else sb.Subtitles()
+        if fn(subs) is False:
+            return False
+        if before is not None and subs.to_json() == before.to_json():
+            return False
+        if before is None and subs.is_default():
+            return False
+        self.seq.subtitles = subs
+        self._done("subtitles")
+        return True
 
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]
