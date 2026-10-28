@@ -1,4 +1,5 @@
-"""Janela "Configurar a sequência": resolução, quadros por segundo, cor do fundo e emendas de som."""
+"""Janela "Configurar a sequência": resolução, quadros por segundo, cor do fundo, emendas de som e faixa
+principal magnética."""
 
 from __future__ import annotations
 
@@ -95,6 +96,13 @@ class SequenceDialog(QDialog):
                                 "para não estalar. Não vale onde o clipe já tem fade ou transição, nem num corte "
                                 "que não foi mexido (o som continua igual)."))
         form.addRow(_("Som"), self.micro)
+        self.magnet = QCheckBox(_("Faixa principal magnética"))
+        self.magnet.setChecked(bool(seq.magnetic))
+        self.magnet.setToolTip(_("A faixa V1 nunca fica com buracos: apagar, aparar ou mover um clipe dela fecha o "
+                                 "espaço, e alongar empurra o resto. Títulos, imagens e sons nas outras faixas "
+                                 "acompanham a imagem da V1 que estava embaixo deles. Desligada, a linha do tempo "
+                                 "é livre."))
+        form.addRow(_("Montagem"), self.magnet)
         lay.addLayout(form)
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.button(QDialogButtonBox.StandardButton.Ok).setText(_("Aplicar"))
@@ -143,6 +151,9 @@ class SequenceDialog(QDialog):
 
     def micro_fade(self) -> bool:
         return self.micro.isChecked()
+
+    def magnetic(self) -> bool:
+        return self.magnet.isChecked()
 
 
 __all__ = ["SequenceDialog", "RESOLUTIONS", "fps_label"]

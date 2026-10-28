@@ -17,7 +17,7 @@ from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QInputDialog, QMenu, QScrollBar, QSizePolicy,
                                QToolButton, QToolTip, QVBoxLayout, QWidget)
 
@@ -58,6 +58,7 @@ class TimelineCanvas(QWidget):
     seekRequested = Signal(int)
     scrubbing = Signal(bool)
     filesDropped = Signal(list, int, str, int)
+    filesInserted = Signal(list, int, str, int)   # soltos no modo inserir: o resto anda para a direita
     viewChanged = Signal()
     clipActivated = Signal(str)
     toolChanged = Signal(str)
@@ -73,12 +74,13 @@ class TimelineCanvas(QWidget):
         self.outp: int | None = None
         self.tool = "select"      # "select" | "blade"
         self.snap = True
+        self.insert_mode = False  # soltar/mover empurra o resto (inserir) em vez de cobrir; Ctrl inverte
         self.follow = True        # rola sozinho para acompanhar o cursor na reprodução
         self.peaks_provider: Callable[[str], np.ndarray | None] | None = None
         self._drag: dict | None = None
         self._hover_x: float | None = None
         self._snap_x: float | None = None
-        self._drop: tuple[float, str, int] | None = None
+        self._drop: tuple[float, str, int, bool] | None = None
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -285,8 +287,11 @@ class TimelineCanvas(QWidget):
                        _("Arraste vídeos, imagens ou músicas para cá\nou use Importar e \"Adicionar à linha do tempo\"."))
         if self._drop is not None:
             x = self._drop[0]
-            p.setPen(QPen(QColor(theme.ACCENT_HI), 2))
-            p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
+            if self._drop[3]:
+                self._paint_insert_mark(p, x, h)
+            else:
+                p.setPen(QPen(QColor(theme.ACCENT_HI), 2))
+                p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
         if self.tool == "blade" and self._hover_x is not None and self._hover_x >= HEADER_W:
             p.setPen(QPen(QColor(theme.DANGER), 1, Qt.PenStyle.DashLine))
             p.drawLine(QPointF(self._hover_x, RULER_H), QPointF(self._hover_x, h))
@@ -484,15 +489,32 @@ class TimelineCanvas(QWidget):
         d = self._drag
         if not d or d.get("mode") not in ("move", "left", "right") or not d.get("active"):
             return set()
-        return set(d["group"])
+        return set(self._drag_ids(d))
+
+    @staticmethod
+    def _drag_ids(d: dict) -> list[str]:
+        """Clipes que o arraste muda: o grupo, ou só o clipe ao aparar com Alt (corte J/L)."""
+        return [d["clip"]] if d.get("solo") and d["mode"] != "move" else list(d["group"])
+
+    def _paint_insert_mark(self, p: QPainter, x: float, h: float) -> None:
+        """Ponto de inserção: linha cheia com setas para a direita (o que vem depois vai andar)."""
+        p.setPen(QPen(QColor(theme.ACCENT_HI), 2))
+        p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(theme.ACCENT_HI))
+        for y in (RULER_H + 2, h - 12):
+            p.drawPolygon(QPolygonF([QPointF(x + 2, y), QPointF(x + 10, y + 5), QPointF(x + 2, y + 10)]))
 
     def _paint_ghosts(self, p: QPainter) -> None:
         d = self._drag
         if not d or not d.get("active") or d.get("mode") not in ("move", "left", "right"):
             return
+        ghosts = self.ghosts()
+        if d["mode"] == "move" and d.get("insert") and ghosts:
+            self._paint_insert_mark(p, self.frame_to_x(min(g[0] for g in ghosts.values())), self.height())
         p.setPen(QPen(QColor(theme.ACCENT_HI), 1.5, Qt.PenStyle.DashLine))
         p.setBrush(QColor(240, 166, 58, 40))
-        for cid, (start, dur, kind, track) in self.ghosts().items():
+        for cid, (start, dur, kind, track) in ghosts.items():
             tr = self.track_rect(kind, track)
             if tr is None:
                 # Faixa nova (arrastou acima da última): desenha logo acima/abaixo.
@@ -511,7 +533,7 @@ class TimelineCanvas(QWidget):
         if not d or d.get("mode") not in ("move", "left", "right"):
             return {}
         out = {}
-        for cid in d["group"]:
+        for cid in self._drag_ids(d):
             c = self.seq.find(cid)
             if c is None:
                 continue
@@ -697,6 +719,11 @@ class TimelineCanvas(QWidget):
             p.setFont(theme.font(9, theme.QFont.Weight.DemiBold, title=True))
             p.drawText(QRectF(12, y + 6, 40, BTN), Qt.AlignmentFlag.AlignVCenter, tr.name)
             btns = self.header_buttons(kind, idx, y, rh)
+            if kind == VIDEO and idx == 0 and self.seq.magnetic:
+                # Faixa principal magnética (Configurar a sequência): ímã no lugar do botão "solo" do áudio.
+                r = QRectF(HEADER_W - 16 - 3 * BTN, y + 6, BTN, BTN).toRect()
+                p.drawPixmap(r, icons.icon("magnet", theme.ACCENT_HI if not tr.locked else theme.FAINT,
+                                           16).pixmap(QSize(16, 16)))
             states = {"lock": ("lock" if tr.locked else "unlock", tr.locked),
                       "mute": ((("eye_off" if tr.muted else "eye") if kind == VIDEO
                                 else ("mute" if tr.muted else "volume")), tr.muted)}
@@ -837,6 +864,8 @@ class TimelineCanvas(QWidget):
             if abs(pos.x() - d["press_x"]) < 3 and (mode != "move" or same_row):
                 return
         d["active"] = True
+        d["insert"] = self.insert_for(e.modifiers())
+        d["solo"] = bool(e.modifiers() & Qt.KeyboardModifier.AltModifier)
         exclude = set(d["group"])
         raw = self.x_to_frame(pos.x()) - d["press_frame"]
         o_start, o_dur, _o_track = d["orig"][d["clip"]]
@@ -900,16 +929,28 @@ class TimelineCanvas(QWidget):
             return
         cid = d["clip"]
         o_start, o_dur, o_track = d["orig"][cid]
+        mods = e.modifiers()
+        solo = bool(mods & Qt.KeyboardModifier.AltModifier) or bool(d.get("solo"))
         if mode == "move":
             if d["delta"] or d["track"] != o_track:
-                self.model.move_clip(cid, o_start + d["delta"], d["track"] if d["track"] != o_track else None)
+                self.model.move_clip(cid, o_start + d["delta"], d["track"] if d["track"] != o_track else None,
+                                     insert=self.insert_for(mods))
         elif mode == "left":
             if d["delta"]:
-                self.model.trim_start(cid, o_start + d["delta"])
+                self.model.trim_start(cid, o_start + d["delta"], solo=solo)
         elif mode == "right":
             if d["delta"]:
-                self.model.trim_end(cid, o_start + o_dur + d["delta"])
+                self.model.trim_end(cid, o_start + o_dur + d["delta"], solo=solo)
         self.update()
+
+    def insert_for(self, mods) -> bool:
+        """Inserir (empurrar) ou sobrescrever: o modo da barra, invertido enquanto o Ctrl está apertado."""
+        return self.insert_mode != bool(mods & Qt.KeyboardModifier.ControlModifier)
+
+    def set_insert_mode(self, on: bool) -> None:
+        if self.insert_mode != bool(on):
+            self.insert_mode = bool(on)
+            self.toolChanged.emit(self.tool)
 
     def mouseDoubleClickEvent(self, e):
         pos = e.position()
@@ -1037,6 +1078,7 @@ class TimelineCanvas(QWidget):
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())
+            self.split_edit_actions(menu, clip, pos.x())
             menu.addSeparator()
             menu.addAction(_("Remover espaços da faixa"), lambda: self._close_gaps(clip.kind, clip.track))
         else:
@@ -1093,6 +1135,48 @@ class TimelineCanvas(QWidget):
         elif got < AUDIO_TRANSITION_S - 1e-3:
             QToolTip.showText(where, _("Transição de {s} s: é o que sobra do arquivo além do corte.").format(
                 s=fmt_decimal(got, 2)), self)
+
+    def split_edit_actions(self, menu: QMenu, clip: Clip, x: float) -> list:
+        """"Corte J" / "Corte L" / "Alinhar o som com a imagem" no corte entre dois pares imagem + som ligados
+        mais perto do clique (a metade da esquerda do clipe escolhe o corte do começo). Nada se ali não há um
+        corte assim (`Sequence.cut_pair`)."""
+        from ..timeline import SPLIT_EDIT_S
+        seq = self.seq
+        r = self.clip_rect(clip)
+        near_left = r is None or x < r.center().x()
+        left = next((s for s in (near_left, not near_left) if seq.cut_pair(clip, s) is not None), None)
+        if left is None:
+            return []
+        _pv, _pa, nv, na = seq.cut_pair(clip, left)
+        off = na.start - nv.start
+        n = seq.frames_for(SPLIT_EDIT_S)
+        acts = []
+        for text, want, on in ((_("Corte J (o som do próximo entra antes da imagem)"), -n, off < 0),
+                               (_("Corte L (o som continua depois do corte da imagem)"), n, off > 0)):
+            a = menu.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(on)
+            a.triggered.connect(lambda _on=False, w=want: self.split_edit(clip.id, left, w))
+            acts.append(a)
+        a = menu.addAction(_("Alinhar o som com o corte da imagem"))
+        a.setEnabled(off != 0)
+        a.triggered.connect(lambda _on=False: self.split_edit(clip.id, left, 0))
+        acts.append(a)
+        return acts
+
+    def split_edit(self, cid: str, left: bool, offset: int) -> None:
+        got = self.model.split_edit(cid, left, offset)
+        if got is None or got == offset or not offset:
+            return
+        r = self.clip_rect(self.seq.find(cid)) if self.seq.find(cid) is not None else None
+        where = self.mapToGlobal(r.topLeft().toPoint()) if r is not None else self.mapToGlobal(self.rect().center())
+        if got == 0:
+            QToolTip.showText(where, _("Sem sobra de som além do corte: o corte J precisa de um pedaço do arquivo "
+                                       "antes do começo do clipe da direita; o corte L, depois do fim do da "
+                                       "esquerda."), self)
+        else:
+            QToolTip.showText(where, _("Coube {s} s: é o que sobra do arquivo além do corte.").format(
+                s=fmt_decimal(abs(got) / self.seq.fps, 2)), self)
 
     def _close_gaps(self, kind: str, idx: int) -> None:
         self.model.close_gaps(kind, idx)
@@ -1170,7 +1254,7 @@ class TimelineCanvas(QWidget):
         if not (e.mimeData().hasFormat(MIME_SOURCE) or e.mimeData().hasUrls()):
             return
         f, kind, idx = self.drop_target(e.position())
-        self._drop = (self.frame_to_x(f), kind, idx)
+        self._drop = (self.frame_to_x(f), kind, idx, self.insert_for(e.modifiers()))
         e.acceptProposedAction()
         self.update()
 
@@ -1184,7 +1268,8 @@ class TimelineCanvas(QWidget):
         if paths:
             f, kind, idx = self.drop_target(e.position())
             e.acceptProposedAction()
-            self.filesDropped.emit(paths, f, kind, idx)
+            sig = self.filesInserted if self.insert_for(e.modifiers()) else self.filesDropped
+            sig.emit(paths, f, kind, idx)
         self.update()
 
 
@@ -1194,6 +1279,7 @@ class TimelineEditor(QWidget):
     seekRequested = Signal(int)
     scrubbing = Signal(bool)
     filesDropped = Signal(list, int, str, int)
+    filesInserted = Signal(list, int, str, int)
     clipActivated = Signal(str)
 
     def __init__(self, model: TimelineModel, parent=None):
@@ -1220,6 +1306,7 @@ class TimelineEditor(QWidget):
         c.seekRequested.connect(self.seekRequested)
         c.scrubbing.connect(self.scrubbing)
         c.filesDropped.connect(self.filesDropped)
+        c.filesInserted.connect(self.filesInserted)
         c.clipActivated.connect(self.clipActivated)
         c.viewChanged.connect(self._sync_bars)
         c.toolChanged.connect(self._sync_tools)
@@ -1272,7 +1359,11 @@ class TimelineEditor(QWidget):
                                   checkable=True)
         self.btn_snap.setChecked(c.snap)
         self.btn_snap.toggled.connect(self._set_snap)
-        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap):
+        self.btn_insert = self._btn("insert_mode", _("Inserir: soltar ou mover um clipe empurra o que vem depois, "
+                                                     "em vez de cobrir. Ctrl inverte ao arrastar."), checkable=True)
+        self.btn_insert.setChecked(c.insert_mode)
+        self.btn_insert.toggled.connect(c.set_insert_mode)
+        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_insert):
             hl.addWidget(b)
         hl.add_spacing(8)
         self.btn_marker = self._btn("marker", _("Adicionar marcador no cursor (M)"), _("Marcador"))
@@ -1339,10 +1430,11 @@ class TimelineEditor(QWidget):
     def _sync_tools(self, tool: str) -> None:
         self.btn_select.setChecked(tool == "select")
         self.btn_blade.setChecked(tool == "blade")
-        if self.btn_snap.isChecked() != self.canvas.snap:
-            self.btn_snap.blockSignals(True)
-            self.btn_snap.setChecked(self.canvas.snap)
-            self.btn_snap.blockSignals(False)
+        for b, on in ((self.btn_snap, self.canvas.snap), (self.btn_insert, self.canvas.insert_mode)):
+            if b.isChecked() != on:
+                b.blockSignals(True)
+                b.setChecked(on)
+                b.blockSignals(False)
 
     def _sync_actions(self) -> None:
         m = self.model

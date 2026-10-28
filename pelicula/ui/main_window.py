@@ -14,7 +14,7 @@ from pathlib import Path
 import dataclasses
 
 import numpy as np
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Qt, QTimer, QSettings, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QObject, QSize, Qt, QTimer, QSettings, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QFontMetrics, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
@@ -298,6 +298,10 @@ class MainWindow(QMainWindow):
         self.outp: int | None = None
         self.loop = True
         self.playing = False
+        self._play_rate = 1      # reprodução para a frente: 1× (com som) ou 2/4/8× (L de novo; sem som)
+        self._rev_rate = 0       # reprodução para trás (J): 0 = parada; 1/2/4/8×, sem som
+        self._rev_t0 = self._rev_f0 = self._rev_last = 0
+        self._k_held = False     # K apertado: J/L andam um quadro
         self.preview_q = str(self.settings.value("preview_quality", "720"))
         self.preview_fullscreen = False
         self._state_before_full = Qt.WindowState.WindowNoState
@@ -376,6 +380,9 @@ class MainWindow(QMainWindow):
         self.play_timer = QTimer(self)
         self.play_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.play_timer.timeout.connect(self._play_tick)
+        self.rev_timer = QTimer(self)   # J: pede ao carregador o quadro do relógio andando para trás
+        self.rev_timer.setInterval(40)
+        self.rev_timer.timeout.connect(self._reverse_tick)
         self.queue_timer = QTimer(self)
         self.queue_timer.setInterval(500)
         self.queue_timer.timeout.connect(self._queue_tick)
@@ -441,6 +448,7 @@ class MainWindow(QMainWindow):
         self.bin.addRequested.connect(self.add_to_timeline)
         self.bin.removeRequested.connect(self._bin_remove)
         self.bin.filesDropped.connect(self._bin_files)
+        self.bin.placeRequested.connect(self.place_at_cursor)
         self.left_stack = QStackedWidget()
         self.left_stack.addWidget(self.looks)
         self.left_stack.addWidget(self.bin)
@@ -451,6 +459,7 @@ class MainWindow(QMainWindow):
         self.tl_editor = TimelineEditor(self.model)
         self.tl_editor.seekRequested.connect(self.seek)
         self.tl_editor.filesDropped.connect(self.drop_on_timeline)
+        self.tl_editor.filesInserted.connect(lambda p, f, k, t: self.drop_on_timeline(p, f, k, t, insert=True))
         self.tl_editor.set_peaks_provider(self._peaks_for)
         self.tl_editor.setVisible(False)
         self.center_split.addWidget(self.tl_editor)
@@ -712,6 +721,11 @@ class MainWindow(QMainWindow):
         self.time_label.setMinimumWidth(QFontMetrics(theme.mono_font()).horizontalAdvance("00:00:00:00  /  00:00:00:00") + 8)
         th.addSpacing(6)
         th.addWidget(self.time_label)
+        self.shuttle_label = QLabel("")   # J/K/L: velocidade da reprodução rápida ou para trás
+        self.shuttle_label.setObjectName("Muted")
+        self.shuttle_label.setToolTip(_("Reprodução rápida ou para trás (J/K/L), sem som. K ou Espaço para."))
+        self.shuttle_label.setVisible(False)
+        th.addWidget(self.shuttle_label)
         self.timeline = Timeline()
         self.timeline.seek.connect(self.seek)
         tr.scrub, tr.top_row, tr.row, tr.scrub_index = self.timeline, top, th, th.count()
@@ -722,7 +736,7 @@ class MainWindow(QMainWindow):
         self.btn_out.clicked.connect(self.mark_out)
         self.btn_clear = self._flat("clear", _("Limpar entrada e saída (X)"))
         self.btn_clear.clicked.connect(self.clear_marks)
-        self.btn_loop = self._flat("loop", _("Repetir (L)"), checkable=True)
+        self.btn_loop = self._flat("loop", _("Repetir (Ctrl+L)"), checkable=True)
         self.btn_loop.setChecked(True)
         self.btn_loop.toggled.connect(lambda on: setattr(self, "loop", on))
         for b in (self.btn_in, self.btn_out, self.btn_clear, self.btn_loop):
@@ -874,6 +888,7 @@ class MainWindow(QMainWindow):
         sc("Ctrl+1", lambda: self.set_mode("pelicula"))
         sc("Ctrl+Alt+C", lambda: self.mode == "edicao" and self.inspector.copy_values())
         sc("Ctrl+Alt+V", lambda: self.mode == "edicao" and self.inspector.paste_values())
+        sc("Ctrl+L", lambda: self.btn_loop.toggle())  # o L sozinho é do J/K/L (reproduzir para a frente)
         sc("F11", self.toggle_preview_fullscreen)
         sc("Shift+F11", self.toggle_window_fullscreen)
 
@@ -1444,7 +1459,9 @@ class MainWindow(QMainWindow):
         if not src.is_image:
             self._detect_profile(src)
 
-    def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0):
+    def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0,
+                insert: bool = False):
+        """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o que vem depois em vez de cobrir."""
         seq = self.model.seq
         self._adopt_format(src)
         if not src.has_video:
@@ -1453,9 +1470,9 @@ class MainWindow(QMainWindow):
                 tracks = seq.kind_tracks(timeline.AUDIO)
                 track = next((i for i in range(len(tracks)) if not seq.clips_on(timeline.AUDIO, i)), len(tracks))
                 return self.model.insert_media(src, at=0, atrack=track)
-            return self.model.insert_media(src, at=at, atrack=track if kind == timeline.AUDIO else 0)
+            return self.model.insert_media(src, at=at, atrack=track if kind == timeline.AUDIO else 0, insert=insert)
         return self.model.insert_media(src, at=at, vtrack=track if kind == timeline.VIDEO else 0,
-                                       atrack=track if kind == timeline.AUDIO else 0)
+                                       atrack=track if kind == timeline.AUDIO else 0, insert=insert)
 
     def import_paths(self, paths: list[str]) -> None:
         """Importa arquivos para a edição: entram na Mídia e vão para o fim da linha do tempo."""
@@ -1488,16 +1505,39 @@ class MainWindow(QMainWindow):
         if src is not None:
             self._insert(src)
 
-    def drop_on_timeline(self, paths: list, frame: int, kind: str, track: int) -> None:
-        """Arquivos (do sistema ou da Mídia) soltos na linha do tempo: entram no ponto e na faixa do mouse."""
+    def drop_on_timeline(self, paths: list, frame: int, kind: str, track: int, insert: bool = False) -> int:
+        """Arquivos (do sistema ou da Mídia) soltos na linha do tempo: entram no ponto e na faixa do mouse,
+        um depois do outro; `insert` empurra o que vem depois (modo inserir ou Ctrl). Devolve o fim do último."""
         pos = max(0, int(frame))
         for path in paths:
             src = self._probe_source(str(path))
             if src is None:
                 continue
-            made = self._insert(src, at=pos, kind=kind, track=max(0, int(track)))
+            made = self._insert(src, at=pos, kind=kind, track=max(0, int(track)), insert=insert)
             if made:
                 pos = max(c.end for c in made)
+        return pos
+
+    def place_at_cursor(self, paths: list, insert: bool) -> None:
+        """"Inserir no cursor" (`,`) / "Sobrescrever no cursor" (`.`): os itens escolhidos na Mídia entram no
+        cursor, na V1 e na A1 — inserir empurra o que vem depois, sobrescrever cobre — e o cursor vai para o
+        fim do que entrou (para o próximo)."""
+        if self.mode != "edicao" or not paths:
+            return
+        self.stop_play()
+        end = self.drop_on_timeline(list(paths), self.frame_idx, timeline.VIDEO, 0, insert=insert)
+        if self.info is not None:
+            self.seek(end)
+
+    def trim_to_playhead(self, side: str) -> None:
+        """Q (`side="start"`) / W (`"end"`): apara até o cursor o clipe sob ele e fecha o espaço. Com Q, o cursor
+        vai para o novo começo do clipe (o quadro que estava sob ele continua na tela)."""
+        self.stop_play()
+        n = self.model.trim_to_playhead(self.frame_idx, side)
+        if not n:
+            self.statusBar().showMessage(_("Q / W: deixe o cursor dentro de um clipe numa faixa destravada."), 4000)
+        elif side == "start":
+            self.seek(max(0, self.frame_idx - n))
 
     def _bin_files(self, paths: list) -> None:
         """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo)."""
@@ -1525,7 +1565,7 @@ class MainWindow(QMainWindow):
         dlg = SequenceDialog(self, self.model.seq)
         if dlg.exec():
             w, h, fps, bg = dlg.values()
-            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade())
+            self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic())
 
     def auto_adjust_clip(self, cid: str) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
@@ -1646,7 +1686,7 @@ class MainWindow(QMainWindow):
 
     # ================================================================ reprodução
     def toggle_play(self) -> None:
-        if self.playing:
+        if self.playing or self._rev_rate:
             self.stop_play()
         else:
             self.start_play()
@@ -1729,14 +1769,16 @@ class MainWindow(QMainWindow):
         self._play_last = f
         self._play_pending = None
         self.playing = True
-        if self._audio_ok and self.audio is not None:
-            self._audio_seek(f)
-            self.audio.play()
-        self._meter_start()
+        if self._play_rate == 1:  # J/K/L: o som e o medidor só valem a 1× para a frente
+            if self._audio_ok and self.audio is not None:
+                self._audio_seek(f)
+                self.audio.play()
+            self._meter_start()
         self.btn_play.setIcon(icons.icon("pause", theme.TEXT, 18))
         self.play_timer.start(max(5, int(500 / self.info.fps)))
 
     def stop_play(self) -> None:
+        self._shuttle_halt()
         if not self.playing:
             return
         self.player.stop()
@@ -1771,7 +1813,7 @@ class MainWindow(QMainWindow):
                 if self._play_t0 is not None:
                     self._audio_seek(f)
                 self._play_t0, self._play_f0 = now, f
-            target = self._play_f0 + int((now - self._play_t0) * self.info.fps)
+            target = self._play_f0 + int((now - self._play_t0) * self.info.fps * self._play_rate)
             if f > target:
                 self._play_pending = item
                 return
@@ -1784,7 +1826,100 @@ class MainWindow(QMainWindow):
             break
         self._play_last = f
         self._set_frame(f, item[1])
-        self._audio_follow(f)
+        if self._play_rate == 1:
+            self._audio_follow(f)
+
+    # ================================================================ J/K/L (shuttle)
+    SHUTTLE_MAX = 8
+
+    def shuttle_rate(self) -> int:
+        """Velocidade da reprodução: 0 parada, 1/2/4/8 para a frente, −1/−2/−4/−8 para trás."""
+        if self._rev_rate:
+            return -self._rev_rate
+        return self._play_rate if self.playing else 0
+
+    def shuttle(self, direction: int) -> None:
+        """L (`direction` > 0) / J (< 0): reproduz para a frente / para trás; de novo no mesmo sentido dobra a
+        velocidade (1, 2, 4, 8×); no outro sentido volta a 1×. Com o K apertado, anda um quadro."""
+        if self.info is None or self.info.is_image:
+            return
+        if self._k_held:
+            self.step(1 if direction > 0 else -1)
+            return
+        r = self.shuttle_rate()
+        if r and (r > 0) == (direction > 0):
+            new = max(-self.SHUTTLE_MAX, min(self.SHUTTLE_MAX, r * 2))
+        else:
+            new = 1 if direction > 0 else -1
+        self._set_shuttle(new)
+
+    def _set_shuttle(self, rate: int) -> None:
+        if rate > 0:
+            was = self.playing
+            self._shuttle_halt()            # para trás → para a frente
+            self._play_rate = int(rate)
+            if not was:
+                self.start_play()
+            else:
+                self._play_t0 = None        # o relógio recomeça do quadro atual, na velocidade nova
+                if rate != 1:               # sem som fora de 1× para a frente
+                    if self.audio is not None:
+                        self.audio.pause()
+                    self.meter_timer.stop()
+                    if self._meter_enabled:
+                        self.meter.idle()
+        else:
+            self.stop_play()
+            self._rev_rate = int(-rate)
+            self._rev_t0 = time.perf_counter()
+            self._rev_f0 = self._rev_last = self.frame_idx
+            self.btn_play.setIcon(icons.icon("pause", theme.TEXT, 18))
+            self.rev_timer.start()
+        self._update_shuttle_label()
+
+    def _shuttle_halt(self) -> None:
+        """Para o J (para trás) e volta a velocidade a 1× (o próximo play é normal, com som)."""
+        self._play_rate = 1
+        if self._rev_rate:
+            self._rev_rate = 0
+            self.rev_timer.stop()
+            self.btn_play.setIcon(icons.icon("play", theme.TEXT, 18))
+            self.thumb_timer.start()
+        self._update_shuttle_label()
+
+    def _reverse_tick(self) -> None:
+        """J: pede o quadro do relógio, andando para trás, ao carregador por busca (`FrameLoader`). Ele só
+        decodifica o pedido mais recente: a interface não trava e cada quadro mostrado é o certo (se a busca
+        for lenta, pula quadros). Respeita a entrada/saída e o Repetir."""
+        if self.info is None or not self._rev_rate:
+            self._shuttle_halt()
+            return
+        now = time.perf_counter()
+        if self.frame_idx != self._rev_last:      # o cursor foi mexido: continua dali
+            self._rev_t0, self._rev_f0 = now, self.frame_idx
+        lo = self.inp or 0
+        hi = self.outp if self.outp is not None else self.info.frames - 1
+        target = self._rev_f0 - int((now - self._rev_t0) * self.info.fps * self._rev_rate)
+        done = False
+        if target < lo:
+            if self.loop and hi > lo:
+                self._rev_t0, self._rev_f0 = now, hi
+                target = hi
+            else:
+                target, done = lo, True
+        if target != self.frame_idx:
+            self.request_frame(target)
+        self._rev_last = self.frame_idx
+        if done:
+            self._shuttle_halt()
+
+    def _update_shuttle_label(self) -> None:
+        lbl = getattr(self, "shuttle_label", None)
+        if lbl is None:
+            return
+        r = self.shuttle_rate()
+        lbl.setText("" if r in (0, 1) else (f"◀◀ {-r}×" if r < 0 else f"{r}× ▶▶"))
+        lbl.setVisible(r not in (0, 1))
 
     # ================================================================ medidor de som (módulo medidor_som)
     METER_JUMP_S = 5.0  # o relógio pulou mais que isso para a frente: medição nova
@@ -2830,7 +2965,7 @@ class MainWindow(QMainWindow):
     def show_shortcuts(self) -> None:
         QMessageBox.information(self, _("Atalhos do teclado"), _(
             "Espaço — reproduzir / pausar\n← / → — quadro anterior / próximo\nShift + ← / → — 1 segundo\n"
-            "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\nL — repetir\n"
+            "Home / End — início / fim\nI / O — marcar entrada / saída\nX — limpar marcas\n"
             "M — som da prévia (no modo Edição: Shift+M)\nShift + ↑ / ↓ — marcador anterior / próximo\n"
             "C — trocar o modo de comparação\nF — ajustar à janela\n+ / − — mais / menos zoom (de 10% a 1600%)\n"
             "1 / 2 — zoom 100% / 200%\nF11 — prévia em tela cheia (Esc sai) • Shift+F11 — janela em tela cheia\n"
@@ -2843,7 +2978,13 @@ class MainWindow(QMainWindow):
             "Edição: S divide no cursor • Delete apaga • Shift+Delete apaga e fecha o espaço\n"
             "M marcador no cursor (dois cliques nele: nome, cor, nota e capítulo)\n"
             "Ctrl+Alt+C / Ctrl+Alt+V copiar / colar os ajustes de cor do clipe\n"
-            "B lâmina • V seleção • N ímã • Ctrl + roda do mouse: zoom da linha do tempo"))
+            "B lâmina • V seleção • N ímã • Ctrl + roda do mouse: zoom da linha do tempo") + "\n\n" + _(
+            "J / K / L — para trás / pausar / para a frente (de novo: 2×, 4×, 8×; sem som fora de 1× para a frente)\n"
+            "K + J / L — um quadro para trás / para a frente • Ctrl+L — repetir\n"
+            "Edição: Q / W apara o começo / o fim do clipe até o cursor e fecha o espaço\n"
+            ", / . — inserir / sobrescrever no cursor (itens escolhidos na Mídia)\n"
+            "Ctrl ao soltar ou mover — inverte inserir / sobrescrever • Alt ao aparar — só a imagem ou só o som "
+            "(corte J/L)"))
 
     def about(self) -> None:
         try:
@@ -2875,6 +3016,20 @@ class MainWindow(QMainWindow):
         if self.mode == "edicao" and k == Qt.Key.Key_M and not shift:
             self.add_marker()  # no modo Edição o M marca; o som da prévia fica no Shift+M
             return
+        if self.mode == "edicao" and k in (Qt.Key.Key_Q, Qt.Key.Key_W) and not shift:
+            self.trim_to_playhead("start" if k == Qt.Key.Key_Q else "end")
+            return
+        if self.mode == "edicao" and k in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
+            self.bin.place(k == Qt.Key.Key_Comma)  # inserir / sobrescrever no cursor
+            return
+        if k in (Qt.Key.Key_J, Qt.Key.Key_K, Qt.Key.Key_L) and not shift:
+            if k == Qt.Key.Key_K:
+                if not e.isAutoRepeat():
+                    self._k_held = True
+                    self.stop_play()
+            elif not e.isAutoRepeat() or self._k_held:   # segurar K + L: anda quadro a quadro
+                self.shuttle(1 if k == Qt.Key.Key_L else -1)
+            return
         if shift and k in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self.goto_marker(1 if k == Qt.Key.Key_Down else -1)
             return
@@ -2894,8 +3049,6 @@ class MainWindow(QMainWindow):
             self.mark_out()
         elif k == Qt.Key.Key_X:
             self.clear_marks()
-        elif k == Qt.Key.Key_L:
-            self.btn_loop.toggle()
         elif k == Qt.Key.Key_M:
             if self.btn_mute.isEnabled():
                 self.btn_mute.toggle()
@@ -2918,6 +3071,16 @@ class MainWindow(QMainWindow):
             self.toggle_preview_fullscreen()
         else:
             super().keyPressEvent(e)
+
+    def keyReleaseEvent(self, e):
+        if e.key() == Qt.Key.Key_K and not e.isAutoRepeat():
+            self._k_held = False
+        super().keyReleaseEvent(e)
+
+    def changeEvent(self, e):
+        if e.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+            self._k_held = False  # o K pode ter sido solto em outra janela
+        super().changeEvent(e)
 
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():

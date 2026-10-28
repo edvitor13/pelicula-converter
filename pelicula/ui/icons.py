@@ -334,6 +334,15 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         p.drawPolyline([QPointF(12, 10.2), QPointF(10.3, 12), QPointF(12, 13.8)])
         p.drawLine(QPointF(5, 4), QPointF(8, 4))
         p.drawLine(QPointF(5, 20), QPointF(8, 20))
+    elif name == "insert_mode":
+        # Inserir: um clipe entra entre dois e o da direita é empurrado (seta).
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(2.5, 11, 5, 8), 1.5, 1.5)
+        p.drawRoundedRect(QRectF(16.5, 11, 5, 8), 1.5, 1.5)
+        p.drawLine(QPointF(12, 3.5), QPointF(12, 14))
+        p.drawPolyline([QPointF(9.5, 11.5), QPointF(12, 14.2), QPointF(14.5, 11.5)])
+        p.drawLine(QPointF(17, 6), QPointF(21.5, 6))
+        p.drawPolyline([QPointF(19.8, 4.2), QPointF(21.6, 6), QPointF(19.8, 7.8)])
     elif name == "pointer":
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(c))
