@@ -146,3 +146,102 @@ def test_reverse_from_the_clip_menu_and_frozen_clips():
     tempo_ui.add_clip_actions(menu2, cv, m.seq.find(v.id))
     acts = _actions(menu2)
     assert not acts["reverse"].isEnabled() and not menu2.findChild(QMenu, "ramp_menu").isEnabled()
+
+
+# ------------------------------------------------------------------ congelar este quadro
+def test_freeze_from_the_clip_menu_asks_the_duration_and_follows_insert_mode():
+    from PySide6.QtWidgets import QInputDialog, QMenu
+    from pelicula.ui.timeline_view import TimelineCanvas
+    m, v = _model()
+    cv = TimelineCanvas(m)
+    cv.playhead = 100
+    asked = []
+
+    def fake(*args, **kw):
+        asked.append(args[3])
+        return 1.5, True
+    orig = QInputDialog.getDouble
+    QInputDialog.getDouble = staticmethod(fake)
+    try:
+        menu = QMenu()
+        tempo_ui.add_clip_actions(menu, cv, v)
+        act = _actions(menu)["freeze_here"]
+        assert act.isEnabled() and "Shift+F" in act.text()
+        cv.set_insert_mode(True)
+        act.trigger()
+    finally:
+        QInputDialog.getDouble = orig
+    assert asked == [2.0] and cv.freeze_seconds == 1.5
+    hold = m.seq.find(m.selection[0])
+    assert hold.frozen and (hold.start, hold.dur) == (100, 36) and m.seq.duration == 276
+    m.undo()
+    assert m.seq.duration == 240 and len(m.seq.clips) == 2
+    cv.set_insert_mode(False)                          # sobrescrever: a duração da montagem não muda
+    assert tempo_ui.freeze_at(cv, v.id)
+    assert m.seq.duration == 240 and m.seq.find(m.selection[0]).dur == 36
+    cv.playhead = 500                                  # fora do clipe: nada a congelar
+    menu2 = QMenu()
+    tempo_ui.add_clip_actions(menu2, cv, v)
+    assert not _actions(menu2)["freeze_here"].isEnabled() and tempo_ui.freeze_at(cv, v.id) is None
+
+
+# ------------------------------------------------------------------ na janela (precisa de OpenGL)
+import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def win():
+    from pelicula.ui import prefs
+    from pelicula.ui.main_window import MainWindow
+    st = prefs.settings()
+    st.setValue("auto_update", "false")
+    st.setValue("language", "pt_BR")
+    try:
+        w = MainWindow()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"OpenGL 3.3 indisponível: {exc}")
+    w.confirm_discard = lambda: True
+    w.resize(1400, 900)
+    w.show()
+    APP.processEvents()
+    yield w
+
+
+def _pump(cond, timeout=20.0) -> bool:
+    import time
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        APP.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_shift_f_in_the_window_freezes_the_frame_at_the_playhead(win, sample_video):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from pelicula import media
+    win.set_mode("pelicula")
+    win.cur = None
+    win.load_media(sample_video)
+    assert _pump(lambda: win.cur is not None)
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    win._loading = True
+    try:
+        win.model.set_sequence(seq)
+    finally:
+        win._loading = False
+    win._refresh_source(reset=True)
+    win.set_mode("edicao")
+    win.tl_editor.canvas.set_insert_mode(True)
+    win.request_frame(6)
+    assert _pump(lambda: win.frame_idx == 6 and win.tl_editor.canvas.playhead == 6)
+    want = win.model.seq.src_frame(next(c for c in win.model.seq.clips if c.kind == tl.VIDEO), 6)
+    QTest.keyClick(win, Qt.Key.Key_F, Qt.KeyboardModifier.ShiftModifier)
+    hold = win.model.seq.find(win.model.selection[0]) if win.model.selection else None
+    assert hold is not None and hold.frozen and hold.start == 6 and hold.dur == 48
+    assert win.model.seq.src_frame(hold, 6) == want and win.model.seq.duration == 24 + 48
+    win.undo()
+    assert win.model.seq.duration == 24

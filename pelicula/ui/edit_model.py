@@ -27,6 +27,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .. import editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
+FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
+
 TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
 AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
 
@@ -312,6 +314,18 @@ class TimelineModel(QObject):
             return False
         lo, hi = self.seq.source_range(c)
         return self.set_ramp(cid, timemap.preset_anchors(preset, lo, hi, c.reverse, amount, ramp_s))
+
+    def freeze_frame(self, cid: str | None, frame: int, seconds: float = FREEZE_SECONDS,
+                     insert: bool = True) -> str | None:
+        """"Congelar este quadro" (`Sequence.freeze_frame`): um passo do desfazer; o quadro parado fica escolhido."""
+        with self.seq.keep_main():
+            hold = self.seq.freeze_frame(cid, int(frame), self.seq.frames_for(max(0.04, float(seconds))), insert)
+        if hold is None:
+            return None
+        self.selection = [hold.id]
+        self.selectionChanged.emit()
+        self._done("structure")
+        return hold.id
 
     def set_reverse(self, cid: str, on: bool) -> bool:
         """Liga/desliga o reverso do clipe (e dos ligados do mesmo arquivo, o som junto): um passo do desfazer."""

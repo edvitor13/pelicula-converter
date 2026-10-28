@@ -195,3 +195,30 @@ def test_reverse_sound_is_the_file_backwards(ffmpeg_ok, tmp_path):
     err = np.abs(y - gain * ref)
     assert np.corrcoef(y, ref)[0, 1] > 0.999, "o som é o arquivo de trás para a frente, amostra por amostra"
     assert err.max() < 0.05, f"sem estalo nem buraco nas emendas (erro máximo {err.max():.3f} em {err.argmax() / R:.3f} s)"
+
+
+# ------------------------------------------------------------------ congelar este quadro
+@pytest.mark.ffmpeg
+def test_freeze_hold_pixels_are_the_source_frame(ffmpeg_ok, sample_video, gl_engine):
+    src = media.probe_source(sample_video)
+    seq = tl.Sequence.for_source(src)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_key(v.id, "exposicao", 0, -0.5)
+    seq.set_key(v.id, "exposicao", 23, 0.8)          # o look animado: o quadro parado leva o valor daquele instante
+    w, h = 160, 90
+    t = 9
+    sequence.clear_cache()
+    ref = gl_engine.compose(sequence.grab(seq, t, w, h, 8), seq, w, h, 8)
+    k = seq.src_frame(v, t)
+    hold = seq.freeze_frame(v.id, t, 12)
+    every = _file_frames(sample_video, w, h)
+    sequence.clear_cache()
+    got = _read_all(seq, w, h)
+    assert [f.frame for f in got] == list(range(seq.duration)) and seq.duration == 36
+    for fl in got[t:t + 12]:
+        (li,) = fl.layers
+        assert li.layer.clip.id == hold.id and li.layer.src_frame == k
+        assert np.array_equal(li.image, every[k]), "o quadro parado é o quadro do arquivo, bit a bit"
+        assert np.array_equal(gl_engine.compose(fl, seq, w, h, 8), ref), "e sai igual ao quadro de antes na tela"
+    after = got[t + 12]
+    assert after.layers[0].layer.src_frame == k and np.array_equal(after.layers[0].image, every[k])

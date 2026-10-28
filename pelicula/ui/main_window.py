@@ -26,7 +26,7 @@ from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, edi
 from ..i18n import N_, _
 from ..engine import Engine
 from ..frame import Recipe
-from . import icons, theme
+from . import icons, tempo_ui, theme
 from .export_dialog import ExportDialog
 from .looks import THUMB_H, THUMB_W, LooksPanel
 from .meter import AudioMeter
@@ -3067,7 +3067,11 @@ class MainWindow(QMainWindow):
             "Edição: Q / W apara o começo / o fim do clipe até o cursor e fecha o espaço\n"
             ", / . — inserir / sobrescrever no cursor (itens escolhidos na Mídia)\n"
             "Ctrl ao soltar ou mover — inverte inserir / sobrescrever • Alt ao aparar — só a imagem ou só o som "
-            "(corte J/L)"))
+            "(corte J/L)") + "\n" + _(
+            "Edição: Shift+F congela o quadro do cursor (divide o clipe e põe ali 2 s de quadro parado; inserir / "
+            "sobrescrever segue o botão da linha do tempo)\n"
+            "Losango ao lado de um ajuste — chave no cursor (botão direito: curva, apagar) • setas — chave anterior "
+            "/ próxima\nLosangos na linha do tempo: clique vai até a chave, arrastar move, Delete apaga"))
 
     def about(self) -> None:
         try:
@@ -3102,6 +3106,10 @@ class MainWindow(QMainWindow):
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Q, Qt.Key.Key_W) and not shift:
             self.trim_to_playhead("start" if k == Qt.Key.Key_Q else "end")
+            return
+        if self.mode == "edicao" and k == Qt.Key.Key_F and shift:
+            sel = [c for c in self.model.selected_clips() if c.start <= self.frame_idx < c.end]
+            tempo_ui.freeze_at(self.tl_editor.canvas, sel[0].id if sel else None)  # congelar este quadro
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
             self.bin.place(k == Qt.Key.Key_Comma)  # inserir / sobrescrever no cursor

@@ -5,7 +5,10 @@
   (`timemap.PRESETS`), a intensidade e a duração de cada transição e aplica no trecho que o clipe mostra; "Tirar a
   rampa" volta à velocidade constante. Rampa e reverso combinam: a rampa fica presa à imagem, então no reverso o
   trecho lento continua no mesmo pedaço do vídeo (uma entrada lenta vira uma saída lenta).
-- `add_clip_actions`: os mesmos comandos no menu do botão direito de um clipe na linha do tempo.
+- `add_clip_actions`: os mesmos comandos no menu do botão direito de um clipe na linha do tempo, mais "Congelar
+  este quadro…" (também no Shift+F do modo Edição: `freeze_at`), que divide o clipe no cursor e põe ali um quadro
+  parado de `freeze_seconds` (2 s; a caixa do menu muda o valor), inserindo ou sobrescrevendo conforme o botão
+  "Inserir" da linha do tempo.
 
 Toda edição passa pelo `TimelineModel` (um passo do desfazer cada); a conta do tempo é só de `timemap` e
 `timeline.Sequence`.
@@ -16,7 +19,8 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QInputDialog, QLabel, QMenu, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from .. import timemap
 from ..i18n import _, fmt_decimal
@@ -143,6 +147,27 @@ class TempoPanel(QWidget):
         return c is not None and self.model.set_ramp(c.id, [])
 
 
+def freeze_seconds(canvas) -> float:
+    from .edit_model import FREEZE_SECONDS
+    return float(getattr(canvas, "freeze_seconds", FREEZE_SECONDS))
+
+
+def freeze_at(canvas, cid: str | None = None, ask: bool = False) -> str | None:
+    """Congela no cursor o quadro do clipe `cid` (ou do vídeo de cima): insere ou sobrescreve conforme o botão
+    "Inserir" da linha do tempo. Com `ask`, pergunta antes a duração (e guarda para as próximas vezes)."""
+    m = canvas.model
+    if m.seq.freeze_target(cid, canvas.playhead) is None:
+        return None
+    if ask:
+        val, ok = QInputDialog.getDouble(canvas, _("Congelar este quadro"),
+                                         _("Duração do quadro parado, em segundos:"), freeze_seconds(canvas),
+                                         0.1, 60.0, 1)
+        if not ok:
+            return None
+        canvas.freeze_seconds = val
+    return m.freeze_frame(cid, canvas.playhead, freeze_seconds(canvas), insert=canvas.insert_mode)
+
+
 def add_clip_actions(menu: QMenu, canvas, clip) -> None:
     """Reverso, rampa de velocidade e congelar no menu do botão direito de um clipe."""
     m = canvas.model
@@ -163,6 +188,11 @@ def add_clip_actions(menu: QMenu, canvas, clip) -> None:
     off = sub.addAction(_("Tirar a rampa"), lambda: m.set_ramp(clip.id, []))
     off.setObjectName("ramp_off")
     off.setEnabled(bool(clip.ramp))
+    frz = menu.addAction(_("Congelar este quadro…") + " (Shift+F)", lambda: freeze_at(canvas, clip.id, ask=True))
+    frz.setObjectName("freeze_here")
+    frz.setEnabled(m.seq.freeze_target(clip.id, canvas.playhead) is not None)
+    frz.setToolTip(_("Divide o clipe no cursor e põe ali o quadro parado pelo tempo escolhido; o som fica em "
+                     "silêncio nesse trecho."))
 
 
-__all__ = ["TempoPanel", "add_clip_actions", "ramp_summary"]
+__all__ = ["TempoPanel", "add_clip_actions", "freeze_at", "freeze_seconds", "ramp_summary"]

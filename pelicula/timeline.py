@@ -996,6 +996,54 @@ class Sequence:
             self.open_space(main.end, end - main.end, {(c.kind, c.track) for c in members},
                             exclude={c.id for c in members}, all_tracks=False, split=False)
 
+    def freeze_target(self, cid: str | None, t: int) -> Clip | None:
+        """O clipe de vídeo que "Congelar este quadro" usa no quadro t: o próprio `cid` (ou o vídeo ligado a ele,
+        se for som); sem `cid`, o de cima entre os visíveis. None se não há um vídeo de arquivo ali para congelar."""
+        t = int(t)
+        if cid is not None:
+            c = self.find(cid)
+            cands = [] if c is None else [c] + [g for g in self.group(c) if g.id != c.id]
+        else:
+            cands = list(reversed(self.clips_at(t, VIDEO)))
+        for c in cands:
+            src = self.sources.get(c.src)
+            if (c.kind == VIDEO and c.start <= t < c.end and not self.locked(c) and src is not None
+                    and src.has_video and not self._holds(c)):
+                return c
+        return None
+
+    def freeze_frame(self, cid: str | None, t: int, dur: int, insert: bool = True) -> Clip | None:
+        """Congela o quadro que o clipe mostra em `t` por `dur` quadros: divide o clipe ali e põe um clipe parado
+        (`congelar`, sem chaves, rampa nem reverso) com exatamente aquele quadro do arquivo e os ajustes daquele
+        instante. `insert` empurra o resto do clipe (e tudo o que vem depois, como `insert_media(insert=True)`);
+        senão o quadro parado cobre os `dur` quadros seguintes. O som ligado fica com um buraco (silêncio) no
+        mesmo trecho e continua em sincronia depois. Devolve o clipe novo (None se não dá)."""
+        c = self.freeze_target(cid, t)
+        if c is None:
+            return None
+        t, dur = int(t), max(1, int(dur))
+        src = self.sources[c.src]
+        k = self.src_frame(c, t)
+        values = copy.deepcopy(self.values_at(c, t))
+        values.update(congelar=True, velocidade=1.0, entrada_tipo="corte", saida_tipo="corte")
+        # O meio do quadro: o arredondamento do JSON (6 casas) não troca de quadro.
+        hold = Clip(new_id(), VIDEO, c.src, c.track, t, dur, (k + 0.5) / src.fps, "", c.name, values)
+        group = [g for g in self.group(c) if not self.locked(g)]
+        targets = {(g.kind, g.track) for g in group if g.id == c.id or g.start <= t < g.end}
+        if insert:
+            self.open_space(t, dur, targets, all_tracks=not self.magnet_active)
+        else:
+            end = t + dur
+            self.split(t, [g.id for g in group if g.start < t < g.end])
+            cross = [o.id for o in self.clips if (o.kind, o.track) in targets and o.start < end < o.end
+                     and not self.locked(o)]
+            if cross:
+                self.split(end, cross)
+            for kind, track in targets:
+                self._clear_range(kind, track, t, end, set())
+        self.clips.append(hold)
+        return hold
+
     def set_values(self, cid: str, values: dict[str, Any]) -> None:
         """Troca os ajustes de um clipe (a velocidade passa por `set_speed` para manter os ligados juntos)."""
         c = self.find(cid)
