@@ -70,6 +70,49 @@ REF_DENSITY = (0.96198, 0.96198, 0.94202)  # densidade de cada camada no cinza m
 
 GOLDEN = math.pi * (3.0 - math.sqrt(5.0))
 
+# 1.6 (fase 3): *Tamanho do cristal* e *Variação do tamanho* (ARQUITETURA §30.8). A variação dá a cada grão um raio
+# log-normal ρ = e^(s·z − s²) / √c (z gaussiana cortada em ±Z_CLIP, s = VAR_SIGMA × variação, c = a média de
+# e^(2·s·z − 2·s²) com o corte: E[ρ²] = 1, então λ·π·E[r²] = D·ln 10 continua e a densidade média não muda).
+Z_CLIP = 2.5
+VAR_SIGMA = 0.5
+# Compensação do KAPPA de cada camada R, G, B (tools/ajustar_grao.py, `physical_extra_constants`): o sigma D na
+# abertura de 48 µm, na densidade de referência, continua o NEG_SIGMA_D com qualquer cristal e qualquer variação (o
+# cristal muda a textura, não a granularidade do datasheet; o Tamanho do grão da seção Grão muda os dois).
+CRYSTAL_KNOTS = (0.5, 0.594604, 0.707107, 0.840896, 1.0, 1.189207, 1.414214, 1.681793, 2.0)
+CRYSTAL_K = ((1.8075, 1.54748, 1.33032, 1.14958, 1.0, 0.87733, 0.77815, 0.69958, 0.6388),
+             (1.8075, 1.54748, 1.33032, 1.14958, 1.0, 0.87733, 0.77815, 0.69958, 0.6388),
+             (1.8073, 1.54734, 1.33023, 1.14953, 1.0, 0.87737, 0.77824, 0.69971, 0.63898))
+VARIATION_KNOTS = (0.0, 0.25, 0.5, 0.75, 1.0)
+VARIATION_K = ((1.0, 0.98101, 0.92682, 0.84782, 0.75929),
+               (1.0, 0.98101, 0.92682, 0.84782, 0.75929),
+               (1.0, 0.98089, 0.92639, 0.84708, 0.75838))
+
+
+def radius_params(variation: float) -> tuple[float, float, float]:
+    """(s, 1/√c, ρ máximo) da *Variação do tamanho* (0–1): os raios relativos ρ = e^(s·z − s²)/√c, z em ±Z_CLIP."""
+    s = VAR_SIGMA * min(max(float(variation), 0.0), 1.0)
+    if s == 0.0:
+        return 0.0, 1.0, 1.0
+    a = Z_CLIP
+
+    def phi(x: float) -> float:
+        return 0.5 * math.erfc(-x / math.sqrt(2.0))
+    c = (phi(a - 2 * s) - phi(-a - 2 * s)) + math.exp(-2 * s * s) * phi(-a) * (math.exp(2 * s * a) + math.exp(-2 * s * a))
+    inv = 1.0 / math.sqrt(c)
+    return s, inv, math.exp(s * a - s * s) * inv
+
+
+def _interp_row(x: float, knots, row) -> float:
+    return float(np.interp(x, knots, row))
+
+
+def kappa_factor(crystal: float, variation: float) -> tuple[float, float, float]:
+    """Fator do KAPPA de cada camada para o cristal (interpolado em log2) e a variação (linear); (1, 1, 1) no padrão."""
+    lc = math.log2(min(max(float(crystal), CRYSTAL_KNOTS[0]), CRYSTAL_KNOTS[-1]))
+    lk = [math.log2(k) for k in CRYSTAL_KNOTS]
+    v = min(max(float(variation), 0.0), 1.0)
+    return tuple(_interp_row(lc, lk, CRYSTAL_K[i]) * _interp_row(v, VARIATION_KNOTS, VARIATION_K[i]) for i in range(3))
+
 
 def offsets() -> np.ndarray:
     """(N_SAMPLES, 2) pontos do spot em raios: espiral de Vogel com os raios nos quantis de uma gaussiana 2D de
@@ -146,6 +189,7 @@ def negative_grain(plan, U: dict, v: dict, gauge: dict, scale: float, amt: float
     U["u_pg_chroma"] = chroma
     U["u_pg_seed"] = int(plan.grain_seed % 2147483647)
     plan.grain_size = 0.0  # a grade do ruído não é usada
+    extras(U, v, amt)  # 1.6 (fase 3): tamanho do cristal e variação do tamanho (nada no padrão)
 
 
 # ------------------------------------------------------------------ GLSL (FINAL_PG)
@@ -275,3 +319,83 @@ def _final_pg() -> str:
 # O FINAL de sempre com o grão físico na densidade do negativo (Engine._final_program, compilado só no primeiro uso):
 # o FINAL e o BAKE (o LUT exportado) continuam letra por letra os de antes.
 FINAL_PG = _final_pg()
+
+
+# ------------------------------------------------------------------ 1.6 (fase 3): cristal e variação do tamanho
+def extras(U: dict, v: dict, amt: float) -> None:
+    """Gancho de `negative_grain` (modelo "fisico"): *Tamanho do cristal* multiplica o raio e *Variação do tamanho*
+    espalha os raios (u_pg_var: programa `final_pgv`); o KAPPA de cada camada é compensado (`kappa_factor`) para o
+    sigma D da abertura de 48 µm, na densidade de referência, continuar o do datasheet. No padrão (1 e 0%) não muda
+    nada (nem os valores do plano)."""
+    m = float(v.get("lab_grao_cristal", 1.0))
+    var = float(v.get("lab_grao_variacao", 0.0))
+    if m == 1.0 and var <= 0.0:
+        return
+    f = kappa_factor(m, var)
+    U["u_pg_r"] = U["u_pg_r"] * m
+    U["u_pg_amp"] = tuple(min(k * fi * float(amt), AMP_MAX) for k, fi in zip(KAPPA, f))
+    if var > 0.0:
+        U["u_pg_var"] = radius_params(var)
+
+
+def _glsl_variable() -> str:
+    """GLSL do grão físico com raios variáveis: cada disco ganha o seu raio de um hash próprio; o alcance da busca
+    cresce com o maior raio. O GLSL de sempre (raio único) não muda."""
+    src = GLSL
+    pairs = (
+        ("uniform int u_pg_seed;\n",
+         "uniform int u_pg_seed;\n"
+         "uniform vec3 u_pg_var;     // 1.6 (fase 3): variação do tamanho: s, 1/√c, maior raio relativo (final_pgv)\n"),
+        ("uint pgHits(vec2 d) {", "uint pgHits(vec2 d, float r2) {"),
+        ("        if (dot(e, e) < 1.0) m |= (1u << uint(k));",
+         "        if (dot(e, e) < r2) m |= (1u << uint(k));"),
+        ("vec3 physCoverage(vec3 D, vec2 p, uint seed) {",
+         "// Raio relativo de um grão (log-normal, z gaussiana cortada em ±Z_CLIP; E[ρ²] = 1): de um hash do próprio grão\n"
+         "float pgRadius(uint h2) {\n"
+         "    uint h3 = pcg(h2 ^ 0x85EBCA6Bu);\n"
+         "    uint h4 = pcg(h3);\n"
+         "    float u1 = (float(h3 >> 8u) + 0.5) * (1.0 / 16777216.0);\n"
+         "    float u2 = float(h4 >> 8u) * (1.0 / 16777216.0);\n"
+         "    float z = clamp(sqrt(-2.0 * log(u1)) * cos(6.2831853 * u2), -%(Z)s, %(Z)s);\n"
+         "    return exp(u_pg_var.x * z - u_pg_var.x * u_pg_var.x) * u_pg_var.y;\n"
+         "}\n"
+         "vec3 physCoverage(vec3 D, vec2 p, uint seed) {"),
+        ("    vec2 q = p / u_pg_r;\n",
+         "    vec2 q = p / u_pg_r;\n    float rv = PG_REACH - 1.0 + u_pg_var.z;  // alcance com o maior grão\n"),
+        ("    ivec2 c0 = ivec2(floor((q - PG_REACH) / PG_CELL));\n    ivec2 c1 = ivec2(floor((q + PG_REACH) / PG_CELL));\n",
+         "    ivec2 c0 = ivec2(floor((q - rv) / PG_CELL));\n    ivec2 c1 = ivec2(floor((q + rv) / PG_CELL));\n"),
+        ("            if (dot(nq, nq) >= PG_REACH * PG_REACH) continue;\n",
+         "            if (dot(nq, nq) >= rv * rv) continue;\n"),
+        ("                    if (dot(d, d) >= PG_REACH * PG_REACH) continue;\n                    uint hm = pgHits(d);\n",
+         "                    float rho = pgRadius(h2);\n"
+         "                    float ri = PG_REACH - 1.0 + rho;\n"
+         "                    if (dot(d, d) >= ri * ri) continue;\n"
+         "                    uint hm = pgHits(d, rho * rho);\n"),
+    )
+    for old, new in pairs:
+        assert src.count(old) == 1, old
+        src = src.replace(old, new)
+    return src.replace("%(Z)s", _glsl_float(Z_CLIP))
+
+
+GLSL_V = _glsl_variable()
+
+
+def _final_pgv() -> str:
+    assert FINAL_PG.count(GLSL) == 1
+    return FINAL_PG.replace(GLSL, GLSL_V)
+
+
+_PROGRAMS: dict[str, str] = {}
+
+
+def program(name: str) -> str:
+    """Fonte da variante `final_pgv` (raios variáveis) ou `final_pgv_lx` (com véu, pré-exposição e scanner)."""
+    if name not in _PROGRAMS:
+        if name == "final_pgv":
+            _PROGRAMS[name] = _final_pgv()
+        else:
+            assert name == "final_pgv_lx", name
+            from . import labx
+            _PROGRAMS[name] = labx.patch_glsl(program("final_pgv"))
+    return _PROGRAMS[name]

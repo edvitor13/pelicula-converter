@@ -312,6 +312,14 @@ SECTIONS: list[Section] = [
           "finas do negativo aparecem grãos soltos, nas densas, buracos soltos, sem nenhum ajuste por faixa de "
           "brilho. A força segue os datasheets da Kodak e o tamanho segue a bitola, o ISO e o Tamanho do grão. "
           "Mais pesado para a placa de vídeo."),
+        F("lab_grao_cristal", "Tamanho do cristal", 1.0, 0.5, 2.0, 0.05, 2, "×",
+          "Só no modelo Físico: o tamanho dos grãos de prata. Maior = grãos maiores e mais raros, com a mesma "
+          "granularidade do datasheet (a força medida numa área de 48 µm não muda); muda a textura, não a "
+          "quantidade de grão. O Tamanho da seção Grão muda os dois.", advanced=True),
+        F("lab_grao_variacao", "Variação do tamanho", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Só no modelo Físico: em vez de todos os grãos do mesmo tamanho, uma mistura de grãos pequenos e "
+              "grandes, como numa emulsão de verdade, com a mesma densidade média e a mesma granularidade do "
+              "datasheet. Um pouco mais pesado para a placa de vídeo. 0% = todos iguais."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,
@@ -454,6 +462,15 @@ SECTIONS: list[Section] = [
               "azul), como na película: a emulsão, a revelação e a luz da copiadora nunca são iguais de um "
               "quadro para outro. Muda a cada quadro e devagar ao longo da fita, sempre igual para o mesmo quadro "
               "e a mesma semente. 100% = cerca de um ponto de copiadora; 0% = desligado."),
+        F("grao_estrutura", "Estrutura pela densidade", 0.0, 0, 1, percent=True,
+          tip="A forma do grão muda com a densidade do negativo, como na película: nas partes finas (sombras) "
+              "aparecem grãos soltos, um pouco maiores; nas densas (tons médios e altas luzes), buracos soltos. A "
+              "força em cada densidade e em cada camada segue o datasheet da Kodak (o azul tem mais grão). Os "
+              "ajustes Nas sombras, Nos tons médios e Nas altas luzes continuam valendo por cima. 0% = o grão de "
+              "sempre."),
+        F("grao_aglomeracao", "Aglomeração nas altas densidades", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Com a Estrutura pela densidade, junta o grão das partes densas do negativo em aglomerados maiores "
+              "(até 2,3 vezes). 0% = o tamanho calibrado."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [

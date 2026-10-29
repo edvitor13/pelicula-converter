@@ -48,6 +48,9 @@ pelicula/
   grao_fisico.py             1.6, grão físico (ARQUITETURA §30.7; módulo Beta grao_fisico): modelo booleano no
                              negativo, gancho negative_grain (u_grain_on = 3, u_pg_*), GLSL e FINAL_PG (o FINAL
                              com physGrain, compilado só quando usado), referência exata (covariance, pixel_stats)
+                             e, na fase 3 (§30.8), extras (tamanho do cristal, variação do tamanho: FINAL_PGV)
+  grao_estrutura.py          1.6 (fase 3), estrutura pela densidade (ARQUITETURA §30.8): gancho structure (u_gs_*),
+                             FINAL_GS (só quando usado), referência numpy (channel) e constantes do H-1-5207
   labx.py                    1.6, Laboratório (ARQUITETURA §32): scanner de luz branca, película vencida, pré-exposição;
                              variante FINAL_LX/BAKE_LX (só com u_lx_on) e o pc_lab_path_x do nó Laboratório/OFX
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
@@ -433,6 +436,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |
 | `tests/test_grao_ui.py` | os controles de grão e textura da 1.6 nos cartões das seções (casos em `grao_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_grao_fisico.py` | grão físico (1.6): padrão "ruido" e módulo Beta, plano em px@1080, constantes = `tools/ajustar_grao.py`, referência numpy do modelo booleano (cobertura média, variância exata, pico no meio, sinal da assimetria, correlação ~ raio), sigma D na abertura = datasheet, cópia molda o grão, LUT igual, determinismo sem estado preso, prévia = exportação, independência da resolução |
+| `tests/test_grao_estrutura.py` | estrutura pela densidade (1.6, fase 3): padrão neutro, constantes = `tools/ajustar_grao.py`, sigma D por densidade = pontos do H-1-5207, numpy = GLSL, assimetria/força/tamanho de cada camada no look, aglomeração, pesos por tom, brilho médio, grão no negativo, LUT igual, determinismo, prévia = exportação, resolução |
+| `tests/test_grao_fisico_extras.py` | tamanho do cristal e variação do tamanho do grão físico (1.6, fase 3): padrão neutro, tabelas = ferramenta, E[ρ²] = 1, espalhamento do raio na GPU, variância = modelo exato com raios aleatórios, sigma D na abertura = datasheet, brilho/LUT iguais, determinismo, prévia = exportação, resolução |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_entrada_base.py` | a entrada da 1.6 não muda os padrões: Película e Edição em 8/16 bits, LUT exportado e plugin iguais à BASE (`entrada_base.py` + `data/entrada_base.json`) |
 | `tests/test_entrada_leitura.py` | leitura de log com super-brancos (códigos acima de 940 sobrevivem, em float32) e 16 bits exatos da faixa legal (preto, cinza e branco) com o ffmpeg |

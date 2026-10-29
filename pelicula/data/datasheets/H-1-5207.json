@@ -29,7 +29,27 @@
     "log_e_relativa": [1.0, 1.4, 1.6, 2.0, 2.2, 3.0, 3.2, 3.4, 3.8, 4.0, 4.4, 4.8],
     "R": [0.0061, 0.0096, 0.0099, null, null, 0.0057, 0.0054, 0.0054, 0.0049, 0.0048, 0.0048, 0.0045],
     "G": [0.0067, 0.0102, 0.0106, null, null, 0.0065, 0.0067, 0.0069, 0.0063, 0.0062, 0.0057, 0.0051],
-    "B": [0.0147, 0.0158, 0.0158, 0.0129, 0.0125, 0.0138, 0.0136, 0.0129, 0.0117, 0.0105, 0.0093, 0.0079]
+    "B": [0.0147, 0.0158, 0.0158, 0.0129, 0.0125, 0.0138, 0.0136, 0.0129, 0.0117, 0.0105, 0.0093, 0.0079],
+    "leitura_estrutura": {
+      "data": "2026-10-29",
+      "uso": "Estrutura pela densidade (1.6, pelicula/grao_estrutura.py): o sigma D de cada camada em função da densidade relativa ao cinza. Os pontos acima ficam como estão (a média deles é o NEG_SIGMA_D do grão no negativo).",
+      "metodo": "Mesma imagem raster da página 3 (PDF com o SHA-256 acima). As bordas do gráfico dão a escala: log E relativa de 0 a 5 (444 px) e densidade de 0 a 3 (444 px); o eixo do sigma D tem 140 px por década, conferido nos pontos já lidos. As curvas cheias (densidade) foram seguidas pelo traço, coluna a coluna, a partir de onde estão separadas; o sigma D tracejado foi lido coluna a coluna fora das curvas cheias (média de ±4 px).",
+      "erro": "±1 px da imagem: ±0,007 de densidade e ±1,7% no sigma D. Entre log E 2,0 e 2,6 o vermelho e o verde tracejados são um traço só (um valor para os dois)."
+    },
+    "densidade": {
+      "unidade": "densidade (com base e véu) das curvas cheias da mesma figura, na mesma log E relativa",
+      "log_e_relativa": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8],
+      "R": [0.23, 0.23, 0.23, 0.23, 0.23, 0.243, 0.264, 0.321, 0.406, 0.509, 0.629, 0.742, 0.86, 0.967, 1.062, 1.167, 1.268, 1.379, 1.491, 1.595, 1.695, 1.789, 1.871, 1.936, 1.987],
+      "G": [0.598, 0.595, 0.595, 0.601, 0.601, 0.615, 0.642, 0.706, 0.809, 0.941, 1.068, 1.2, 1.329, 1.446, 1.562, 1.695, 1.822, 1.949, 2.076, 2.203, 2.33, 2.443, 2.54, 2.615, 2.665],
+      "B": [1.0, 1.014, 1.014, 1.01, 1.02, 1.043, 1.09, 1.155, 1.246, 1.354, 1.484, 1.614, 1.737, 1.854, 1.973, 2.087, 2.214, 2.341, 2.461, 2.571, 2.678, 2.772, 2.856, 2.926, 2.984]
+    },
+    "pontos_extras": {
+      "unidade": "sigma D nos trechos que faltam acima (R e G sobrepostos: o mesmo traço)",
+      "log_e_relativa": [2.0, 2.2, 2.4, 2.6],
+      "R": [0.008, 0.0073, 0.0065, 0.0061],
+      "G": [0.008, 0.0073, 0.0065, 0.0061],
+      "B": [null, null, null, 0.0128]
+    }
   },
   "sensitometria": {
     "tolerancia_ajuste": 0.03,

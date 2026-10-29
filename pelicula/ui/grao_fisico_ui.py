@@ -20,6 +20,11 @@ def row(cards) -> object | None:
     return None
 
 
+EXTRA_KEYS = ("lab_grao_cristal", "lab_grao_variacao")  # 1.6 (fase 3): só valem no modelo físico
+
+
 def module_tools(win) -> dict[str, list]:
     r = row(win.cards)
-    return {"grao_fisico": [r]} if r is not None else {}
+    rows = [r] if r is not None else []
+    rows += [x for card in win.cards for x in card.rows if x.param.key in EXTRA_KEYS]
+    return {"grao_fisico": rows} if rows else {}

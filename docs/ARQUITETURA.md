@@ -37,6 +37,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
     - [30.7 Grão físico: o modelo booleano no negativo](#307-grão-físico-o-modelo-booleano-no-negativo)
+    - [30.8 Grão completo](#308-grão-completo)
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
@@ -2943,6 +2944,11 @@ O comportamento de cada ajuste ligado fica em `tests/test_grao_efeitos.py`.
 
 ### 30.1 Patentes conferidas antes da estrutura pela densidade (M1)
 
+> **Decisão de 29/10/2026 (fase 3 da 1.6):** o usuário decidiu fazer o grão de forma completa, independente de
+> patentes. A estrutura pela densidade (a M1 original, com camadas misturadas pela densidade) entrou (§30.8). Os
+> quadros de reivindicações abaixo e em §30.7 ficam como histórico; as licenças de código e de arquivos de
+> terceiros continuam valendo.
+
 Lidas em 29/10/2026, nas reivindicações publicadas (Google Patents):
 
 - **US 12,705,810 B2** (Northwestern University, "Real time film grain rendering and parameter estimation";
@@ -3223,6 +3229,108 @@ Anterioridade (datas para conferência):
 - A. Newson, J. Delon e B. Galerne, "A Stochastic Film Grain Model for Resolution-Independent Rendering",
   *Computer Graphics Forum* 36(8) (2017): o modelo booleano para renderizar grão, a relação λ ↔ cobertura e o
   filtro do spot (anterior ao provisório de 2023 da US 12,705,810).
+
+### 30.8 Grão completo
+
+Fase 3 da 1.6, depois da decisão de 29/10 (§30.1): o grão "de forma completa, independente de patentes". Três
+partes: a **estrutura pela densidade** (a M1 original), o **tamanho do cristal** e a **variação do tamanho** do grão
+físico, e a decisão de **não** gravar placas de grão. Os padrões continuam bit a bit (`tests/grao_base.py`,
+`tests/cor_base.py`, `tests/entrada_base.py`; só a chave `plugin` de `cor_base.json` foi regravada, porque o texto
+dos nós *Laboratorio* e *Textura* mudou de propósito).
+
+**Estrutura pela densidade** (`pelicula/grao_estrutura.py`; `grao_estrutura` 0–100%, padrão 0%, seção Grão;
+`grao_aglomeracao` 0–100%, padrão 0%, avançado). A forma do grão muda com a densidade local, como no modelo booleano
+de §30.7, mas sobre o campo do grão de sempre (a mesma grade, as mesmas sementes, a mesma mistura de *Aspereza* e
+*Grão colorido*):
+
+- **Três camadas**, cada uma num ponto do modelo booleano com o spot do pixel (`tools/ajustar_grao.py`,
+  `structure_layers`): **fina** (D = 0,05, u ≈ 0,11; assimetria exata +1,74; 11% maior), **média** (D = 0,3, u ≈ 0,5;
+  −0,15; 9% maior) e **densa** (D = 1, u ≈ 0,9; −1,90; o tamanho do grão de sempre). A assimetria vem de uma
+  transformação não linear do campo gaussiano, `T_s(g) = (e^(s·g − s²/2) − 1) / (sinal(s)·√(e^(s²) − 1))` (média 0 e
+  variância 1 exatas; assimetria `(e^(s²) + 2)·√(e^(s²) − 1)`; `s` = 0,4976, −0,0486, −0,5304). A assimetria do
+  modelo booleano é integrada com o mesmo spot de 16 pontos (a união de três discos pela inclusão–exclusão, a área
+  comum dos três numa grade de 0,004 raio). O tamanho é a fração da amostra grossa do ruído (a da *Aspereza*) que dá
+  a meia-distância de correlação da camada em relação à densa (`STRUCT_COARSE` 0,318, 0,292, 0); a *Aglomeração* leva
+  a da camada densa até 1 (até 2,3× maior).
+- **Mistura**: `s01 = smoothstep(ln 0,05, ln 0,3, ln D)` e `s12 = smoothstep(ln 0,3, ln 1, ln D)`, com `D = ρ·DREF`
+  (`DREF` = `grao_fisico.REF_DENSITY`, a densidade de cada camada no cinza). Os parâmetros (s e a fração grossa) são
+  interpolados por esses pesos: um padrão só, aninhado, com variância 1 exata em toda densidade (sem emendas num
+  degradê, sem mattes). Com a *Estrutura* em `e`: `s·e`, fração grossa `aspereza + (1 − aspereza)·e·δ` e força
+  `1 + e·(envelope − 1)`; em 0 é o grão de sempre.
+- **Força por densidade e por camada** (H-1-5207, p. 3, figura *Diffuse rms Granularity Curves*): o sigma D de cada
+  camada em função de `ρ` = densidade relativa ao cinza `(D − Dmin)/(D_cinza − Dmin)`. A figura traz as curvas de
+  densidade (cheias) e o sigma D (tracejado) na mesma log E; as curvas cheias foram lidas agora (chave
+  `granularidade.densidade` do JSON, de 0,2 em 0,2 log E) e o cinza fica em log E 2,527 (onde cada curva chega à
+  densidade acima da base que a curva sensitométrica tem em 0 stop; as três camadas concordam). Os trechos que
+  faltavam (R e G sobrepostos de log E 2,0 a 2,6; azul em 2,6) estão em `granularidade.pontos_extras`. Os pontos de
+  antes não mudaram (o `NEG_SIGMA_D` da M3 é a média deles). Tabela `STRUCT_SIGMA_D_Q` (nós em √ρ, 0 a 1,6): pico
+  suave nas exposições baixas e médias (ρ ≈ 0,2–0,3), queda nas altas, azul > verde ≈ vermelho.
+  - Grão de sempre (`u_grain_on = 1`): `ρ` de cada canal sai da exposição da cena (`linToStops(lin)` antes do
+    `colorPipe`) pela curva da mesma figura (`STRUCT_RHO_X`, −8 a +8 stops); `envelope = σD(ρ)/σD(1) ×
+    STRUCT_RATIO` (razão das camadas no cinza: R 0,930, G 0,930, B 1,898; a média do Rec.709 é 1, então o brilho do
+    grão nos tons médios fica o de antes).
+  - Grão no negativo "ruido" (`u_grain_on = 2`): `ρ = dn/nmid` dentro de `labPath` (cada caminho do Laboratório com a
+    sua densidade); `envelope = σD(ρ)/NEG_SIGMA_D` (o absoluto do datasheet, já que `u_ngrain` é o NEG_SIGMA_D).
+  - Modelo "fisico" (`u_grain_on = 3`): a estrutura não se aplica (ele já é a estrutura).
+- **Os pesos por tom** (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) continuam multiplicando o grão de sempre
+  como antes, por cima da estrutura: eles dizem quanto a cópia mostra o grão (na luminância da saída), a estrutura
+  diz como o negativo o fez (na exposição da cena). No grão no negativo eles já não valiam (§30.4).
+- **A cópia (2383)** não ganhou grão próprio: a granularidade dela não foi digitalizada e, somada em quadratura, seria
+  ≲ 10% do grão do negativo nos tons médios e < 1/255 nos pretos. Fica de fora (documentado aqui).
+
+Na GPU: variante `final_gs` (`grao_estrutura.FINAL_GS`, substituição de texto de `shaders.FINAL`: a parte comum
+antes de `// Um caminho completo. lin:`, `gsNeg` no lugar de `dn += g_ng;`, `applyGrainS` no lugar de `applyGrain`,
+`gsSample` no lugar de `negGrain`), compilada só quando o plano traz `u_gs_amt` (o plano grava `u_gs_amt` e
+`u_gs_clump` só com a *Estrutura* > 0); com véu, pré-exposição ou scanner, `final_gs_lx` (`labx.patch_glsl`). O BAKE
+não muda (o LUT exportado nunca tem grão). Custo (RTX 3060, render + leitura de 16 bits): igual ao do grão de
+sempre dentro do ruído da medida (≈ 4–6 ms em 1080p, ≈ 14–16 ms em 4K).
+
+Testes (`tests/test_grao_estrutura.py`): as constantes são as da ferramenta; o sigma D por densidade de cada camada
+contra os pontos lidos; a referência numpy (`grao_estrutura.channel`) contra o GLSL (`gsChannel`); a estatística de
+cada camada medida no look (força, sinal e valor da assimetria, meia-distância de correlação, aglomeração); os pesos
+por tom por cima; o brilho médio igual; o grão no negativo; LUT igual; determinismo; prévia = exportação; a mesma
+razão para o grão de sempre a 1080 e a 2160 linhas.
+
+**Tamanho do cristal e variação do tamanho** (`grao_fisico.extras`; seção Laboratório, avançados, só com o modelo
+físico e escondidos com o módulo Beta "grao_fisico"):
+
+- `lab_grao_cristal` (0,5–2×, padrão 1): multiplica o raio dos discos. O KAPPA de cada camada é compensado
+  (`CRYSTAL_K`, nós de 2^(k/4)): o sigma D na abertura de 48 µm, na densidade de referência, continua o do datasheet;
+  o cristal muda a textura (grãos maiores e mais raros), não a granularidade. O *Tamanho* da seção Grão continua
+  mudando os dois (§30.7). Pela lei de Selwyn (σD·√A constante para A ≫ grão), o fator seria 1/m; com a abertura de
+  ~6 raios a conta exata dá 1,81 em m = 0,5 e 0,64 em m = 2.
+- `lab_grao_variacao` (0–100%, padrão 0%): cada grão ganha o seu raio, log-normal: `ρ = e^(s·z − s²)/√c`, `s = 0,5 ×
+  variação`, `z` gaussiana (Box–Muller de um hash do próprio grão) cortada em ±2,5, `c` = a média de `e^(2sz − 2s²)`
+  com o corte (fechada com erf), então `E[ρ²] = 1`: `λ·π·E[r²] = D·ln 10` continua e a densidade média não muda. A
+  covariância exata com raios aleatórios é `(1 − u)²·(e^(λ·E[γ_ρ(h)]) − 1)`, `γ_ρ(h) = ρ²·γ(h/ρ)` (quadratura de
+  161 nós); o KAPPA é compensado (`VARIATION_K`: 0,76 em 100%). O alcance da busca cresce com o maior raio (até 2,75
+  raios médios em 100%).
+- Compensações separáveis (`kappa_factor = CRYSTAL_K(m) × VARIATION_K(v)`), conferidas no shader com o cristal 0,7 e
+  a variação 50% juntos (sigma D a ±8% do datasheet, como em §30.7).
+- Programas: o cristal só muda valores (`u_pg_r`, `u_pg_amp`); a variação usa a variante `final_pgv`
+  (`grao_fisico.GLSL_V`: `pgRadius`, `pgHits(d, r²)`, alcance `PG_REACH − 1 + ρ_max`; uniform `u_pg_var` = s, 1/√c,
+  ρ_max) e `final_pgv_lx`. O `FINAL_PG` de sempre não mudou um caractere. O mesmo número de pontos do spot (16) na
+  prévia e na exportação.
+- Custo (RTX 3060, render + leitura de 16 bits, cena lisa no cinza): "ruido" 4,6 / 14,7 ms (1080p / 4K); "fisico"
+  14,9 / 49,0 ms; cristal 2: 12,4 / 43,4 ms; cristal 0,5: 14,8 / 54,7 ms; variação 50%: 21,7 / 75,6 ms; variação
+  100%: 27,0 / 91,8 ms.
+- Plugin: `pc_pg_grain_v` / `pc_pg_coverage_v` / `pc_pg_radius` / `pc_pg_kfactor` / `pc_pg_var` em `K_PGRAIN`, tabelas
+  `PC_PG_CRYS`, `PC_PG_VARK`, `PC_PG_VARINV` (1/√c de 0 a 100% de 5 em 5%; o maior raio sai em forma fechada),
+  `B_PGRAIN_LAB` escolhe a versão de raios variáveis quando `gw.z > 0`; controles "Lab - Tamanho do cristal" e "Lab -
+  Variacao do tamanho" no nó *Laboratorio* e no OpenFX (`pc_colorpipe_pgv`). O OpenFX agora passa o grão físico pelo
+  `labx.body` (véu, pré-exposição e scanner valiam no app e não no OpenFX com o grão físico).
+
+Testes (`tests/test_grao_fisico_extras.py`): padrão neutro (o plano igual); as tabelas contra a ferramenta (uma
+amostra: o cálculo inteiro leva ~30 s); `E[ρ²] = 1` (quadratura e Monte Carlo do Box–Muller cortado); na GPU, o desvio
+do log do raio cresce com a variação e `E[ρ²] = 1`; a cobertura média segue a lei de Nutting e a variância por pixel
+é a do modelo exato com raios aleatórios (±6%); o sigma D na abertura de 48 µm continua o do datasheet (±8%) com o
+cristal, a variação e os dois; brilho médio e LUT iguais; determinismo; nada velho no programa; prévia = exportação;
+resolução. Paridade: `test_resolve.py` e `test_ofx.py`.
+
+**Placas de grão gravadas: não.** A tarefa 3 do plano (placas de grão escaneadas ou gravadas por exposição, como os
+"assets" da US 9,438,821) não foi feita: o modelo físico já reproduz o modelo booleano a ~2% na variância e na
+assimetria (tabela de §30.7), sem arquivos grandes, em qualquer resolução e animado por semente. Ficam de fora
+também (adiadas): o perfil por cartela (M5), "igualar a um filme" e "grão de um scan".
 
 ## 31. Cor simples e cor por planos
 

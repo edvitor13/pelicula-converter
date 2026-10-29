@@ -278,8 +278,17 @@ class Engine:
         véu, pré-exposição e scanner de luz branca (`labx`) ou com os dois (a `labPathX` copia a `labPath` já com o
         grão físico)."""
         if U.get("u_grain_on") != 3:
+            if "u_gs_amt" in U:  # 1.6: estrutura pela densidade (grao_estrutura.py)
+                from . import grao_estrutura
+                name = "final_gs_lx" if "u_lx_on" in U else "final_gs"
+                self._lazy_program(name, grao_estrutura.program(name))
+                return name
             return self._lab_program("final", U)
         from . import grao_fisico
+        if "u_pg_var" in U:  # 1.6 (fase 3): variação do tamanho do grão físico (raios variáveis)
+            name = "final_pgv_lx" if "u_lx_on" in U else "final_pgv"
+            self._lazy_program(name, grao_fisico.program(name))
+            return name
         if "u_lx_on" not in U:
             self._lazy_program("final_pg", grao_fisico.FINAL_PG)
             return "final_pg"

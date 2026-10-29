@@ -218,6 +218,15 @@ Dicas:
   ou *Fisico* (os grãos de prata do app, veja [EFEITOS.md](EFEITOS.md#laboratório-negativo-e-cópia)). Como o
   outro, parado no DCTL e animado no OpenFX. É mais pesado: no nó DCTL, uns 2× o tempo do nó com o *Ruido* em
   1080p e 4K; no OpenFX (CPU), uns 3×. O nó *Cor* não tem esse modo.
+- **Lab - Tamanho do cristal** e **Lab - Variacao do tamanho** (nó *Laboratorio* e plugin OpenFX, 1.6, só com o
+  modelo *Fisico*): grãos maiores ou menores com a mesma granularidade e cada grão com o seu tamanho, iguais ao
+  app. A *Variação* deixa o nó mais pesado (até uns 2× o do *Fisico* com 100%).
+- **Grao - Estrutura pela densidade** e **Grao - Aglomeracao** (nó *Textura*, e no *Laboratorio* para o grão no
+  negativo *Ruido*; plugin OpenFX, 1.6): o grão muda de forma e de força com a densidade, como no app. No nó
+  *Laboratorio* e no OpenFX a densidade é a de cada camada do negativo, igual ao app. No nó *Textura* a densidade
+  sai da imagem que chega ao nó (lida como o código de vídeo do app, antes da cor), então ele é igual ao app só
+  quando a cor da árvore é neutra; o plugin OpenFX vê a exposição da cena e segue o app. O nó *Cor* não tem esses
+  controles. Com o *Fisico* a estrutura não muda nada (ele já a tem).
 - **Lab - Tipo de scanner**, **Lab - Pelicula vencida anos** e **Lab - Pre-exposicao** (com os stops abaixo do
   cinza e a cor) (nó *Laboratorio* e plugin OpenFX, 1.6): o scanner de luz branca do *Sem cópia*, o véu e a
   perda de contraste da película vencida e o *flashing*, iguais ao app (diferença < 0,000003 nos testes). O nó
