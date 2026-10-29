@@ -174,6 +174,48 @@ VIDEO_SECTIONS: list[Section] = [
     ], "Dissolver, surgir do preto e sumir"),
 ]
 
+# 1.6, cor simples (`colorsimple.py`, módulo "cor_simples"): seções de cor novas, acrescentadas no fim (o inspetor as
+# mostra perto das parecidas: `ui/edit_panels.DISPLAY_AFTER`). Todo padrão é neutro e as chaves vão para o JSON só
+# fora do padrão (`SPARSE_KEYS`). O HSL mostra só as linhas de uma faixa por vez, por isso a cor escolhida é outra
+# seção.
+VIDEO_SECTIONS += [
+    Section("pele", "Pele natural", None, [
+        _pct("pele_natural", "Pele natural", lo=0.0,
+             tip="A pele não acompanha as mudanças de cor deste clipe (balanço, saturação, rodas, cor escolhida, "
+                 "degradê) e fica com a cor mais uniforme. Só a cor: a textura não muda."),
+        F("pele_centro", "Cor da pele", 64.5, 0, 360, 0.5, 1, "°",
+          "Matiz da pele que a máscara procura (o conta-gotas da pele acerta este valor).", advanced=True),
+    ], "Protege e uniformiza a cor da pele"),
+
+    Section("alvo", "Cor escolhida", None, [
+        F("alvo_matiz", "Cor", 0.0, 0, 360, 1, 0, "°",
+          "A cor que muda (matiz). O conta-gotas \"Cor\" acerta este valor clicando na prévia."),
+        F("alvo_largura", "Largura", 30.0, 5, 90, 1, 0, "°", "Quanto o matiz pode se afastar da cor escolhida."),
+        F("alvo_desvio", "Matiz", 0.0, -180, 180, 1, 0, "°", "Gira a cor escolhida para outra."),
+        _pct("alvo_sat", "Saturação"),
+        _pct("alvo_luz", "Luminância"),
+    ], "Clique numa cor da prévia e mude só ela"),
+
+    Section("degrade", "Degradê", None, [
+        C("degrade_tipo", "Forma", "linear", [("linear", N_("Linear (céu ou chão)")),
+                                              ("radial", N_("Radial (dentro do círculo)"))]),
+        F("degrade_angulo", "Direção", 0.0, -180, 180, 1, 0, "°",
+          "Que lado muda no degradê linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo (chão)."),
+        F("degrade_x", "Centro horizontal", 0.0, -1920, 1920, 10, 0, " px",
+          "Desloca a linha ou o círculo (px de um quadro de 1080 linhas do clipe; 0 = centro)."),
+        F("degrade_y", "Centro vertical", 0.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        F("degrade_raio", "Raio", 500.0, 10, 2000, 10, 0, " px", "Tamanho do círculo do degradê radial."),
+        F("degrade_suavidade", "Suavidade", 400.0, 0, 2000, 10, 0, " px",
+          "Largura da passagem (0 = borda seca)."),
+        B("degrade_inverter", "Inverter", False, "Troca o lado que muda."),
+        F("degrade_exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV", "Mais ou menos luz só no lado marcado."),
+        F("degrade_temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
+        F("degrade_tonalidade", "Tonalidade", 0.0, -100, 100, 1, 0, "",
+          "Negativo puxa para verde, positivo para magenta."),
+        _pct("degrade_saturacao", "Saturação"),
+    ], "Céu ou chão com cor e luz próprias"),
+]
+
 AUDIO_SECTIONS: list[Section] = [
     Section("som", "Som", None, [
         F("volume", "Volume", 0.0, -60, 12, 0.5, 1, " dB"),
@@ -202,7 +244,8 @@ VIDEO = Schema(VIDEO_SECTIONS)
 AUDIO = Schema(AUDIO_SECTIONS)
 SCHEMAS = {"video": VIDEO, "audio": AUDIO}
 
-COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
+COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos",
+                  "pele", "alvo", "degrade")  # 1.6: cor simples (acrescentadas no fim)
 
 # Ajustes que aceitam chaves de animação (`keyframes.py`, `Clip.keys`): enquadramento e opacidade, todo ajuste
 # numérico de cor, luz, detalhe e efeitos (e as rodas) e o volume do som. Escolhas, liga/desliga, corte,
@@ -266,6 +309,7 @@ SPARSE_KEYS: set[str] = {
     "entrada_zoom", "entrada_quadros", "entrada_clarao",
     "saida_suavidade", "saida_centro_x", "saida_centro_y", "saida_anel",
 }
+SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

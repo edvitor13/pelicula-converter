@@ -2752,3 +2752,40 @@ compara os dois na GPU.
   "Ver planos"; geometria; blocos Frente, Fundo e Pele). Prontos (`planes.PRONTOS`) só preenchem os controles, um
   passo do desfazer. A janela liga tudo por `ui/cor_ui.py` (`install`, `after_render`, `module_tools`,
   `apply_modules`, Esc cancela o conta-gotas).
+
+### 31.3 Cor simples no modo Edição (`colorsimple.py`, módulo "cor_simples")
+
+- **Ajustes de clipe**: três seções de cor acrescentadas no fim de `editparams.VIDEO_SECTIONS` e de
+  `COLOR_SECTIONS` — "pele" (`pele_natural`, `pele_centro`), "alvo" (`alvo_matiz`, `_largura`, `_desvio`,
+  `_sat`, `_luz`) e "degrade" (`degrade_tipo`, `_angulo`, `_x`, `_y`, `_raio`, `_suavidade`, `_inverter`,
+  `_exposicao`, `_temperatura`, `_tonalidade`, `_saturacao`). Seções à parte porque o cartão HSL só mostra as
+  linhas de uma faixa; o inspetor as põe perto das parecidas (`ui/edit_panels.DISPLAY_AFTER`). Todas em
+  `SPARSE_KEYS` (JSON só fora do padrão) e, por serem de cor, entram em `color_active`, nos ajustes rápidos,
+  no "Restaurar cor", no copiar/colar e nas chaves de animação. Fora do padrão o projeto vai para o formato 4
+  ("ajustes_clipe_1_6").
+- **Shader**: `compositor.clip_uniforms` acrescenta `colorsimple.uniforms(v)` quando a cor do clipe está ligada;
+  sem nenhum dos três ajustes devolve `{}`. Com `u_cs_on`, o `Engine.compose` usa `editshaders.CLIP_CS` (ou
+  `CLIP_TR_CS` com transição): o `CLIP`/`CLIP_TR` letra por letra mais `colorsimple.GLSL` (as funções de
+  `masks.GLSL` e `colorSimple`) e, em volta do `colorCorrect`, `vec3 c_in = c;` e `c = colorSimple(c_in, c, uv);`
+  (`tests/test_colorsimple.py` confere a reconstrução). O `CLIP` não muda (o hash dele está em
+  `tests/test_transitions.py`).
+- **`colorSimple(cin, c, uv)`**, na ordem: cor escolhida (peso pelo matiz HSV da cor do arquivo `cin`, cheio até
+  metade da largura e zero na largura, vezes `smoothstep(0,02; 0,2; saturação)`; muda matiz, saturação e valor
+  de `c`); degradê (`gradMask(framePoint(uv, aspecto do clipe))`: ganho por canal na luz, `exp2((EV + mistura
+  do balanço)·g)`, e saturação em volta da luminância); pele natural (máscara `skinMask(cin)` × força; no OkLab,
+  a claridade de `c` com o `a, b` de `cin` na mesma proporção `C/L`, depois `skinEven`). `colorsimple.apply` é a
+  mesma conta em numpy (`tests/test_colorsimple.py` compara com a GPU).
+- **Ferramentas** (funções puras em `colorsimple`, interface em `ui/color_tools.py`):
+  `white_balance_from(rgb)` resolve exatamente `want = média(log2) − log2(luz)` = EV + mistura da temperatura e da
+  tonalidade (a mesma de `compositor.wb_gains_ev`); `sample_frames(clip)` dá 9 quadros no meio de partes iguais
+  do clipe e `auto_adjust_frames` passa os quadros empilhados ao `compositor.auto_adjust` (o clique do
+  "Automático"; "Só o quadro atual" no menu do botão chama o de antes); `match_adjust(src, ref, protect_skin)`
+  mede a mediana da luz, a média dos canais nos tons médios, a cor média e o desvio da luminância (as duas
+  últimas relativas à luminância média), sem os pixels de pele, e `match_values` soma a diferença aos ajustes
+  da referência (outro clipe) ou a zero (uma imagem); `pick_target`/`nearest_band` dão o matiz HSV e a faixa do
+  HSL. O ponto clicado vira uv do clipe por `compositor.transform` (`clip_point`) e a cor vem da imagem
+  decodificada da camada (antes dos ajustes).
+- **Grupos de cor**: `Clip.color_group` (JSON "grupo" só quando usado; `timeline.FEATURES_V4["grupos_cor"]`).
+  `TimelineModel.set_clip_values` passa as chaves de cor que mudaram para os outros clipes de vídeo do grupo
+  (`_group_follow`, no mesmo passo do desfazer); `set_color_group`, `group_selected`, `ungroup_selected`,
+  `select_color_group`. As chaves de animação continuam de cada clipe.

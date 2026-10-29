@@ -235,7 +235,9 @@ no topo do painel.
 
 Um clique resolve o mais comum:
 
-- **Automático**: corrige exposição, contraste e balanço de branco olhando o quadro atual.
+- **Automático**: corrige exposição, níveis e balanço de branco olhando **o clipe inteiro** (9 quadros
+  espalhados por ele, sempre os mesmos). A setinha do botão tem **Só o quadro atual**, o jeito de antes. Os
+  clipes que já foram ajustados ficam como estão: só muda o que você clicar de novo.
 - **Mais vivo**, **Quente**, **Frio**, **Suave**, **Contraste**, **Preto e branco**, **Antigo**.
 - **Restaurar cor**: volta a cor e a luz ao original (o enquadramento e a velocidade ficam).
 - **Copiar ajustes / Colar / Aplicar a todos**: leva a cor e a luz de um clipe para outros — ótimo para
@@ -252,12 +254,49 @@ Um clique resolve o mais comum:
 | **Cor por faixa (HSL)** | Mude uma cor sem mexer nas outras: escolha a bolinha (vermelhos, laranjas, amarelos, verdes, cianos, azuis, roxos, magentas) e ajuste matiz, saturação e luminância. Bolinhas com um pontinho já têm ajuste |
 | **Detalhe** | Nitidez, clareza (contraste local: realça textura ou suaviza a pele), desfoque e redução de ruído |
 | **Efeitos** | Vinheta (escurece ou clareia as bordas) e desbotar (pretos lavados, como foto antiga) |
+| **Pele natural** *(cor simples)* | A pele não acompanha as mudanças de cor do clipe e fica com a cor mais uniforme (veja *Cor simples*, abaixo) |
+| **Cor escolhida** *(cor simples)* | Uma cor só (a que você clicou): matiz, saturação e luminância |
+| **Degradê** *(cor simples)* | Céu ou chão com luz e cor próprias |
 | **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
 
 > **Dissolver** mistura o começo deste clipe com o fim do clipe anterior da mesma faixa (encostado nele).
 > Para a mistura ficar bonita, o clipe anterior precisa ter um pouco de vídeo sobrando depois do corte.
+
+#### Cor simples
+
+Ferramentas de um clique sobre a cor do clipe (módulo **Cor simples**, ligado no perfil Criador; desligar só
+esconde a barra e os cartões). Tudo o que elas fazem vira ajuste comum do clipe: dá para mexer depois e desfazer
+com Ctrl+Z. A barra **Cor simples** fica embaixo dos ajustes rápidos:
+
+- **Neutro** (conta-gotas do balanço de branco): clique em algo que deveria ser branco ou cinza na prévia (uma parede, uma camiseta,
+  o céu nublado). A temperatura e a tonalidade do clipe ficam no ponto em que essa cor vira neutra. Esc cancela.
+- **Cor** (conta-gotas): clique numa cor da prévia — o carro vermelho, o céu, a grama. Ela vira a **Cor
+  escolhida** do clipe: no cartão *Cor escolhida*, mude o **Matiz** (gira para outra cor), a **Saturação** e a
+  **Luminância** só dela; a **Largura** diz quanto das cores vizinhas entra. O cartão HSL também abre na faixa
+  mais perto da cor clicada. Os cinzas nunca mudam.
+- **Igualar**: deixa a cor e a luz deste clipe parecidas com as de **outro clipe** (o quadro do meio dele, já
+  com os ajustes dele) ou de **uma imagem**. Mede a exposição, o balanço, a saturação e o contraste e escreve os
+  valores nos ajustes do clipe. Com **Proteger a pele** (ligado), os tons de pele ficam fora das contas — um rosto
+  não puxa o balanço — e a *Pele natural* do clipe vai a 50%.
+- **Grupo**: selecione dois ou mais clipes e use **Agrupar os selecionados**. Daí em diante, mexer na cor ou na
+  luz de um muda a dos outros do grupo (só os ajustes que você mexeu: o resto de cada clipe fica). O
+  enquadramento, a velocidade, as transições e as chaves de animação continuam de cada clipe. **Selecionar o
+  grupo** e **Tirar do grupo** estão no mesmo menu.
+
+Os cartões da cor simples:
+
+| Cartão | Ajuste | O que faz |
+|---|---|---|
+| **Pele natural** | Pele natural (0–100%) | Na pele (achada pela cor, do muito claro ao muito escuro), a cor volta à do arquivo, com a luz do clipe, e fica mais uniforme. Esfrie o clipe inteiro sem deixar o rosto azulado. Só a cor: a textura nunca é alisada |
+| | Cor da pele *(avançado)* | O matiz que a máscara da pele procura |
+| **Cor escolhida** | Cor, Largura | A cor que muda (matiz, 0–360°) e quanto as vizinhas entram |
+| | Matiz, Saturação, Luminância | O que muda nela |
+| **Degradê** | Forma | Linear (uma linha: céu ou chão) ou radial (dentro do círculo) |
+| | Direção | Que lado muda no linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo (chão) |
+| | Centro, Raio, Suavidade, Inverter | Onde fica a linha ou o círculo (em pixels de um quadro de 1080 linhas do próprio clipe: o degradê acompanha o enquadramento) |
+| | Exposição, Temperatura, Tonalidade, Saturação | O que muda no lado marcado |
 
 #### Transições de película
 

@@ -11,10 +11,11 @@ from __future__ import annotations
 
 
 def install(win) -> None:
-    from . import planes_ui, preview_tools
+    from . import color_tools, planes_ui, preview_tools
     win.preview_tools = preview_tools.PreviewTools(win)
     cards = {c.section.key: c for c in win.cards}
     win.planes_ui = planes_ui.PlanesUI(win, cards["planos"])
+    win.color_tools = color_tools.ColorTools(win)
 
 
 def after_render(win, recipe) -> None:
@@ -25,13 +26,26 @@ def after_render(win, recipe) -> None:
 
 def module_tools(win) -> dict[str, list]:
     cards = {c.section.key: c for c in win.cards}
-    return {"cor_planos": [cards["planos"]]}
+    out = {"cor_planos": [cards["planos"]]}
+    tools = getattr(win, "color_tools", None)
+    if tools is not None:
+        out["cor_simples"] = tools.module_tools()
+    return out
 
 
 def apply_modules(win, on: set[str]) -> None:
     ui = getattr(win, "planes_ui", None)
     if ui is not None:
         ui.apply_module("cor_planos" in on)
+    tools = getattr(win, "color_tools", None)
+    if tools is not None:
+        tools.apply_module("cor_simples" in on)
+
+
+def auto_whole_clip(win, cid: str) -> bool:
+    """"Automático" do clipe inteiro (`color_tools.ColorTools.auto_whole_clip`); False = o do quadro atual."""
+    tools = getattr(win, "color_tools", None)
+    return tools is not None and tools.auto_whole_clip(cid)
 
 
 def cancel_pick(win) -> bool:

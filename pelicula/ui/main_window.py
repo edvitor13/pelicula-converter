@@ -921,6 +921,7 @@ class MainWindow(QMainWindow):
         vl.addWidget(self.edit_scopes)
         self.inspector = ClipInspector(self.model)
         self.inspector.autoRequested.connect(self.auto_adjust_clip)
+        self.inspector.autoFrameRequested.connect(lambda cid: self.auto_adjust_clip(cid, whole=False))
         self.inspector.seekRequested.connect(self.seek)
         self.gen_editor = generators_ui.GeneratorEditor(self.model)
         self.inspector.add_source_editor(self.gen_editor)
@@ -1836,8 +1837,11 @@ class MainWindow(QMainWindow):
             self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic(),
                                     transparent=dlg.transparent())
 
-    def auto_adjust_clip(self, cid: str) -> None:
-        """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço."""
+    def auto_adjust_clip(self, cid: str, whole: bool = True) -> None:
+        """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço.
+        `whole`: 1.6, o clipe inteiro (`colorsimple.sample_frames`; vídeo de arquivo) em vez do quadro atual."""
+        if whole and cor_ui.auto_whole_clip(self, cid):
+            return
         seq = self.model.seq
         clip = seq.find(cid)
         if clip is None or clip.kind != timeline.VIDEO:

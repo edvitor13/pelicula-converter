@@ -446,6 +446,9 @@ class Engine:
             if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
                 program = "clip_tr"
                 self._lazy_program(program, editshaders.CLIP_TR)
+            if "u_cs_on" in U:  # 1.6: cor simples do clipe (`colorsimple.py`)
+                program += "_cs"
+                self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
             self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         out_dtype = "u1" if depth == 8 else "u2"

@@ -627,3 +627,19 @@ void main() {
 """
 
 CLIP_TR = CLIP.split("void main() {")[0] + _CURVES + _TR_FUNCS + _TR_MAIN
+
+
+# 1.6: cor simples do clipe (`colorsimple.py`): a cor escolhida, o degradê e a pele natural depois do
+# `colorCorrect`, com a cor de antes dos ajustes. Programas à parte, usados só quando `clip_uniforms` traz `u_cs_on`:
+# o `CLIP` e o `CLIP_TR` de sempre ficam letra por letra (a mesma saída de antes).
+def _with_simple(src: str) -> str:
+    from .colorsimple import GLSL
+    head, sep, main = src.partition("void main() {")
+    old = "        c = colorCorrect(c);\n"
+    assert sep and main.count(old) == 1
+    new = "        vec3 c_in = c;\n" + old + "        if (u_cs_on == 1) c = colorSimple(c_in, c, uv);\n"
+    return head + GLSL + "\n" + sep + main.replace(old, new)
+
+
+CLIP_CS = _with_simple(CLIP)
+CLIP_TR_CS = _with_simple(CLIP_TR)
