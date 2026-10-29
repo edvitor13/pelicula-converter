@@ -1,4 +1,4 @@
-// PeliculaConverter 1.5.0 - parametros do plugin OpenFX (gerado por pelicula/ofx.py; nao edite).
+// PeliculaConverter 1.6.0 - parametros do plugin OpenFX (gerado por pelicula/ofx.py; nao edite).
 #pragma once
 
 struct pc_param_def {
@@ -381,5 +381,5 @@ static const float PC_APP_DEFAULTS[168] = {0.0f, 100.0f, 100.0f, 0.0f, 5.0f, 4.0
 #define PC_PLUGIN_ID "com.peliculaconverter.pelicula"
 #define PC_PLUGIN_LABEL "PeliculaConverter"
 #define PC_VERSION_MAJOR 1
-#define PC_VERSION_MINOR 5
-#define PC_VERSION_TEXT "1.5.0"
+#define PC_VERSION_MINOR 6
+#define PC_VERSION_TEXT "1.6.0"

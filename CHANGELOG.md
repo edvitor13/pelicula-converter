@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.6.0] - 2026-10-29
+
 ### Adicionado
 - **Perfis de câmera novos**, pelas fórmulas que os fabricantes publicam: Canon Log 2 e Log 3, Fujifilm
   F-Log, F-Log2 e F-Log2 C, DJI D-Log, Sony S-Log2 e Leica L-Log, e o **EI do ARRI LogC3** (avançado).
@@ -90,10 +96,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   aviso em vez de abri-lo sem os ajustes novos. Projetos sem nada da 1.6 continuam no formato de antes.
 - Dados de fabricantes: números de publicações públicas podem calibrar modelos, com a fonte registrada
   (`pelicula/data/datasheets/`); o aviso legal do README explica o que é usado.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.5.0] - 2026-10-28
 

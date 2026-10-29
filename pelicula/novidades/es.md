@@ -1,3 +1,15 @@
+## Versión 1.6.0 — 29 de octubre de 2026
+
+**Color y película: cámaras log, color simple, laboratorio completo y grano de verdad.**
+
+- 🎥 **Tu cámara, como debe ser.** Perfiles nuevos (Canon Log 2 y 3, F-Log, F-Log2, D-Log, S-Log2, L-Log y el EI de LogC3), perfil por clip en el modo Edición y sugerencia automática por los datos del archivo. Las altas luces del video log por encima del blanco ya no se recortan, y los colores muy saturados (LED, neón) quedan protegidos.
+- 🎨 **Color simple.** En el modo Edición: cuentagotas del blanco, automático por el clip entero, igualar a otro clip o a una imagen protegiendo la piel, hacer clic en un color y cambiar solo ese, piel natural, degradado y grupos de color. Cebra, falso color y fotograma de referencia en la vista previa.
+- 🧪 **Laboratorio completo.** Diapositiva reversible, revelado cruzado, película vencida, preexposición, escáner de luz blanca y películas calibradas con las hojas de datos públicas de Kodak. En el modo Edición, la **luz de la positivadora por clip** (Alt+R/G/B/D) y, en prueba, el **fotómetro de la película**, que muestra dónde el negativo pierde detalle o se quema. Cuatro presets nuevos.
+- 🌾 **Grano de verdad.** El grano nace en el negativo, en cada capa, cambia con la densidad y puede estar hecho de granos de plata simulados (Beta). Suavidad, respiración y nitidez por capa, y halación física.
+- 📷 **Cámara y formato.** Obturador de 180° a partir de video de 50/60/120 fps, manivela, lente anamórfica, fecha impresa, formatos de foto (135, medio cuadro, 120), el montaje convertido en empalmes de película y la **Máquina del tiempo**: elige un año y dónde se veía la película.
+- 🎛️ **Plugin de DaVinci Resolve.** Tiene los perfiles, procesos, grano y formatos nuevos. **Reinstala el plugin** desde la ventana de la app para tenerlo todo.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.6 solo abre en la 1.6 o más nueva; los antiguos abren y salen iguales.
+
 ## Versión 1.5.0 — 28 de octubre de 2026
 
 **Movimiento, texto y subtítulos en el modo Edición.**
