@@ -253,7 +253,7 @@ DEFAULT_ID = "vision3_250d"
 # Ajustes que descrevem o arquivo, não o look: aplicar um preset (pronto ou do usuário) não muda esses
 # valores. O perfil do vídeo vem da câmera (ou da detecção do HDR ao abrir o arquivo); um preset que o
 # trocasse para Rec.709 desfaria em silêncio a escolha certa.
-SOURCE_KEYS = ("entrada", "log_reescalado")
+SOURCE_KEYS = ("entrada", "log_reescalado", "logc3_ei")
 
 
 def with_source(preset_values: dict[str, Any], current: dict[str, Any] | None) -> dict[str, Any]:

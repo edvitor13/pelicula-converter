@@ -21,7 +21,30 @@ D_P = 4.0
 
 INPUT_IDS = {"rec709": 0, "linear": 1, "nlog": 2, "slog3": 3, "logc3": 4, "vlog": 5, "cineon": 6, "dwg": 7,
              "log3g10": 8, "bmd_gen5": 9, "logc4": 10,
-             "applelog": 11, "hlg": 12, "pq": 13}
+             "applelog": 11, "hlg": 12, "pq": 13,
+             # 1.6 (fontes em shaders.camDec): o F-Log2 C é a curva do F-Log2 com o F-Gamut C
+             "clog2": 14, "clog3": 15, "flog": 16, "flog2": 17, "flog2c": 18, "dlog": 19, "slog2": 20,
+             "llog": 21}
+
+# ARRI LogC3 com outro EI (`logc3_ei` ≠ 800): `u_input` = LOGC3_EI_ID + posição do EI nesta tabela, que se repete
+# em shaders.LC3 e no plugin (PC_LC3).
+# ARRI, "ALEXA Log C Curve – Usage in VFX" (Harald Brendel, 2012), tabela "SUP 3.x, Linear Scene Exposure
+# Factor": (corte, a, b, c, d, e, f) por EI; t = c·log10(a·x + b) + d acima do corte, e·x + f abaixo. O cinza
+# 18% fica em 0,391 em todos; muda a compressão das luzes e das sombras. O EI 800 é a curva de sempre (id 4).
+LOGC3_EI_ID = 22
+LOGC3_EI = {
+    "160": (0.005561, 5.555556, 0.080216, 0.269036, 0.381991, 5.842037, 0.092778),
+    "200": (0.006208, 5.555556, 0.076621, 0.266007, 0.382478, 5.776265, 0.092782),
+    "250": (0.006871, 5.555556, 0.072941, 0.262978, 0.382966, 5.710494, 0.092786),
+    "320": (0.007622, 5.555556, 0.068768, 0.259627, 0.383508, 5.637732, 0.092791),
+    "400": (0.008318, 5.555556, 0.064901, 0.256598, 0.383999, 5.571960, 0.092795),
+    "500": (0.009031, 5.555556, 0.060939, 0.253569, 0.384493, 5.506188, 0.092800),
+    "640": (0.009840, 5.555556, 0.056443, 0.250219, 0.385040, 5.433426, 0.092805),
+    "800": (0.010591, 5.555556, 0.052272, 0.247190, 0.385537, 5.367655, 0.092809),
+    "1000": (0.011361, 5.555556, 0.047996, 0.244161, 0.386036, 5.301883, 0.092814),
+    "1280": (0.012235, 5.555556, 0.043137, 0.240810, 0.386590, 5.229121, 0.092819),
+    "1600": (0.013047, 5.555556, 0.038625, 0.237781, 0.387093, 5.163350, 0.092824),
+}
 
 GAUGES: dict[str, dict[str, Any]] = {
     "nenhuma": dict(grain_size=1.00, grain_amt=1.00, blur=0.0, weave=1.0, vignette=0.00, hal=1.00, aspect=None),
@@ -139,11 +162,20 @@ _PRIMARIES = {
     # Blackmagic Wide Gamut (Gen 4/5) e ARRI Wide Gamut 4 (valores publicados; branco D65)
     "bmdwg": ((0.7177215, 0.3171181), (0.2280410, 0.8615690), (0.1005841, -0.0820452)),
     "awg4": ((0.7347, 0.2653), (0.1424, 0.8576), (0.0991, -0.0308)),
+    # 1.6. Canon Cinema Gamut (Canon, "Cinema Gamut" na atualização da EOS C500, 2014); Fujifilm F-Gamut C
+    # ("F-Log2 C Data Sheet" Ver.1.0, 2024; o F-Gamut do F-Log/F-Log2 é o BT.2020); DJI D-Gamut ("White Paper
+    # on D-Log and D-Gamut of DJI Cinema Color System", 2017); Sony S-Gamut ("S-Log2 Technical Paper", 2012).
+    "cinemagamut": ((0.74, 0.27), (0.17, 1.14), (0.08, -0.10)),
+    "fgamutc": ((0.73470, 0.26530), (0.02630, 0.97370), (0.11730, -0.02240)),
+    "dgamut": ((0.71, 0.31), (0.21, 0.88), (0.09, -0.08)),
+    "sgamut": ((0.73, 0.28), (0.14, 0.855), (0.10, -0.05)),
 }
 _D65 = (0.3127, 0.3290)
 INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020",
                "slog3": "sgamut3cine", "logc3": "awg3", "vlog": "vgamut", "dwg": "dwg", "log3g10": "rwg",
-               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020", "hlg": "2020", "pq": "2020"}
+               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020", "hlg": "2020", "pq": "2020",
+               "clog2": "cinemagamut", "clog3": "cinemagamut", "flog": "2020", "flog2": "2020",
+               "flog2c": "fgamutc", "dlog": "dgamut", "slog2": "sgamut", "llog": "2020"}
 
 # Domínio de cada curva de entrada: em que escala o fabricante escreveu a fórmula.
 #
@@ -164,6 +196,11 @@ INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020"
 #     Nikon N-Log, "N-Log Specification Document": "x is the N-Log 10-bit code value"; cinza 18% = 372
 #       (35%, calculado pela fórmula). Exceção: gravação externa por HDMI com a saída em "Limited" chega já
 #       reescalada para 64–940 (guia de edição da Nikon) — `log_reescalado` desliga a volta ao código.
+#     Fujifilm F-Log e F-Log2 ("F-Log Data Sheet" Ver.1.1; "F-Log2 Data Sheet"; "F-Log2 C Data Sheet" Ver.1.0):
+#       a tabela dá o código de 10 bits da fórmula (F-Log: 0% → 95, 18% → 470, 90% → 705; F-Log2: 95, 400,
+#       570) e o "IRE" de cada um como (código − 64)/876 (18% = 46,3% no F-Log): o código vai direto ao arquivo.
+#     DJI D-Log ("White Paper on D-Log and D-Gamut of DJI Cinema Color System", 2017): tabela em código de 10
+#       bits igual a 1023·fórmula (0% → 95, 18% → 408, 90% → 586).
 # - "sinal": a fórmula usa o próprio sinal E′ (0 = preto, 1 = branco nominal), gravado com a quantização
 #   padrão (faixa legal: código = 64 + 876·E′; cheia: 1023·E′); o valor expandido v já é E′. Fontes:
 #     ARRI LogC3, "ALEXA Log C Curve – Usage in VFX": o cinza 18% é o valor 0,391 = 400/1023 num código
@@ -182,12 +219,21 @@ INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020"
 #     Apple Log ("Apple Log Profile White Paper", 2023): P em [0, 1] gravado em buffers "video range" de 10
 #       bits (não conferido no documento original: está atrás do login de desenvolvedor da Apple).
 #     Rec.709 (curva neutra do app), linear e HLG/PQ (ITU-R BT.2100: E′ com D = 876·E′ + 64 em 10 bits).
+#     Canon Log 2 e Canon Log 3 ("Canon Log Gamma Curves", transformadas de entrada 201612 e 202007): a fórmula
+#       v1 dá o sinal (18% → 39,2% e 32,8%) e o arquivo de faixa legal guarda 64 + 876·sinal (18% → 39,8% e
+#       34,3% de 1023); a versão 1.2 da Canon é a mesma curva com as constantes já nesse código.
+#     Sony S-Log2 ("S-Log2 Technical Paper"): sinal levado para a faixa legal (0% → 90, 18% → 347, 90% → 582).
+#     Leica L-Log ("L-Log Reference Manual" V1.9, 2026): h.264/h.265 gravam a faixa cheia (código = 1023·L,
+#       0% → 92, 18% → 445, 90% → 634) e o ProRes "video levels": o mesmo L reescalado para 64–940 (a tabela 2
+#       dá 88% IRE no ProRes para o código 897 = 897/1023). Nos dois casos o valor lido já é L.
 # Os LUTs externos e os .cube exportados usam o domínio da própria curva (código de 10 bits nas curvas
 # "cv"): é a convenção dos LUTs dos fabricantes ("N-Log-Full", LUTs "Full range" da Sony) e das IDTs do
 # ACES, que aplicam a fórmula direto no valor de entrada.
 INPUT_DOMAIN = {"rec709": "sinal", "linear": "sinal", "nlog": "cv", "slog3": "cv", "logc3": "sinal",
                 "vlog": "cv", "cineon": "sinal", "dwg": "sinal", "log3g10": "sinal", "bmd_gen5": "sinal",
-                "logc4": "sinal", "applelog": "sinal", "hlg": "sinal", "pq": "sinal"}
+                "logc4": "sinal", "applelog": "sinal", "hlg": "sinal", "pq": "sinal",
+                "clog2": "sinal", "clog3": "sinal", "flog": "cv", "flog2": "cv", "flog2c": "cv", "dlog": "cv",
+                "slog2": "sinal", "llog": "sinal"}
 
 # HLG e PQ: luz de cena normalizada E (0..1 no HLG) → luz linear do app (cinza médio = 0,18). O cinza
 # de referência da ITU-R BT.2408 (cartão 18% em 38% do sinal HLG: E = 0,38²/3) vira 0,18; o branco de
@@ -209,6 +255,16 @@ PQ_NOMINAL_PEAK = 1000.0  # cd/m²: pico nominal do HLG na conversão PQ → luz
 def code_value_curve(entrada: str) -> bool:
     """A curva do perfil é escrita no código de 10 bits (código/1023)? (veja INPUT_DOMAIN)"""
     return INPUT_DOMAIN.get(entrada) == "cv"
+
+
+def input_id(v: dict) -> int:
+    """Id da curva de entrada no shader (`u_input`): o de `INPUT_IDS`, ou, no ARRI LogC3 com `logc3_ei` diferente
+    de 800, `LOGC3_EI_ID` + a posição do EI em `LOGC3_EI` (o EI 800 fica no id 4 de sempre)."""
+    entrada = v.get("entrada", "rec709")
+    ei = str(v.get("logc3_ei", "800"))
+    if entrada == "logc3" and ei != "800" and ei in LOGC3_EI:
+        return LOGC3_EI_ID + list(LOGC3_EI).index(ei)
+    return int(INPUT_IDS.get(entrada, 0))
 
 
 def _npm(prim, white=_D65) -> np.ndarray:
@@ -822,7 +878,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     # ---- Entrada, geometria e exposição (passo base)
     U["u_res"] = (float(width), float(height))
     U["u_scale"] = scale
-    U["u_input"] = INPUT_IDS.get(v["entrada"], 0)
+    U["u_input"] = input_id(v)  # o de INPUT_IDS; no LogC3 com outro EI, o id dele (o 800 é a curva de sempre)
     # Curva em código de 10 bits: volta ao código quando a fonte veio expandida (u_legal), menos quando o
     # arquivo já traz o log reescalado para a faixa legal (saída HDMI "Limited" da câmera).
     U["u_input_cv"] = 1 if (code_value_curve(v["entrada"]) and not v.get("log_reescalado")) else 0

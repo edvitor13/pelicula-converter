@@ -170,11 +170,13 @@ quadros vizinhos:
   prévia (picos L/R e loudness EBU R128: momentânea, curto prazo, integrada e true peak).
 
 ### Entrada
-- **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
-  ARRI LogC3 (EI 800), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
+- **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine) e S-Log2 (S-Gamut),
+  ARRI LogC3 (EI 160 a 1600), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
   Nikon N-RAW convertidos), Blackmagic Film Gen 5 (Blackmagic Wide Gamut), Apple Log (iPhone),
-  DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa e a faixa do
-  arquivo levada em conta (S-Log3, V-Log e N-Log são lidos no código de 10 bits da câmera).
+  Canon Log 2 e Canon Log 3 (Cinema Gamut), Fujifilm F-Log, F-Log2 e F-Log2 C, DJI D-Log (D-Gamut),
+  Leica L-Log, DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa e a
+  faixa do arquivo levada em conta (S-Log3, V-Log, N-Log, F-Log e D-Log são lidos no código de 10 bits da
+  câmera; os super-brancos acima do 940 chegam inteiros ao look).
 - **Vídeo HDR**: **HLG** (o HDR dos celulares, inclusive o do iPhone) e **PQ / HDR10** (Rec.2100), com o
   cinza de referência da BT.2408 no cinza médio do app. Ao abrir um vídeo HDR o perfil é escolhido sozinho.
 - Os presets mudam o look, **não** o perfil do vídeo.
@@ -644,7 +646,7 @@ A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
 
 **Exportar LUTs do próprio app**: *⋯ → Exportar a cor como LUT .cube* grava a parte de cor do look
 atual (curva, cópia, tons, saturação, LUT externo e exposição/balanço) com entrada no mesmo perfil
-escolhido em *Perfil do vídeo* (em S-Log3, V-Log e N-Log, o código de 10 bits da câmera, como os LUTs dos
+escolhido em *Perfil do vídeo* (em S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, o código de 10 bits da câmera, como os LUTs dos
 fabricantes: no Resolve, clipe em *Data Levels → Full*). *Exportar todos os presets como LUTs (pacote)* gera um `.cube` de
 33 pontos para cada preset, com entrada Rec.709 — um pacote de LUTs gratuito que funciona no
 Premiere, Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite `.cube`. Grão, halação,

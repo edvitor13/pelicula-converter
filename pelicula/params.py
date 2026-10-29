@@ -68,7 +68,7 @@ ENTRADAS = [
     ("linear", "Linear"),
     ("nlog", "Nikon N-Log"),
     ("slog3", "Sony S-Log3 (S-Gamut3.Cine)"),
-    ("logc3", "ARRI LogC3 (EI 800)"),
+    ("logc3", "ARRI LogC3 (ARRI Wide Gamut 3)"),
     ("vlog", "Panasonic V-Log"),
     ("log3g10", "RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE"),
     ("dwg", "DaVinci Intermediate (DaVinci Wide Gamut)"),
@@ -78,7 +78,20 @@ ENTRADAS = [
     ("applelog", "Apple Log (Rec.2020) — iPhone"),
     ("hlg", "HLG (HDR de celular, Rec.2100)"),
     ("pq", "PQ / HDR10 (Rec.2100)"),
+    # 1.6: perfis com fórmula publicada pelo fabricante (look.INPUT_IDS 14+)
+    ("clog2", "Canon Log 2 (Cinema Gamut)"),
+    ("clog3", "Canon Log 3 (Cinema Gamut)"),
+    ("flog", "Fujifilm F-Log (F-Gamut)"),
+    ("flog2", "Fujifilm F-Log2 (F-Gamut)"),
+    ("flog2c", "Fujifilm F-Log2 C (F-Gamut C)"),
+    ("dlog", "DJI D-Log (D-Gamut)"),
+    ("slog2", "Sony S-Log2 (S-Gamut)"),
+    ("llog", "Leica L-Log (Rec.2020)"),
 ]
+
+# EI do ARRI LogC3 (look.LOGC3_EI): a ALEXA grava uma curva para cada EI; 800 é a de sempre.
+LOGC3_EIS = [(ei, f"EI {ei}") for ei in ("160", "200", "250", "320", "400", "500", "640", "800", "1000", "1280",
+                                          "1600")]
 
 LUT_ENTRADAS = [
     ("rec709", "Rec.709 (LUTs criativos, Premiere)"),
@@ -95,6 +108,14 @@ LUT_ENTRADAS = [
     ("linear", "Linear"),
     ("hlg", "HLG (Rec.2100)"),
     ("pq", "PQ / HDR10 (Rec.2100)"),
+    ("clog2", "Canon Log 2"),
+    ("clog3", "Canon Log 3"),
+    ("flog", "Fujifilm F-Log"),
+    ("flog2", "Fujifilm F-Log2"),
+    ("flog2c", "Fujifilm F-Log2 C"),
+    ("dlog", "DJI D-Log"),
+    ("slog2", "Sony S-Log2"),
+    ("llog", "Leica L-Log"),
 ]
 
 # Laboratório: aproximações artísticas do comportamento de cada filme (sem dados dos fabricantes).
@@ -209,9 +230,13 @@ SECTIONS: list[Section] = [
           "Como o vídeo foi gravado. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR "
           "(os celulares costumam gravar em HLG). Trocar de preset não muda este ajuste."),
         B("log_reescalado", "Log reescalado (HDMI “Limited”)", False,
-          "Só para S-Log3, V-Log e N-Log, que a câmera grava no código de 10 bits. Ligue em gravações externas em "
+          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, que a câmera grava no código de 10 bits. Ligue em gravações externas em "
           "que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em “Limited”, comum na Nikon): "
           "o app deixa de converter de volta para o código da câmera. Trocar de preset não muda este ajuste.",
+          advanced=True),
+        C("logc3_ei", "EI do ARRI LogC3", "800", LOGC3_EIS,
+          "Só para o ARRI LogC3: a ALEXA grava uma curva para cada EI (veja nos metadados do clipe). O cinza fica "
+          "no mesmo lugar; muda a compressão das luzes e das sombras. Trocar de preset não muda este ajuste.",
           advanced=True),
         F("exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
         F("temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),

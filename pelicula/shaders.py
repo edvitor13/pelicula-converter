@@ -167,6 +167,111 @@ vec3 pqEnc(vec3 x) {
     return pow((PQ_C1 + PQ_C2 * t) / (1.0 + PQ_C3 * t), vec3(PQ_M2));
 }
 
+// ---------------------------------------------------------------- perfis de câmera da 1.6 (look.INPUT_IDS 14+)
+// Fórmulas publicadas pelos fabricantes (a biblioteca colour-science, BSD-3, serviu só de conferência).
+// Canon Log 2 e Canon Log 3: Canon, "Canon Log Gamma Curves – Input Transform Version 201612" (v1). A
+// fórmula usa a reflexão sobre o branco 90% (luz/0,9) e é espelhada abaixo de 0, como a da Canon.
+float clog2Dec(float y) {
+    float r = (y < 0.035388128) ? -(pow(10.0, (0.035388128 - y) / 0.281863093) - 1.0) / 87.09937546
+                                : (pow(10.0, (y - 0.035388128) / 0.281863093) - 1.0) / 87.09937546;
+    return r * 0.9;
+}
+float clog2Enc(float x) {
+    float r = x / 0.9;
+    return (r < 0.0) ? -(0.281863093 * log10f(-r * 87.09937546 + 1.0) - 0.035388128)
+                     : 0.281863093 * log10f(r * 87.09937546 + 1.0) + 0.035388128;
+}
+float clog3Dec(float y) {
+    float r;
+    if (y < 0.04076162) r = -(pow(10.0, (0.07623209 - y) / 0.42889912) - 1.0) / 14.98325;
+    else if (y <= 0.105357102) r = (y - 0.073059361) / 2.3069815;
+    else r = (pow(10.0, (y - 0.069886632) / 0.42889912) - 1.0) / 14.98325;
+    return r * 0.9;
+}
+float clog3Enc(float x) {
+    float r = x / 0.9;
+    if (r < -0.014) return -0.42889912 * log10f(-r * 14.98325 + 1.0) + 0.07623209;
+    if (r <= 0.014) return 2.3069815 * r + 0.073059361;
+    return 0.42889912 * log10f(r * 14.98325 + 1.0) + 0.069886632;
+}
+// Fujifilm F-Log ("F-Log Data Sheet" Ver.1.1) e F-Log2 ("F-Log2 Data Sheet"; o F-Log2 C, id 18, usa a mesma curva):
+// código de 10 bits / 1023; c·log10(a·x + b) + d acima de cut1, e·x + f abaixo.
+float flogDec(float y) {
+    return (y < 0.100537775223865) ? (y - 0.092864) / 8.735631
+                                   : pow(10.0, (y - 0.790453) / 0.344676) / 0.555556 - 0.009468 / 0.555556;
+}
+float flogEnc(float x) { return (x < 0.00089) ? 8.735631 * x + 0.092864 : 0.344676 * log10f(0.555556 * x + 0.009468) + 0.790453; }
+float flog2Dec(float y) {
+    return (y < 0.100686685370811) ? (y - 0.092864) / 8.799461
+                                   : pow(10.0, (y - 0.384316) / 0.245281) / 5.555556 - 0.064829 / 5.555556;
+}
+float flog2Enc(float x) { return (x < 0.000889) ? 8.799461 * x + 0.092864 : 0.245281 * log10f(5.555556 * x + 0.064829) + 0.384316; }
+// DJI D-Log: "White Paper on D-Log and D-Gamut of DJI Cinema Color System" (2017), código de 10 bits / 1023.
+float dlogDec(float y) { return (y <= 0.14) ? (y - 0.0929) / 6.025 : (pow(10.0, 3.89616 * y - 2.27752) - 0.0108) / 0.9892; }
+float dlogEnc(float x) { return (x <= 0.0078) ? 6.025 * x + 0.0929 : log10f(x * 0.9892 + 0.0108) * 0.256663 + 0.584555; }
+// Sony S-Log2: "S-Log2 Technical Paper" (2012). Sinal (antes da faixa legal) do S-Log com x·155/219 e a
+// reflexão sobre o branco 90%.
+float slog2Dec(float y) {
+    float r = (y >= 0.030001222851889303) ? pow(10.0, (y - 0.646596) / 0.432699) - 0.037584
+                                          : (y - 0.030001222851889303) / 5.0;
+    return r * 0.9 * 219.0 / 155.0;
+}
+float slog2Enc(float x) {
+    float r = x * 155.0 / 219.0 / 0.9;
+    return (r >= 0.0) ? 0.432699 * log10f(r + 0.037584) + 0.646596 : r * 5.0 + 0.030001222851889303;
+}
+// Leica L-Log: "L-Log Reference Manual" V1.9 (2026), seção 4. O manual tem um degrau de 0,0009 em 0,006 entre
+// a reta e o log; fica como está.
+float llogDec(float y) { return (y <= 0.138) ? (y - 0.09) / 8.0 : (pow(10.0, (y - 0.6) / 0.27) - 0.0115) / 1.3; }
+float llogEnc(float x) { return (x <= 0.006) ? 8.0 * x + 0.09 : 0.27 * log10f(1.3 * x + 0.0115) + 0.6; }
+// ARRI LogC3 com outro EI (`logc3_ei` ≠ 800): id 22 + k, k = posição do EI em look.LOGC3_EI (160, 200, 250,
+// 320, 400, 500, 640, 800, 1000, 1280, 1600). Corte, b, c, d, e, f de cada EI (a = 5,555556 em todos).
+const float LC3[66] = float[66](
+    0.005561, 0.080216, 0.269036, 0.381991, 5.842037, 0.092778,
+    0.006208, 0.076621, 0.266007, 0.382478, 5.776265, 0.092782,
+    0.006871, 0.072941, 0.262978, 0.382966, 5.710494, 0.092786,
+    0.007622, 0.068768, 0.259627, 0.383508, 5.637732, 0.092791,
+    0.008318, 0.064901, 0.256598, 0.383999, 5.571960, 0.092795,
+    0.009031, 0.060939, 0.253569, 0.384493, 5.506188, 0.092800,
+    0.009840, 0.056443, 0.250219, 0.385040, 5.433426, 0.092805,
+    0.010591, 0.052272, 0.247190, 0.385537, 5.367655, 0.092809,
+    0.011361, 0.047996, 0.244161, 0.386036, 5.301883, 0.092814,
+    0.012235, 0.043137, 0.240810, 0.386590, 5.229121, 0.092819,
+    0.013047, 0.038625, 0.237781, 0.387093, 5.163350, 0.092824
+);
+float logc3eDec(float t, int k) {
+    float cut = LC3[k * 6], b = LC3[k * 6 + 1], c = LC3[k * 6 + 2], d = LC3[k * 6 + 3];
+    float e = LC3[k * 6 + 4], f = LC3[k * 6 + 5];
+    return (t > e * cut + f) ? (pow(10.0, (t - d) / c) - b) / 5.555556 : (t - f) / e;
+}
+float logc3eEnc(float x, int k) {
+    float cut = LC3[k * 6], b = LC3[k * 6 + 1], c = LC3[k * 6 + 2], d = LC3[k * 6 + 3];
+    float e = LC3[k * 6 + 4], f = LC3[k * 6 + 5];
+    return (x > cut) ? c * log10f(5.555556 * x + b) + d : e * x + f;
+}
+vec3 camDec(vec3 c, int id) {
+    if (id == 14) return vec3(clog2Dec(c.r), clog2Dec(c.g), clog2Dec(c.b));
+    if (id == 15) return vec3(clog3Dec(c.r), clog3Dec(c.g), clog3Dec(c.b));
+    if (id == 16) return vec3(flogDec(c.r), flogDec(c.g), flogDec(c.b));
+    if (id == 17 || id == 18) return vec3(flog2Dec(c.r), flog2Dec(c.g), flog2Dec(c.b));  // F-Log2 (C)
+    if (id == 19) return vec3(dlogDec(c.r), dlogDec(c.g), dlogDec(c.b));
+    if (id == 20) return vec3(slog2Dec(c.r), slog2Dec(c.g), slog2Dec(c.b));
+    if (id == 21) return vec3(llogDec(c.r), llogDec(c.g), llogDec(c.b));
+    int k = id - 22;
+    return vec3(logc3eDec(c.r, k), logc3eDec(c.g, k), logc3eDec(c.b, k));
+}
+vec3 camEnc(vec3 n, int id) {
+    if (id == 14) return vec3(clog2Enc(n.r), clog2Enc(n.g), clog2Enc(n.b));
+    if (id == 15) return vec3(clog3Enc(n.r), clog3Enc(n.g), clog3Enc(n.b));
+    if (id == 16) return vec3(flogEnc(n.r), flogEnc(n.g), flogEnc(n.b));
+    if (id == 17 || id == 18) return vec3(flog2Enc(n.r), flog2Enc(n.g), flog2Enc(n.b));  // F-Log2 (C)
+    if (id == 19) return vec3(dlogEnc(n.r), dlogEnc(n.g), dlogEnc(n.b));
+    if (id == 20) return vec3(slog2Enc(n.r), slog2Enc(n.g), slog2Enc(n.b));
+    if (id == 21) return vec3(llogEnc(n.r), llogEnc(n.g), llogEnc(n.b));
+    int k = id - 22;
+    return vec3(logc3eEnc(n.r, k), logc3eEnc(n.g, k), logc3eEnc(n.b, k));
+}
+
 // Curvas em código de 10 bits (look.INPUT_DOMAIN == "cv"): o decodificador expande a faixa legal
 // (v = (código − 64)/876) e a fórmula do fabricante espera CV = código/1023.
 vec3 legalToCv(vec3 v) { return (v * 876.0 + 64.0) / 1023.0; }
@@ -188,6 +293,7 @@ vec3 toLinear(vec3 c, int id, bool cv) {
     if (id == 11) return vec3(appleDec(c.r), appleDec(c.g), appleDec(c.b));
     if (id == 12) return vec3(hlgDec(c.r), hlgDec(c.g), hlgDec(c.b));
     if (id == 13) return pqDec(c);
+    if (id >= 14) return camDec(c, id);
     return vec3(cineonDec(c.r), cineonDec(c.g), cineonDec(c.b));
 }
 
@@ -323,6 +429,7 @@ vec3 lutEncode(vec3 lin, int id) {
     if (id == 11) return vec3(appleEnc(n.r), appleEnc(n.g), appleEnc(n.b));
     if (id == 12) return vec3(hlgEnc(n.r), hlgEnc(n.g), hlgEnc(n.b));
     if (id == 13) return pqEnc(n);
+    if (id >= 14) return camEnc(n, id);
     return vec3(cineonEnc(n.r), cineonEnc(n.g), cineonEnc(n.b));
 }
 vec3 sampleLut(vec3 c) {

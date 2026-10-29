@@ -46,7 +46,7 @@ SKIP = ("ui_qualidade", "ui_fps")  # só fazem sentido no DCTL (o OFX tem a imag
 # Rótulo, dica e opções com acento dos controles só do plugin (os do app vêm de params.py).
 INTERNAL_TEXT = {
     "ui_faixa_video": ("Faixa do vídeo",
-                       "Só muda S-Log3, V-Log e N-Log, curvas escritas no código de 10 bits. Vídeo (padrão): clipe "
+                       "Só muda S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, curvas escritas no código de 10 bits. Vídeo (padrão): clipe "
                        "em Data Levels Auto ou Video, que o Resolve expande de 64–940 para 0–1 (o plugin volta ao "
                        "código da câmera). Cheia: o valor já é o código — clipe em Full em Clip Attributes (como "
                        "a Sony recomenda) ou log que a câmera mandou reescalado pela saída HDMI “Limited”.",
@@ -54,7 +54,7 @@ INTERNAL_TEXT = {
 }
 # Ajustes do clipe, não do look: escolher um preset ou carregar um look .json não muda (como no app,
 # presets.SOURCE_KEYS que existem no plugin) — o perfil e a faixa do vídeo dependem do clipe no Resolve.
-KEEP_ON_PRESET = ("entrada", "faixa_video")
+KEEP_ON_PRESET = ("entrada", "faixa_video", "logc3_ei")
 
 
 class OfxError(RuntimeError):

@@ -319,7 +319,8 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
   Gamut), todas com branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
 - **Curvas de câmera** em GLSL: N-Log, S-Log3, LogC3 (EI 800), V-Log, Cineon (685/300 com preto
   offset), DaVinci Intermediate, Log3G10, Blackmagic Film Gen 5, LogC4, Apple Log, HLG e PQ —
-  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log).
+  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log). Os perfis da 1.6
+  (Canon, Fujifilm, DJI, S-Log2, L-Log e o LogC3 de outros EI) ficam em `camDec`/`camEnc` (seção 29.3).
 - **HLG e PQ** (BT.2100): HLG é a OETF inversa × `HLG_SCALE` (o cinza da BT.2408, 38% do sinal, vira
   0,18); PQ é a EOTF da ST 2084 (cd/m²) seguida da OOTF inversa do HLG a 1000 cd/m² (γ = 1,2 pela
   luminância BT.2100, como a conversão PQ → HLG da BT.2408) e da mesma escala. Acima de 1000 cd/m² não há
@@ -2760,3 +2761,49 @@ reconstrução do croma nas bordas de cor é a do swscale de sempre: o 16 bits c
   2023 (entre a 6.1 e a 7.0): o branco 940 sai em 65283 nas duas. A CI roda o 6.1 do Ubuntu 24.04.
 - **Para as notas da versão**: a exportação em 16 bits e o "Salvar quadro" de vídeo em faixa legal ficam até
   0,4% mais claros nas luzes (o branco volta a 100%); o log de câmera ganha as luzes acima do código 940.
+
+### 29.3 Perfis de câmera novos
+
+Oito perfis no fim de `params.ENTRADAS` (e de `LUT_ENTRADAS`), com ids novos em `look.INPUT_IDS`; os 14 de antes
+mantêm chave, posição e id. Fórmulas dos documentos públicos dos fabricantes, citados em `shaders.camDec`,
+`look.INPUT_DOMAIN` e `tests/test_entrada.py` (a colour-science, BSD-3, só como conferência; nenhum PDF no
+repositório).
+
+| Chave | id | Domínio | Gamut | Fonte |
+|---|---|---|---|---|
+| `clog2` | 14 | sinal | `cinemagamut` | Canon, "Canon Log Gamma Curves – Input Transform Version 201612" (v1) |
+| `clog3` | 15 | sinal | `cinemagamut` | idem (reta entre ±0,014 em x/0,9) |
+| `flog` | 16 | cv | `2020` (F-Gamut) | Fujifilm, "F-Log Data Sheet" Ver.1.1 |
+| `flog2` | 17 | cv | `2020` (F-Gamut) | Fujifilm, "F-Log2 Data Sheet" |
+| `flog2c` | 18 | cv | `fgamutc` | Fujifilm, "F-Log2 C Data Sheet" Ver.1.0 (a curva do F-Log2) |
+| `dlog` | 19 | cv | `dgamut` | DJI, "White Paper on D-Log and D-Gamut of DJI Cinema Color System" (2017) |
+| `slog2` | 20 | sinal | `sgamut` | Sony, "S-Log2 Technical Paper" (2012) |
+| `llog` | 21 | sinal | `2020` | Leica, "L-Log Reference Manual" V1.9 (2026) |
+
+- **Shader**: as curvas novas ficam em funções novas (`clog2Dec`…`llogEnc`, `camDec`/`camEnc` em
+  `shaders.COMMON`, antes de `legalToCv`); `toLinear`, `lutEncode` e o `trEnc` das transições
+  (`editshaders.CLIP_TR`) ganham só um `if (id >= 14)`. Os ids 0–13 seguem o mesmo caminho, bit a bit
+  (`tests/test_entrada_base.py`).
+- **Domínio**: Fujifilm e DJI dão tabelas em código de 10 bits igual a 1023·fórmula ("cv", como o S-Log3); Canon
+  v1, S-Log2 e L-Log dão o sinal ("sinal"). O L-Log é gravado em faixa cheia no h.264/h.265 (código = 1023·L) e
+  reescalado para 64–940 no ProRes (tabela 2 do manual: código 897 → 88% IRE no ProRes); nos dois casos o valor
+  lido já é L.
+- **Gamuts** (`look._PRIMARIES`, branco D65): Cinema Gamut (Canon, 2014), F-Gamut C, D-Gamut (a matriz para
+  BT.709 que a DJI publica bate com a calculada em 2·10⁻⁴) e S-Gamut. O F-Gamut é o BT.2020; o L-Log usa o
+  BT.2020 (a SL tipo 601 grava BT.709 e não tem perfil próprio).
+- **EI do ARRI LogC3** (`logc3_ei`, escolha "160"…"1600", padrão "800", avançado, em `presets.SOURCE_KEYS` e
+  `ofx.KEEP_ON_PRESET`): `look.LOGC3_EI` traz (corte, a, b, c, d, e, f) da tabela SUP 3.x da ARRI ("ALEXA Log C
+  Curve – Usage in VFX"). Com o EI 800 nada muda (`u_input` = 4, a curva de sempre). Com outro EI,
+  `look.input_id` dá `u_input = LOGC3_EI_ID + k` (22 + a posição do EI) e o shader usa `logc3eDec` com a tabela
+  `shaders.LC3` (constante, sem uniforms novos: o `CLIP_TR` das transições inclui as curvas). Um parâmetro e não
+  onze perfis: a lista fica curta, o cinza é o mesmo em todos e o EI é um dado do clipe, como a faixa. As
+  transições misturam na luz do mesmo EI (`transitions.light_of` usa `look.input_id`); o LUT externo
+  (`lut_entrada` = LogC3) fica no EI 800.
+- **Plugin**: `pc_cam_dec` e `pc_logc3e_dec` em `resolve.K_DECODE`; tabela `PC_LC3` (6 números por EI, sem o `a`)
+  e `PC_LC3_STD`; o controle *EI do LogC3* logo depois de *Faixa do video* nos nós Cor e Laboratório (e no OFX,
+  `tools/gerar_ofx.py`). `tests/test_resolve.py` confere cada perfil e o EI contra o app na GPU.
+- **LUTs**: `luts.guess_input` reconhece CanonLog2/3, FLog/FLog2/FLog2C, DLog (não o D-Log M), SLog2 e L-Log/Leica
+  pelo nome, antes do N-Log ("CanonLog" contém "nlog").
+- **Leitura**: todos são log de câmera, então um arquivo de faixa legal é lido em float (29.1).
+- **Fora**: Apple Log 2 (a Apple não publicou a curva nem as primárias do Apple Wide Gamut; a documentação do
+  AVFoundation só cita o nome) e o D-Log M da DJI (sem documento público da curva).

@@ -393,6 +393,7 @@ vec3 trEnc(vec3 n) {
     else if (id == 11) c = vec3(appleEnc(n.r), appleEnc(n.g), appleEnc(n.b));
     else if (id == 12) c = vec3(hlgEnc(n.r), hlgEnc(n.g), hlgEnc(n.b));
     else if (id == 13) c = pqEnc(n);
+    else if (id >= 14) c = camEnc(n, id);
     else c = vec3(cineonEnc(n.r), cineonEnc(n.g), cineonEnc(n.b));
     return u_tr_cv == 1 ? cvToLegal(c) : c;
 }

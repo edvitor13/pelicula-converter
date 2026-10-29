@@ -49,10 +49,12 @@ do OpenFX. Para desinstalar, apague essa pasta.
    **Carregar look do PeliculaConverter (.json)** — um preset exportado pelo app (menu ⋯ dos presets ›
    *Exportar preset (.json)…*) ou um projeto `.plc`. **Recarregar o look** lê o arquivo de novo.
 3. **Perfil do vídeo** (grupo *Entrada e exposição*): a curva da câmera (S-Log3, LogC3, LogC4, V-Log,
-   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon), **HLG** ou **PQ** para
-   vídeo HDR (celulares gravam em HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou
-   ponha um *Color Space Transform* antes). **Faixa do vídeo** só muda S-Log3, V-Log e N-Log, curvas que os
-   fabricantes escrevem no código de 10 bits (o cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
+   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon e, desde a 1.6, Canon Log 2
+   e 3, F-Log, F-Log2, F-Log2 C, D-Log, S-Log2 e L-Log), **HLG** ou **PQ** para vídeo HDR (celulares gravam em
+   HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou ponha um *Color Space Transform*
+   antes). No LogC3, **EI do LogC3** escolhe a curva do EI do clipe (padrão 800). **Faixa do vídeo** só muda
+   S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, curvas que os fabricantes escrevem no código de 10 bits (o
+   cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
    legal)** com o clipe em *Data Levels* Auto/Video (o padrão do Resolve para arquivos de câmera, que ele
    expande de 64–940 para 0–1 — o plugin volta ao código da câmera) e escolha **Cheia** quando o valor já é o
    código: clipe em *Full* (Clip Attributes, como a Sony recomenda para S-Log) ou log que a câmera mandou
@@ -111,7 +113,8 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 - Os mipmaps das cadeias de brilho são médias 2×2; o driver do OpenGL do app pode filtrar um pouco
   diferente em tamanhos ímpares.
 - O alfa passa direto; a cor entra como no app (código do vídeo de 0 a 1, no perfil escolhido). O plugin
-  não sabe a faixa do arquivo: confira a *Faixa do vídeo* nos clipes S-Log3, V-Log e N-Log.
+  não sabe a faixa do arquivo: confira a *Faixa do vídeo* nos clipes S-Log3, V-Log, N-Log, F-Log, F-Log2 e
+  D-Log.
 - Compilado para Windows x64 e Linux x64 (o macOS está desativado no app).
 - Conferido com um host OpenFX de teste (`tests/ofxhost.py`: descrever, criar, trocar preset, carregar
   `.json`, identidade e render); a instalação de verdade no Resolve é feita pelo usuário, pelo app.

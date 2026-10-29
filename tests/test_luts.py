@@ -167,6 +167,17 @@ def test_load_cube_with_utf8_bom_before_title(tmp_path):
     (r"D:\luts\HDR10 to SDR.cube", "pq"),
     (r"D:\luts\PQ_1000nits_look.cube", "pq"),
     (r"D:\luts\ST2084 to 709.cube", "pq"),
+    # perfis da 1.6
+    (r"D:\luts\CinemaGamut_CanonLog2-to-BT709_WideDR_65_FF_Ver.2.0.cube", "clog2"),
+    (r"D:\luts\CinemaGamut_CanonLog3-to-BT709_WideDR_65_FF_Ver.2.0.cube", "clog3"),
+    (r"D:\luts\C-Log3 film look.cube", "clog3"),
+    (r"D:\luts\XH2S_FLog_FGamut_to_WDR_BT.709_33grid_V.1.00.cube", "flog"),
+    (r"D:\luts\XH2S_FLog2_FGamut_to_FLog_BT.709_33grid_V.1.01.cube", "flog2"),
+    (r"D:\luts\FLog2C_FGamutC_to_BT.709_65grid.cube", "flog2c"),
+    (r"D:\luts\DJI_X7_DLOG2Rec709.cube", "dlog"),
+    (r"D:\luts\DJI_Mavic3_DLogM_to_Rec709.cube", "rec709"),   # D-Log M é outra curva
+    (r"D:\luts\SLog2SGamut_To_LC-709.cube", "slog2"),
+    (r"D:\luts\Leica_L-Log_BT2020_to_BT709.cube", "llog"),
     (r"D:\luts\Teal Orange.cube", "rec709"),
     (r"D:\luts\Equipe Highlight Glow.cube", "rec709"),
     (r"C:\Program Files\Adobe\Adobe Premiere Pro 2025\Lumetri\LUTs\Creative\Fuji F125 Kodak 2393.cube", "rec709"),
