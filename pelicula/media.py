@@ -699,6 +699,9 @@ class FrameReader:
     `profile` (o perfil de entrada do look, `params` "entrada"): log de câmera num vídeo de faixa legal sai em
     float32 (h × w × 3) com o que passa do branco e do preto nominais (`float_input`), em qualquer `depth`.
 
+    16 bits de um vídeo de faixa legal (sem transparência) vão pelo zscale (`exact16`): o swscale expande a faixa
+    para 0–65280 (o branco 0,4% abaixo); o zscale entrega o branco em 65535 e cada código no valor exato.
+
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
 
@@ -720,6 +723,8 @@ class FrameReader:
         # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
         self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
         self.float = not alpha and float_input(info, profile)
+        self.exact16 = (not alpha and not self.float and depth != 8 and _in_range(info) == "limited"
+                        and has_zscale())
         if alpha:
             self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
         elif self.float:
@@ -753,6 +758,11 @@ class FrameReader:
             vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
         elif self.float:
             vf.append(_zscale(info, width, height, hq))
+            vf.append(f"format={self.pix}")
+        elif self.exact16:
+            # gbrp16le primeiro: pedir rgb48le direto ao zscale faz o ffmpeg converter de 10 bits (perde precisão).
+            vf.append(_zscale(info, width, height, hq))
+            vf.append("format=gbrp16le")
             vf.append(f"format={self.pix}")
         else:
             vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"

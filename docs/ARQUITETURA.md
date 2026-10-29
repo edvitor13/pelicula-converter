@@ -494,6 +494,8 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
 - Log de câmera num vídeo de faixa legal (`profile=` o perfil do look; `media.float_input`), em qualquer
   profundidade: `zscale=w=L:h=A:filter=lanczos|bicubic:matrixin=M:rangein=limited:range=full,format=gbrpf32le`
   → float32 (textura `f4`), sem cortar em 0–1 (seção 29.1).
+- 16 bits de vídeo de faixa legal (sem transparência; `FrameReader.exact16`): `zscale=…,format=gbrp16le,
+  format=rgb48le` — o swscale entrega o branco em 65280–65283 (seção 29.2).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
   nele como se fosse um arquivo. A conexão espera o ffmpeg abrir o pipe e destrava sozinha se ele
   morrer antes (timeout de 60 s). Isso é bem mais rápido que `stdout` para quadros 4K.
@@ -2731,3 +2733,21 @@ acima do código 940 virava 1,0 e tudo abaixo do 64 virava 0. As câmeras gravam
 - **ffmpeg 8+**: ao gerar vídeo de teste a partir de `rawvideo`, a faixa vai também como opção de entrada
   (`-color_range tv` antes do `-i`); sem ela o ffmpeg converte o "sem faixa" para a legal e corta os códigos
   fora de 64–943 (`tests/entrada_base.synthetic_video`).
+
+### 29.2 16 bits exatos na faixa legal
+
+O swscale expande a faixa legal para RGB de 16 bits multiplicando por 65280/65535 (`rgb48le`: o branco 940 sai em
+65280–65283, 0,4% abaixo; acima do 940, 65535 — o super-branco fica *acima* do branco). Isso pegava a exportação
+em 16 bits (ProRes, FFV1, DNxHR 444…) e o "Salvar quadro", sempre em 16 bits. Na 1.6, 16 bits de um vídeo de
+faixa legal sem transparência vão pelo zscale (`FrameReader.exact16`): `format=gbrp16le` e só então
+`format=rgb48le` (reempacotar sem perda; pedir `rgb48le` direto ao zscale faz o ffmpeg passar por 10 bits). Cada
+código sai em round((código − 64)/876 · 65535) — preto 0, branco 65535 — em 4:4:4, 4:2:2 e 4:2:0, 8 e 10 bits,
+com ou sem redimensionamento (`tests/test_entrada_leitura.py`).
+
+- **Sem mudança**: 8 bits (`rgb24` do swscale já arredonda certo), faixa cheia, imagens RGB, o caminho com
+  transparência (`_alpha_graph`, `gbrap16le` pelo swscale) e ffmpeg sem zscale (leitura de antes).
+- **Versões**: conferido com o ffmpeg 9.0.2 (gyan.dev, o que o app baixa) e com uma compilação de dezembro de
+  2023 (entre a 6.1 e a 7.0); a CI roda o 6.1 do Ubuntu 24.04 (com `--enable-libzimg`). O zscale só existe com o
+  zimg: sem ele `has_zscale()` é falso e tudo segue como na 1.5.
+- **Para as notas da versão**: a exportação em 16 bits e o "Salvar quadro" de vídeo em faixa legal ficam até
+  0,4% mais claros nas luzes (o branco volta a 100%); o log de câmera ganha as luzes acima do código 940.

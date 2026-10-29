@@ -185,6 +185,86 @@ def test_export_and_its_preview_read_log_in_float(zscale, gl_engine, tmp_path):
         reader.close()
 
 
+# ------------------------------------------------------------------ 16 bits exatos
+def _expect16(codes, bits):
+    lo, span = (64, 876) if bits == 10 else (16, 219)
+    return np.clip(np.round((codes - lo) / span * 65535.0), 0, 65535)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("pix", ["yuv444p10le", "yuv422p10le", "yuv420p10le", "yuv420p"])
+@pytest.mark.parametrize("hq", [False, True])
+def test_16bit_reading_expands_legal_range_exactly(zscale, tmp_path, pix, hq):
+    """Branco (940/235) = 65535, preto (64/16) = 0 e cada cinza no valor exato; antes o branco ficava em
+    65280–65283 (0,4% abaixo) no swscale."""
+    if pix == "yuv420p":
+        codes = np.zeros((H, W, 3), np.uint16)
+        codes8 = np.array([0, 8, 16, 30, 60, 100, 126, 128, 150, 180, 200, 220, 230, 235, 240, 255])
+        codes[..., 0], codes[..., 1:] = codes8, 128
+        path = tmp_path / "v8.mkv"
+        eb.synthetic_video(path, pix, codes)
+        info, want = media.probe(str(path)), _expect16(codes8, 8)
+    else:
+        info, want = media.probe(_video(tmp_path, pix)), _expect16(CODES, 10)
+    img = media.grab_frame(info, 0, W, H, 16, hq=hq)
+    assert img.dtype == np.uint16
+    for c in range(3):
+        assert np.array_equal(img[0, :, c], want), (pix, img[0, :, c], want)
+
+
+@pytest.mark.ffmpeg
+def test_16bit_reading_is_exact_after_resizing(zscale, tmp_path):
+    """Faixas largas reduzidas à metade: o centro de cada faixa continua no valor exato."""
+    info = media.probe(_video(tmp_path, "yuv420p10le", patch=32, h=8))
+    for hq in (False, True):
+        img = media.grab_frame(info, 0, W * 16, 4, 16, hq=hq)
+        got = img[2, 8::16, 1]
+        assert np.array_equal(got, _expect16(CODES, 10)), (hq, got)
+
+
+@pytest.mark.ffmpeg
+def test_16bit_export_reader_uses_the_exact_expansion(zscale, tmp_path):
+    info = media.probe(_video(tmp_path))
+    s = export.ExportSettings(codec="prores")
+    frames = export.frame_pipeline(info, dict(presets.builtin_values("vision3_500t")), s)
+    assert frames.depth == 16
+    reader, _skip = export.open_reader(info, frames, 0, 1, None, media.Perf())
+    try:
+        assert reader.exact16 and not reader.float
+        img = reader.read()
+    finally:
+        reader.close()
+    assert img.dtype == np.uint16 and img[0, 9, 1] == 65535 and img[0, 2, 1] == 0
+
+
+@pytest.mark.ffmpeg
+def test_16bit_without_zscale_keeps_the_old_reading(ffmpeg_ok, tmp_path, monkeypatch):
+    info = media.probe(_video(tmp_path))
+    monkeypatch.setattr(media, "_FILTERS", {"scale"})
+    r = media.FrameReader(info, W, H, 16, 0, 1)
+    try:
+        assert not r.exact16
+        img = r.read()
+    finally:
+        r.close()
+    assert img.dtype == np.uint16 and 65000 < int(img[0, 9, 1]) <= 65535
+
+
+@pytest.mark.ffmpeg
+def test_16bit_full_range_and_8bit_reading_do_not_use_zscale(zscale, tmp_path):
+    info = media.probe(_video(tmp_path))
+    r8 = media.FrameReader(info, W, H, 8, 0, 1)
+    try:
+        assert not r8.exact16 and not r8.float and r8.pix == "rgb24"
+    finally:
+        r8.close()
+    ra = media.FrameReader(info, W, H, 16, 0, 1, alpha=True)   # sem alfa no arquivo: os 3 canais de sempre
+    try:
+        assert ra.exact16
+    finally:
+        ra.close()
+
+
 def test_burned_subtitles_compose_over_float_frames():
     from pelicula import subtitles, textrender
     frame = np.full((40, 80, 3), 1.05, np.float32)
