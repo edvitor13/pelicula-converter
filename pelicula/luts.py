@@ -71,6 +71,27 @@ def save_cube(path: str, data: np.ndarray, size: int, title: str) -> None:
             fh.write(f"{r:.6f} {g:.6f} {b:.6f}\n")
 
 
+def _guess_camera_16(compact: str, words: set[str]) -> str | None:
+    """Perfis da 1.6 pelo nome do LUT (sem separadores: "CanonLog3", "FLog2C", "SLog2SGamut"...)."""
+    if "canonlog2" in compact or "clog2" in compact:
+        return "clog2"
+    if "canonlog3" in compact or "clog3" in compact:
+        return "clog3"
+    if "flog2c" in compact or "fgamutc" in compact:
+        return "flog2c"
+    if "flog2" in compact:
+        return "flog2"
+    if "flog" in compact:
+        return "flog"
+    if "dlog" in compact and "dlogm" not in compact:  # o D-Log M dos drones pequenos é outra curva
+        return "dlog"
+    if "slog2" in compact:
+        return "slog2"
+    if "llog" in compact or "leica" in words:
+        return "llog"
+    return None
+
+
 def guess_input(path: str) -> str:
     """Palpite do espaço de entrada pelo nome e pasta do LUT."""
     p = path.replace("\\", "/").lower()
@@ -85,6 +106,9 @@ def guess_input(path: str) -> str:
         return "applelog"
     if "gen5" in compact or "bmdfilm" in compact or "blackmagicfilm" in compact:
         return "bmd_gen5"
+    cam = _guess_camera_16(compact, words)  # perfis da 1.6 (antes do N-Log: "CanonLog" contém "nlog")
+    if cam:
+        return cam
     if "logc" in name or "arri" in words or "alexa" in words:
         return "logc3"
     if "slog3" in name or "s-log3" in name:

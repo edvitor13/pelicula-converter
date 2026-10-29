@@ -186,6 +186,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
     for key, p in editparams.VIDEO.params.items():
         if key in ("velocidade", "congelar") or key in transition_keys:  # transições: tests/test_transitions.py
             continue
+        if key.startswith("camera_"):  # perfil de câmera do clipe (1.6): pela receita, tests/test_entrada_camera.py
+            continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)

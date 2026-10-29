@@ -73,6 +73,12 @@ class Recipe:
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
                    None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha))
 
+    @property
+    def profile(self) -> str | None:
+        """O perfil de entrada do look: a leitura do arquivo depende dele (log com super-brancos sai em float32,
+        `media.float_input`); None sem look."""
+        return (self.values or {}).get("entrada")
+
     def with_(self, **kw) -> "Recipe":
         """Cópia com alguns campos trocados (ex.: a prévia em 16 bits para comparar com a exportação)."""
         return replace(self, **kw)
@@ -99,6 +105,12 @@ class Recipe:
         crop = self.fit.canvas_crop if self.fit is not None else None
         from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
         kw = {"alpha": True} if self.alpha else {}
+        from . import camera
+        if camera.uses_profiles(self.seq):  # 1.6: perfis de câmera por clipe (a tela vai ao look em float32)
+            # sem look (prévia sem película) o espaço é o Rec.709, o mesmo da exportação "Sem película", que usa o
+            # preset "original" (entrada Rec.709)
+            kw.update(camera=camera.target_of(self.values, self.legal),
+                      float_out=self.values is not None and not self.alpha)
         return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop,
                               light=light_of(self.values, self.legal), **kw)
 

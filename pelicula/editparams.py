@@ -14,7 +14,7 @@ import copy
 from typing import Any
 
 from .i18n import N_
-from .params import B, C, F, Param, Schema, Section
+from .params import ENTRADAS, LOGC3_EIS, B, C, F, Param, Schema, Section
 
 # Faixas de cor do HSL: (chave, rótulo, matiz central em graus no círculo de cores RGB).
 HSL_COLORS: list[tuple[str, str, float]] = [
@@ -172,6 +172,19 @@ VIDEO_SECTIONS: list[Section] = [
         F("saida_anel", "Anel preto", 0.0, 0, 200, 1, 0, " px",
           "Anel preto em volta do círculo, como nos filmes mudos (0 = sem anel)."),
     ], "Dissolver, surgir do preto e sumir"),
+
+    # 1.6 (`camera.py`): perfil de câmera do clipe. "look" segue a entrada do look, como antes (bit a bit).
+    Section("camera", "Câmera", None, [
+        C("camera_entrada", "Perfil do clipe", "look", [("look", N_("Igual ao do look"))] + list(ENTRADAS),
+          "Como este clipe foi gravado, para misturar câmeras numa montagem: o clipe é convertido para o perfil do "
+          "look (Película › Entrada e exposição), que lê a montagem inteira. “Igual ao do look” deixa o clipe "
+          "como está."),
+        B("camera_reescalado", "Log reescalado (HDMI “Limited”)", False,
+          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log: ligue se este clipe veio de uma gravação externa "
+          "com o log já reescalado para a faixa legal (saída HDMI em “Limited”).", advanced=True),
+        C("camera_ei", "EI do ARRI LogC3", "800", LOGC3_EIS,
+          "Só para o ARRI LogC3: o EI com que este clipe foi gravado (está nos metadados do clipe).", advanced=True),
+    ], "Perfil de cor da câmera deste clipe"),
 ]
 
 # 1.6, cor simples (`colorsimple.py`, módulo "cor_simples"): seções de cor novas, acrescentadas no fim (o inspetor as
@@ -308,6 +321,7 @@ SPARSE_KEYS: set[str] = {
     "entrada_direcao", "entrada_suavidade", "entrada_centro_x", "entrada_centro_y", "entrada_anel", "entrada_ponta",
     "entrada_zoom", "entrada_quadros", "entrada_clarao",
     "saida_suavidade", "saida_centro_x", "saida_centro_y", "saida_anel",
+    "camera_entrada", "camera_reescalado", "camera_ei",  # 1.6: perfil de câmera do clipe (`camera.py`)
 }
 SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}

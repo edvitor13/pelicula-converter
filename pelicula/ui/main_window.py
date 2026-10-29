@@ -37,6 +37,7 @@ from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch,
 from .flow import AdaptiveBar, ElideLabel, FlowLayout
 from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
+from .input_notice import InputNotice, profile_name
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .keyframes_ui import KeyRows, KeyStrip
@@ -80,7 +81,9 @@ def qimage_from(arr: np.ndarray) -> QImage:
     if arr.ndim == 3 and arr.shape[2] == 4:  # transparência: sobre o xadrez (só para ver)
         from .alphaview import over_checker
         arr = over_checker(arr)
-    if arr.dtype != np.uint8:
+    if arr.dtype == np.float32:  # leitura de log com super-brancos (`media.float_input`): só para ver
+        arr = np.clip(arr * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+    elif arr.dtype != np.uint8:
         arr = (arr >> 8).astype(np.uint8)
     arr = np.ascontiguousarray(arr)
     return QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
@@ -109,9 +112,11 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, source, frame, w, h) -> None:
+    def request(self, source, frame, w, h, profile: str | None = None) -> None:
+        """Pede o quadro `frame` de `source` em w × h; `profile`: o perfil de entrada do look (a leitura de um
+        arquivo log em faixa legal vem em float32, `media.float_input`)."""
         with self._lock:
-            self._pending = (source, frame, w, h)
+            self._pending = (source, frame, w, h, profile)
             if self._busy:
                 return
             self._busy = True
@@ -125,12 +130,12 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            source, frame, w, h = job
+            source, frame, w, h, profile = job
             try:
                 if isinstance(source, timeline.Sequence):
                     img = sequence.grab(source, frame, w, h, 8)
                 else:
-                    img = media.grab_frame(source, frame, w, h, 8)
+                    img = media.grab_frame(source, frame, w, h, 8, profile=profile)
             except Exception as exc:  # noqa: BLE001
                 self.failed.emit(str(exc))
                 continue
@@ -144,7 +149,7 @@ class Player:
         self.q: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
 
-    def start(self, source, start, end, w, h, loop, loop_start) -> None:
+    def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
@@ -163,7 +168,7 @@ class Player:
         def open_reader(f):
             if is_seq:
                 return sequence.SequenceReader(source, w, h, 8, f, end - f + 1)
-            return media.FrameReader(source, w, h, 8, f)
+            return media.FrameReader(source, w, h, 8, f, profile=profile)
 
         def run():
             f = start
@@ -329,6 +334,8 @@ class MainWindow(QMainWindow):
         self.cur_neutral_q: QImage | None = None
         self.edit_film = str(self.settings.value("edit_film", "false")) == "true"
         self._sources: dict[str, timeline.Source] = {}
+        self._file_infos: dict[str, media.MediaInfo] = {}  # 1.6: metadados de câmera (`media.suggest_input`)
+        self.model.clip_profile_for = self._clip_profile_for
         self._loading = False
         self._audio_src = ("", "")
         self._mix_key = ""
@@ -449,6 +456,9 @@ class MainWindow(QMainWindow):
         self.module_notice.enableRequested.connect(self.enable_modules)
         self.module_notice.dismissed.connect(lambda ids: self._notice_muted.update(ids))
         root.addWidget(self.module_notice)
+        self.input_notice = InputNotice()  # 1.6: perfil sugerido pelos metadados do arquivo
+        self.input_notice.accepted.connect(self._accept_input_suggestion)
+        root.addWidget(self.input_notice)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
@@ -981,6 +991,7 @@ class MainWindow(QMainWindow):
         for wdg in (self.top_bar, self.left_stack, self.right_panel, self.statusBar()):
             wdg.setVisible(not entering)
         self._check_modules()  # o aviso de recurso desligado some na tela cheia e volta ao sair
+        self.input_notice.set_suppressed(entering)
         self.tl_editor.setVisible(not entering and self.mode == "edicao")
         self.viewer.set_fullscreen(entering)
         self.btn_full.setIcon(icons.icon("fullscreen_exit" if entering else "fullscreen", theme.TEXT, 18))
@@ -1077,9 +1088,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
+        self._file_infos[info.path] = info
         if detect:
             self._detect_profile(info)
             self.store.clear_keys()  # as chaves do look estão no tempo do arquivo anterior
+        self._offer_input(info if detect else None)
         self.file_info = info
         self.cur = None
         self._media_label = label or (media.sequence_label(path, info.seq_start, info.frames) if info.is_sequence
@@ -1111,6 +1124,34 @@ class MainWindow(QMainWindow):
         self.store.set("entrada", prof)
         self.store.commit()
         self.statusBar().showMessage(self._profile_message(prof), 8000)
+
+    def _offer_input(self, info) -> None:
+        """1.6: os metadados de `info` indicam outro perfil de entrada (`media.suggest_input`)? Mostra o aviso com um
+        botão (`InputNotice`); o look nunca muda sozinho. None (projeto reaberto, outro arquivo) esconde o aviso."""
+        sug = media.suggest_input(info) if info is not None else None
+        cur = self.store.get("entrada")
+        self.input_notice.offer(sug if sug in dict(params.ENTRADAS) and sug != cur else None, cur)
+
+    def _accept_input_suggestion(self, prof: str) -> None:
+        """"Usar este perfil" do aviso: troca o Perfil do vídeo do look (entra no desfazer)."""
+        if prof not in dict(params.ENTRADAS) or prof == self.store.get("entrada"):
+            return
+        self.store.set("entrada", prof)
+        self.store.commit()
+        self.statusBar().showMessage(_("Perfil do vídeo ajustado para {perfil}, pelos metadados do arquivo.")
+                                     .format(perfil=profile_name(prof)), 8000)
+
+    def _clip_profile_for(self, src: timeline.Source) -> str | None:
+        """1.6: perfil de câmera de um clipe novo do modo Edição (`TimelineModel.clip_profile_for`): o sugerido pelos
+        metadados quando difere da entrada do look (`camera.prefill`). O primeiro arquivo de uma montagem vazia fica
+        em "Igual ao do look": o look é que se ajusta a ele (`_adopt_format`, como ao abrir no modo Película)."""
+        from .. import camera
+        if not src.is_file or not src.has_video:
+            return None
+        if all(c.src == src.path for c in self.model.seq.clips if c.kind == timeline.VIDEO):
+            return None
+        info = self._file_infos.get(src.path)
+        return camera.prefill(media.suggest_input(info), self.store.values, info)
 
     @staticmethod
     def _profile_message(prof: str) -> str:
@@ -1153,7 +1194,9 @@ class MainWindow(QMainWindow):
         self.frame_idx = f
         self._update_time()
         w, h = self.preview_size()
-        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h)
+        prof = self.store.get("entrada")
+        self._float_source = self.src_seq is None and media.float_input(self.info, prof)
+        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof)
 
     def _frame_loaded(self, source, frame: int, img) -> None:
         expected = self.src_seq if self.src_seq is not None else self.info
@@ -1536,7 +1579,7 @@ class MainWindow(QMainWindow):
         if src is None:
             self._recovery_point()
             try:
-                src = media.probe_source(path)
+                src = media.probe_source(path, self._file_infos)
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
                     nome=Path(path).name, erro=exc))
@@ -1631,6 +1674,7 @@ class MainWindow(QMainWindow):
         self.model.set_settings(ref.width, ref.height, ref.fps_str)
         if not src.is_image and src.is_file:  # clipe sem arquivo não tem metadados de câmera
             self._detect_profile(src)
+            self._offer_input(self._file_infos.get(src.path))  # 1.6: só sugere (aviso com um botão)
 
     def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0,
                 insert: bool = False):
@@ -1937,9 +1981,15 @@ class MainWindow(QMainWindow):
                 c.refresh(key)
         self._sync_look_strips()
         self.schedule_render()
+        notice = getattr(self, "input_notice", None)
+        if notice is not None and key in ("entrada", "*"):
+            notice.sync(self.store.get("entrada"))  # 1.6: o perfil sugerido já está no look
         timer = getattr(self, "thumb_timer", None)
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
             timer.start()  # as miniaturas dos presets usam o perfil do arquivo
+        if (key in ("entrada", "*") and self.info is not None and self.src_seq is None and not self.playing
+                and media.float_input(self.info, self.store.get("entrada")) != getattr(self, "_float_source", False)):
+            self.request_frame(self.frame_idx)  # log ↔ Rec.709: o quadro é lido de novo (super-brancos em float)
         self._update_modified()
         self._update_title()
         if self.curve_graph.isVisible():
@@ -2036,7 +2086,7 @@ class MainWindow(QMainWindow):
             f = loop_start
         w, h = self.preview_size()
         self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
-                          loop_start)
+                          loop_start, self.store.get("entrada"))
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -2709,9 +2759,12 @@ class MainWindow(QMainWindow):
         if self.src_seq is not None:
             img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
         else:
-            img = media.grab_frame(self.info, frame, w, h, 16, hq=True)
+            img = None
+        recipe = self.frame_recipe(16, full=True, alpha=alpha)
+        if img is None:
+            img = media.grab_frame(self.info, frame, w, h, 16, hq=True, profile=recipe.profile)
         self._uploaded = None
-        return self.frame_recipe(16, full=True, alpha=alpha).render(self.engine, img, frame)
+        return recipe.render(self.engine, img, frame)
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:
@@ -2839,6 +2892,7 @@ class MainWindow(QMainWindow):
         self.cur_q = None
         self.inp = self.outp = None
         self._sources = {}
+        self.input_notice.offer(None)
         self.bin.clear()
         self._loading = True
         try:
@@ -2870,6 +2924,7 @@ class MainWindow(QMainWindow):
     def show_project(self, p: project.Project, remember: bool = True) -> None:
         """Mostra um projeto já lido (de um .plc ou de uma cópia da recuperação automática, sem `p.path`).
         `remember`: entra nos projetos recentes."""
+        self.input_notice.offer(None)  # 1.6: um projeto salvo nunca recebe sugestão de perfil
         if p.sequence:
             self._open_sequence_project(p, remember)
             return

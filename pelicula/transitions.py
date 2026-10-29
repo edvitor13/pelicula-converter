@@ -80,7 +80,7 @@ def light_of(values: dict[str, Any] | None, legal: bool = True) -> tuple[int, bo
     from . import look
     entrada = values.get("entrada", "rec709")
     cv = look.code_value_curve(entrada) and not values.get("log_reescalado") and bool(legal)
-    return int(look.INPUT_IDS.get(entrada, 0)), bool(cv)
+    return look.input_id(values), bool(cv)
 
 
 def seed_of(owner: str) -> int:

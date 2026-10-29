@@ -91,10 +91,12 @@ As três cópias, resumidas:
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Perfil do vídeo** | veja abaixo | Rec.709 / sRGB (vídeo comum) | Como o vídeo foi gravado. O app desfaz a curva e o gamut da câmera para trabalhar em luz linear. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR. Vídeo HDR é reconhecido sozinho ao abrir o arquivo (veja abaixo). **Trocar de preset não muda este ajuste.** |
-| **Log reescalado (HDMI "Limited")** (avançado) | liga/desliga | desligado | Só S-Log3, V-Log e N-Log. Ligue em gravações externas em que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em *Limited*, comum na Nikon); o app deixa de voltar ao código da câmera. Presets não mudam. Chave `log_reescalado`. |
+| **Log reescalado (HDMI "Limited")** (avançado) | liga/desliga | desligado | Só S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log. Ligue em gravações externas em que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em *Limited*, comum na Nikon); o app deixa de voltar ao código da câmera. Presets não mudam. Chave `log_reescalado`. |
+| **EI do ARRI LogC3** (avançado, 1.6) | EI 160 a EI 1600 | EI 800 | Só ARRI LogC3. A ALEXA grava uma curva para cada EI (está nos metadados do clipe): o cinza fica no mesmo lugar e muda a compressão das luzes e das sombras. Presets não mudam. Chave `logc3_ei`. |
 | **Exposição** | −3 a +3 EV | 0 EV | Mais ou menos luz, antes de qualquer curva (como abrir ou fechar o diafragma). |
 | **Temperatura** | −100 a +100 | 0 | Negativo esfria, positivo esquenta. Em +100: vermelho +0,28 EV e azul −0,38 EV. |
 | **Tonalidade** | −100 a +100 | 0 | Negativo puxa para verde, positivo para magenta. Em +100: verde −0,22 EV, vermelho e azul +0,08 EV. |
+| **Proteger cores saturadas** (1.6) | 0 a 100% | 0% | Traz com suavidade para dentro do Rec.709 as cores que a câmera grava além dele (LED, neon, céu muito saturado), logo depois da conversão do gamut e antes do look e do negativo. Sem isso, uma dessas cores chega com um canal "negativo", que vira zero: o tom muda de repente e o negativo do Laboratório vê um canal sem exposição. Com 100%, a cor mais saturada que o gamut da câmera guarda cai na borda do Rec.709; as cores comuns (até ~80% do caminho até a borda) não mudam. Abaixo de 100% é uma mistura: as cores mais extremas ainda podem passar da borda. É a compressão da *ACES Reference Gamut Compression*, no espaço do app. Presets não mudam. Chave `proteger_cores`. |
 
 Perfis disponíveis:
 
@@ -104,7 +106,7 @@ Perfis disponíveis:
 | Linear | nenhuma | Rec.709 | EXR e arquivos já lineares. |
 | Nikon N-Log | N-Log | Rec.2020 | Nikon Z gravando em N-Log. |
 | Sony S-Log3 (S-Gamut3.Cine) | S-Log3 | S-Gamut3.Cine | Sony em S-Log3 / S-Gamut3.Cine. |
-| ARRI LogC3 (EI 800) | LogC3 EI 800 | ARRI Wide Gamut 3 | ARRI Alexa (LogC3). |
+| ARRI LogC3 (ARRI Wide Gamut 3) | LogC3 do EI escolhido em *EI do ARRI LogC3* (padrão 800) | ARRI Wide Gamut 3 | ARRI Alexa (LogC3). |
 | Panasonic V-Log | V-Log | V-Gamut | Panasonic Lumix/Varicam em V-Log. |
 | RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE | Log3G10 | REDWideGamutRGB | RED R3D e Nikon N-RAW convertidos no DaVinci Resolve. |
 | DaVinci Intermediate (DaVinci Wide Gamut) | DaVinci Intermediate | DaVinci Wide Gamut | Arquivos exportados do Resolve em DWG/Intermediate. |
@@ -114,6 +116,17 @@ Perfis disponíveis:
 | Apple Log (Rec.2020) — iPhone | Apple Log | Rec.2020 | iPhone 15 Pro e mais novos gravando em Apple Log. |
 | HLG (HDR de celular, Rec.2100) | HLG (ITU-R BT.2100) | Rec.2020 | Vídeo HDR de celular (iPhone, Android) e de câmeras em HLG. |
 | PQ / HDR10 (Rec.2100) | PQ (SMPTE ST 2084) | Rec.2020 | Vídeo HDR10 / PQ (algumas câmeras e celulares, masters HDR). |
+| Canon Log 2 (Cinema Gamut) | Canon Log 2 | Cinema Gamut | Câmeras Canon em Canon Log 2 com Cinema Gamut. |
+| Canon Log 3 (Cinema Gamut) | Canon Log 3 | Cinema Gamut | Canon em Canon Log 3 com Cinema Gamut. |
+| Fujifilm F-Log (F-Gamut) | F-Log | Rec.2020 (F-Gamut) | Fujifilm X e GFX em F-Log. |
+| Fujifilm F-Log2 (F-Gamut) | F-Log2 | Rec.2020 (F-Gamut) | Fujifilm em F-Log2. |
+| Fujifilm F-Log2 C (F-Gamut C) | F-Log2 | F-Gamut C | Fujifilm em F-Log2 C (a curva do F-Log2 com o gamut mais largo). |
+| DJI D-Log (D-Gamut) | D-Log | D-Gamut | Câmeras e drones DJI em D-Log (o D-Log M dos drones menores é outra curva). |
+| Sony S-Log2 (S-Gamut) | S-Log2 | S-Gamut | Sony mais antigas em S-Log2. |
+| Leica L-Log (Rec.2020) | L-Log | Rec.2020 | Leica SL2, SL2-S, SL3, SL3-S e Q3 em L-Log (a SL tipo 601 grava em Rec.709: o gamut fica um pouco mais saturado). |
+
+Os perfis da 1.6 seguem as fórmulas publicadas pelos fabricantes (Canon, Fujifilm, DJI, Sony, Leica e ARRI);
+o *Apple Log 2* ficou de fora porque a Apple não publicou a curva nem o gamut.
 
 **Vídeo HDR (HLG e PQ).** O app leva o HDR para a luz da cena e deixa o cinza médio no mesmo lugar dos
 outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
@@ -131,14 +144,32 @@ outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
   HDR, volta para Rec.709. Um perfil log escolhido à mão nunca muda, e reabrir um projeto salvo não muda nada.
   A troca entra no desfazer (Ctrl+Z).
 
+**Sugestão pelos metadados (1.6).** Ao abrir um arquivo (ou pôr o primeiro clipe numa montagem vazia), se os
+metadados indicam outro perfil, uma faixa abaixo da barra do topo diz qual ("Pelos metadados, este arquivo
+parece gravado em…") com o botão **Usar este perfil**; o *Perfil do vídeo* só muda com o clique (e entra no
+desfazer). Fechar a faixa mantém o perfil; reabrir um projeto salvo nunca mostra a sugestão. O que é reconhecido:
+
+- HDR marcado (HLG e PQ), também quando o perfil está num log escolhido à mão;
+- EXR (e a transferência `linear`) → *Linear*;
+- o nome da curva numa etiqueta de gamma/curva do arquivo (como as que câmeras ARRI em ProRes e gravadores
+  externos podem gravar) e o XML que as câmeras da **Sony** gravam ao lado do vídeo (`C0001M01.XML`,
+  *CaptureGammaEquation*: S-Log3, S-Log2, HLG);
+- iPhone em **Apple Log**: marca Apple com primárias BT.2020 e sem transferência HDR (uma dedução: a Apple não
+  marca a curva no arquivo).
+
+Nunca sugere Rec.709 por uma etiqueta BT.709 (muitas câmeras marcam o log assim). Sony em MP4 sem o XML,
+Panasonic, Canon, Fujifilm, Nikon e DJI não gravam a curva onde o ffprobe a mostra: escolha o perfil à mão.
+No modo Edição, a sugestão preenche o cartão **Câmera** dos clipes novos (veja o guia da Edição).
+
 **Faixa do vídeo e curvas em código de 10 bits.** Vídeo comum (YUV) usa a *faixa legal*: o preto é o código
 64 e o branco o 940 (em 10 bits). O app expande essa faixa ao decodificar (64 → 0, 940 → 1), como o DaVinci
 Resolve faz com um clipe em *Video levels*. A maioria das curvas é definida sobre esse sinal (LogC3, LogC4,
-Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709). Já a **Sony (S-Log3), a
-Panasonic (V-Log) e a Nikon (N-Log)** escrevem a curva no **código de 10 bits** e gravam esse código como está:
-o cinza 18% do S-Log3 é o código 420 (41% IRE) e o branco 90% é o 598 (61%). Nesses três perfis o app volta ao
-código da câmera antes da curva, CV = (v·876 + 64)/1023, sempre que o arquivo veio em faixa legal; imagens e
-vídeo de faixa cheia já trazem o código. Na montagem do modo Edição vale a faixa da maioria dos clipes de
+Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709, Canon Log 2 e 3, S-Log2 e
+L-Log). Já a **Sony (S-Log3), a Panasonic (V-Log), a Nikon (N-Log), a Fujifilm (F-Log, F-Log2) e a DJI (D-Log)**
+escrevem a curva no **código de 10 bits** e gravam esse código como está: o cinza 18% do S-Log3 é o código 420
+(41% IRE) e o branco 90% é o 598 (61%). Nesses perfis o app volta ao código da câmera antes da curva,
+CV = (v·876 + 64)/1023, sempre que o arquivo veio em faixa legal; imagens e vídeo de faixa cheia já trazem o
+código (o L-Log da Leica em h.264/h.265 é gravado assim, em faixa cheia). Na montagem do modo Edição vale a faixa da maioria dos clipes de
 vídeo. Exceção: gravações externas em que a câmera reescalou o log para a faixa legal (saída HDMI em
 *Limited*, comum na Nikon) — ligue **Log reescalado**.
 
@@ -295,7 +326,7 @@ Laranja 0,55/0,38/0,07 · Amarelo 0,40/0,52/0,08 · Verde 0,18/0,72/0,10 · Azul
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Arquivo .cube** | lista + *Procurar arquivo .cube…* | (nenhum) | LUTs encontrados no computador (Premiere Pro, DaVinci Resolve e *Meus LUTs*) ou qualquer arquivo. **Instalar LUTs…** copia `.cube` para a pasta do app; **Pasta** abre essa pasta. Escolher um LUT liga a seção e adivinha a entrada. |
-| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear, HLG (Rec.2100), PQ / HDR10 (Rec.2100) | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. Em S-Log3, V-Log e N-Log o LUT recebe o **código de 10 bits** da câmera (a convenção dos LUTs dos fabricantes, "Full range"), qualquer que seja a faixa do arquivo. |
+| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear, HLG (Rec.2100), PQ / HDR10 (Rec.2100), Canon Log 2, Canon Log 3, Fujifilm F-Log, Fujifilm F-Log2, Fujifilm F-Log2 C, DJI D-Log, Sony S-Log2, Leica L-Log | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. Em S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log o LUT recebe o **código de 10 bits** da câmera (a convenção dos LUTs dos fabricantes, "Full range"), qualquer que seja a faixa do arquivo. O ARRI LogC3 do LUT é sempre o do EI 800. |
 | **Aplicar** | Depois do look de película, No lugar do look | Depois | *Depois*: o LUT entra sobre o resultado da cor da película e da cópia. *No lugar*: só o LUT (a cor da película e a cópia são ignoradas; o envelhecimento continua valendo se a *Cor da película* estiver ligada). |
 | **Intensidade do LUT** | 0–100% | 100% | Mistura com a imagem sem o LUT. |
 
@@ -618,7 +649,7 @@ dependem da posição do pixel, dos vizinhos ou do tempo): grão (também o grã
 camada, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura, scan e cor por planos.
 
-A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o
-**código de 10 bits** da câmera, como nos LUTs oficiais da Sony, da Panasonic e da Nikon ("Full range"): no
+A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log, N-Log, F-Log, F-Log2 e
+D-Log ela é o **código de 10 bits** da câmera, como nos LUTs oficiais desses fabricantes ("Full range"): no
 DaVinci Resolve, ponha esses clipes em *Data Levels → Full* (Clip Attributes), como os fabricantes recomendam.
 Nos outros perfis a entrada é o próprio sinal (o clipe pode ficar em *Auto/Video*).

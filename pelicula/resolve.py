@@ -221,7 +221,7 @@ ENTRADA_TIP = ("Curva e gamut da camera ou HLG-PQ para video HDR. Se a linha do 
 def range_control() -> Ctl:
     """Faixa do vídeo (controle só do plugin; o app sabe a faixa pelo arquivo: `media.legal_range`)."""
     return Ctl("ui_faixa_video", "Faixa do video", "combo", "legal", choices=list(RANGE_CHOICES),
-               tip=ascii_tip("So muda S-Log3 V-Log e N-Log que usam o codigo de 10 bits. Video e o padrao para "
+               tip=ascii_tip("So muda S-Log3 V-Log N-Log F-Log F-Log2 e D-Log que usam o codigo de 10 bits. Video e o padrao para "
                              "clipes em Data Levels Auto ou Video. Cheia para clipes em Full ou log que a camera "
                              "mandou reescalado pela saida HDMI Limited."),
                section="entrada")
@@ -229,8 +229,8 @@ def range_control() -> Ctl:
 
 def input_controls() -> list[Ctl]:
     """Perfil do vídeo, faixa, exposição e balanço (o começo dos nós Cor e Laboratório)."""
-    return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(),
-            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
+    return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(), ctl("logc3_ei", "EI do LogC3"),
+            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade"), ctl("proteger_cores")]
 
 
 def cor_controls() -> list[Ctl]:
@@ -548,6 +548,55 @@ PC_DEVICE float3 pc_pq_dec(float3 c) {
     float y = _fmaxf(0.2627f * f.x + 0.6780f * f.y + 0.0593f * f.z, 1e-10f);
     return f * (_powf(y, -1.0f / 6.0f) * PC_HLG_K);
 }
+// Perfis da 1.6 (look.INPUT_IDS 14+; formulas e fontes em shaders.camDec)
+PC_DEVICE float pc_clog2_dec(float y) {
+    float r = (y < 0.035388128f) ? -(_powf(10.0f, (0.035388128f - y) / 0.281863093f) - 1.0f) / 87.09937546f
+                                 : (_powf(10.0f, (y - 0.035388128f) / 0.281863093f) - 1.0f) / 87.09937546f;
+    return r * 0.9f;
+}
+PC_DEVICE float pc_clog3_dec(float y) {
+    float r = (_powf(10.0f, (y - 0.069886632f) / 0.42889912f) - 1.0f) / 14.98325f;
+    if (y < 0.04076162f) r = -(_powf(10.0f, (0.07623209f - y) / 0.42889912f) - 1.0f) / 14.98325f;
+    else if (y <= 0.105357102f) r = (y - 0.073059361f) / 2.3069815f;
+    return r * 0.9f;
+}
+PC_DEVICE float pc_flog_dec(float y) {
+    return (y < 0.100537775223865f) ? (y - 0.092864f) / 8.735631f
+                                    : _powf(10.0f, (y - 0.790453f) / 0.344676f) / 0.555556f - 0.009468f / 0.555556f;
+}
+PC_DEVICE float pc_flog2_dec(float y) {
+    return (y < 0.100686685370811f) ? (y - 0.092864f) / 8.799461f
+                                    : _powf(10.0f, (y - 0.384316f) / 0.245281f) / 5.555556f - 0.064829f / 5.555556f;
+}
+PC_DEVICE float pc_dlog_dec(float y) {
+    return (y <= 0.14f) ? (y - 0.0929f) / 6.025f : (_powf(10.0f, 3.89616f * y - 2.27752f) - 0.0108f) / 0.9892f;
+}
+PC_DEVICE float pc_slog2_dec(float y) {
+    float r = (y >= 0.030001222851889303f) ? _powf(10.0f, (y - 0.646596f) / 0.432699f) - 0.037584f
+                                           : (y - 0.030001222851889303f) / 5.0f;
+    return r * 0.9f * 219.0f / 155.0f;
+}
+PC_DEVICE float pc_llog_dec(float y) {
+    return (y <= 0.138f) ? (y - 0.09f) / 8.0f : (_powf(10.0f, (y - 0.6f) / 0.27f) - 0.0115f) / 1.3f;
+}
+PC_DEVICE float3 pc_cam_dec(float3 c, int id) {
+    if (id == 14) return make_float3(pc_clog2_dec(c.x), pc_clog2_dec(c.y), pc_clog2_dec(c.z));
+    if (id == 15) return make_float3(pc_clog3_dec(c.x), pc_clog3_dec(c.y), pc_clog3_dec(c.z));
+    if (id == 16) return make_float3(pc_flog_dec(c.x), pc_flog_dec(c.y), pc_flog_dec(c.z));
+    if (id == 17 || id == 18) return make_float3(pc_flog2_dec(c.x), pc_flog2_dec(c.y), pc_flog2_dec(c.z));
+    if (id == 19) return make_float3(pc_dlog_dec(c.x), pc_dlog_dec(c.y), pc_dlog_dec(c.z));
+    if (id == 20) return make_float3(pc_slog2_dec(c.x), pc_slog2_dec(c.y), pc_slog2_dec(c.z));
+    return make_float3(pc_llog_dec(c.x), pc_llog_dec(c.y), pc_llog_dec(c.z));
+}
+// ARRI LogC3 com outro EI (tabela PC_LC3: corte, b, c, d, e, f por EI; a = 5,555556)
+PC_DEVICE float pc_logc3e_dec(float t, int ei) {
+    float cut = PC_LC3[ei * 6 + 0];
+    float e = PC_LC3[ei * 6 + 4];
+    float f = PC_LC3[ei * 6 + 5];
+    return (t > e * cut + f) ? (_powf(10.0f, (t - PC_LC3[ei * 6 + 3]) / PC_LC3[ei * 6 + 2]) - PC_LC3[ei * 6 + 1])
+                               / 5.555556f
+                             : (t - f) / e;
+}
 // cv = 1: a curva e escrita no codigo de 10 bits (codigo/1023) e o clipe chegou em faixa legal expandida
 // (v = (codigo - 64)/876): volta ao codigo antes da formula (look.INPUT_DOMAIN).
 PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
@@ -566,7 +615,23 @@ PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
     if (id == 11) return make_float3(pc_apple_dec(c.x), pc_apple_dec(c.y), pc_apple_dec(c.z));
     if (id == 12) return make_float3(pc_hlg_dec(c.x), pc_hlg_dec(c.y), pc_hlg_dec(c.z));
     if (id == 13) return pc_pq_dec(c);
+    if (id >= 14) return pc_cam_dec(c, id);
     return make_float3(pc_cineon_dec(c.x), pc_cineon_dec(c.y), pc_cineon_dec(c.z));
+}
+// Proteger cores saturadas (1.6; shaders.gamutCompress, ACES Reference Gamut Compression): limites em PC_GCL
+PC_DEVICE float pc_gc_compress(float d, float lim, float thr) {
+    if (d < thr) return d;
+    float s = (lim - thr) / _powf(_powf((1.0f - thr) / (lim - thr), -PC_GC_PWR) - 1.0f, 1.0f / PC_GC_PWR);
+    float nd = (d - thr) / s;
+    return thr + (d - thr) / _powf(1.0f + _powf(nd, PC_GC_PWR), 1.0f / PC_GC_PWR);
+}
+PC_DEVICE float3 pc_gamut_compress(float3 c, float3 lim) {
+    float a = _fmaxf(c.x, _fmaxf(c.y, c.z));
+    if (a == 0.0f) return c;
+    float aa = _fabs(a);
+    return make_float3(a - pc_gc_compress((a - c.x) / aa, lim.x, PC_GC_THR_R) * aa,
+                       a - pc_gc_compress((a - c.y) / aa, lim.y, PC_GC_THR_G) * aa,
+                       a - pc_gc_compress((a - c.z) / aa, lim.z, PC_GC_THR_B) * aa);
 }
 """
 
@@ -672,9 +737,15 @@ B_INPUT = r"""
     int ent = v_entrada;
     int in_cv = (PC_IN_CV[ent] == 1 && v_faixa_video == 0) ? 1 : 0;
     float3 lin_in = pc_to_linear(code, PC_IN_ID[ent], in_cv);
+    if (PC_IN_ID[ent] == 4 && v_logc3_ei != PC_LC3_STD)
+        lin_in = make_float3(pc_logc3e_dec(code.x, v_logc3_ei), pc_logc3e_dec(code.y, v_logc3_ei),
+                             pc_logc3e_dec(code.z, v_logc3_ei));
     lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
                      make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
                      make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
+    if (v_proteger_cores > 0.0f)
+        lin_in = pc_lerp3(lin_in, pc_gamut_compress(lin_in, make_float3(PC_GCL[ent * 3 + 0], PC_GCL[ent * 3 + 1],
+                                                                        PC_GCL[ent * 3 + 2])), v_proteger_cores);
 """
 
 # Exposição e balanço (u_gain do app) sobre `lin`; `gx` soma ganhos por canal (cintilação etc., no OFX).
@@ -762,6 +833,12 @@ def _cor_tables(dialect: str) -> str:
             + _define("PC_PQ_C2", look.PQ_C2) + _define("PC_PQ_C3", look.PQ_C3))
     out += _table(dialect, "PC_IN_ID", [look.INPUT_IDS[e] for e in entradas], "int")
     out += _table(dialect, "PC_IN_CV", [1 if look.code_value_curve(e) else 0 for e in entradas], "int")
+    eis = [c[0] for c in params.PARAMS["logc3_ei"].choices]
+    out += _table(dialect, "PC_LC3", [float(x) for ei in eis for i, x in enumerate(look.LOGC3_EI[ei]) if i != 1])
+    out += f"#define PC_LC3_STD ({eis.index('800')})\n"
+    out += _table(dialect, "PC_GCL", [x for e in entradas for x in look.gamut_limits(look.INPUT_GAMUT[e])])
+    out += (_define("PC_GC_THR_R", look.GC_THRESHOLDS[0]) + _define("PC_GC_THR_G", look.GC_THRESHOLDS[1])
+            + _define("PC_GC_THR_B", look.GC_THRESHOLDS[2]) + _define("PC_GC_PWR", look.GC_POWER))
     gam = []
     for e in entradas:
         m = look.gamut_to_709(look.INPUT_GAMUT[e])
@@ -2085,7 +2162,8 @@ Como usar (pagina Color):
     Blackmagic Film Gen 5, Apple Log, DWG...) ou HLG / PQ para video HDR (celulares gravam em HLG). Se a
     linha do tempo ja estiver em Rec.709 (Gamma 2.4), deixe Rec.709. Outra opcao e colocar um Color Space
     Transform antes convertendo para Rec.709 / Gamma 2.4.
-  - "Faixa do video" so muda S-Log3, V-Log e N-Log (curvas no codigo de 10 bits): deixe "Video" com o
+  - "Faixa do video" so muda S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log (curvas no codigo de 10 bits):
+    deixe "Video" com o
     clipe em Data Levels Auto/Video (o padrao do Resolve) e use "Cheia" com o clipe em Full (Clip
     Attributes) ou com log que a camera mandou reescalado pela saida HDMI "Limited".
   - "Mostrar curva" e so para ver o ajuste: desligue antes de renderizar.
