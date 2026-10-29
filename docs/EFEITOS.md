@@ -780,3 +780,60 @@ Bitolas e formatos de scan novos: **Foto 35 mm (135, 36 × 24)**, **Foto meio qu
 formato (120)**; no *Scan da película*, 135 (8 furos), meio quadro (4 furos), 120 6 × 6 e 120 6 × 4,5 (sem furos).
 O 135, o meio quadro e o 6 × 6 aparecem com a tira deitada, como nos scans de foto. O grão segue o tamanho do
 quadro (maior quadro, grão menor: 120 < 135 < 35 mm de cinema < meio quadro).
+
+---
+
+## Luz por plano, fotômetro e presets novos (1.6)
+
+### Marcação de luz por plano (modo Edição)
+
+*O marcador de luz do laboratório acertava cada plano na copiadora.* No modo Edição, o inspetor de um clipe de vídeo
+tem o cartão **Luz da copiadora** (logo depois de *Câmera*): o mostrador clássico **25 · 25 · 25** (o TAPE padrão:
+as luzes no alvo, mais as do Laboratório do look e as deste clipe), botões −/+ de 1 ponto para vermelha, verde,
+azul e densidade (as três), **Zerar** e **Copiar luzes para os clipes selecionados**. Atalhos: **Ctrl+Alt+R / G /
+B / D** (+1 ponto) e com **Shift** (−1), nos clipes selecionados ou no plano da V1 sob o cursor.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Luz vermelha / verde / azul** | −24 a +24 pt | 0 | Somam às *Luzes da copiadora* do Laboratório nos quadros deste plano. Mais luz = cópia mais densa naquela cor (mais luz vermelha deixa a imagem menos vermelha). |
+| **Densidade (as três)** | −24 a +24 pt | 0 | Soma o mesmo nas três: mais = cópia mais escura. |
+
+1 ponto = 0,025 log E; **12 pontos = 1 stop da cópia**, cerca de 7 pontos = 1 stop da câmera. Precisa do
+**Laboratório** ligado no look (o cartão avisa quando está desligado). Vale o plano da faixa **V1**: clipes de
+V2 em diante não mudam a luz. Numa transição de dois clipes (dissolver, fusão, cortina…) a luz passa de um plano
+ao outro junto com a mistura; nas que passam pelo preto ou pelo branco ela troca no corte. No modo Película (o
+arquivo inteiro, sem montagem) não há planos: divida o clipe no modo Edição. Detalhes em
+[EDICAO.md](EDICAO.md#10-marcação-de-luz-por-plano-16).
+
+### Fotômetro da película (Beta, recurso "Fotômetro da película")
+
+*Onde cada parte da imagem cai na curva do negativo.* Ligue o recurso em *Configurações › Recursos*; o botão
+**Fotômetro** aparece na barra da prévia. Ligado, a prévia é pintada pela zona do negativo escolhido no
+Laboratório — com a revelação, a película vencida e a pré-exposição —, medida em stops da luz da cena em relação
+ao cinza de 18% (a mesma luz da falsa cor):
+
+| Cor | Zona | O que quer dizer |
+|---|---|---|
+| roxo | **Sem detalhe** | Abaixo do pé: o negativo quase não separa mais os tons (menos de 10% do contraste). |
+| azul | **Pé** | Sombras comprimidas, ainda com algum detalhe (10 a 50%). |
+| cinza (pela exposição) | **Trecho reto** | Detalhe completo; o cinza de 18% em verde. |
+| laranja | **Ombro** | Altas luzes comprimidas (50 a 10%). |
+| vermelho | **Estourado** | Além do ombro. |
+
+Ao lado do botão, o negativo e a **latitude** do trecho reto (a camada de cor mais estreita), por exemplo
+"Kodak Vision3 250D: −5,1 a +6,5 stops"; a dica mostra onde o detalhe acaba. A setinha do botão tem **Ler um
+ponto**: clique na imagem e a barra de status mostra os stops em relação ao cinza, a zona, quanto falta até o pé e
+o ombro e as camadas de cor que já estão noutra zona (uma luz vermelha forte chega ao ombro do vermelho antes).
+
+| Negativo e revelação | Trecho reto (stops) |
+|---|---|
+| Vision3 250D | −5,1 a +6,5 |
+| Vision3 500T | −5,5 a +6,1 |
+| Double-X (preto e branco) | −4,7 a +6,0 |
+| 250D forçado 1 stop / 2 stops | −4,9 / −4,6 a +6,5 (as sombras fecham) |
+| 250D puxado 1 stop | −5,4 a +6,5 |
+| 250D vencido há 20 anos | −3,3 a +7,1 (menos sensível e com véu) |
+| 250D com pré-exposição de 4 stops abaixo do cinza | −3,8 a +6,5 (sombras mais lisas; o detalhe fraco fica) |
+
+Sem o Laboratório ligado, o fotômetro usa o negativo padrão (Vision3 250D, revelação normal) e diz isso. Só na
+tela: nunca vai para a exportação, para um LUT nem para o plugin.

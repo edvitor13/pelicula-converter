@@ -3645,3 +3645,35 @@ caminho (a montagem vira a entrada do look). Luz por segmento entre marcadores n
 estrutura nova no JSON e de uma segunda fonte de verdade para o "plano"; a montagem já é essa fonte. O plugin do
 DaVinci não muda: a luz por plano é tempo da montagem do app, e o nó Laboratorio já tem as luzes da copiadora
 (docs/DAVINCI.md).
+
+### 35.2 Fotômetro da película (`fotometro.py`, `ui/fotometro_ui.py`)
+
+Módulo Beta "fotometro" (grupo "pelicula", começa desligado; nenhum perfil o liga). Só tela, como a zebra e a falsa
+cor do §31: nenhum arquivo do caminho de render (`frame`, `export`, `look`, `engine`, `shaders`, `cli`, `sequence`,
+`compositor`) cita o módulo (`tests/test_fotometro.py` confere), e `exposure.py` não mudou.
+
+**O negativo.** `fotometro.negative_path(v)` = `look.lab_paths_for(v)[0]`, o caminho A do Laboratório: as curvas do
+negativo escolhido já com a revelação (`ng·(1 + 0,12·push)`, `nt + 0,08·push`), a idade (`labx.aged`) e a exposição
+somada `add` (pré-exposição e véu, `labx.added_exposure`). Sem `lab_on`, os valores de `params.defaults()` (Vision3
+250D), marcados `Latitude.default`. Nada do modelo muda; o fotômetro só lê.
+
+**A conta.** Para a exposição da cena `E = 0,18·2^s` no eixo do cinza (as linhas de `sens` somam 1), cada camada tem
+`x = log10((E + add)/0,18)` e o contraste relativo `ρ(s) = [σ((x − pé)/w) − σ((x − ombro)/w)] · E/(E + add)` —
+a derivada de `D` em relação a `log E` da cena dividida pela gama da camada (1 no trecho reto). O fator
+`E/(E + add)` é a pré-exposição e o véu comprimindo as sombras. `latitude` varre `s` de −16 a +16 stops (passo
+0,005, `lru_cache` por `LabPath`) e acha, por camada, onde `ρ ≥ 0,5` (trecho reto: `lo`, `hi`) e `ρ ≥ 0,1` (com
+detalhe: `lo_detail`, `hi_detail`); o resultado é a camada mais estreita em cada ponta. Num negativo sem forçar e sem
+`add`, `ρ = ½` no pé e no ombro exatos (`σ(0) = ½`), então a latitude é `pé/log10 2` a `ombro/log10 2`.
+
+**Camada e leitura.** `ui/fotometro_ui.FilmMeter` registra a camada "fotometro" em `preview_tools.PreviewTools`: os
+stops por pixel são `exposure.stops` da `Context.light()` (a mesma `Engine.scene_light` da falsa cor) e
+`fotometro.false_color` pinta as cinco zonas (`ZONES`; o trecho reto em cinza pela exposição e ±0,25 stop do cinza
+em verde), com o alfa da cobertura. O texto ao lado do botão é o negativo + `latitude_text` ("−5,1 a +6,5 stops").
+"Ler um ponto" (menu do botão) usa o conta-gotas do `Viewer` (`start_pick`/`picked`, como `color_tools` e
+`planes_ui`, cada um com o seu estado `_picking`): média ponderada pela cobertura de 5 × 5 pixels da luz da cena e
+`fotometro.spot` — stops, zona, distância ao pé e ao ombro e a zona de cada camada vista pela matriz `sens` do
+negativo. Os valores do look são os do quadro (`Context.values`, com as chaves) ou os do painel.
+
+**O que fica de fora.** É o eixo do cinza: uma cor saturada pode cair noutra zona numa camada (a leitura de um ponto
+mostra; a camada pinta pela luminância, como a falsa cor). O caminho B (o processo: cruzado, reversível) e a cópia
+não entram: o fotômetro mede o negativo, que é onde a latitude da câmera mora.

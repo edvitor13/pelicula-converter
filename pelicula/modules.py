@@ -120,6 +120,11 @@ MODULES: tuple[Module, ...] = (
     Module("maquina_tempo", N_("Máquina do tempo"),
            N_("Escolha um ano (1920 a 2020) e onde o filme passava: um clique preenche a bitola, o filme, a cor, o "
               "grão, a projeção, o desgaste e a moldura da época, com o motivo de cada escolha."), "pelicula"),
+    Module("fotometro", N_("Fotômetro da película"),
+           N_("Na prévia, mostra onde cada parte da imagem cai na curva do negativo escolhido no Laboratório (com a "
+              "revelação, a película vencida e a pré-exposição): sem detalhe, pé, trecho reto, ombro ou estourado, "
+              "a latitude em stops e a leitura de um ponto. Só na tela: nunca vai para a exportação."),
+           "pelicula", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}

@@ -202,3 +202,72 @@ def test_card_and_shortcuts_belong_to_the_laboratory_module(win, png):
     set_module(win, "laboratorio", True)
     assert not win.lights_card.isHidden()
     assert all(s.isEnabled() for s in win.lights_shortcuts)
+
+
+# ------------------------------------------------------------------ janela: fotômetro da película
+def test_meter_is_a_beta_module_off_by_default(win):
+    meter = win.film_meter
+    assert meter is not None and win._module_tools()["fotometro"] == [meter.btn]
+    assert meter.btn.isHidden() and meter.info.isHidden()
+    assert meter.btn.parent() is win.findChild(type(meter.btn.parent()), "ViewerBar")
+    set_module(win, "fotometro", True)
+    assert not meter.btn.isHidden()
+    assert meter.info.isHidden(), "o texto só com o fotômetro ligado"
+
+
+def test_meter_layer_shows_the_zones_only_on_screen(win, png):
+    set_module(win, "fotometro", True)
+    open_two_shots(win, png)
+    meter = win.film_meter
+    win.store.set("lab_on", False)
+    APP.processEvents()
+    a = win.frame_recipe().render(win.engine, win.cur_layers, 0)
+    meter.btn.setChecked(True)
+    APP.processEvents()
+    ov = win.viewer.overlay
+    assert ov is not None and ov.width() == W and ov.height() == H, win.preview_tools.last_error
+    assert not meter.info.isHidden() and "stops" in meter.info.text() and "padrão" in meter.info.text()
+    assert meter.last_latitude is not None and meter.last_latitude.default
+    # o negativo escolhido muda a latitude mostrada
+    win.store.set("lab_on", True)
+    win.store.set("lab_negativo", "double_x")
+    APP.processEvents()
+    win.preview_tools.refresh()
+    assert meter.last_latitude.negative == "double_x" and not meter.last_latitude.default
+    assert "padrão" not in meter.info.text()
+    win.store.set("lab_on", False)
+    win.store.set("lab_negativo", "vision3_250d")
+    APP.processEvents()
+    # a receita do quadro (a da exportação) não muda com a camada da tela
+    assert np.array_equal(win.frame_recipe().render(win.engine, win.cur_layers, 0), a)
+    meter.btn.setChecked(False)
+    APP.processEvents()
+    assert win.viewer.overlay is None and meter.info.isHidden()
+
+
+def test_meter_spot_reading(win, png):
+    set_module(win, "fotometro", True)
+    open_two_shots(win, png)
+    meter = win.film_meter
+    assert meter.start_spot()
+    assert meter.btn.isChecked() and win.viewer.picking
+    win.viewer.pick_at(0.5, 0.5)
+    APP.processEvents()
+    assert not win.viewer.picking
+    r = meter.last_reading
+    assert r is not None and r.zone in ("sem_detalhe", "pe", "reta", "ombro", "estourado")
+    assert win.statusBar().currentMessage().startswith("Fotômetro:")
+    # Esc (cancelar) não deixa a leitura presa
+    meter.start_spot()
+    win.viewer.cancel_pick()
+    assert not meter._picking
+    meter.btn.setChecked(False)
+
+
+def test_meter_hides_and_turns_off_with_the_module(win, png):
+    set_module(win, "fotometro", True)
+    meter = win.film_meter
+    meter.btn.setChecked(True)
+    set_module(win, "fotometro", False)
+    assert meter.btn.isHidden() and not meter.btn.isChecked() and meter.info.isHidden()
+    assert win.viewer.overlay is None
