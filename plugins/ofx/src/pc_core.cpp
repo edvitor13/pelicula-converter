@@ -658,6 +658,7 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     // ---------------------------------------------------------------- grão (grade de ruído)
     NoiseGrid noise;
     float grain_amt = 0.0f;
+    float ng_k = 0.0f;  // 1.6: multiplicador do grão no negativo (o de grain_amt sem o 0,011)
     const bool grain = V.grao_on == 1 && V.grao_forca > 0.0f;
     if (grain) {
         float iso = PC_ISO[V.iso];
@@ -671,8 +672,13 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
         int gh = std::max(2, (int)std::ceil(H / gsz));
         float push = V.lab_on == 1 ? std::pow(1.15f, V.lab_revelacao) : 1.0f;
         grain_amt = 0.011f * V.grao_forca * gauge(gi, 1) * iso_amt * std::sqrt(std::min(1.0f, size)) * push;
+        ng_k = V.grao_forca * gauge(gi, 1) * iso_amt * std::sqrt(std::min(1.0f, size)) * push;
         noise.build(gw, gh, (uint)seed * 8u);
     }
+    // 1.6: grão no negativo (grao.negative_grain): o mesmo campo na densidade das camadas, dentro da cor
+    const bool ngrain = grain && V.lab_on == 1 && V.lab_grao == 1;
+    float3 ng_amp = make_float3(0.0f, 0.0f, 0.0f);
+    if (ngrain) ng_amp = make_float3(PC_NG_AMP[0], PC_NG_AMP[1], PC_NG_AMP[2]) * ng_k;
 
     PC_MARK("noise");
     // ---------------------------------------------------------------- curva sobreposta ("Mostrar curva")
@@ -715,8 +721,15 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                 if (bloom.on) l = l + sample(bloom_b, u, v) * (V.bloom_forca * 0.22f);
                 if (hal.on) l = l + V.hal_cor * (sample(hal_b, u, v).x * V.hal_forca * 0.32f);
                 if (F.leak_on > 0.0f) l = l + pc_leak(u, v, W / H, F.L0, F.L1, V.vazamento_cor, V.vazamento);
-                float3 yv = lut ? lut_color(lut->data, lut->exact, V, l) : pc_colorpipe(V, l);
-                if (grain) {
+                float3 yv;
+                if (ngrain) {
+                    float4 nf = noise.sample(u, v) * 2.08f;
+                    float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
+                    yv = pc_colorpipe_ng(V, l, pc_neg_grain(nf, nc, V.grao_aspereza, V.grao_cor) * ng_amp);
+                } else {
+                    yv = lut ? lut_color(lut->data, lut->exact, V, l) : pc_colorpipe(V, l);
+                }
+                if (grain && !ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
                     yv = pc_apply_grain(yv, nf, nc, V.grao_aspereza, V.grao_cor,

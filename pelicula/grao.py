@@ -6,6 +6,8 @@ bit a bit o de antes (`tests/test_grao.py` confere com a referência gravada pel
 - **Maciez pelo grão** (`grao_maciez`, M2): `soft_sigma` amacia a imagem até a nitidez do próprio grão.
 - **Diferença de nitidez entre camadas** (`mtf_camadas`, M7): `layer_softness` dá a cada canal a maciez da sua
   camada (MTF dos datasheets), com o mesmo desfoque da maciez (`shaders.BLUR3`, um sigma por canal).
+- **Grão no negativo** (`lab_grao`, M3): `negative_grain` leva o mesmo campo do grão para a densidade de cada
+  camada do negativo dentro do Laboratório (`labPath` no shader), em unidades de sigma D por camada.
 
 Constantes calibradas por datasheets públicos (regra 8): os pontos lidos ficam em `pelicula/data/datasheets/`
 com a fonte, e `tools/ajustar_grao.py` refaz o ajuste (o teste confere que as constantes daqui são as dele).
@@ -101,3 +103,38 @@ def layer_softness(plan, v: dict, soft: float, scale: float) -> None:
     plan.soft_sigma = max(s3)
     plan.uniforms["u_soft_on"] = 1
     plan.uniforms["u_soft_mix"] = 1.0
+
+
+# ------------------------------------------------------------------ M3: grão no negativo (densidade por camada)
+# Granularidade rms difusa de cada camada R, G, B do negativo (sigma D numa abertura de 48 µm), média dos pontos
+# lidos de KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, "Diffuse rms Granularity Curves" (ECN-2):
+# o azul tem o dobro do grão do verde e do vermelho (`tools/ajustar_grao.py`).
+NEG_SIGMA_D = (0.00611, 0.00709, 0.01262)
+GRAN_APERTURE_MM = 0.048
+GRAIN_NORM = 2.08  # o ruído interpolado (texBicubic × 2,08) tem variância 1 por pixel
+# O sigma D do datasheet é medido numa abertura; o do app é por pixel. Na referência (35 mm, ISO 250 = o 250D,
+# Tamanho 1: célula do grão s = 0,8 px@1080; abertura D = 48 µm · 1920 / 24,9 mm = 3,70 px@1080), a média do
+# campo do grão (variância 1 por pixel) na abertura circular tem o sigma GRAN_APERTURE_SIGMA, calculado em
+# `tools/ajustar_grao.py` pela integral exata da autocovariância do campo (a da B-spline cúbica consigo mesma)
+# com a das aberturas; a lei de Selwyn (sigma ∝ s / D) só vale para D muito maior que s e daria 15% a mais. Cada
+# camada recebe por pixel a amplitude que dá o sigma D do datasheet nessa abertura; a bitola, o ISO, a revelação
+# e a Intensidade multiplicam como no grão de sempre.
+GRAN_APERTURE_PX = GRAN_APERTURE_MM * REF_WIDTH_PX / 24.9
+GRAN_APERTURE_SIGMA = 0.43215
+SIGMA_D_TO_PIXEL = 1.0 / GRAN_APERTURE_SIGMA
+NEG_GRAIN_AMP = tuple(sd * SIGMA_D_TO_PIXEL for sd in NEG_SIGMA_D)
+
+
+def negative_grain_on(v: dict) -> bool:
+    return bool(v.get("lab_grao")) and bool(v.get("lab_on")) and bool(v.get("grao_on"))         and float(v.get("grao_forca", 0.0)) > 0.0
+
+
+def negative_grain(U: dict, v: dict, amt: float) -> None:
+    """Gancho do bloco do grão de `build_plan`: com o Laboratório e "Grão no negativo" ligados, o grão sai da
+    saída e entra na densidade das camadas (`u_grain_on = 2`; `u_ngrain` = sigma D por pixel de R, G, B). `amt` é
+    o multiplicador do grão de sempre (Intensidade × bitola × ISO × compensação × revelação × redes). Sem uniform
+    novo nos planos de sempre: `u_ngrain` só é lido com `u_grain_on = 2`, e esse plano sempre o grava."""
+    if not negative_grain_on(v):
+        return
+    U["u_grain_on"] = 2
+    U["u_ngrain"] = tuple(a * amt for a in NEG_GRAIN_AMP)

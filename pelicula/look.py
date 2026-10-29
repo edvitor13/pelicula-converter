@@ -1010,7 +1010,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.lut_path = v["lut_arquivo"]
 
     # ---- Grão
-    U["u_grain_on"] = 0
+    U["u_grain_on"] = 0  # 1 = grão na saída; 2 = grão no negativo (1.6, grao.negative_grain)
     if v["grao_on"] and v["grao_forca"] > 0:
         size = 0.8 * v["grao_tamanho"] * gauge["grain_size"] * iso_size * scale
         net = 1.0
@@ -1027,6 +1027,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_rough"] = v["grao_aspereza"]
         U["u_grain_chroma"] = v["grao_cor"] * (NET_GRAIN_CHROMA if net_grain > 0 else 1.0)
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
+        grao.negative_grain(U, v, v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net)
 
     # ---- Defeitos desenhados por cima
     dg = bool(v["desg_on"])

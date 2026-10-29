@@ -201,6 +201,11 @@ Dicas:
 - Os nós *Laboratorio* e *Cor* podem ser aplicados também como LUT (botão direito no nó › *DCTL*), com os
   valores padrão.
 - A **Qualidade do brilho** (nó *Textura*) troca velocidade por suavidade da halação/bloom/névoa.
+- **Lab - Grao no negativo** (nó *Laboratorio*): o nó ganhou os ajustes do grão que esse modo usa (ligar,
+  intensidade, tamanho, aspereza, colorido, semente, bitola e ISO) e põe o grão na densidade das camadas, como
+  no app. Ligado, **desligue o Grão do nó Textura** para não somar dois grãos. No DCTL esse grão fica **parado**
+  (o nó de cor também funciona como LUT, sem o número do quadro); o plugin OpenFX o anima como o app. O nó *Cor*
+  não tem esse modo.
 - **MTF - Camadas com copia** (nó *Textura*): o nó não vê a cópia escolhida nos nós *Cor* ou *Laboratorio*;
   ligue-o quando houver uma cópia (print) na sua árvore, para a *Diferença entre camadas* amaciar também o
   azul, como no app. Os nós gerados pelo app já vêm com ele certo; o plugin OpenFX vê a cópia sozinho.

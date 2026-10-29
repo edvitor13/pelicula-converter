@@ -173,6 +173,7 @@ comportamento de cada um, sem dados nem curvas dos fabricantes.
 |---|---|---|---|
 | **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
 | **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
+| **Grão no negativo** | liga/desliga | desligado | Põe o grão da seção *Grão* (que precisa estar ligada) **dentro do negativo**: cada camada recebe o grão na sua densidade, antes da cópia, como na película de verdade. Quem molda o grão visível passa a ser a curva da cópia: ele some nos pretos profundos e nas altas luzes estouradas e aparece nos tons médios; o azul tem mais grão que o verde e o vermelho (a granularidade das camadas, veja *Modelos calibrados por datasheets*). *Intensidade*, *Tamanho*, *Aspereza*, *Grão colorido*, *Muda a cada quadro*, a bitola, o ISO e a revelação valem como sempre; a resposta por tom (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) deixa de valer. Não entra no LUT exportado. |
 | **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
 | **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
 | **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
@@ -322,7 +323,8 @@ interpolação é trilinear na GPU.
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
 bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é **procedural**: nasce dos ajustes
 e de constantes publicadas, nunca de uma análise da sua imagem ou de um scan. Ele é aplicado depois da curva de
-cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho). Em prévias reduzidas, grãos
+cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho); com o **Grão no negativo** do
+Laboratório ligado, ele vai para a densidade das camadas do negativo e quem dá a resposta por tom é a cópia. Em prévias reduzidas, grãos
 menores que 1 pixel são levemente compensados; para ver o grão fiel, use a prévia *Máxima* com
 zoom 100%.
 
@@ -499,6 +501,7 @@ são dos donos.
 |---|---|---|---|
 | Nitidez por camada do negativo | **Diferença de nitidez entre camadas** | Curvas de MTF de cada camada: o vermelho cai mais cedo que o verde, e o verde mais cedo que o azul | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Modulation-Transfer Function Curves* |
 | Nitidez por camada da cópia | **Diferença de nitidez entre camadas** (com cópia) | Curvas de MTF da cópia: o azul é a camada mais macia, o verde a mais nítida | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC |
+| Grão de cada camada do negativo | **Grão no negativo** | Granularidade rms difusa (sigma D, abertura de 48 µm) de cada camada: azul 0,0126, verde 0,0071, vermelho 0,0061 (média pela exposição) | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Diffuse rms Granularity Curves* |
 
 Como a conta é feita: cada camada ganha uma gaussiana (somada em quadratura) que leva a resposta da camada mais
 nítida à dela nas frequências do meio, de 20 a 62 ciclos/mm (`tools/ajustar_grao.py`). Ficam 4,3 µm no
@@ -506,6 +509,12 @@ vermelho e 2,2 µm no verde do negativo e 2,3 µm no vermelho e 4,5 µm no azul 
 pelo tamanho do quadro da bitola (um quadro de 1080 linhas cobre a largura da imagem da bitola). A gaussiana
 fica a menos de 8% das razões publicadas no negativo e a menos de 18% na cópia; outros filmes usam os mesmos
 valores.
+
+No **Grão no negativo**, o sigma D de cada camada vale para o 35 mm com ISO 250 (o próprio 250D) e *Tamanho* 1:
+o app calcula quanto grão por pixel dá esse sigma D medido numa abertura de 48 µm (a média do grão nessa
+abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e a *Intensidade* multiplicam como no
+grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
+sua imagem.
 
 ---
 

@@ -161,7 +161,8 @@ def test_generated_tables_have_no_floating_noise():
 def test_plugin_has_every_control_of_the_dctl_nodes():
     names = [s.ctl.name for s in ofx.slots()]
     assert len(names) == len(set(names))
-    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()}
+    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()
+            + resolve.lab_grain_controls()}  # 1.6: "Grão no negativo" do Laboratório
     assert set(names) == want - set(ofx.SKIP)
     keys = {s.ctl.key for s in ofx.slots() if s.ctl.key}
     for k in ("lab_separacao", "lab_dens_r", "lab_bypass_copia", "lab_neutro_negativo", "mtf", "entrada",
@@ -483,6 +484,9 @@ RENDER_CASES = [
     ("camadas", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
     ("camadas_copia", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=1.0, copia="k2383")),
     ("camadas_lab", _neutral(bitola="super8", bitola_vinheta=0.0, mtf_camadas=0.6, lab_on=True)),
+    ("grao_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True)),
+    ("grao_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
+                                    grao_cor=0.8, lab_revelacao=1.0)),
 ]
 
 

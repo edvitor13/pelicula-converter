@@ -229,6 +229,11 @@ SECTIONS: list[Section] = [
           "Filme da câmera. Cada um tem latitude, contraste e mistura de camadas próprios (aproximações artísticas)."),
         F("lab_revelacao", "Revelação (puxar / forçar)", 0.0, -2, 3, 0.5, 1, " stop",
           "Forçar (+) aumenta o contraste, fecha as sombras e aumenta o grão; puxar (−) suaviza."),
+        B("lab_grao", "Grão no negativo", False,
+          "Põe o grão (seção Grão, que precisa estar ligada) dentro do negativo, na densidade de cada camada, "
+          "antes da cópia: a curva da cópia molda o grão, que some nos pretos e nas altas luzes estouradas, e o "
+          "azul tem mais grão que o verde e o vermelho, como nos datasheets da Kodak. A resposta por tom da "
+          "seção Grão deixa de valer: quem decide é a cópia."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,

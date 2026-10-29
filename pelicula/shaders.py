@@ -387,12 +387,17 @@ vec3 labCurve(vec3 x, vec3 g, vec3 xt, vec3 xs, float w) {
     return g * w * (a - b);
 }
 
+// 1.6: grão no negativo (grao.negative_grain): densidade somada a cada camada do negativo. Só o FINAL a preenche;
+// no resto (BAKE, o LUT exportado) fica zero.
+vec3 g_ng = vec3(0.0);
+
 // Um caminho completo. lin: luz linear Rec.709 (0,18 = cinza médio). Devolve o valor de exibição.
 vec3 labPath(vec3 lin, mat3 sens, vec3 ng, vec3 nt, vec3 ns, float nw, mat3 ii, vec3 pg, vec3 pt, vec3 ps,
              float pw, mat3 dye, vec3 off, vec3 key, vec3 nmid, int scan) {
     vec3 e = max(sens * lin, vec3(1e-7));
     vec3 le = vec3(log10f(e.r / 0.18), log10f(e.g / 0.18), log10f(e.b / 0.18));  // log10 relativo ao cinza
     vec3 dn = ii * labCurve(le, ng, nt, ns, nw);  // densidade do negativo (com o efeito entre camadas)
+    dn += g_ng;
     if (scan == 1) {
         // Sem cópia: inverte o negativo com o gama nominal (guardado em pg; 0,30103 = log10(2), um stop)
         // e mostra com a curva neutra.
@@ -784,6 +789,18 @@ vec3 applyGrain(vec3 y, vec2 uv) {
     return y + g * u_grain_amt * w;
 }
 
+// 1.6: o mesmo campo do grão, sem a resposta por tom, em sigma D por camada (grão no negativo)
+uniform vec3 u_ngrain;  // só com u_grain_on = 2
+vec3 negGrain(vec2 uv) {
+    vec4 nf = texBicubic(t_noise, uv) * 2.08;
+    vec4 nc = texBicubic(t_noise, uv * 0.4347 + vec2(0.311, 0.173)) * 2.08;
+    float r = u_grain_rough;
+    vec4 n = (nf * (1.0 - r) + nc * r) / sqrt((1.0 - r) * (1.0 - r) + r * r);
+    float c = u_grain_chroma;
+    vec3 g = (vec3(n.a) * (1.0 - c) + n.rgb * c) / sqrt((1.0 - c) * (1.0 - c) + c * c);
+    return g * u_ngrain;
+}
+
 vec3 leak(vec2 uv) {
     float a = u_res.x / u_res.y;
     vec3 acc = vec3(0.0);
@@ -952,6 +969,7 @@ void main() {
     if (u_bloom_on == 1) lin += texture(t_bloom, uv).rgb * u_bloom_amt;
     if (u_hal_on == 1) lin += texture(t_hal, uv).r * u_hal_color * u_hal_amt;
     if (u_leak_on == 1) lin += leak(uv);
+    if (u_grain_on == 2) g_ng = negGrain(uv);
     vec3 y = colorPipe(lin);
     if (u_grain_on == 1) y = applyGrain(y, uv);
     if (u_dmg_on == 1) y = damage(y, uv);

@@ -288,8 +288,18 @@ def curve_control() -> Ctl:
 
 def laboratorio_controls() -> list[Ctl]:
     """Nó Laboratório: entrada, exposição e o laboratório (sempre ligado), como um nó de emulação de filme."""
-    return (input_controls() + lab_controls(with_switch=False)
+    return (input_controls() + lab_controls(with_switch=False) + lab_grain_controls()
             + [ctl("mix_geral", "Forca geral do look"), curve_control()])
+
+
+def lab_grain_controls() -> list[Ctl]:
+    """1.6: "Grão no negativo" do nó Laboratório e os ajustes do grão que ele usa (os mesmos rótulos do Textura)."""
+    return [
+        ctl("lab_grao", "Lab - Grao no negativo"),
+        ctl("grao_on", "Grao"), ctl("grao_forca", "Grao - Intensidade"), ctl("grao_tamanho", "Grao - Tamanho"),
+        ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
+        ctl("grao_semente", "Grao - Semente"), ctl("bitola"), ctl("iso", "Sensibilidade ISO"),
+    ]
 
 
 # ------------------------------------------------------------------ dialetos
@@ -802,10 +812,15 @@ def spec(kind: str, dialect: str = DCTL) -> Spec:
         lab_only = kind == "laboratorio"
         controls = laboratorio_controls() if lab_only else cor_controls()
         body = B_COR.replace("/*LAB*/", B_LAB).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
+        body = body.replace("/*NGRAIN*/", B_NGRAIN if lab_only else "")  # 1.6: grão no negativo
         if lab_only:
             body = "    int v_lab_on = 1;\n" + body  # o nó Laboratório é o laboratório sempre ligado
         kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB + K_CURVE
-        return Spec(kind, controls, _cor_tables(dialect) + _lab_tables(dialect), kernel, body, False)
+        tables = _cor_tables(dialect) + _lab_tables(dialect)
+        if lab_only:
+            kernel += K_RAND + K_TEXTURA + K_NGRAIN
+            tables += _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
+        return Spec(kind, controls, tables, kernel, body, False)
     if kind == "textura":
         tables = _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
         return Spec("textura", textura_controls(), tables, K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
@@ -924,13 +939,14 @@ PC_DEVICE float pc_det3(float3 a, float3 b, float3 c) {
 PC_DEVICE float3 pc_lab_path(float3 lin, float3 s0, float3 s1, float3 s2, float3 ng0, float3 nt0, float3 ns,
                              float nw, float3 i0, float3 i1, float3 i2, int has_print, float3 pg, float3 dmax,
                              float pw, float3 d0, float3 d1, float3 d2, float3 key, float push, float xtalk,
-                             float3 lights) {
+                             float3 lights, float3 gn) {
     float3 ng = ng0 * (1.0f + 0.12f * push);
     float3 nt = nt0 + pc_s3(0.08f * push);
     float3 dmid = pc_mat3(i0, i1, i2, pc_lab_curve(pc_s3(0.0f), ng, nt, ns, nw));
     float3 e = pc_max3(pc_mat3(s0, s1, s2, lin), 1e-7f);
     float3 le = make_float3(pc_log10(e.x / 0.18f), pc_log10(e.y / 0.18f), pc_log10(e.z / 0.18f));
     float3 dn = pc_mat3(i0, i1, i2, pc_lab_curve(le, ng, nt, ns, nw));
+    dn = dn + gn;  // 1.6: grao no negativo (grao.negative_grain); zero sem ele
     if (has_print == 0) {
         // sem copia: inversao digital com o gama nominal do negativo
         float3 st = make_float3((dn.x - dmid.x) / (ng0.x * 0.30103f) - lights.x / 0.30103f,
@@ -1008,7 +1024,8 @@ PC_DEVICE float3 pc_lab_post(float3 y, float hi, float lo, float sat, float3 den
 # Etapa do laboratório no corpo do nó Cor (antes do look; o resultado volta para luz linear).
 B_LAB = r"""
     if (v_lab_on == 1) {
-        int ni = v_lab_negativo * 20;
+        float3 gn = pc_s3(0.0f);
+/*NGRAIN*/        int ni = v_lab_negativo * 20;
         int lp = v_lab_copia;
         int pk = v_lab_processo * 40;
         float kind = PC_PROC[pk];
@@ -1052,7 +1069,7 @@ B_LAB = r"""
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
-            key, v_lab_revelacao, v_lab_diafonia, lights);
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn);
         if (kind == 2.0f) {
             int b = pk + 1;
             float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
@@ -1074,7 +1091,7 @@ B_LAB = r"""
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
                 make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
-                v_lab_revelacao, v_lab_diafonia, lights);
+                v_lab_revelacao, v_lab_diafonia, lights, gn);
             la = pc_lerp3(la, lb, forca);
         }
         la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
@@ -1331,6 +1348,45 @@ PC_DEVICE float3 pc_apply_grain(float3 y, float4 nf, float4 nc, float rough, flo
 """
 
 
+# 1.6: grão no negativo (grao.negative_grain). O campo do grão do Textura (mesma grade, sementes e mistura de
+# aspereza e cor), sem a resposta por tom, vira densidade de cada camada do negativo (PC_NG_AMP = sigma D por
+# pixel); quem molda o grão visível é a curva da cópia.
+K_NGRAIN = r"""
+PC_DEVICE float3 pc_neg_grain(float4 nf, float4 nc, float rough, float chroma) {
+    float r = rough;
+    float4 n = (nf * (1.0f - r) + nc * r) * (1.0f / _sqrtf((1.0f - r) * (1.0f - r) + r * r));
+    float c = chroma;
+    return (pc_s3(n.w) * (1.0f - c) + make_float3(n.x, n.y, n.z) * c)
+           * (1.0f / _sqrtf((1.0f - c) * (1.0f - c) + c * c));
+}
+"""
+
+# No nó Laboratório (dentro de B_LAB, na passada da imagem): `gn` = a densidade do grão deste pixel.
+B_NGRAIN = r"""        if (v_lab_grao == 1 && v_grao_on == 1 && v_grao_forca > 0.0f && pass == 0) {
+            float gW = PC_F(p_Width);
+            float gH = PC_F(p_Height);
+            float gu = (PC_F(p_X) + 0.5f) / gW;
+            float gv = (PC_F(p_Y) + 0.5f) / gH;
+            int ggi = v_bitola;
+            float giso = PC_ISO[v_iso];
+            float gsize = 0.8f * v_grao_tamanho * PC_GAUGE[ggi * 7 + 0] * _powf(giso / 250.0f, 0.18f)
+                          * (gH / 1080.0f);
+            float gsz = _fmaxf(gsize, 1.0f);
+            int gseed = v_grao_semente * 7919;  // parado: o no de cor tambem vale como LUT, sem o numero do quadro
+            int ggw = PC_I(_ceilf(gW / gsz));
+            int ggh = PC_I(_ceilf(gH / gsz));
+            ggw = ggw < 2 ? 2 : ggw;
+            ggh = ggh < 2 ? 2 : ggh;
+            float gamt = v_grao_forca * PC_GAUGE[ggi * 7 + 1] * _powf(giso / 250.0f, 0.35f)
+                         * _sqrtf(_fminf(1.0f, gsize)) * _powf(1.15f, v_lab_revelacao);
+            uint gs8 = PC_U(gseed) * 8u;
+            float4 gnf = pc_noise(gu, gv, ggw, ggh, gs8) * 2.08f;
+            float4 gnc = pc_noise(gu * 0.4347f + 0.311f, gv * 0.4347f + 0.173f, ggw, ggh, gs8) * 2.08f;
+            float3 g3 = pc_neg_grain(gnf, gnc, v_grao_aspereza, v_grao_cor);
+            gn = make_float3(g3.x * PC_NG_AMP[0], g3.y * PC_NG_AMP[1], g3.z * PC_NG_AMP[2]) * gamt;
+        }
+"""
+
 def _indent(code: str, n: int) -> str:
     pad = " " * n
     return "\n".join((pad + ln) if ln.strip() else ln for ln in code.splitlines()) + "\n"
@@ -1559,6 +1615,7 @@ def _grao_tables(dialect: str) -> str:
     out += _table(dialect, "PC_MTF_LAYERS", list(grao.layer_dsigma_um(False)) + list(grao.layer_dsigma_um(True)))
     copias = [k for k, _l in params.COPIAS]
     lab_copias = [k for k, _l in params.COPIAS_LAB]
+    out += _table(dialect, "PC_NG_AMP", list(grao.NEG_GRAIN_AMP))  # grão no negativo: sigma D por pixel
     out += f"#define PC_COPIA_NENHUMA {copias.index('nenhuma')}\n"
     out += f"#define PC_LAB_COPIA_NENHUMA {lab_copias.index('nenhuma')}\n"
     return out

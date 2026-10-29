@@ -611,3 +611,24 @@ def test_layer_softness_with_a_print_matches_the_app(harness, gl_engine, test_rg
     d = np.abs(want - got)
     assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5
     assert np.abs(got - plain)[..., 2].mean() > np.abs(got - plain)[..., 1].mean()  # a cópia amacia o azul
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [{}, dict(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0,
+                                            lab_processo="tech3", grao_cor=0.0, iso="500"),
+                                   dict(lab_copia="nenhuma", lab_revelacao=1.0, grao_aspereza=0.6)],
+                         ids=["2383", "tech3_s8", "scan"])
+def test_negative_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: o grão no negativo do nó Laboratório = o do app (a grade do grão, a densidade de cada camada).
+
+    No DCTL o grão do nó de cor fica parado (o nó também vale como LUT): igual ao app sem "muda a cada quadro".
+    """
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
+    plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.5  # o grão aparece

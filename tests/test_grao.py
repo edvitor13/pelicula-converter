@@ -55,6 +55,17 @@ def same_gpu(gl_engine):
     return gl_engine
 
 
+@pytest.fixture(autouse=True)
+def _no_edge_text(monkeypatch, gl_engine):
+    """A referência foi gravada sem QGuiApplication: o texto da borda do scan não é desenhado. Na suíte inteira
+    outro teste pode ter criado a aplicação; aqui o texto fica de fora do mesmo jeito (e sem cache antigo)."""
+    from pelicula import edgetext
+    monkeypatch.setattr(edgetext, "render", lambda text, height=64: None)
+    gl_engine._text_key = None
+    yield
+    gl_engine._text_key = None
+
+
 def _diff(got: dict, ref: dict) -> list[str]:
     return sorted(k for k in ref if got.get(k) != ref[k])
 

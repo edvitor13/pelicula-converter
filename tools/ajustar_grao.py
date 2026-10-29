@@ -14,7 +14,12 @@ frequências altas, e a média acerta a resposta nas frequências do meio (as qu
 mostra numa película de 35 mm). O resultado é em micrômetros na película.
 
 **Grão no negativo (M3).** A granularidade rms difusa (sigma D, abertura de 48 µm) de cada camada do negativo é
-quase constante pela exposição; vale a média dos pontos lidos.
+quase constante pela exposição; vale a média dos pontos lidos. Para levar o sigma D da abertura ao pixel, o
+sigma da média do campo do grão do app (grade de gaussianas interpolada por B-spline cúbica, variância 1 por
+pixel) numa abertura circular sai da integral exata `var = ∫∫ C(r) · K(r) d²r`, com `C` a autocovariância do
+campo (o produto, em x e em y, da B-spline cúbica correlacionada consigo mesma, normalizada para C(0) = 1) e `K`
+a das aberturas (área comum de dois círculos / área²), na referência: célula de 0,8 px@1080 e 48 µm no quadro de
+24,9 mm do 35 mm.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "pelicula" / "data" / "datasheets"
 F_MIN, F_MAX = 20.0, 62.0   # ciclos/mm: abaixo, o efeito de adjacência (> 100%) domina; acima, a cauda
 LAYERS = ("R", "G", "B")
+APERTURE_MM, REF_FRAME_MM, REF_WIDTH_PX, REF_GRAIN_PX = 0.048, 24.9, 1920.0, 0.8
 
 
 def load(pub: str) -> dict:
@@ -55,13 +61,40 @@ def mean_sigma_d(gran: dict) -> dict[str, float]:
     return {c: float(np.mean([x for x in gran[c] if x is not None])) for c in LAYERS}
 
 
+def bspline3(u: np.ndarray) -> np.ndarray:
+    u = np.abs(u)
+    return np.where(u < 1, (4 - 6 * u ** 2 + 3 * u ** 3) / 6, np.where(u < 2, (2 - u) ** 3 / 6, 0.0))
+
+
+def aperture_sigma(d_over_s: float, step: float = 1 / 200, h: float = 1 / 50) -> float:
+    """Sigma da média do campo do grão (variância 1 por pixel) numa abertura circular de diâmetro `d_over_s`
+    células."""
+    u = np.arange(-2, 2 + step / 2, step)
+    b = bspline3(u)
+    b7 = np.convolve(b, b) * step                    # (β⋆β)(r), r de −4 a 4 células
+    r7 = np.arange(len(b7)) * step - 4.0
+    c0 = float(np.interp(0.0, r7, b7))
+    d = float(d_over_s)
+    ext = min(d, 4.0)
+    x = np.arange(-ext, ext + h / 2, h)
+    cx = np.interp(x, r7, b7, left=0.0, right=0.0) / c0
+    dist = np.hypot(*np.meshgrid(x, x))
+    rad = d / 2
+    q = np.clip(dist / d, 0.0, 1.0)
+    overlap = np.where(dist < d, 2 * rad * rad * np.arccos(q) - (dist / 2) * np.sqrt(np.maximum(d * d - dist ** 2, 0)),
+                       0.0)
+    k = overlap / (math.pi * rad * rad) ** 2
+    return math.sqrt(float(np.sum(cx[None, :] * cx[:, None] * k)) * h * h)
+
+
 def constants() -> dict:
     neg, prt = load("H-1-5207"), load("H-1-2383")
     ref_n, dn = layer_dsigma_um(neg["mtf"])
     ref_p, dp = layer_dsigma_um(prt["mtf"])
     return {"MTF_NEG_REF": ref_n, "MTF_NEG_DSIGMA_UM": tuple(round(dn[c], 3) for c in LAYERS),
             "MTF_PRINT_REF": ref_p, "MTF_PRINT_DSIGMA_UM": tuple(round(dp[c], 3) for c in LAYERS),
-            "NEG_SIGMA_D": tuple(round(v, 5) for v in mean_sigma_d(neg["granularidade"]).values())}
+            "NEG_SIGMA_D": tuple(round(v, 5) for v in mean_sigma_d(neg["granularidade"]).values()),
+            "GRAN_APERTURE_SIGMA": round(aperture_sigma(APERTURE_MM * REF_WIDTH_PX / REF_FRAME_MM / REF_GRAIN_PX), 5)}
 
 
 def main() -> int:

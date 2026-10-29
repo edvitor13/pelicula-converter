@@ -230,3 +230,127 @@ def test_layer_softness_is_deterministic_and_preview_equals_export(gl_engine):
     # a exportação usa o mesmo plano (a prévia só muda a resolução: o sigma segue em px@1080)
     small = plan(v, 320, 180, 7).soft_sigma3
     assert small == pytest.approx(tuple(x * 180 / 1080 for x in plan(v, 1920, 1080, 7).soft_sigma3))
+
+
+# ------------------------------------------------------------------ M3: grão no negativo
+def lab(**kw) -> dict:
+    """Laboratório ligado (Vision3 250D → 2383), sem o look paramétrico, com o grão ligado."""
+    base = dict(bitola="35mm", bitola_desfoque_on=False, bitola_vinheta=0.0, lab_on=True, cor_on=False,
+                copia="nenhuma", grao_on=True)
+    base.update(kw)
+    return vals(**base)
+
+
+def test_negative_grain_constants_are_the_datasheet_fit():
+    c = _tool().constants()
+    assert grao.NEG_SIGMA_D == pytest.approx(c["NEG_SIGMA_D"], abs=1e-12)
+    r, g, b = grao.NEG_SIGMA_D
+    assert b > g > r  # o azul tem mais grão (H-1-5207, p. 3)
+    assert grao.NEG_GRAIN_AMP == pytest.approx(tuple(x * grao.SIGMA_D_TO_PIXEL for x in grao.NEG_SIGMA_D))
+    # 48 µm no 35 mm: 3,70 px@1080; o grão de 0,8 px tem sigma 0,432 nessa abertura (integral exata)
+    assert grao.GRAN_APERTURE_PX == pytest.approx(3.7012, abs=1e-3)
+    assert grao.GRAN_APERTURE_SIGMA == pytest.approx(c["GRAN_APERTURE_SIGMA"], abs=2e-5)
+    assert grao.SIGMA_D_TO_PIXEL == pytest.approx(1.0 / c["GRAN_APERTURE_SIGMA"], rel=1e-4)
+
+
+def test_aperture_sigma_of_the_bspline_grain_field():
+    """Simulação: o desvio do campo do grão (B-spline cúbica de uma grade gaussiana, variância 1 por pixel) médio
+    numa abertura circular é o da integral exata de `tools/ajustar_grao.py` (a menos do ruído da amostra)."""
+    rng = np.random.default_rng(1234)
+    s, n = 6, 160                                   # célula de 6 px (o campo é quase contínuo), 160 células
+    a = rng.standard_normal((n + 4, n + 4))
+    t = (np.arange(s) + 0.5) / s
+    w = np.stack([(1 - t) ** 3, 3 * t ** 3 - 6 * t ** 2 + 4, -3 * t ** 3 + 3 * t ** 2 + 3 * t + 1, t ** 3]) / 6
+    rows = sum(w[k][None, :, None] * a[k:k + n, None, :] for k in range(4)).reshape(n * s, n + 4)
+    f = sum(rows[:, k:k + n, None] * w[k][None, None, :] for k in range(4)).reshape(n * s, n * s)
+    norm = 1.0 / f.std()
+    assert norm == pytest.approx(grao.GRAIN_NORM, rel=0.03)
+    f = f * norm
+    d = s * grao.GRAN_APERTURE_PX / 0.8              # a mesma razão abertura/célula da referência
+    r = int(math.ceil(d / 2))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    disc = ((xx ** 2 + yy ** 2) <= (d / 2) ** 2).astype(np.float64)
+    disc /= disc.sum()
+    from numpy.fft import irfft2, rfft2
+    k = np.zeros_like(f)
+    k[:disc.shape[0], :disc.shape[1]] = disc
+    avg = irfft2(rfft2(f) * rfft2(k), s=f.shape)[2 * r:-2 * r, 2 * r:-2 * r]
+    assert avg.std() == pytest.approx(grao.GRAN_APERTURE_SIGMA, rel=0.04)
+    assert _tool().aperture_sigma(d / s) == pytest.approx(grao.GRAN_APERTURE_SIGMA, abs=2e-5)
+    # a lei de Selwyn (abertura muito maior que o grão) daria uns 15% a mais nesta abertura
+    assert grao.GRAIN_NORM * s / (d * math.sqrt(math.pi) / 2) > 1.1 * grao.GRAN_APERTURE_SIGMA
+
+
+def test_negative_grain_is_off_by_default():
+    assert params.PARAMS["lab_grao"].default is False
+    for v in (lab(), lab(lab_grao=True, lab_on=False), lab(lab_grao=True, grao_on=False),
+              lab(lab_grao=True, grao_forca=0.0)):
+        assert plan(v).uniforms["u_grain_on"] != 2 and "u_ngrain" not in plan(v).uniforms
+    assert plan(lab()).uniforms["u_grain_on"] == 1
+
+
+def test_negative_grain_replaces_the_output_grain():
+    """Com o Laboratório e o grão ligados, o grão sai da saída e entra na densidade, com a mesma grade."""
+    old, new = plan(lab(iso="500", lab_revelacao=1.0)), plan(lab(iso="500", lab_revelacao=1.0, lab_grao=True))
+    assert new.uniforms["u_grain_on"] == 2 and old.uniforms["u_grain_on"] == 1
+    assert (new.grain_size, new.grain_seed) == (old.grain_size, old.grain_seed)
+    k = old.uniforms["u_grain_amt"] / 0.011   # Intensidade × bitola × ISO × compensação × revelação
+    assert new.uniforms["u_ngrain"] == pytest.approx(tuple(a * k for a in grao.NEG_GRAIN_AMP))
+
+
+@pytest.mark.parametrize("h", [1080, 2160])
+def test_negative_grain_amplitude_does_not_depend_on_resolution(h):
+    v = lab(lab_grao=True, bitola="16mm")
+    assert plan(v, h * 16 // 9, h).uniforms["u_ngrain"] == pytest.approx(plan(v).uniforms["u_ngrain"])
+
+
+def steps_image(w=1600, h=360, stops=(-6, -4, -2, 0, 2, 4)):
+    """Faixas de cinza em luz linear (stops em volta de 0,18), em código Rec.709 de 16 bits."""
+    img = np.zeros((h, w, 3))
+    bw = w // len(stops)
+    for i, st in enumerate(stops):
+        img[:, i * bw:(i + 1) * bw] = 0.18 * 2.0 ** st
+    code = np.where(img < 0.018, 4.5 * img, 1.099 * np.power(np.maximum(img, 1e-9), 0.45) - 0.099)
+    return np.rint(np.clip(code, 0, 1) * 65535).astype(np.uint16), bw
+
+
+def band_stats(out, bw, n):
+    return [(out[40:-40, i * bw + 20:(i + 1) * bw - 20].mean(axis=(0, 1)),
+             out[40:-40, i * bw + 20:(i + 1) * bw - 20].std(axis=(0, 1))) for i in range(n)]
+
+
+@pytest.mark.gpu
+def test_the_print_curve_shapes_the_negative_grain(gl_engine):
+    """O grão nasce igual em toda densidade; a cópia o esconde nos pretos e nas altas luzes estouradas e o mostra
+    nos tons médios. O azul tem mais grão que o verde e o vermelho; o brilho médio quase não muda."""
+    stops = (-6, -4, -2, 0, 2, 4)
+    img, bw = steps_image(stops=stops)
+    clean = band_stats(render(gl_engine, img, lab(grao_on=False), 7), bw, len(stops))
+    st = band_stats(render(gl_engine, img, lab(lab_grao=True), 7), bw, len(stops))
+    sd = np.array([s for _m, s in st])
+    mid = stops.index(0)
+    assert sd[mid].min() > 3 * sd[stops.index(4)].max()     # altas luzes estouradas: quase sem grão
+    assert sd[mid].min() > 3 * sd[stops.index(-6)].max()    # pretos: quase sem grão
+    r, g, b = sd[mid]
+    assert b > g > r and b > 1.3 * g
+    for (m0, _s0), (m1, _s1) in zip(clean, st):
+        np.testing.assert_allclose(m1, m0, atol=3e-3)
+
+
+@pytest.mark.gpu
+def test_negative_grain_never_reaches_the_exported_lut(gl_engine):
+    for v in (lab(), lab(lab_copia="nenhuma"), lab(lab_processo="tech3", bitola="super8")):
+        a = gl_engine.bake_lut(v, 17)
+        b = gl_engine.bake_lut(dict(v, lab_grao=True), 17)
+        assert np.array_equal(a, b)
+
+
+@pytest.mark.gpu
+def test_negative_grain_is_deterministic_per_frame(gl_engine):
+    img, _bw = steps_image(480, 120, stops=(0, 1))
+    v = lab(lab_grao=True)
+    a, b = render(gl_engine, img, v, 7), render(gl_engine, img, v, 7)
+    assert np.array_equal(a, b)
+    assert not np.array_equal(a, render(gl_engine, img, v, 8))           # muda a cada quadro
+    still = dict(v, grao_animado=False)
+    assert np.array_equal(render(gl_engine, img, still, 7), render(gl_engine, img, still, 8))
