@@ -22,7 +22,7 @@ APP = QApplication.instance() or QApplication([])
 from pelicula import maquina, modules, presets  # noqa: E402
 from pelicula.ui import prefs  # noqa: E402
 
-NEW = ("camera_cinema", "anamorfico", "data_impressa", "maquina_tempo")
+NEW = ("camera_cinema", "anamorfico", "data_impressa", "montagem_pelicula", "maquina_tempo")
 
 
 @pytest.fixture(scope="module")
@@ -64,7 +64,7 @@ def test_new_modules_hide_and_show_their_tools(win):
         set_module(win, mid, False)
         assert all(t.isHidden() for t in items), mid
     set_module(win, "maquina_tempo", True)
-    for mid in NEW[:3]:
+    for mid in NEW[:4]:
         win.settings.remove(modules.KEY_PREFIX + mid)
     win.settings_changed.emit("modulos")
 

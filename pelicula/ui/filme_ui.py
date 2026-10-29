@@ -7,12 +7,14 @@ consulta `modules`: um projeto que use um recurso desligado sai igual.
 - "camera_cinema" (Beta): o cartão "Obturador de película" do look e o cartão "Manivela" do inspetor.
 - "anamorfico" (Beta): o cartão "Lente anamórfica".
 - "data_impressa" (Beta): o cartão "Data impressa".
+- "montagem_pelicula" (Beta): o cartão "A montagem na película".
 - "maquina_tempo" (estável): o botão "Máquina do tempo…" do painel de looks (modo Película; `ui/maquina_ui.py`).
 """
 
 from __future__ import annotations
 
-LOOK_CARDS = {"camera_cinema": ("obturador",), "anamorfico": ("anamorfico",), "data_impressa": ("data",)}
+LOOK_CARDS = {"camera_cinema": ("obturador",), "anamorfico": ("anamorfico",), "data_impressa": ("data",),
+              "montagem_pelicula": ("montagem_filme",)}
 CLIP_CARDS = {"camera_cinema": ("manivela",)}
 
 

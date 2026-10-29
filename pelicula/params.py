@@ -609,6 +609,24 @@ SECTIONS: list[Section] = [
         F("data_tamanho", "Tamanho", 34.0, 12, 120, 1, 0, " px", "Altura dos números (num quadro de 1080 linhas)."),
         F("data_margem", "Distância do canto", 60.0, 0, 300, 1, 0, " px", advanced=True),
     ], "A data laranja das câmeras dos anos 80 e 90"),
+
+    # 1.6 (`montagem_filme.py`, módulo Beta "montagem_pelicula"): os cortes da montagem viram emendas na película.
+    Section("montagem_filme", "A montagem na película", "mfilme_on", [
+        B("mfilme_on", "Ativo", False),
+        F("mfilme_emenda", "Emendas visíveis", 0.7, 0, 1, percent=True,
+          tip="Em quantos cortes secos da faixa V1 a fita da emenda aparece no primeiro quadro do clipe novo."),
+        F("mfilme_clarao", "Clarão no corte", 0.4, 0, 1, percent=True,
+          tip="A luz que passa pela junta da emenda: o primeiro quadro depois do corte clareia."),
+        F("mfilme_salto", "Pulo no corte", 0.5, 0, 1, percent=True,
+          tip="A emenda é mais grossa e pula na janela do projetor por um ou dois quadros."),
+        I("mfilme_semente", "Semente", 7, 0, 9999, advanced=True),
+        B("rolo_on", "Rolos de Super 8", False,
+          "Um rolo de 50 pés tem 3 600 quadros: no fim dele a luz vela a película e a troca de rolo dá um pulo."),
+        C("rolo_cadencia", "Cadência do rolo", "18", [
+            ("18", "18 qps (3 min 20 s por rolo)"), ("24", "24 qps (2 min 30 s por rolo)")]),
+        F("rolo_velamento", "Velamento no fim do rolo", 0.7, 0, 1, percent=True),
+        COR("rolo_cor", "Cor do velamento", (1.0, 0.42, 0.12)),
+    ], "Emendas nos cortes e rolos de Super 8"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])

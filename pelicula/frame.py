@@ -163,8 +163,13 @@ class Recipe:
 
     def plan(self, w: int, h: int, index: int) -> look.Plan:
         """Passo 4: o plano do look para uma imagem w × h no quadro `index`."""
-        return look.build_plan(self.look_values(index), w, h, index, self.fps, self.lut, dither=self.dither,
-                               legal=self.legal, net_grain=self.net_grain)
+        values = self.look_values(index)
+        kw = {}
+        if values is not None and values.get("mfilme_on") and self.seq is not None:  # 1.6: os cortes da montagem
+            from . import montagem_filme
+            kw["edit"] = montagem_filme.edit_info(self.seq, index, self.fps)
+        return look.build_plan(values, w, h, index, self.fps, self.lut, dither=self.dither,
+                               legal=self.legal, net_grain=self.net_grain, **kw)
 
     def look(self, engine, img, index: int, upload: bool = True):
         """Passo 5: aplica o look à imagem montada (e as legendas gravadas, antes ou depois dele). `upload=False`

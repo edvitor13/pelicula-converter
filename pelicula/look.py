@@ -909,7 +909,7 @@ def aspect_target(v: dict, gauge: dict) -> float:
 
 def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: float,
                lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True,
-               net_grain: float = 0.0) -> Plan:
+               net_grain: float = 0.0, edit=None) -> Plan:
     """Monta todos os valores do quadro `frame` para uma imagem width x height.
 
     `legal`: a imagem de entrada veio de vídeo em faixa legal que o decodificador expandiu para 0–1
@@ -920,6 +920,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     `net_grain`: "Grão para redes" da exportação. 0 (padrão) = desligado, o plano é o de sempre. Maior que 0
     = quantos pixels desta imagem valem um pixel do arquivo exportado (1 na exportação; menos na prévia
     reduzida): o grão fica com pelo menos `NET_GRAIN_MIN_PX` pixels da saída e um pouco mais forte.
+
+    `edit` (1.6): onde o quadro está em relação aos cortes da montagem (`montagem_filme.EditInfo`, de
+    `frame.Recipe.plan`); None = sem montagem. Só a seção "A montagem na película" usa.
     """
     scale = height / 1080.0
     fps = fps or 24.0
@@ -1184,6 +1187,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
                 U["u_splice"] = (1.0, 0.15 + 0.7 * _hash(ep, sd + 503))
     U["u_dmg_on"] = 1 if (U["u_dust"] > 0 or U["u_scratch"] > 0 or U["u_hair"][0] > 0 or U["u_stain"][0] > 0
                           or U["u_cue"] > 0 or U["u_splice"][0] > 0) else 0
+    if v.get("mfilme_on"):  # 1.6: emendas nos cortes e rolos de Super 8 (`montagem_filme.py`)
+        from . import montagem_filme
+        montagem_filme.apply(U, v, edit, frame, fps, scale)
     U["u_frame"] = int(frame)
     U["u_seed_d"] = sd
 

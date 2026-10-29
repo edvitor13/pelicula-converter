@@ -109,6 +109,10 @@ MODULES: tuple[Module, ...] = (
     Module("data_impressa", N_("Data impressa"),
            N_("A data laranja de sete segmentos das câmeras dos anos 80 e 90, exposta no negativo."), "pelicula",
            BETA),
+    Module("montagem_pelicula", N_("A montagem na película"),
+           N_("Os cortes secos da montagem viram emendas: a fita no primeiro quadro, o clarão e o pulo na janela; e "
+              "rolos de Super 8 de 50 pés, com o velamento no fim e o pulo na troca. Não vai para o plugin do "
+              "DaVinci."), "pelicula", BETA),
     Module("maquina_tempo", N_("Máquina do tempo"),
            N_("Escolha um ano (1920 a 2020) e onde o filme passava: um clique preenche a bitola, o filme, a cor, o "
               "grão, a projeção, o desgaste e a moldura da época, com o motivo de cada escolha."), "pelicula"),
@@ -241,6 +245,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         used.add("anamorfico")
     if v.get("data_on"):  # 1.6: data impressa
         used.add("data_impressa")
+    if v.get("mfilme_on"):  # 1.6: a montagem na película
+        used.add("montagem_pelicula")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):
