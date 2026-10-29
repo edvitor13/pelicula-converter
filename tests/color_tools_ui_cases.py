@@ -124,9 +124,11 @@ def test_new_cards_sit_next_to_the_similar_ones():
     assert keys.index("pele") == keys.index("cor") + 1
     assert keys.index("alvo") == keys.index("hsl") + 1
     assert keys.index("degrade") == keys.index("efeitos") + 1
-    assert [s.key for s in editparams.VIDEO_SECTIONS][-3:] == ["pele", "alvo", "degrade"]
+    sec = [s.key for s in editparams.VIDEO_SECTIONS]
+    i = sec.index("pele")  # 1.6, frente E: a manivela vem depois, também com lugar próprio no inspetor
+    assert sec[i:i + 3] == ["pele", "alvo", "degrade"]
     assert [s.key for s in edit_panels.display_order(editparams.VIDEO_SECTIONS)
-            if s.key not in edit_panels.DISPLAY_AFTER] == [s.key for s in editparams.VIDEO_SECTIONS[:-3]]
+            if s.key not in edit_panels.DISPLAY_AFTER] == [s.key for s in editparams.VIDEO_SECTIONS[:i]]
 
 
 # ------------------------------------------------------------------ janela

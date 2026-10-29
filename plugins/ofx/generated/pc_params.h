@@ -19,8 +19,8 @@ struct pc_param_def {
 
 static const char* const PC_CHL_0[] = {"Nenhuma (sem c\303\263pia)", "Kodak 2383 (c\303\263pia de cinema cl\303\241ssica)", "Kodak 2393 (mais contraste)", "Fuji 3513 (mais fria e neutra)"};
 static const char* const PC_CHV_0[] = {"nenhuma", "k2383", "k2393", "f3513"};
-static const char* const PC_CHL_4[] = {"Nenhuma (manual)", "8 mm", "Super 8", "16 mm", "Super 16", "35 mm", "65 mm", "IMAX 70 mm (15/70)"};
-static const char* const PC_CHV_4[] = {"nenhuma", "8mm", "super8", "16mm", "super16", "35mm", "65mm", "imax"};
+static const char* const PC_CHL_4[] = {"Nenhuma (manual)", "8 mm", "Super 8", "16 mm", "Super 16", "35 mm", "65 mm", "IMAX 70 mm (15/70)", "Foto 35 mm (135, 36 \303\227 24)", "Foto meio quadro (18 \303\227 24)", "Foto m\303\251dio formato (120)"};
+static const char* const PC_CHV_4[] = {"nenhuma", "8mm", "super8", "16mm", "super16", "35mm", "65mm", "imax", "135", "meio_quadro", "120"};
 static const char* const PC_CHL_5[] = {"ISO 50", "ISO 100", "ISO 125", "ISO 200", "ISO 250", "ISO 400", "ISO 500", "ISO 800", "ISO 1600", "ISO 3200"};
 static const char* const PC_CHV_5[] = {"50", "100", "125", "200", "250", "400", "500", "800", "1600", "3200"};
 static const char* const PC_CHL_9[] = {"Desligado", "Close (rosto)", "Plano m\303\251dio", "Plano aberto", "Textura 16 mm", "Textura Super 8"};
@@ -54,7 +54,7 @@ static const pc_param_def PC_PARAMS[PC_PARAM_COUNT] = {
     {"copia_forca", "copia_forca", "For\303\247a da c\303\263pia (%)", "", "pelicula", 0, 1, {100.0, 0.0, 0.0}, 0.0, 100.0, 1.0, 0.01, 0, 0, 0, 0},
     {"mix_geral", "mix_geral", "For\303\247a geral do efeito (%)", "Mistura o resultado com o v\303\255deo original.", "pelicula", 0, 2, {100.0, 0.0, 0.0}, 0.0, 100.0, 1.0, 0.01, 0, 0, 0, 0},
     {"mostrar_curva", "", "Mostrar curva", "Desenha as curvas R G B do ajuste atual por cima da imagem - eixo horizontal de -8 a +8 stops. So para ver: desligue antes de renderizar.", "pelicula", 2, 3, {0.0, 0.0, 0.0}, 0.0, 1.0, 0.01, 1.0, 0, 0, 0, 0},
-    {"bitola", "bitola", "Bitola", "Tamanho do quadro da pel\303\255cula. Bitolas menores t\303\252m gr\303\243o maior, menos nitidez e mais tremor.", "pelicula", 3, 4, {5.0, 0.0, 0.0}, 0.0, 7.0, 0.01, 1.0, 8, PC_CHL_4, PC_CHV_4, 0},
+    {"bitola", "bitola", "Bitola", "Tamanho do quadro da pel\303\255cula. Bitolas menores t\303\252m gr\303\243o maior, menos nitidez e mais tremor.", "pelicula", 3, 4, {5.0, 0.0, 0.0}, 0.0, 10.0, 0.01, 1.0, 11, PC_CHL_4, PC_CHV_4, 0},
     {"iso", "iso", "Sensibilidade", "Filmes mais sens\303\255veis t\303\252m gr\303\243o maior e mais vis\303\255vel.", "pelicula", 3, 5, {4.0, 0.0, 0.0}, 0.0, 9.0, 0.01, 1.0, 10, PC_CHL_5, PC_CHV_5, 0},
     {"bitola_desfoque_on", "bitola_desfoque_on", "Desfoque da bitola", "Maciez natural de cada bitola (desfoque gaussiano). Em 1080p: 8 mm 2,4 px \342\200\242 Super 8 1,9 px \342\200\242 16 mm 1,1 px \342\200\242 Super 16 0,9 px \342\200\242 35 mm 0,35 px \342\200\242 65 mm e IMAX nenhum. Desligue para manter a nitidez do v\303\255deo. Para devolver ainda mais detalhe, use Lente e nitidez \342\206\222 Recuperar detalhe.", "pelicula", 2, 6, {1.0, 0.0, 0.0}, 0.0, 1.0, 0.01, 1.0, 0, 0, 0, 0},
     {"bitola_resolucao", "bitola_resolucao", "Intensidade do desfoque (%)", "100% = a maciez natural da bitola; 0% = sem desfoque.", "pelicula", 0, 7, {100.0, 0.0, 0.0}, 0.0, 100.0, 1.0, 0.01, 0, 0, 0, 0},
