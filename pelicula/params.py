@@ -280,8 +280,8 @@ SECTIONS: list[Section] = [
         F("lab_chave", "Chave preta (Technicolor)", 0.3, 0, 1, percent=True,
           tip="Imagem preto e branco de baixo contraste somada aos corantes: pretos mais profundos."),
         F("lab_luz_r", "Luz vermelha da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
-          "Pontos de luz da copiadora (12 pontos = 1 stop). Mais vermelho deixa a cópia mais ciano, como no "
-          "laboratório."),
+          "Pontos de luz da copiadora (12 pontos = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera). Mais "
+          "vermelho deixa a cópia mais ciano, como no laboratório."),
         F("lab_luz_g", "Luz verde da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
           "Mais verde deixa a cópia mais magenta."),
         F("lab_luz_b", "Luz azul da copiadora", 0.0, -12, 12, 0.5, 1, " pt",

@@ -37,6 +37,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
+32. [Laboratório na 1.6](#32-laboratório-na-16)
 
 ---
 
@@ -3238,3 +3239,31 @@ compara os dois na GPU.
   `_module_tools` (que já usa a chave "scopes" para o painel).
 - Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
   projeto salvo sai igual.
+
+## 32. Laboratório na 1.6
+
+O Laboratório (§14) ganhou na 1.6 conferências pelo LAD da Kodak (M9), películas calibradas pelos datasheets
+públicos (M8), o tipo de scanner do "Sem cópia" (M6) e processos novos (reversível, película vencida, pré-exposição e
+revelação cruzada). Regra de sempre: **os filmes e processos que já existiam não mudam um bit**; o que é novo entra
+como id novo no fim das listas (o plugin do DaVinci grava a posição) ou como ajuste com padrão neutro.
+
+### 32.1 Conferências pelo LAD (M9)
+
+`tests/test_lab_lad.py` mede o modelo de sempre contra o LAD (*Laboratory Aim Density*: Pytlak e Fleischer,
+SMPTE Journal 85, out/1976, p. 781–786; Kodak H-61, H-61A e H-61B, 1992). As densidades do app são **acima da
+base** (projeção `10^(−d/2,6)`, base limpa = branco). Medido com a 2383, processo normal e sem forçar:
+
+| Conferência | LAD | App | Situação |
+|---|---|---|---|
+| Cinza de 16% na cópia (densidade visual) | 1,0 com a base (Status A R 1,09, G 1,06, B 1,03) | 0,971–0,976 acima da base nos Vision3 (2393: 0,976–0,984); a base da cópia soma ~0,05 | Bate (teste: 0,95–1,05) |
+| Cinza de 18% (o alvo do app) | — | 0,9017 = −2,6 · log10(0,45), 0,07 menos denso que o de 16% | Bate com a conta da M9 |
+| 1 ponto da copiadora | 0,025 log E | 0,025 log E (`LAB_POINT`) | Igual |
+| Densidade por ponto perto do alvo | ≈ 0,07 | 0,059–0,060 (2383), 0,064 (2393) | **Desvia ~15%**: a reta da 2383 do app tem gama 2,85–3,00, mas no cinza a cópia ainda está na curva do pé (inclinação efetiva ≈ 2,4) |
+| Pontos para 1 stop de câmera | ≈ 7 | 7,2 (250D), 7,0 (500T), 7,5 (50D), com 2383 e 2393 | Bate (teste: 6,5–8) |
+| 12 pontos | 0,30 log E = 1 stop da cópia | 0,300 log E = 0,997 stop | Igual |
+| TAPE 25-25-25 | Luzes do analisador no alvo | 0 pontos = cinza calibrado neutro; ±7 pontos juntos dão no máximo 0,006 de cor | Bate |
+| Escala de cinza 2,5–90% sem "contraste descasado" | Neutra | 16–20%: ≤ 0,0072 entre canais; preto de 2,5%: até 0,073 nos Vision3/Eterna (sombras um pouco quentes, altas luzes um pouco frias) e até 0,14 no 5247 dos anos 70 com a 2393 (virada de propósito dos filmes antigos) | Bate nos modernos (teste < 0,08); antigos < 0,15 |
+| Mancha do LAD no negativo | Status M R 0,80, G 1,20, B 1,60 (com a máscara); menos a densidade mínima do 250D no datasheet (R 0,18, G 0,58, B 0,85): ≈ 0,62/0,62/0,75 | 0,931/0,931/0,911 acima da base + véu (250D) | **Desvia**: o pé do negativo do app fica mais longe do cinza. Não muda a cópia (as luzes calibradas absorvem); fica só medido |
+
+Os desvios não foram corrigidos (os filmes de sempre não mudam). Eles são metas das películas calibradas da M8
+(§32.2), que partem dos pontos dos datasheets e por isso não herdam os números à mão.

@@ -195,7 +195,10 @@ cena → cada camada do negativo vê uma faixa de cor (sensibilidade)
 ```
 
 O cinza médio é **calibrado** para sair neutro (0,45) em qualquer combinação, como o "25-25-25"
-de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois.
+de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois. O modelo foi
+conferido pelo método LAD da Kodak (*Laboratory Aim Density*): o cinza de 16% sai na cópia com densidade visual
+perto de 1,0, como o alvo dos laboratórios, e cerca de 7 pontos de copiadora compensam 1 stop de exposição da
+câmera.
 Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
@@ -211,10 +214,10 @@ comportamento de cada um: as curvas dos negativos e das cópias não vêm de dad
 | **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
 | **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
 | **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
-| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (12 pontos = 0,3 log E ≈ 1 stop). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). |
+| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (1 ponto = 0,025 log E; 12 pontos = 0,3 log E = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera, como no LAD da Kodak). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). Os pontos são relativos ao cinza calibrado, o "25-25-25" do laboratório. |
 | **Luz verde da copiadora** | −12 a +12 pt | 0 | Mais verde deixa a cópia mais magenta. |
 | **Luz azul da copiadora** | −12 a +12 pt | 0 | Mais azul deixa a cópia mais amarela (quente). |
-| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
+| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura (perto do cinza, cerca de 0,06 de densidade por ponto). Para compensar 1 stop de exposição da câmera, uns 7 pontos. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
 | **Separação de cores (Hue Split)** | 0–100% | 0% | Afasta as cores em volta de um eixo, como a separação das câmeras de três tiras: na densidade do negativo, o eixo laranja ↔ azul-esverdeado é esticado (× 1 + 0,60 × quantidade) e o perpendicular, verde ↔ magenta, comprimido (× 1 − 0,45 × quantidade). Pele mais quente, céu e sombras mais frios, verdes puxados para o amarelo ou o ciano. O cinza e a média das camadas não mudam e, por ser em densidade (log), o efeito é o mesmo em qualquer exposição. |
 | Eixo da separação (**avançado**) | 0–360° | 35° | Matiz do polo quente do eixo (35° = laranja, o par *teal & orange*; 215° inverte os polos). |
 | **Saturação do filme** | 0,00–2,00× | 1,00× | Saturação dentro do negativo, na densidade (a mistura s·I + (1 − s)/3 da matriz de camadas): muda a cor como o próprio filme, antes da cópia. O cinza não muda. |
