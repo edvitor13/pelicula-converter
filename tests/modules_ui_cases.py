@@ -232,6 +232,9 @@ def test_window_starts_with_every_tool(win):
     tools = win._module_tools()
     assert set(tools) <= {m.id for m in modules.MODULES}
     for module_id, items in tools.items():
+        if modules.get(module_id).status != modules.ESTAVEL:  # recurso em teste (1.6: "cor_planos") começa escondido
+            assert items and not any(shown(t) for t in items), module_id
+            continue
         assert items and all(shown(t) for t in items), module_id
     assert win.module_notice.isHidden()
     assert all(s.isEnabled() for s in win._edit_shortcuts)
@@ -243,7 +246,11 @@ def test_each_module_hides_and_restores_its_tools(win):
     expected = {"laboratorio": cards["lab"], "defeitos": cards["desgaste"], "scan": cards["scan"],
                 "luts": cards["lut"], "scopes": win.hist, "curva": win.curve_switch, "davinci": win.act_resolve,
                 "exportar_lut": win.act_luts[0], "edicao": win.mode_switch, "medidor_som": win.meter,
-                "legendas": win.btn_subs, "silencios": win.tl_editor.btn_silences}
+                "legendas": win.btn_subs, "silencios": win.tl_editor.btn_silences,
+                "cor_simples": win.color_tools.bar, "cor_planos": cards["planos"],
+                "grao_fisico": next(r for r in cards["lab"].rows if r.param.key == "lab_grao_modelo")}
+    for module_id in win._module_tools():  # os recursos em teste (1.6: "cor_planos") também, ligados à mão
+        set_module(win, module_id, True)
     for module_id, items in win._module_tools().items():
         set_module(win, module_id, False)
         assert not any(shown(t) for t in items), module_id
@@ -400,7 +407,8 @@ def test_features_page_changes_reach_the_window(win):
     assert shown(win.mode_switch)
     page.cards["tudo"].click()
     APP.processEvents()
-    assert all(shown(t) for ts in win._module_tools().values() for t in ts)
+    assert all(shown(t) for mid, ts in win._module_tools().items() for t in ts
+               if modules.get(mid).status == modules.ESTAVEL)  # perfil nenhum liga recurso em teste
     dlg.reject()
 
 

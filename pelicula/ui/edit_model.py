@@ -61,6 +61,9 @@ class TimelineModel(QObject):
         self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
         self.clipboard_keys: dict[str, list] = {}  # chaves da cor copiadas (tempo a partir do começo do clipe)
+        # 1.6: perfil de câmera dos clipes de vídeo NOVOS (`insert_media`): fonte → chave de `params.ENTRADAS`, ou
+        # None para "Igual ao do look" (a janela usa `camera.prefill` com `media.suggest_input`).
+        self.clip_profile_for = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(400)
@@ -168,6 +171,10 @@ class TimelineModel(QObject):
         """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o resto em vez de sobrescrever."""
         with self.seq.keep_main():
             made = self.seq.insert_media(src, at, vtrack, atrack, insert=insert)
+        prof = self.clip_profile_for(src) if made and self.clip_profile_for is not None else None
+        for c in made if prof else []:  # 1.6: no mesmo passo do desfazer
+            if c.kind == VIDEO:
+                self.seq.set_values(c.id, {**c.values, "camera_entrada": prof})
         if made:
             self.selection = [c.id for c in made]
             self.selectionChanged.emit()
@@ -306,6 +313,8 @@ class TimelineModel(QObject):
                 before = None
         else:
             self.seq.set_values(cid, values)
+        if c.kind == VIDEO and c.color_group:  # 1.6: a mesma mudança de cor nos outros clipes do grupo
+            self._group_follow(c, old)
         if c.values == old and (c.start, c.dur, c.speed) == before:
             return
         kind = "structure" if (c.start, c.dur, c.speed) != before else "values"
@@ -316,6 +325,55 @@ class TimelineModel(QObject):
         self.changed.emit(kind)
         if not record:
             self.historyChanged.emit()
+
+    # ------------------------------------------------------------ 1.6: grupos de cor
+    def color_group_of(self, cid: str) -> list[Clip]:
+        """Os clipes de vídeo do grupo de cor do clipe (ele incluído; só ele se não tem grupo)."""
+        c = self.seq.find(cid)
+        if c is None:
+            return []
+        if not c.color_group:
+            return [c]
+        return [x for x in self.seq.clips if x.kind == VIDEO and x.color_group == c.color_group]
+
+    def _group_follow(self, c: Clip, old: dict[str, Any]) -> None:
+        """As chaves de cor que mudaram no clipe vão para os outros do grupo (as outras ficam como estão; a
+        animação é de cada clipe)."""
+        changed = [k for k in editparams.color_keys() if c.values.get(k) != old.get(k)]
+        if not changed:
+            return
+        for other in self.color_group_of(c.id):
+            if other.id != c.id:
+                vals = dict(other.values)
+                vals.update({k: copy.deepcopy(c.values[k]) for k in changed})
+                self.seq.set_values(other.id, vals)
+
+    def set_color_group(self, ids: Iterable[str], group: str) -> int:
+        """Põe os clipes de vídeo num grupo de cor ("" tira do grupo). Um passo do desfazer."""
+        n = 0
+        for cid in ids:
+            c = self.seq.find(cid)
+            if c is not None and c.kind == VIDEO and c.color_group != group:
+                c.color_group = group
+                n += 1
+        if n:
+            self._done("values")
+        return n
+
+    def group_selected(self) -> str:
+        """Agrupa os clipes de vídeo selecionados (dois ou mais) num grupo novo; devolve o id ("" = nada)."""
+        ids = [c.id for c in self.selected_clips() if c.kind == VIDEO]
+        if len(ids) < 2:
+            return ""
+        gid = timeline.new_id()
+        self.set_color_group(ids, gid)
+        return gid
+
+    def ungroup_selected(self) -> int:
+        return self.set_color_group([c.id for c in self.selected_clips()], "")
+
+    def select_color_group(self, cid: str) -> None:
+        self.select([c.id for c in self.color_group_of(cid)])
 
     def set_source_data(self, path: str, data: dict[str, Any], record: bool = True) -> bool:
         """Troca os parâmetros de uma fonte sem arquivo (`Source.data`: cor, degradê, texto do título…). Vale para
@@ -718,6 +776,27 @@ class TimelineModel(QObject):
         self.seq.subtitles = subs
         self._done("subtitles")
         return True
+
+    # ------------------------------------------------------------ 1.6: mudar algumas chaves de vários clipes
+    def update_clip_values(self, changes: dict[str, dict[str, Any]]) -> int:
+        """Muda só as chaves dadas nos ajustes de cada clipe ({id: {chave: valor}}), num passo só do desfazer (as
+        luzes da copiadora por plano: `ui/luz_plano_ui.py`). Clipe que não existe ou em faixa travada fica de fora.
+        Devolve quantos clipes mudaram."""
+        self.commit()
+        n = 0
+        for cid, update in changes.items():
+            c = self.seq.find(cid)
+            if c is None or self.seq.locked(c):
+                continue
+            vals = dict(c.values)
+            vals.update(update)
+            old = copy.deepcopy(c.values)
+            self.seq.set_values(cid, vals)
+            if c.values != old:
+                n += 1
+        if n:
+            self._done("values")
+        return n
 
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

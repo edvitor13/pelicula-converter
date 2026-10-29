@@ -44,9 +44,11 @@ VIDEO = "video"
 AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
 # Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
-# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes). Veja `features()` e `migrate()`.
-FORMAT = 2
+# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes), uma com algo da 1.5 e nada da 1.6 com FORMAT_15.
+# Veja `features()` e `migrate()`.
+FORMAT = 3
 FORMAT_BASE = 1
+FORMAT_15 = 2
 # Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
 # ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
 SOURCE_FILE = "arquivo"
@@ -267,6 +269,9 @@ class Clip:
     # imagem) e reverso (o arquivo toca para trás a partir de `src_in`, que aí é a ponta mais alta do trecho).
     ramp: list = field(default_factory=list)
     reverse: bool = False
+    # 1.6: grupo de cor (`ui/color_tools.py`): clipes com o mesmo id mudam a cor juntos (`TimelineModel`). Vazio =
+    # sozinho; no JSON ("grupo") só quando usado.
+    color_group: str = ""
 
     def __post_init__(self) -> None:
         schema = editparams.SCHEMAS[self.kind]
@@ -275,6 +280,7 @@ class Clip:
         self.key_off = int(self.key_off)
         self.ramp = timemap.clean_ramp(self.ramp)
         self.reverse = bool(self.reverse)
+        self.color_group = str(self.color_group or "")
 
     @property
     def retimed(self) -> bool:
@@ -318,6 +324,8 @@ class Clip:
             out["rampa"] = timemap.ramp_json(self.ramp)
         if self.reverse:
             out["reverso"] = True
+        if self.color_group:  # 1.6: só com grupo de cor
+            out["grupo"] = self.color_group
         return out
 
     @classmethod
@@ -334,7 +342,8 @@ class Clip:
                        keys=d.get("chaves") if isinstance(d.get("chaves"), dict) else {},
                        key_off=int(d.get("chaves_ref", 0) or 0),
                        ramp=d.get("rampa") if isinstance(d.get("rampa"), list) else [],
-                       reverse=d.get("reverso") is True)
+                       reverse=d.get("reverso") is True,
+                       color_group=d.get("grupo") if isinstance(d.get("grupo"), str) else "")
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -590,8 +599,35 @@ class Sequence:
             s = self.time_map(clip).src_at(1 / self.fps) if clip.frozen else self.src_time(clip, t + 1)
         else:
             s = self.src_time(clip, t)
+        if not clip.frozen and clip.values.get("manivela", "nenhuma") != "nenhuma":  # 1.6: manivela (tempo_camera)
+            s += self.crank_offset(clip, t)
         f = int(math.floor(s * src.fps + EPS))
         return min(max(f, 0), max(0, src.frames - 1))
+
+    def crank_offset(self, clip: Clip, t: int) -> float:
+        """1.6: segundos que a oscilação da manivela soma ao instante do arquivo no quadro t (0 sem ela)."""
+        from . import tempo_camera
+        v = clip.values
+        if tempo_camera.crank_rate(v.get("manivela")) <= 0:
+            return 0.0
+        return tempo_camera.crank_offset((t - clip.start) / self.fps, float(v.get("manivela_oscila", 0.0)),
+                                         int(v.get("manivela_semente", 0)))
+
+    def src_window(self, clip: Clip, t: int, angle: float) -> list[tuple[int, float]] | None:
+        """1.6, obturador do look (`tempo_camera`): os quadros do arquivo (e os pesos) que a janela aberta do
+        obturador cobre no quadro t, ou None quando o clipe não tem o que misturar (menos do dobro de quadros do
+        arquivo por quadro da sequência, imagem, congelado ou sem arquivo). Mesma regra de `src_frame`."""
+        if angle <= 0 or clip.frozen:
+            return None
+        src = self.sources.get(clip.src)
+        if src is None or src.is_image or not src.is_file or src.fps <= 0:
+            return None
+        s0, s1 = self.src_time(clip, t), self.src_time(clip, t + 1)
+        if clip.values.get("manivela", "nenhuma") != "nenhuma":
+            s0 += self.crank_offset(clip, t)
+            s1 += self.crank_offset(clip, t + 1)
+        from . import tempo_camera
+        return tempo_camera.clip_window(s0, s1, src.fps, src.frames, angle, clip.reverse)
 
     def max_dur(self, clip: Clip, src_in: float | None = None) -> int:
         """Maior duração (quadros) que o arquivo permite a partir de `src_in` (no sentido em que o clipe toca)."""
@@ -1146,6 +1182,11 @@ class Sequence:
         if c is None:
             return
         clean = editparams.SCHEMAS[c.kind].sanitize(values)
+        if c.kind == VIDEO and clean.get("manivela") != c.values.get("manivela", "nenhuma"):
+            from . import tempo_camera  # 1.6: a cadência da manivela acelera o clipe (o som segue pela velocidade)
+            old = tempo_camera.crank_factor(self.fps, c.values.get("manivela"))
+            clean["velocidade"] = float(clean.get("velocidade", 1.0)) * tempo_camera.crank_factor(
+                self.fps, clean.get("manivela")) / old
         speed = clean.get("velocidade", 1.0)
         if abs(speed - c.speed) > 1e-9:
             self.set_speed(cid, speed)
@@ -1904,8 +1945,16 @@ class Sequence:
         return Sequence.from_json(self.to_json())
 
     def features(self) -> set[str]:
-        """Recursos da 1.5 que esta montagem usa (`FEATURES`): com algum, o projeto vai para o formato 3."""
-        return {fid for fid, check in FEATURES.items() if check(self)}
+        """Recursos que esta montagem usa: os da 1.5 (`FEATURES`, o projeto vai para o formato 3) e os da 1.6
+        (`FEATURES_V4`, formato 4)."""
+        return {fid for reg in (FEATURES, FEATURES_V4) for fid, check in reg.items() if check(self)}
+
+    def block_format(self) -> int:
+        """O formato do bloco "edicao": FORMAT com algo da 1.6, FORMAT_15 com algo da 1.5, FORMAT_BASE sem nada."""
+        feats = self.features()
+        if feats & set(FEATURES_V4):
+            return FORMAT
+        return FORMAT_15 if feats else FORMAT_BASE
 
     def used_sources(self) -> list[Source]:
         """As fontes que algum clipe usa (na ordem de `sources`)."""
@@ -1915,7 +1964,7 @@ class Sequence:
     def to_json(self) -> dict[str, Any]:
         used = {c.src for c in self.clips}
         out = {
-            "formato": FORMAT if self.features() else FORMAT_BASE,
+            "formato": self.block_format(),
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
             "faixas": [t.to_json() for t in self.tracks],
@@ -2032,6 +2081,21 @@ FEATURES["rampa"] = lambda seq: any(c.ramp for c in seq.clips)        # rampa de
 FEATURES["reverso"] = lambda seq: any(c.reverse for c in seq.clips)   # clipe tocado de trás para a frente
 
 
+def _clips_beyond_1_5(seq: Sequence) -> bool:
+    """Algum clipe usa um ajuste (ou opção, ou chave de animação) que a 1.5 não lê (`params.beyond_1_5`)."""
+    from .params import beyond_1_5, known_1_5
+    known = known_1_5()
+    return any(beyond_1_5(editparams.SCHEMAS[c.kind], known[c.kind], c.values, c.keys) for c in seq.clips)
+
+
+# Recursos da 1.6 numa montagem (mesma regra de `FEATURES`): o bloco vai para o formato 3 e o projeto para o 4,
+# que a 1.5 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_6" pega tudo o que a 1.5 não lê.
+FEATURES_V4: dict[str, Callable[[Sequence], bool]] = {
+    "ajustes_clipe_1_6": _clips_beyond_1_5,
+    "grupos_cor": lambda seq: any(c.color_group for c in seq.clips),  # grupo de cor dos clipes (`Clip.color_group`)
+}
+
+
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
     do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
@@ -2049,8 +2113,15 @@ def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _seq_v2_to_v3(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.5 (formato 2) → formato 3: nada muda nos campos (a 1.6 só acrescenta)."""
+    out = dict(d)
+    out["formato"] = 3
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2, 2: _seq_v2_to_v3}
 
 
 def migrate(d: dict[str, Any]) -> dict[str, Any]:

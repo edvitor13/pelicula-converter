@@ -38,7 +38,7 @@ def test_feature_is_registered_once_in_the_montage_registry():
 def test_sequence_json_round_trip():
     seq = seq_with(sample())
     data = seq.to_json()
-    assert data["formato"] == tl.FORMAT and data["legendas"] == sample().to_json()
+    assert data["formato"] == tl.FORMAT_15 and data["legendas"] == sample().to_json()
     back = tl.Sequence.from_json(json.loads(json.dumps(data)))
     assert back.subtitles == sample()
     assert back.to_json() == data
@@ -60,7 +60,7 @@ def test_default_subtitles_are_not_written_and_the_json_is_the_old_one():
 def test_project_format_3_lists_the_feature_and_round_trips(tmp_path):
     p = project.Project(media_path="C:/videos/a.mp4", sequence=seq_with(sample()).to_json())
     data = p.to_json()
-    assert data["formato"] == project.FORMAT and sb.FEATURE_ID in data["recursos"]
+    assert data["formato"] == project.FORMAT_15 and sb.FEATURE_ID in data["recursos"]
     path = tmp_path / "legendas.plc"
     project.save(p, str(path))
     back = project.load(str(path))

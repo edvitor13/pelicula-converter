@@ -8,11 +8,13 @@ exportação geram exatamente o mesmo resultado.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
+
+from . import grao, grao_estrutura, grao_fisico, labx
 
 # Curva neutra usada para levar vídeo Rec.709 até a luz da cena e de volta.
 D_SLOPE = 0.155
@@ -21,7 +23,30 @@ D_P = 4.0
 
 INPUT_IDS = {"rec709": 0, "linear": 1, "nlog": 2, "slog3": 3, "logc3": 4, "vlog": 5, "cineon": 6, "dwg": 7,
              "log3g10": 8, "bmd_gen5": 9, "logc4": 10,
-             "applelog": 11, "hlg": 12, "pq": 13}
+             "applelog": 11, "hlg": 12, "pq": 13,
+             # 1.6 (fontes em shaders.camDec): o F-Log2 C é a curva do F-Log2 com o F-Gamut C
+             "clog2": 14, "clog3": 15, "flog": 16, "flog2": 17, "flog2c": 18, "dlog": 19, "slog2": 20,
+             "llog": 21}
+
+# ARRI LogC3 com outro EI (`logc3_ei` ≠ 800): `u_input` = LOGC3_EI_ID + posição do EI nesta tabela, que se repete
+# em shaders.LC3 e no plugin (PC_LC3).
+# ARRI, "ALEXA Log C Curve – Usage in VFX" (Harald Brendel, 2012), tabela "SUP 3.x, Linear Scene Exposure
+# Factor": (corte, a, b, c, d, e, f) por EI; t = c·log10(a·x + b) + d acima do corte, e·x + f abaixo. O cinza
+# 18% fica em 0,391 em todos; muda a compressão das luzes e das sombras. O EI 800 é a curva de sempre (id 4).
+LOGC3_EI_ID = 22
+LOGC3_EI = {
+    "160": (0.005561, 5.555556, 0.080216, 0.269036, 0.381991, 5.842037, 0.092778),
+    "200": (0.006208, 5.555556, 0.076621, 0.266007, 0.382478, 5.776265, 0.092782),
+    "250": (0.006871, 5.555556, 0.072941, 0.262978, 0.382966, 5.710494, 0.092786),
+    "320": (0.007622, 5.555556, 0.068768, 0.259627, 0.383508, 5.637732, 0.092791),
+    "400": (0.008318, 5.555556, 0.064901, 0.256598, 0.383999, 5.571960, 0.092795),
+    "500": (0.009031, 5.555556, 0.060939, 0.253569, 0.384493, 5.506188, 0.092800),
+    "640": (0.009840, 5.555556, 0.056443, 0.250219, 0.385040, 5.433426, 0.092805),
+    "800": (0.010591, 5.555556, 0.052272, 0.247190, 0.385537, 5.367655, 0.092809),
+    "1000": (0.011361, 5.555556, 0.047996, 0.244161, 0.386036, 5.301883, 0.092814),
+    "1280": (0.012235, 5.555556, 0.043137, 0.240810, 0.386590, 5.229121, 0.092819),
+    "1600": (0.013047, 5.555556, 0.038625, 0.237781, 0.387093, 5.163350, 0.092824),
+}
 
 GAUGES: dict[str, dict[str, Any]] = {
     "nenhuma": dict(grain_size=1.00, grain_amt=1.00, blur=0.0, weave=1.0, vignette=0.00, hal=1.00, aspect=None),
@@ -32,6 +57,11 @@ GAUGES: dict[str, dict[str, Any]] = {
     "35mm":    dict(grain_size=1.00, grain_amt=1.00, blur=0.35, weave=1.0, vignette=0.06, hal=1.00, aspect=1.85),
     "65mm":    dict(grain_size=0.60, grain_amt=0.72, blur=0.0, weave=0.7, vignette=0.03, hal=0.85, aspect=2.20),
     "imax":    dict(grain_size=0.45, grain_amt=0.55, blur=0.0, weave=0.55, vignette=0.02, hal=0.75, aspect=1.43),
+    # 1.6 (`scanformatos.py`): formatos de foto. O grão segue a largura do quadro (36, 24 e 56 mm contra os 24,9 do
+    # 35 mm de cinema); a câmera de foto não tem tremor de projeção nem desfoque de bitola pequena.
+    "135":     dict(grain_size=0.75, grain_amt=0.85, blur=0.2, weave=0.6, vignette=0.05, hal=0.90, aspect=1.5),
+    "meio_quadro": dict(grain_size=1.05, grain_amt=1.02, blur=0.4, weave=1.0, vignette=0.08, hal=1.00, aspect=1.33),
+    "120":     dict(grain_size=0.50, grain_amt=0.62, blur=0.0, weave=0.5, vignette=0.03, hal=0.80, aspect=1.0),
 }
 
 PRINTS: dict[str, dict[str, Any] | None] = {
@@ -55,9 +85,22 @@ SCAN_FORMATS: dict[str, dict[str, Any]] = {
                     perf_r=0.25, perf_phase=3.81, perf_period=7.62, text=(-1.0, -1.0, -1.0, -1.0), rough=0.025),
     "super8": dict(film_w=8.0, pitch=4.234, img=(1.55, 7.34, 4.01, 0.40), perf=(0.97, -1.0, 0.914, 1.143),
                    perf_r=0.13, perf_phase=2.117, perf_period=4.234, text=(-1.0, -1.0, -1.0, -1.0), rough=0.02),
+    # 1.6 (`scanformatos.py`): foto. 135 = 36 × 24 mm com 8 furos KS (38 mm por quadro), meio quadro = 18 × 24 mm com 4
+    # furos (19 mm), ambos com a tira deitada no scan; 120 = 61,5 mm de largura, sem furos (6 × 6: 56 × 56 mm a cada
+    # 60 mm; 6 × 4,5: 56 × 41,5 mm a cada 45 mm). Sem furos: o furo fica fora da película (x < 0).
+    "135": dict(film_w=35.0, pitch=38.0, img=(5.5, 29.5, 36.0, 0.6), perf=(3.41, 31.59, 2.794, 1.981),
+                perf_r=0.33, perf_phase=2.375, perf_period=4.75, text=(0.35, 1.75, 33.25, 34.65), rough=0.035),
+    "meio_quadro": dict(film_w=35.0, pitch=19.0, img=(5.5, 29.5, 18.0, 0.5), perf=(3.41, 31.59, 2.794, 1.981),
+                        perf_r=0.33, perf_phase=2.375, perf_period=4.75, text=(0.35, 1.75, 33.25, 34.65),
+                        rough=0.035),
+    "120_66": dict(film_w=61.5, pitch=60.0, img=(2.75, 58.75, 56.0, 0.3), perf=(-10.0, -1.0, 0.0, 0.0),
+                   perf_r=0.0, perf_phase=0.0, perf_period=60.0, text=(0.5, 2.1, -1.0, -1.0), rough=0.03),
+    "120_645": dict(film_w=61.5, pitch=45.0, img=(2.75, 58.75, 41.5, 0.3), perf=(-10.0, -1.0, 0.0, 0.0),
+                    perf_r=0.0, perf_phase=0.0, perf_period=45.0, text=(0.5, 2.1, -1.0, -1.0), rough=0.03),
 }
 GAUGE_SCAN = {"8mm": "super8", "super8": "super8", "16mm": "16mm", "super16": "super16",
-              "35mm": "35mm", "65mm": "35mm", "imax": "35mm", "nenhuma": "35mm"}
+              "35mm": "35mm", "65mm": "35mm", "imax": "35mm", "nenhuma": "35mm",
+              "135": "135", "meio_quadro": "meio_quadro", "120": "120_66"}  # 1.6: foto
 EDGE_TEXTS = {
     "kodak_vision3": "KODAK  VISION3",
     "eastman": "EASTMAN  KODAK  SAFETY  FILM",
@@ -86,6 +129,9 @@ def edge_text(v: dict) -> str:
     if choice != "auto":
         return EDGE_TEXTS.get(choice, "")
     fmt = scan_format(v)
+    from . import scanformatos
+    if fmt in scanformatos.EDGE_TEXTS:  # 1.6: foto (135, meio quadro, 120)
+        return scanformatos.EDGE_TEXTS[fmt]
     if fmt == "super8" or fmt == "super16":
         return ""
     code = "5222" if v.get("pb") else _KODAK_35.get(int(v.get("iso", 250)), "5207")
@@ -139,11 +185,20 @@ _PRIMARIES = {
     # Blackmagic Wide Gamut (Gen 4/5) e ARRI Wide Gamut 4 (valores publicados; branco D65)
     "bmdwg": ((0.7177215, 0.3171181), (0.2280410, 0.8615690), (0.1005841, -0.0820452)),
     "awg4": ((0.7347, 0.2653), (0.1424, 0.8576), (0.0991, -0.0308)),
+    # 1.6. Canon Cinema Gamut (Canon, "Cinema Gamut" na atualização da EOS C500, 2014); Fujifilm F-Gamut C
+    # ("F-Log2 C Data Sheet" Ver.1.0, 2024; o F-Gamut do F-Log/F-Log2 é o BT.2020); DJI D-Gamut ("White Paper
+    # on D-Log and D-Gamut of DJI Cinema Color System", 2017); Sony S-Gamut ("S-Log2 Technical Paper", 2012).
+    "cinemagamut": ((0.74, 0.27), (0.17, 1.14), (0.08, -0.10)),
+    "fgamutc": ((0.73470, 0.26530), (0.02630, 0.97370), (0.11730, -0.02240)),
+    "dgamut": ((0.71, 0.31), (0.21, 0.88), (0.09, -0.08)),
+    "sgamut": ((0.73, 0.28), (0.14, 0.855), (0.10, -0.05)),
 }
 _D65 = (0.3127, 0.3290)
 INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020",
                "slog3": "sgamut3cine", "logc3": "awg3", "vlog": "vgamut", "dwg": "dwg", "log3g10": "rwg",
-               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020", "hlg": "2020", "pq": "2020"}
+               "bmd_gen5": "bmdwg", "logc4": "awg4", "applelog": "2020", "hlg": "2020", "pq": "2020",
+               "clog2": "cinemagamut", "clog3": "cinemagamut", "flog": "2020", "flog2": "2020",
+               "flog2c": "fgamutc", "dlog": "dgamut", "slog2": "sgamut", "llog": "2020"}
 
 # Domínio de cada curva de entrada: em que escala o fabricante escreveu a fórmula.
 #
@@ -164,6 +219,11 @@ INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020"
 #     Nikon N-Log, "N-Log Specification Document": "x is the N-Log 10-bit code value"; cinza 18% = 372
 #       (35%, calculado pela fórmula). Exceção: gravação externa por HDMI com a saída em "Limited" chega já
 #       reescalada para 64–940 (guia de edição da Nikon) — `log_reescalado` desliga a volta ao código.
+#     Fujifilm F-Log e F-Log2 ("F-Log Data Sheet" Ver.1.1; "F-Log2 Data Sheet"; "F-Log2 C Data Sheet" Ver.1.0):
+#       a tabela dá o código de 10 bits da fórmula (F-Log: 0% → 95, 18% → 470, 90% → 705; F-Log2: 95, 400,
+#       570) e o "IRE" de cada um como (código − 64)/876 (18% = 46,3% no F-Log): o código vai direto ao arquivo.
+#     DJI D-Log ("White Paper on D-Log and D-Gamut of DJI Cinema Color System", 2017): tabela em código de 10
+#       bits igual a 1023·fórmula (0% → 95, 18% → 408, 90% → 586).
 # - "sinal": a fórmula usa o próprio sinal E′ (0 = preto, 1 = branco nominal), gravado com a quantização
 #   padrão (faixa legal: código = 64 + 876·E′; cheia: 1023·E′); o valor expandido v já é E′. Fontes:
 #     ARRI LogC3, "ALEXA Log C Curve – Usage in VFX": o cinza 18% é o valor 0,391 = 400/1023 num código
@@ -182,12 +242,21 @@ INPUT_GAMUT = {"rec709": "709", "linear": "709", "cineon": "709", "nlog": "2020"
 #     Apple Log ("Apple Log Profile White Paper", 2023): P em [0, 1] gravado em buffers "video range" de 10
 #       bits (não conferido no documento original: está atrás do login de desenvolvedor da Apple).
 #     Rec.709 (curva neutra do app), linear e HLG/PQ (ITU-R BT.2100: E′ com D = 876·E′ + 64 em 10 bits).
+#     Canon Log 2 e Canon Log 3 ("Canon Log Gamma Curves", transformadas de entrada 201612 e 202007): a fórmula
+#       v1 dá o sinal (18% → 39,2% e 32,8%) e o arquivo de faixa legal guarda 64 + 876·sinal (18% → 39,8% e
+#       34,3% de 1023); a versão 1.2 da Canon é a mesma curva com as constantes já nesse código.
+#     Sony S-Log2 ("S-Log2 Technical Paper"): sinal levado para a faixa legal (0% → 90, 18% → 347, 90% → 582).
+#     Leica L-Log ("L-Log Reference Manual" V1.9, 2026): h.264/h.265 gravam a faixa cheia (código = 1023·L,
+#       0% → 92, 18% → 445, 90% → 634) e o ProRes "video levels": o mesmo L reescalado para 64–940 (a tabela 2
+#       dá 88% IRE no ProRes para o código 897 = 897/1023). Nos dois casos o valor lido já é L.
 # Os LUTs externos e os .cube exportados usam o domínio da própria curva (código de 10 bits nas curvas
 # "cv"): é a convenção dos LUTs dos fabricantes ("N-Log-Full", LUTs "Full range" da Sony) e das IDTs do
 # ACES, que aplicam a fórmula direto no valor de entrada.
 INPUT_DOMAIN = {"rec709": "sinal", "linear": "sinal", "nlog": "cv", "slog3": "cv", "logc3": "sinal",
                 "vlog": "cv", "cineon": "sinal", "dwg": "sinal", "log3g10": "sinal", "bmd_gen5": "sinal",
-                "logc4": "sinal", "applelog": "sinal", "hlg": "sinal", "pq": "sinal"}
+                "logc4": "sinal", "applelog": "sinal", "hlg": "sinal", "pq": "sinal",
+                "clog2": "sinal", "clog3": "sinal", "flog": "cv", "flog2": "cv", "flog2c": "cv", "dlog": "cv",
+                "slog2": "sinal", "llog": "sinal"}
 
 # HLG e PQ: luz de cena normalizada E (0..1 no HLG) → luz linear do app (cinza médio = 0,18). O cinza
 # de referência da ITU-R BT.2408 (cartão 18% em 38% do sinal HLG: E = 0,38²/3) vira 0,18; o branco de
@@ -211,6 +280,16 @@ def code_value_curve(entrada: str) -> bool:
     return INPUT_DOMAIN.get(entrada) == "cv"
 
 
+def input_id(v: dict) -> int:
+    """Id da curva de entrada no shader (`u_input`): o de `INPUT_IDS`, ou, no ARRI LogC3 com `logc3_ei` diferente
+    de 800, `LOGC3_EI_ID` + a posição do EI em `LOGC3_EI` (o EI 800 fica no id 4 de sempre)."""
+    entrada = v.get("entrada", "rec709")
+    ei = str(v.get("logc3_ei", "800"))
+    if entrada == "logc3" and ei != "800" and ei in LOGC3_EI:
+        return LOGC3_EI_ID + list(LOGC3_EI).index(ei)
+    return int(INPUT_IDS.get(entrada, 0))
+
+
 def _npm(prim, white=_D65) -> np.ndarray:
     xyz = []
     for x, y in prim:
@@ -229,6 +308,37 @@ def gamut_to_709(name: str) -> np.ndarray:
 def mat3_uniform(m: np.ndarray) -> tuple:
     """GLSL espera matrizes por coluna."""
     return tuple(float(v) for v in np.asarray(m, dtype=np.float64).T.flatten())
+
+
+# "Proteger cores saturadas" (`proteger_cores`, shaders.gamutCompress): limiares, limites e potência da "ACES
+# Reference Gamut Compression" (Academy Software Foundation / AMPAS, especificação em CC BY 4.0), por canal
+# (ciano, magenta, amarelo). O limite de cada perfil é o maior entre o da ACES e a distância da fronteira do gamut
+# da câmera levada ao Rec.709: com 100%, o gamut inteiro da câmera cabe no Rec.709.
+GC_THRESHOLDS = (0.815, 0.803, 0.880)
+GC_LIMITS_ACES = (1.147, 1.264, 1.312)
+GC_POWER = 1.2
+
+# Uniforms da 1.6 que só vão no plano com o efeito ligado (o plano de um projeto antigo continua o mesmo,
+# `tests/test_project_migration.py`). Um programa guarda o último valor de cada uniform: o Engine manda estes
+# valores neutros antes do plano (passos "base" e "bake"), então desligar o efeito volta à cor de sempre.
+SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0,
+                                   "u_anam": (1.0, 0.0, 0.0, 0.0), "u_date_on": 0}  # 1.6: anamórfico e data
+
+
+@lru_cache(maxsize=None)
+def gamut_limits(gamut: str) -> tuple[float, float, float]:
+    """Maior distância ao acromático, por canal, das cores da fronteira do gamut `gamut` (faces do cubo RGB da
+    câmera com um canal em 0) no Rec.709, nunca abaixo de `GC_LIMITS_ACES`."""
+    m = gamut_to_709(gamut)
+    t = np.linspace(0.0, 1.0, 129)
+    s, u = (a.ravel() for a in np.meshgrid(t, t))
+    z = np.zeros_like(s)
+    cam = np.concatenate([np.stack([z, s, u], 1), np.stack([s, z, u], 1), np.stack([s, u, z], 1)])
+    rgb = cam @ m.T
+    a = rgb.max(axis=1)
+    ok = a > 1e-9
+    far = ((a[ok, None] - rgb[ok]) / np.abs(a[ok, None])).max(axis=0)
+    return tuple(float(max(lim, x)) for lim, x in zip(GC_LIMITS_ACES, far))
 
 
 def _hash(i: int, s: int) -> float:
@@ -334,6 +444,15 @@ NEGATIVES: dict[str, dict[str, Any]] = {
                          shoulder=(1.95, 1.95, 1.90), width=0.32, interimage=0.30),
     "double_x": dict(sens=_SENS_PAN, gamma=(0.65, 0.65, 0.65), toe=(-1.40, -1.40, -1.40),
                      shoulder=(1.80, 1.80, 1.80), width=0.25, interimage=0.0),
+    # 1.6 (M8): curvas ajustadas às curvas sensitométricas dos datasheets públicos da Kodak por
+    # tools/ajustar_lab.py (pontos e fonte em pelicula/data/datasheets/). Só as curvas vêm dos dados; a matriz de
+    # sensibilidade e o efeito entre camadas são os do negativo feito à mão.
+    "vision3_250d_v2": dict(sens=_SENS_V3, gamma=(0.489, 0.549, 0.538), toe=(-1.491, -1.476, -1.474),
+                            shoulder=(2.028, 2.082, 2.04), width=0.25, interimage=0.38),
+    "vision3_500t_v2": dict(sens=_SENS_V3T, gamma=(0.488, 0.549, 0.54), toe=(-1.494, -1.491, -1.481),
+                            shoulder=(2.045, 2.079, 2.047), width=0.251, interimage=0.36),
+    "vision3_200t_v2": dict(sens=_SENS_V3T, gamma=(0.487, 0.547, 0.53), toe=(-1.421, -1.401, -1.404),
+                            shoulder=(2.014, 2.065, 2.055), width=0.189, interimage=0.37),
 }
 
 # Cópias: gama, densidade máxima (acima da base) e largura (o pé da cópia é a rolagem das altas luzes).
@@ -353,11 +472,18 @@ LAB_PRINTS: dict[str, dict[str, Any] | None] = {
     "2302": dict(gamma=(2.70, 2.70, 2.70), dmax=(3.8, 3.8, 3.8), width=0.22,
                  dye=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))),
     "nenhuma": None,
+    # 1.6 (M8): gama, densidade máxima e largura ajustados à curva sensitométrica do datasheet (H-1-2383) e diafonia
+    # tirada das curvas de densidade espectral dos corantes (tools/ajustar_lab.py).
+    "2383_v2": dict(gamma=(5.634, 4.24, 6.0), dmax=(3.806, 3.322, 3.41), width=0.155,
+                    dye=((1.0, 0.313, 0.065), (0.232, 1.0, 0.136), (0.089, 0.229, 1.0))),
 }
 
 # Processos especiais (caminho B). Os registros da câmera Technicolor são negativos preto e branco
 # de pouca latitude; a matriz de separação (filtros estreitos) satura mais que um filme de três camadas.
 _TECH_RECORD = dict(gamma=(0.68, 0.68, 0.68), toe=(-1.20, -1.20, -1.20), shoulder=(1.45, 1.45, 1.45), width=0.20)
+_LINEAR_STAGE = dict(gamma=(1.0, 1.0, 1.0), toe=(-6.0, -6.0, -6.0), shoulder=(6.0, 6.0, 6.0), width=0.20)
+_XPRO_E6C41_GAMMA = (1.10, 1.00, 0.92)
+_XPRO_C41E6_GAMMA = (1.25, 1.12, 0.98)
 LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
     "normal": None,
     "prata": None,  # caminho A + densidade de prata retida (média das camadas), sem caminho B
@@ -372,6 +498,24 @@ LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
                   print=dict(gamma=(2.30, 2.30, 2.30), dmax=(3.4, 3.4, 3.4), width=0.16,
                              dye=((1.00, 0.10, 0.0), (0.25, 0.85, 0.0), (0.12, 1.00, 0.0))),
                   key=(0.0, 0.0, 0.0)),
+    # 1.6: processos do próprio filme da câmera (a cópia escolhida não é usada). No reversível e no negativo
+    # revelado como slide, o "negativo" do caminho B é um estágio linear (densidade = log E, sem pé nem ombro
+    # na faixa da cena) e a "cópia" é a curva positiva do próprio filme: pé = altas luzes, dmax = preto.
+    "reversivel": dict(sens=_SENS_VIVID, **_LINEAR_STAGE, interimage=0.30,
+                       print=dict(gamma=(2.20, 2.20, 2.20), dmax=(3.50, 3.50, 3.45), width=0.18,
+                                  dye=((1.00, 0.09, 0.03), (0.07, 1.00, 0.09), (0.03, 0.13, 1.00))),
+                       key=(0.0, 0.0, 0.0)),
+    # Slide revelado em C-41: negativo de emulsão de slide (contraste alto, pouca latitude, sem máscara), camadas
+    # com contrastes diferentes (virada de cor) e "interimage" forte; copiado numa 2383.
+    "cruzado_e6c41": dict(sens=_SENS_VIVID, gamma=_XPRO_E6C41_GAMMA, toe=(-1.05, -1.05, -1.00),
+                          shoulder=(1.25, 1.25, 1.20), width=0.18, interimage=0.55,
+                          print=dict(LAB_PRINTS["2383"]), key=(0.0, 0.0, 0.0)),
+    # Negativo revelado em E-6: positivo de pouco contraste e preto lavado (dmax baixo), camadas com contrastes
+    # diferentes (a máscara laranja que sobra nas altas luzes).
+    "cruzado_c41e6": dict(sens=_SENS_V3, **_LINEAR_STAGE, interimage=0.20,
+                          print=dict(gamma=_XPRO_C41E6_GAMMA, dmax=(2.50, 2.40, 2.30), width=0.25,
+                                     dye=((1.00, 0.08, 0.02), (0.06, 1.00, 0.08), (0.02, 0.14, 1.00))),
+                          key=(0.0, 0.0, 0.0)),
 }
 
 
@@ -567,16 +711,22 @@ class LabPath:
     mid: tuple        # densidade do negativo no cinza médio (para a inversão do scan)
     off: tuple        # luz da copiadora calibrada (log E), antes das luzes do usuário
     scan: bool        # sem cópia: o negativo é invertido digitalmente
+    add: tuple = (0.0, 0.0, 0.0)  # 1.6 (labx): exposição somada a cada camada (véu da idade + pré-exposição)
+    white: bool = False           # 1.6 (labx, M6): scanner de luz branca no Sem cópia
 
     def eval(self, lin, lights=(0.0, 0.0, 0.0)) -> np.ndarray:
         """Mesmo cálculo do `labPath` do shader, em numpy (lin: (..., 3) luz linear Rec.709)."""
         lin = np.asarray(lin, dtype=np.float64)
         e = np.maximum(lin @ np.asarray(self.sens).T, 1e-7)
+        if any(self.add):
+            e = np.maximum(lin @ np.asarray(self.sens).T + np.asarray(self.add), 1e-7)
         le = np.log10(e / 0.18)
         dn = lab_curve(le, self.ng, self.nt, self.ns, self.nw) @ np.asarray(self.ii).T
         off = np.asarray(self.off) + np.asarray(lights)
         if self.scan:
             st = (dn - np.asarray(self.mid)) / (np.asarray(self.pg) * LOG10_2) - off / LOG10_2
+            if self.white:
+                st = labx.white_scan_stops(dn, self.mid, self.pg, off)
             return _stops_to_disp(np.clip(st, -12.0, 12.0))
         dl = lab_curve(off - dn, self.pg, self.pt, self.ps, self.pw)
         d = dl @ np.asarray(self.dye).T + (dl @ np.asarray(self.key))[..., None]
@@ -646,14 +796,20 @@ class LabMods:
     toe: float = 0.0      # pé da cópia: positivo lava os pretos (menos densidade máxima)
     split: float = 0.0    # separação de cores (Hue Split), na densidade do negativo
     split_hue: float = 35.0
+    age: float = 0.0      # 1.6 (labx): película vencida, em anos
+    flash: tuple = (0.0, 0.0, 0.0)  # 1.6 (labx): pré-exposição (luz Rec.709 linear somada antes da sensibilidade)
+    white: bool = False   # 1.6 (labx, M6): scanner de luz branca no Sem cópia
 
 
 def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
                mods: LabMods = LabMods()) -> LabPath:
     gamma = _neutral3(neg["gamma"], mods.neutral_neg)
-    ng = gamma * (1.0 + 0.12 * push)                                       # forçar = mais contraste
-    nt = _neutral3(neg["toe"], mods.neutral_neg) + 0.08 * push             # ... e sombras mais fechadas
+    toe0 = _neutral3(neg["toe"], mods.neutral_neg)
     ns = _neutral3(neg["shoulder"], mods.neutral_neg)
+    if mods.age:
+        gamma, toe0, ns = labx.aged(gamma, toe0, ns, mods.age, neg["sens"])  # 1.6: película vencida
+    ng = gamma * (1.0 + 0.12 * push)                                       # forçar = mais contraste
+    nt = toe0 + 0.08 * push                                                # ... e sombras mais fechadas
     nw = float(neg["width"])
     a_ii, b_ii = ii_coefs(neg.get("interimage", 0.0), mods.film_sat, mods.bypass_neg)
     ii = np.eye(3) * a_ii + b_ii  # dn' = A·dn + B·(soma): linhas somam A + 3B
@@ -661,11 +817,18 @@ def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
         ii = split_matrix(mods.split, mods.split_hue) @ ii  # comuta com A·I + B·J
     dn_mid = ii @ lab_curve(np.zeros(3), ng, nt, ns, nw)
     sens = _t3x3(neg["sens"])
+    add = (0.0, 0.0, 0.0)
+    if mods.age or any(mods.flash):
+        # 1.6: exposição somada (véu + pré-exposição); o cinza da calibração também a recebe
+        add = _t3(labx.added_exposure(sens, mods.flash, mods.age))
+        e_mid = np.asarray(sens) @ np.full(3, 0.18) + np.asarray(add)
+        dn_mid = ii @ lab_curve(np.log10(e_mid / 0.18), ng, nt, ns, nw)
     if pr is None:
         # Sem cópia o campo `pg` guarda o gama nominal (sem forçar) usado na inversão do scan: assim
         # a revelação forçada aparece como mais contraste, como num scan com inversão fixa.
         return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(gamma), (0.0, 0.0, 0.0),
-                       (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True)
+                       (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True,
+                       add, bool(mods.white))
     pg = _neutral3(pr["gamma"], mods.neutral_print)
     dmax = _neutral3(pr["dmax"], mods.neutral_print) * 2.0 ** (-0.6 * mods.toe)
     ps = dmax / pg
@@ -677,7 +840,7 @@ def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
     key = np.asarray(key, dtype=np.float64)
     off = _calibrate_print(dn_mid, pg, ps, pw, dye, key)
     return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(pg), (0.0, 0.0, 0.0), _t3(ps), pw,
-                   _t3x3(dye), _t3(key), _t3(dn_mid), _t3(off), False)
+                   _t3x3(dye), _t3(key), _t3(dn_mid), _t3(off), False, add)
 
 
 @lru_cache(maxsize=512)
@@ -698,7 +861,8 @@ def lab_paths(negativo: str, copia: str, processo: str, push: float, crosstalk: 
     proc = LAB_PROCESSES.get(processo)
     if not proc:
         return a, None
-    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]), mods)
+    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]),
+                   replace(mods, white=False))  # o scanner de luz branca só existe no Sem cópia do caminho A
     return a, b
 
 
@@ -715,7 +879,8 @@ def _r4(x) -> float:
 def lab_paths_for(v: dict) -> tuple[LabPath, LabPath | None]:
     mods = LabMods(_r4(v["lab_saturacao_filme"]), _r4(v["lab_bypass_negativo"]), _r4(v["lab_neutro_negativo"]),
                    _r4(v["lab_neutro_copia"]), _r4(v["lab_pe"]), _r4(v["lab_separacao"]),
-                   _r4(v["lab_separacao_eixo"]))
+                   _r4(v["lab_separacao_eixo"]), _r4(v.get("lab_vencida", 0.0)), labx.flash_light(v),
+                   labx.white_scan(v))
     return lab_paths(v["lab_negativo"], v["lab_copia"], v["lab_processo"], float(v["lab_revelacao"]),
                      float(v["lab_diafonia"]), float(v["lab_chave"]), float(v["lab_processo_forca"]), mods,
                      _r4(v["lab_bypass_copia"]))
@@ -783,6 +948,7 @@ class Plan:
     grain_seed: int = 0
     lut_path: str = ""
     edge_text: str = ""
+    soft_sigma3: tuple[float, float, float] | None = None  # 1.6: sigma da maciez por canal (None = `soft_sigma`)
 
 
 def aspect_target(v: dict, gauge: dict) -> float:
@@ -798,7 +964,7 @@ def aspect_target(v: dict, gauge: dict) -> float:
 
 def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: float,
                lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True,
-               net_grain: float = 0.0) -> Plan:
+               net_grain: float = 0.0, edit=None) -> Plan:
     """Monta todos os valores do quadro `frame` para uma imagem width x height.
 
     `legal`: a imagem de entrada veio de vídeo em faixa legal que o decodificador expandiu para 0–1
@@ -809,6 +975,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     `net_grain`: "Grão para redes" da exportação. 0 (padrão) = desligado, o plano é o de sempre. Maior que 0
     = quantos pixels desta imagem valem um pixel do arquivo exportado (1 na exportação; menos na prévia
     reduzida): o grão fica com pelo menos `NET_GRAIN_MIN_PX` pixels da saída e um pouco mais forte.
+
+    `edit` (1.6): onde o quadro está em relação aos cortes da montagem (`montagem_filme.EditInfo`, de
+    `frame.Recipe.plan`); None = sem montagem. Só a seção "A montagem na película" usa.
     """
     scale = height / 1080.0
     fps = fps or 24.0
@@ -822,12 +991,16 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     # ---- Entrada, geometria e exposição (passo base)
     U["u_res"] = (float(width), float(height))
     U["u_scale"] = scale
-    U["u_input"] = INPUT_IDS.get(v["entrada"], 0)
+    U["u_input"] = input_id(v)  # o de INPUT_IDS; no LogC3 com outro EI, o id dele (o 800 é a curva de sempre)
     # Curva em código de 10 bits: volta ao código quando a fonte veio expandida (u_legal), menos quando o
     # arquivo já traz o log reescalado para a faixa legal (saída HDMI "Limited" da câmera).
     U["u_input_cv"] = 1 if (code_value_curve(v["entrada"]) and not v.get("log_reescalado")) else 0
     U["u_legal"] = 1 if legal else 0
     U["u_gamut"] = mat3_uniform(gamut_to_709(INPUT_GAMUT.get(v["entrada"], "709")))
+    gc = float(v.get("proteger_cores", 0.0))
+    if gc > 0.0:  # Proteger cores saturadas (1.6): só ligado; desligado, o Engine manda o 0 (SPARSE_UNIFORMS)
+        U["u_gc_amt"] = gc
+        U["u_gc_lim"] = gamut_limits(INPUT_GAMUT.get(v["entrada"], "709"))
     temp = v["temperatura"] / 100.0
     tint = v["tint"] / 100.0
     gain = [v["exposicao"] + 0.28 * temp + 0.08 * tint,
@@ -880,6 +1053,12 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_ca"] = (v["aberracao"] * scale / (0.5 * height)) if lente else 0.0
     vig = (v["vinheta"] if lente else 0.0) + gauge["vignette"] * v["bitola_vinheta"]
     U["u_vig"] = (min(vig, 1.5), v["vinheta_raio"], v["vinheta_suavidade"], v["vinheta_redondeza"])
+    if v.get("planos_on"):  # 1.6: Cor por planos no passo base (programa `planes.BASE_CP`; {} = nada a fazer)
+        from . import planes
+        U.update(planes.uniforms(v))
+    from . import anamorfico, data_impressa  # 1.6: só com o efeito ligado (SPARSE_UNIFORMS desliga)
+    anamorfico.base_uniforms(U, v)
+    data_impressa.uniforms(U, v, width, height)
 
     plan = Plan(U)
 
@@ -887,7 +1066,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     sig_g = gauge["blur"] * v["bitola_resolucao"] if v["bitola_desfoque_on"] else 0.0
     sig_u = (v["raio_maciez"] * v["maciez"] * 2.0) if lente else 0.0
     sig_m = mtf_sigma(v)  # MTF da película: gaussiana fina somada em quadratura
-    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2) * scale
+    sig_r = grao.soft_sigma(v, gauge)  # 1.6: maciez pelo grão (0 = desligada)
+    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2 + sig_r ** 2) * scale
     sharp = v["nitidez"] if lente else 0.0
     if soft > 0.05:
         plan.soft_sigma = soft
@@ -901,6 +1081,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_soft_on"] = 0
         U["u_soft_mix"] = 0.0
     U["u_sharp"] = sharp
+    grao.layer_softness(plan, v, soft, scale)  # 1.6: nitidez por camada (nada com 0%)
 
     # ---- Halação, bloom e névoa
     U["u_hal_on"] = 0
@@ -912,6 +1093,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_hal_on"] = 1
         U["u_hal_amt"] = v["hal_forca"] * 0.32
         U["u_hal_color"] = tuple(v["hal_cor"])
+        grao.physical_halation(plan, U, v, scale)  # 1.6: modo "fisica" (nada no modo "brilho")
     if v["bloom_on"] and v["bloom_forca"] > 0:
         plan.chains.append(Chain("bloom", 0.18 * 2 ** v["bloom_limiar"], v["bloom_raio"] * scale, 6.0, False))
         U["u_bloom_on"] = 1
@@ -920,6 +1102,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.chains.append(Chain("mist", 0.0, v["nevoa_raio"] * scale, 3.0, False))
         U["u_mist_on"] = 1
         U["u_mist_amt"] = v["nevoa_forca"]
+    anamorfico.streak(plan, U, v, scale)  # 1.6: risco horizontal (nada desligado)
 
     # ---- Vazamento de luz
     U["u_leak_on"] = 0
@@ -975,6 +1158,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_lab_b_on"] = 1 if lb is not None else 0
         U["u_lab_mix"] = float(v["lab_processo_forca"]) if lb is not None else 0.0
         _lab_post_uniforms(U, lab_post(v))
+        labx.uniforms(U, la, lb)  # 1.6: véu, pré-exposição e scanner de luz branca (só quando ligados)
 
     pr = PRINTS.get(v["copia"])
     U["u_print_on"] = 1 if pr else 0
@@ -1005,7 +1189,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.lut_path = v["lut_arquivo"]
 
     # ---- Grão
-    U["u_grain_on"] = 0
+    U["u_grain_on"] = 0  # 1 = grão na saída; 2 = grão no negativo (1.6, grao.negative_grain)
     if v["grao_on"] and v["grao_forca"] > 0:
         size = 0.8 * v["grao_tamanho"] * gauge["grain_size"] * iso_size * scale
         net = 1.0
@@ -1022,6 +1206,12 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_rough"] = v["grao_aspereza"]
         U["u_grain_chroma"] = v["grao_cor"] * (NET_GRAIN_CHROMA if net_grain > 0 else 1.0)
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
+        grao.negative_grain(U, v, v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net)
+        grao_fisico.negative_grain(plan, U, v, gauge, scale, v["grao_forca"] * gauge["grain_amt"] * iso_amt * push * net,
+                                   net_grain)  # 1.6: modelo "fisico" do grão no negativo (nada no "ruido")
+        grao_estrutura.structure(U, v)  # 1.6: estrutura pela densidade (nada com 0%)
+
+    grao.breathing(U, v, frame)  # 1.6: respiração por camada (nada sem ela)
 
     # ---- Defeitos desenhados por cima
     dg = bool(v["desg_on"])
@@ -1056,6 +1246,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
                 U["u_splice"] = (1.0, 0.15 + 0.7 * _hash(ep, sd + 503))
     U["u_dmg_on"] = 1 if (U["u_dust"] > 0 or U["u_scratch"] > 0 or U["u_hair"][0] > 0 or U["u_stain"][0] > 0
                           or U["u_cue"] > 0 or U["u_splice"][0] > 0) else 0
+    if v.get("mfilme_on"):  # 1.6: emendas nos cortes e rolos de Super 8 (`montagem_filme.py`)
+        from . import montagem_filme
+        montagem_filme.apply(U, v, edit, frame, fps, scale)
     U["u_frame"] = int(frame)
     U["u_seed_d"] = sd
 
@@ -1091,6 +1284,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
             U["u_scan_outside"] = tuple(c * luz for c in (1.9, 1.85, 1.75))
             U["u_scan_textcol"] = display_to_lin((0.42, 0.24, 0.07))
         plan.edge_text = edge_text(v)
+        from . import scanformatos
+        if scanformatos.is_rotated(v):  # 1.6: tira deitada (outra variante do BASE, `Engine._base_program`)
+            U["u_scan_rot"] = 1
 
     # ---- Moldura
     asp = aspect_target(v, gauge)

@@ -32,8 +32,9 @@ vídeo (no modo Película) ou o da montagem; a exportação usa as mesmas chaves
 
 ```
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
-      → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
+      → [cor por planos: frente, fundo e pele] → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
       → maciez (bitola, lente e MTF da película) / nitidez → névoa → bloom → halação → vazamento de luz
+      → respiração por camada
       → [laboratório: negativo (separação de cores, saturação do filme) → copiadora → cópia
          → rolagens, saturação final, densidade por cor, pele]
       → cor da película (ou LUT "no lugar do look") → cópia → envelhecimento → LUT "depois"
@@ -48,7 +49,7 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Bitola** | Nenhuma (manual), 8 mm, Super 8, 16 mm, Super 16, 35 mm, 65 mm, IMAX 70 mm (15/70) | 35 mm | Tamanho do quadro da película. Bitolas menores têm grão maior, menos nitidez e mais tremor. Multiplica grão, maciez, tremor, vinheta e halação e define a proporção usada por *Moldura → Da bitola escolhida* e o formato do *Scan → Da bitola escolhida*. |
+| **Bitola** | Nenhuma (manual), 8 mm, Super 8, 16 mm, Super 16, 35 mm, 65 mm, IMAX 70 mm (15/70); 1.6: Foto 35 mm (135), Foto meio quadro, Foto médio formato (120) | 35 mm | Tamanho do quadro da película. Bitolas menores têm grão maior, menos nitidez e mais tremor. Multiplica grão, maciez, tremor, vinheta e halação e define a proporção usada por *Moldura → Da bitola escolhida* e o formato do *Scan → Da bitola escolhida*. |
 | **Sensibilidade** | ISO 50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200 | ISO 250 | Filmes mais sensíveis têm grão maior e mais visível: tamanho × (ISO/250)^0,18 e força × (ISO/250)^0,35. Também escolhe o código do texto de borda automático no scan. |
 | **Cópia (print)** | Nenhuma (sem cópia), Kodak 2383 (cópia de cinema clássica), Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra) | Nenhuma | Filme usado para copiar o negativo para a projeção. Aplica uma segunda curva de contraste, saturação e cor por canal por cima do negativo. |
 | **Força da cópia** | 0–100% | 100% | Mistura entre o negativo e o resultado com a cópia. |
@@ -57,6 +58,7 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 | **Vinheta da bitola** | 0–100% | 100% | Escurecimento natural das bordas em bitolas pequenas. Vale mesmo com a seção *Lente* desligada. |
 | **MTF da película (maciez fina)** | Desligado, Close (rosto), Plano médio, Plano aberto, Textura 16 mm, Textura Super 8 | Desligado | A resposta de detalhe (MTF) de um filme: tira a nitidez "digital" demais (poros, serrilhado) e mantém o detalhe maior. Escolha pelo enquadramento — o close suaviza mais a pele, o plano aberto menos. É uma gaussiana fina somada em quadratura com o desfoque da bitola e a maciez da lente: σ em 1080p = 1,6 / 1,1 / 0,7 / 1,5 / 2,3 px × 2 × *Quantidade*. Chave `mtf`. |
 | **Quantidade do MTF** | 0–100% | 50% | 50% = o valor do enquadramento escolhido; 100% = o dobro. Chave `mtf_forca`. |
+| **Diferença de nitidez entre camadas** | 0–100% | 0% | Cada cor fica com a nitidez da sua camada na película. No negativo a camada do vermelho é a mais macia e a do azul a mais nítida; com uma cópia escolhida (a *Cópia de projeção* ou a do *Laboratório*), a cópia 2383 amacia o azul e o verde passa a ser o mais nítido. Dá franjas coloridas sutis nas bordas de alto contraste e quase nada nas áreas lisas. 50% = a diferença medida (veja *Modelos calibrados por datasheets*), convertida pelo tamanho do quadro da bitola: some no 35 mm e aparece mais no Super 8; 100% = o dobro. Soma-se em quadratura às outras maciezes. Chave `mtf_camadas`. |
 | **Força geral do efeito** | 0–100% | 100% | Mistura o resultado com o vídeo original (antes da moldura). |
 
 Valores por bitola (multiplicadores internos):
@@ -89,10 +91,12 @@ As três cópias, resumidas:
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Perfil do vídeo** | veja abaixo | Rec.709 / sRGB (vídeo comum) | Como o vídeo foi gravado. O app desfaz a curva e o gamut da câmera para trabalhar em luz linear. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR. Vídeo HDR é reconhecido sozinho ao abrir o arquivo (veja abaixo). **Trocar de preset não muda este ajuste.** |
-| **Log reescalado (HDMI "Limited")** (avançado) | liga/desliga | desligado | Só S-Log3, V-Log e N-Log. Ligue em gravações externas em que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em *Limited*, comum na Nikon); o app deixa de voltar ao código da câmera. Presets não mudam. Chave `log_reescalado`. |
+| **Log reescalado (HDMI "Limited")** (avançado) | liga/desliga | desligado | Só S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log. Ligue em gravações externas em que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em *Limited*, comum na Nikon); o app deixa de voltar ao código da câmera. Presets não mudam. Chave `log_reescalado`. |
+| **EI do ARRI LogC3** (avançado, 1.6) | EI 160 a EI 1600 | EI 800 | Só ARRI LogC3. A ALEXA grava uma curva para cada EI (está nos metadados do clipe): o cinza fica no mesmo lugar e muda a compressão das luzes e das sombras. Presets não mudam. Chave `logc3_ei`. |
 | **Exposição** | −3 a +3 EV | 0 EV | Mais ou menos luz, antes de qualquer curva (como abrir ou fechar o diafragma). |
 | **Temperatura** | −100 a +100 | 0 | Negativo esfria, positivo esquenta. Em +100: vermelho +0,28 EV e azul −0,38 EV. |
 | **Tonalidade** | −100 a +100 | 0 | Negativo puxa para verde, positivo para magenta. Em +100: verde −0,22 EV, vermelho e azul +0,08 EV. |
+| **Proteger cores saturadas** (1.6) | 0 a 100% | 0% | Traz com suavidade para dentro do Rec.709 as cores que a câmera grava além dele (LED, neon, céu muito saturado), logo depois da conversão do gamut e antes do look e do negativo. Sem isso, uma dessas cores chega com um canal "negativo", que vira zero: o tom muda de repente e o negativo do Laboratório vê um canal sem exposição. Com 100%, a cor mais saturada que o gamut da câmera guarda cai na borda do Rec.709; as cores comuns (até ~80% do caminho até a borda) não mudam. Abaixo de 100% é uma mistura: as cores mais extremas ainda podem passar da borda. É a compressão da *ACES Reference Gamut Compression*, no espaço do app. Presets não mudam. Chave `proteger_cores`. |
 
 Perfis disponíveis:
 
@@ -102,7 +106,7 @@ Perfis disponíveis:
 | Linear | nenhuma | Rec.709 | EXR e arquivos já lineares. |
 | Nikon N-Log | N-Log | Rec.2020 | Nikon Z gravando em N-Log. |
 | Sony S-Log3 (S-Gamut3.Cine) | S-Log3 | S-Gamut3.Cine | Sony em S-Log3 / S-Gamut3.Cine. |
-| ARRI LogC3 (EI 800) | LogC3 EI 800 | ARRI Wide Gamut 3 | ARRI Alexa (LogC3). |
+| ARRI LogC3 (ARRI Wide Gamut 3) | LogC3 do EI escolhido em *EI do ARRI LogC3* (padrão 800) | ARRI Wide Gamut 3 | ARRI Alexa (LogC3). |
 | Panasonic V-Log | V-Log | V-Gamut | Panasonic Lumix/Varicam em V-Log. |
 | RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE | Log3G10 | REDWideGamutRGB | RED R3D e Nikon N-RAW convertidos no DaVinci Resolve. |
 | DaVinci Intermediate (DaVinci Wide Gamut) | DaVinci Intermediate | DaVinci Wide Gamut | Arquivos exportados do Resolve em DWG/Intermediate. |
@@ -112,6 +116,17 @@ Perfis disponíveis:
 | Apple Log (Rec.2020) — iPhone | Apple Log | Rec.2020 | iPhone 15 Pro e mais novos gravando em Apple Log. |
 | HLG (HDR de celular, Rec.2100) | HLG (ITU-R BT.2100) | Rec.2020 | Vídeo HDR de celular (iPhone, Android) e de câmeras em HLG. |
 | PQ / HDR10 (Rec.2100) | PQ (SMPTE ST 2084) | Rec.2020 | Vídeo HDR10 / PQ (algumas câmeras e celulares, masters HDR). |
+| Canon Log 2 (Cinema Gamut) | Canon Log 2 | Cinema Gamut | Câmeras Canon em Canon Log 2 com Cinema Gamut. |
+| Canon Log 3 (Cinema Gamut) | Canon Log 3 | Cinema Gamut | Canon em Canon Log 3 com Cinema Gamut. |
+| Fujifilm F-Log (F-Gamut) | F-Log | Rec.2020 (F-Gamut) | Fujifilm X e GFX em F-Log. |
+| Fujifilm F-Log2 (F-Gamut) | F-Log2 | Rec.2020 (F-Gamut) | Fujifilm em F-Log2. |
+| Fujifilm F-Log2 C (F-Gamut C) | F-Log2 | F-Gamut C | Fujifilm em F-Log2 C (a curva do F-Log2 com o gamut mais largo). |
+| DJI D-Log (D-Gamut) | D-Log | D-Gamut | Câmeras e drones DJI em D-Log (o D-Log M dos drones menores é outra curva). |
+| Sony S-Log2 (S-Gamut) | S-Log2 | S-Gamut | Sony mais antigas em S-Log2. |
+| Leica L-Log (Rec.2020) | L-Log | Rec.2020 | Leica SL2, SL2-S, SL3, SL3-S e Q3 em L-Log (a SL tipo 601 grava em Rec.709: o gamut fica um pouco mais saturado). |
+
+Os perfis da 1.6 seguem as fórmulas publicadas pelos fabricantes (Canon, Fujifilm, DJI, Sony, Leica e ARRI);
+o *Apple Log 2* ficou de fora porque a Apple não publicou a curva nem o gamut.
 
 **Vídeo HDR (HLG e PQ).** O app leva o HDR para a luz da cena e deixa o cinza médio no mesmo lugar dos
 outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
@@ -129,14 +144,32 @@ outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
   HDR, volta para Rec.709. Um perfil log escolhido à mão nunca muda, e reabrir um projeto salvo não muda nada.
   A troca entra no desfazer (Ctrl+Z).
 
+**Sugestão pelos metadados (1.6).** Ao abrir um arquivo (ou pôr o primeiro clipe numa montagem vazia), se os
+metadados indicam outro perfil, uma faixa abaixo da barra do topo diz qual ("Pelos metadados, este arquivo
+parece gravado em…") com o botão **Usar este perfil**; o *Perfil do vídeo* só muda com o clique (e entra no
+desfazer). Fechar a faixa mantém o perfil; reabrir um projeto salvo nunca mostra a sugestão. O que é reconhecido:
+
+- HDR marcado (HLG e PQ), também quando o perfil está num log escolhido à mão;
+- EXR (e a transferência `linear`) → *Linear*;
+- o nome da curva numa etiqueta de gamma/curva do arquivo (como as que câmeras ARRI em ProRes e gravadores
+  externos podem gravar) e o XML que as câmeras da **Sony** gravam ao lado do vídeo (`C0001M01.XML`,
+  *CaptureGammaEquation*: S-Log3, S-Log2, HLG);
+- iPhone em **Apple Log**: marca Apple com primárias BT.2020 e sem transferência HDR (uma dedução: a Apple não
+  marca a curva no arquivo).
+
+Nunca sugere Rec.709 por uma etiqueta BT.709 (muitas câmeras marcam o log assim). Sony em MP4 sem o XML,
+Panasonic, Canon, Fujifilm, Nikon e DJI não gravam a curva onde o ffprobe a mostra: escolha o perfil à mão.
+No modo Edição, a sugestão preenche o cartão **Câmera** dos clipes novos (veja o guia da Edição).
+
 **Faixa do vídeo e curvas em código de 10 bits.** Vídeo comum (YUV) usa a *faixa legal*: o preto é o código
 64 e o branco o 940 (em 10 bits). O app expande essa faixa ao decodificar (64 → 0, 940 → 1), como o DaVinci
 Resolve faz com um clipe em *Video levels*. A maioria das curvas é definida sobre esse sinal (LogC3, LogC4,
-Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709). Já a **Sony (S-Log3), a
-Panasonic (V-Log) e a Nikon (N-Log)** escrevem a curva no **código de 10 bits** e gravam esse código como está:
-o cinza 18% do S-Log3 é o código 420 (41% IRE) e o branco 90% é o 598 (61%). Nesses três perfis o app volta ao
-código da câmera antes da curva, CV = (v·876 + 64)/1023, sempre que o arquivo veio em faixa legal; imagens e
-vídeo de faixa cheia já trazem o código. Na montagem do modo Edição vale a faixa da maioria dos clipes de
+Blackmagic Gen 5, DaVinci Intermediate, Log3G10, Cineon, Apple Log, HLG, PQ, Rec.709, Canon Log 2 e 3, S-Log2 e
+L-Log). Já a **Sony (S-Log3), a Panasonic (V-Log), a Nikon (N-Log), a Fujifilm (F-Log, F-Log2) e a DJI (D-Log)**
+escrevem a curva no **código de 10 bits** e gravam esse código como está: o cinza 18% do S-Log3 é o código 420
+(41% IRE) e o branco 90% é o 598 (61%). Nesses perfis o app volta ao código da câmera antes da curva,
+CV = (v·876 + 64)/1023, sempre que o arquivo veio em faixa legal; imagens e vídeo de faixa cheia já trazem o
+código (o L-Log da Leica em h.264/h.265 é gravado assim, em faixa cheia). Na montagem do modo Edição vale a faixa da maioria dos clipes de
 vídeo. Exceção: gravações externas em que a câmera reescalou o log para a faixa legal (saída HDMI em
 *Limited*, comum na Nikon) — ligue **Log reescalado**.
 
@@ -162,24 +195,36 @@ cena → cada camada do negativo vê uma faixa de cor (sensibilidade)
 ```
 
 O cinza médio é **calibrado** para sair neutro (0,45) em qualquer combinação, como o "25-25-25"
-de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois.
+de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe são somadas depois. O modelo foi
+conferido pelo método LAD da Kodak (*Laboratory Aim Density*): o cinza de 16% sai na cópia com densidade visual
+perto de 1,0, como o alvo dos laboratórios, e cerca de 7 pontos de copiadora compensam 1 stop de exposição da
+câmera.
 Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
-comportamento de cada um, sem dados nem curvas dos fabricantes.
+comportamento de cada um: as curvas dos negativos e das cópias não vêm de dados dos fabricantes (só o
+*Grão no negativo* usa a granularidade publicada, veja *Modelos calibrados por datasheets*). A exceção são os
+filmes marcados **(datasheet)**: as curvas deles foram ajustadas às curvas publicadas pela Kodak (veja *Modelos
+calibrados por datasheets*). Eles foram feitos para andar juntos: um negativo (datasheet) com a cópia 2383
+(datasheet) dá a escala de cinza quase neutra; misturados com os filmes feitos à mão, as sombras e as altas luzes
+ganham cor (o vermelho do negativo medido tem menos contraste que o verde e o azul, e a cópia medida compensa).
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
+| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B), Kodak Vision3 250D (datasheet), Kodak Vision3 500T (datasheet), Kodak Vision3 200T (datasheet) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
 | **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
-| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
-| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
-| **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
+| **Grão no negativo** | liga/desliga | desligado | Põe o grão da seção *Grão* (que precisa estar ligada) **dentro do negativo**: cada camada recebe o grão na sua densidade, antes da cópia, como na película de verdade. Quem molda o grão visível passa a ser a curva da cópia: ele some nos pretos profundos e nas altas luzes estouradas e aparece nos tons médios; o azul tem mais grão que o verde e o vermelho (a granularidade das camadas, veja *Modelos calibrados por datasheets*). *Intensidade*, *Tamanho*, *Aspereza*, *Grão colorido*, *Muda a cada quadro*, a bitola, o ISO e a revelação valem como sempre; a resposta por tom (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) deixa de valer. Não entra no LUT exportado. |
+| **Modelo do grão no negativo** (Beta) | Ruído (campo procedural), Físico (grãos de prata) | Ruído | Só com o *Grão no negativo* ligado, e só aparece com o recurso *Grão físico* ligado em *Configurações › Recursos* (com *Mostrar recursos em teste*). *Físico* troca o campo de ruído por grãos de verdade: discos opacos espalhados ao acaso em cada camada, mais numerosos onde a camada é mais densa (a fração coberta dá a densidade). Um processo só, com os mesmos ajustes na imagem inteira: o aspecto (grãos soltos onde há pouca densidade, buracos soltos onde há muita, mais grão nos tons médios) sai da própria conta. O tamanho visível é o do *Ruído*; *Intensidade*, *Tamanho*, *Grão colorido* (quanto cada camada tem grãos próprios), *Muda a cada quadro*, a bitola, o ISO e a revelação valem; a *Aspereza* não. É mais pesado (uns 13 ms por quadro em 1080p numa RTX 3060, contra ~2 ms). Não entra no LUT exportado. Chave `lab_grao_modelo`. |
+| Tamanho do cristal (**avançado**, Beta) | 0,5–2,0 × | 1,00 × | Só com o modelo *Físico*. Grãos maiores e mais raros (acima de 1) ou menores e mais numerosos (abaixo), com a **mesma granularidade** medida do datasheet: muda a textura, não a quantidade de grão (o *Tamanho* da seção *Grão* muda as duas). Chave `lab_grao_cristal`. |
+| Variação do tamanho (**avançado**, Beta) | 0–100% | 0% | Só com o modelo *Físico*. Cada grão ganha o seu tamanho (distribuição log-normal, como os cristais de uma emulsão real): grãos pequenos e grandes misturados, o aspecto fica mais irregular. A densidade média e a granularidade medida continuam as do datasheet. Mais pesado: uns 22 ms por quadro em 1080p com 50% e 27 ms com 100% (RTX 3060), contra ~15 ms. Chave `lab_grao_variacao`. |
+| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido), Kodak 2383 (datasheet) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
+| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass), Reversível (slide, sem cópia), Revelação cruzada: slide no C-41, Revelação cruzada: negativo no E-6 | Normal | Veja abaixo. Nos dois Technicolor, no reversível e nas revelações cruzadas a cópia escolhida não é usada (eles têm a própria). |
+| **Força do processo** | 0–100% | 100% | Technicolor, reversível e revelações cruzadas: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
 | **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
-| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (12 pontos = 0,3 log E ≈ 1 stop). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). |
+| **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (1 ponto = 0,025 log E; 12 pontos = 0,3 log E = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera, como no LAD da Kodak). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). Os pontos são relativos ao cinza calibrado, o "25-25-25" do laboratório. |
 | **Luz verde da copiadora** | −12 a +12 pt | 0 | Mais verde deixa a cópia mais magenta. |
 | **Luz azul da copiadora** | −12 a +12 pt | 0 | Mais azul deixa a cópia mais amarela (quente). |
-| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
+| **Densidade da cópia** | −12 a +12 pt | 0 | As três luzes juntas: mais pontos = cópia mais escura (perto do cinza, cerca de 0,06 de densidade por ponto). Para compensar 1 stop de exposição da câmera, uns 7 pontos. Sem cópia, desloca a inversão do scan (12 pontos ≈ 1 stop). |
 | **Separação de cores (Hue Split)** | 0–100% | 0% | Afasta as cores em volta de um eixo, como a separação das câmeras de três tiras: na densidade do negativo, o eixo laranja ↔ azul-esverdeado é esticado (× 1 + 0,60 × quantidade) e o perpendicular, verde ↔ magenta, comprimido (× 1 − 0,45 × quantidade). Pele mais quente, céu e sombras mais frios, verdes puxados para o amarelo ou o ciano. O cinza e a média das camadas não mudam e, por ser em densidade (log), o efeito é o mesmo em qualquer exposição. |
 | Eixo da separação (**avançado**) | 0–360° | 35° | Matiz do polo quente do eixo (35° = laranja, o par *teal & orange*; 215° inverte os polos). |
 | **Saturação do filme** | 0,00–2,00× | 1,00× | Saturação dentro do negativo, na densidade (a mistura s·I + (1 − s)/3 da matriz de camadas): muda a cor como o próprio filme, antes da cópia. O cinza não muda. |
@@ -195,6 +240,11 @@ comportamento de cada um, sem dados nem curvas dos fabricantes.
 | Curva neutra do negativo (**avançado**) | 0–100% | 0% | Aproxima o gama, o pé e o ombro das três camadas do negativo da média delas: tira a virada de cor entre sombras e luzes do filme. |
 | Curva neutra da cópia (**avançado**) | 0–100% | 0% | O mesmo para o gama e a densidade máxima das camadas da cópia. |
 | Mistura entre camadas (**avançado**) | 0,00–2,00× | 1,00× | Multiplica as absorções indesejadas dos corantes da cópia: acima de 1 a cor fica mais suja e densa; abaixo, mais pura. |
+| **Tipo de scanner** | RGB estreito (cada camada sozinha), Luz branca (camadas misturadas) | RGB estreito | Só com a cópia *Sem cópia*. O RGB estreito (o de sempre) lê cada camada do negativo sozinha, como um scanner de cinema com LEDs vermelho, verde e azul estreitos. A luz branca é a de uma câmera fotografando o negativo numa mesa de luz: cada canal vê um pouco das outras camadas (no vermelho, 29% da camada magenta), então as cores saem **menos saturadas**; o cinza e a escala de cinza continuam iguais (a inversão usa o contraste de cada canal no cinza). A mistura vem das curvas de densidade espectral do Vision3 250D (veja *Modelos calibrados por datasheets*). |
+| **Película vencida** | 0–30 anos | 0 | Anos guardada fora da geladeira (regra prática dos laboratórios, não uma medida): por década, ~1/2 stop a menos de sensibilidade, 10% a menos de contraste e um **véu** de 2% da exposição do cinza. A camada do azul (a mais rápida, a de grão maior) envelhece mais: o véu levanta os pretos, que ficam lavados e **azulados**, e as altas luzes ficam **amareladas**; o cinza médio continua calibrado. A densidade mínima do negativo só sobe com os anos. Num preto e branco o véu é cinza. Vale também para o filme dos processos reversível e cruzados. |
+| **Pré-exposição (flashing)** | liga/desliga | desligada | Uma luz uniforme no negativo antes da cena (como o *flashing* de laboratório): levanta e suaviza as sombras e quase não mexe nas altas luzes (com 4 stops ou mais, as altas luzes mudam menos de 0,012); o cinza continua calibrado. |
+| Pré-exposição abaixo do cinza | 1–8 stops | 4 stops | Quanto abaixo do cinza médio fica a luz da pré-exposição: 4 stops = 1/16 da exposição do cinza. Menos stops, mais efeito. |
+| Cor da pré-exposição | Neutra, Âmbar (quente), Azul (fria), Verde, Magenta | Neutra | Cor da luz da pré-exposição (mesmo brilho em todas): tinge as sombras. |
 
 **Processos.**
 
@@ -211,6 +261,16 @@ comportamento de cada um, sem dados nem curvas dos fabricantes.
   da cópia e soma uma imagem preto e branca aos corantes: menos cor, mais contraste, pretos
   profundos. Os controles *Bleach bypass no negativo* e *na cópia* fazem o mesmo em qualquer
   processo e em quantidade ajustável.
+- **Reversível** (slide, Ektachrome em E-6): o próprio filme da câmera vira o positivo, sem
+  negativo nem cópia. Mais contraste que o caminho negativo + cópia (cerca de 1,5 vez no cinza),
+  pretos mais densos, pouca latitude (as altas luzes estouram uns 6 stops acima do cinza) e cores
+  puras. *Revelação* forçada aumenta ainda mais o contraste, como no slide forçado.
+- **Revelação cruzada: slide no C-41** (o *cross processing* dos anos 90): o filme de slide revelado
+  como negativo e copiado: contraste muito alto, cor saturada, **sombras azuladas e altas luzes
+  amareladas** (as camadas ficam com contrastes diferentes).
+- **Revelação cruzada: negativo no E-6**: o negativo revelado como slide: positivo de **pouco
+  contraste**, preto lavado (densidade máxima baixa), **altas luzes quentes** (a máscara laranja que
+  sobra) e **sombras azuladas**.
 
 **Calibração.** Tudo o que muda as curvas (negativo, revelação, separação, saturação do filme,
 bleach bypass, curvas neutras, pé, diafonia, chave) entra na calibração do cinza: o cinza médio
@@ -292,7 +352,7 @@ Laranja 0,55/0,38/0,07 · Amarelo 0,40/0,52/0,08 · Verde 0,18/0,72/0,10 · Azul
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
 | **Arquivo .cube** | lista + *Procurar arquivo .cube…* | (nenhum) | LUTs encontrados no computador (Premiere Pro, DaVinci Resolve e *Meus LUTs*) ou qualquer arquivo. **Instalar LUTs…** copia `.cube` para a pasta do app; **Pasta** abre essa pasta. Escolher um LUT liga a seção e adivinha a entrada. |
-| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear, HLG (Rec.2100), PQ / HDR10 (Rec.2100) | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. Em S-Log3, V-Log e N-Log o LUT recebe o **código de 10 bits** da câmera (a convenção dos LUTs dos fabricantes, "Full range"), qualquer que seja a faixa do arquivo. |
+| **O LUT espera** | Rec.709 (LUTs criativos, Premiere), Cineon log (LUTs de cópia do Resolve), ARRI LogC3, Sony S-Log3, Nikon N-Log, Panasonic V-Log, RED Log3G10 (RWG), DaVinci Intermediate (DWG), Blackmagic Film Gen 5, ARRI LogC4, Apple Log, Linear, HLG (Rec.2100), PQ / HDR10 (Rec.2100), Canon Log 2, Canon Log 3, Fujifilm F-Log, Fujifilm F-Log2, Fujifilm F-Log2 C, DJI D-Log, Sony S-Log2, Leica L-Log | Rec.709 | Em que espaço o LUT foi feito. O app converte a imagem para esse espaço (curva e gamut) antes de consultar o LUT. LUTs de cópia do Resolve (Kodak 2383 etc.) esperam Cineon; os do Premiere esperam Rec.709. Em S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log o LUT recebe o **código de 10 bits** da câmera (a convenção dos LUTs dos fabricantes, "Full range"), qualquer que seja a faixa do arquivo. O ARRI LogC3 do LUT é sempre o do EI 800. |
 | **Aplicar** | Depois do look de película, No lugar do look | Depois | *Depois*: o LUT entra sobre o resultado da cor da película e da cópia. *No lugar*: só o LUT (a cor da película e a cópia são ignoradas; o envelhecimento continua valendo se a *Cor da película* estiver ligada). |
 | **Intensidade do LUT** | 0–100% | 100% | Mistura com a imagem sem o LUT. |
 
@@ -316,10 +376,16 @@ interpolação é trilinear na GPU.
 | **Nas altas luzes** | 0,00–2,00 | 0,45 | Quanto grão aparece nas altas luzes. |
 | **Grão muda a cada quadro** | liga/desliga | ligado | Desligado, o padrão do grão fica parado (útil para fotos ou efeitos especiais). |
 | Semente (**avançado**) | 0–9999 | 7 | Muda o padrão aleatório do grão. |
+| **Maciez pelo grão** | 0–100% | 0% | Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma imagem mais nítida que ele (na película, a imagem nunca é mais nítida que o grão). 100% dá à imagem a maciez do grão: cresce com o *Tamanho*, a bitola e o ISO. Soma-se às outras maciezes (bitola, lente, MTF) e só vale com o grão ligado. |
+| **Respiração por camada** | 0–100% | 0% | A cor e o brilho de cada quadro variam um pouco, cada camada por si (vermelho, verde e azul), como na película: a espessura da emulsão ao longo da fita, a revelação e a luz da copiadora nunca são iguais de um quadro para outro. Uma parte muda de quadro em quadro e outra devagar ao longo da fita (uns 24 quadros), sempre igual para o mesmo quadro e a mesma *Semente*. Entra como exposição **antes da cor**, então a cópia (ou o Laboratório) a esconde nos pretos e nas altas luzes estouradas. 100% ≈ um ponto de copiadora de desvio (0,015 de densidade do negativo), o de uma cópia revelada sem muito cuidado; vale com a seção *Grão* ligada, mesmo com a *Intensidade* em 0. Não entra no LUT exportado. Chave `grao_respiracao`. |
+| **Estrutura pela densidade** | 0–100% | 0% | O grão muda de forma com a densidade, como na película: onde o negativo tem pouca densidade (as sombras da cena) ele é feito de **grãos soltos**, um pouco maiores; nos tons médios é equilibrado; onde o negativo é denso (as altas luzes) vira **buracos soltos** num fundo de grão. A força também segue a granularidade publicada de cada camada (pico suave nas exposições baixas e médias, o azul com mais grão; veja *Modelos calibrados por datasheets*). As três formas se misturam suavemente pela densidade de cada ponto, sem emendas num degradê. Com o *Grão no negativo* do Laboratório, vale a densidade de cada camada do negativo; com o modelo *Físico*, não muda nada (ele já tem essa estrutura). *Nas sombras*, *Nos tons médios* e *Nas altas luzes* continuam valendo por cima (quanto a cópia mostra o grão). 0% é o grão de sempre. Não entra no LUT exportado. Chave `grao_estrutura`. |
+| Aglomeração nas altas densidades (**avançado**) | 0–100% | 0% | Com a *Estrutura pela densidade* ligada, junta o grão das partes densas em aglomerados maiores (até ~2,3×), como nos filmes muito revelados. Chave `grao_aglomeracao`. |
 
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
-bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é aplicado depois da curva de
-cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho). Em prévias reduzidas, grãos
+bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é **procedural**: nasce dos ajustes
+e de constantes publicadas, nunca de uma análise da sua imagem ou de um scan. Ele é aplicado depois da curva de
+cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho); com o **Grão no negativo** do
+Laboratório ligado, ele vai para a densidade das camadas do negativo e quem dá a resposta por tom é a cópia. Em prévias reduzidas, grãos
 menores que 1 pixel são levemente compensados; para ver o grão fiel, use a prévia *Máxima* com
 zoom 100%.
 
@@ -338,9 +404,25 @@ camada vermelha: daí o halo alaranjado em volta de lâmpadas e reflexos.
 | **Raio** | 1–100 px | 14 px | Medido num quadro de 1080 linhas (e multiplicado pela bitola: 1,6× em 8 mm, 0,75× em IMAX). |
 | **Limiar** | 0–6 EV | 2,50 EV | A partir de quantos stops acima do cinza médio brilha (com transição suave). |
 | **Cor** | cor | `#FF450D` (vermelho-alaranjado) | Cor do halo. Os presets de P&B usam branco. |
+| **Modelo** | Brilho (acima do limiar), Física (reflexo na base) | Brilho | Veja abaixo. Chave `hal_modelo`. |
 
-O halo é calculado só pela luminância das luzes e tingido pela cor escolhida. Com o *Scan da
-película* ligado, só a área da imagem emite halação (os furos iluminados não).
+No modelo **Brilho** (o de sempre), o halo é calculado só pela luminância das luzes acima do *Limiar*,
+tingido pela cor escolhida e somado por cima da imagem. Com o *Scan da película* ligado, só a área da
+imagem emite halação (os furos iluminados não).
+
+No modelo **Física**, o halo é a própria luz que volta da base do filme: nasce da exposição do vermelho
+(a camada mais perto da base) em toda a imagem, na proporção da luz, e entra na exposição **antes da
+cópia** (e do Laboratório, se ligado), como uma segunda exposição da camada. O *Limiar* não vale. Só o
+desvio local do reflexo entra: a parte que uma área lisa receberia já está nas curvas medidas do filme,
+então céus, paredes e rostos sem luz forte por perto ficam iguais (em qualquer cor), e o anel em volta
+de uma lâmpada sai da própria lâmpada. A *Cor* diz quanto do reflexo chega a cada camada (no padrão,
+quase só no vermelho e um pouco no verde). O *Raio* vale para o 35 mm e cresce na proporção do quadro
+das bitolas menores (o anel tem o mesmo tamanho na película, uns 0,2 mm): 2,4× no 16 mm, 4,3× no
+Super 8, 0,47× no 65 mm. Com a *Intensidade* padrão, uns 11% do vermelho voltam, o que é o caso de uma
+película sem camada anti-halo; o halo em volta de uma luz estourada fica com a força do modelo Brilho.
+Esse número não vem de datasheet: a camada anti-halo (o *remjet* da Vision3) tira quase todo o reflexo,
+e o quanto sobra muda de filme para filme. A luz de um ponto estourado no arquivo é contida suavemente
+(o valor dela é um palpite da entrada).
 
 ---
 
@@ -460,7 +542,7 @@ milímetros (furos, linhas entre quadros, borda com texto) e coloca o vídeo den
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Película** | Da bitola escolhida, 35 mm (4 furos por quadro), 16 mm (1 furo), Super 16, Super 8 | Da bitola escolhida | Medidas reais de cada película: furos, linhas entre quadros e bordas. *Da bitola*: 8 mm e Super 8 → Super 8; 16 mm → 16 mm; Super 16 → Super 16; 35 mm, 65 mm, IMAX e Nenhuma → 35 mm. |
+| **Película** | Da bitola escolhida, 35 mm (4 furos por quadro), 16 mm (1 furo), Super 16, Super 8; 1.6: Foto 35 mm (135, 8 furos), Foto meio quadro (4 furos), Foto 120 6 × 6 e 6 × 4,5 (sem furos) | Da bitola escolhida | Medidas reais de cada película: furos, linhas entre quadros e bordas. *Da bitola*: 8 mm e Super 8 → Super 8; 16 mm → 16 mm; Super 16 → Super 16; 35 mm, 65 mm, IMAX e Nenhuma → 35 mm; 135 → 135; meio quadro → meio quadro; 120 → 120 6 × 6. |
 | **Tipo de scan** | Cópia projetada (furos claros), Negativo invertido (furos escuros) | Cópia projetada | Numa cópia escaneada com luz por trás, os furos aparecem brancos; num negativo invertido, escuros. |
 | **Enquadramento** | Mostrar o vídeo inteiro (barras no quadro), Preencher o quadro (corta as bordas) | Mostrar o vídeo inteiro | Como o vídeo cabe no quadro da película quando as proporções são diferentes. |
 | **Aproximação** | 1,00–1,60× | 1,00× | Aproxima do quadro e esconde parte das bordas (centraliza no quadro conforme aproxima). |
@@ -484,15 +566,302 @@ tremor do projetor move a tira inteira.
 
 ---
 
+## Modelos calibrados por datasheets
+
+Alguns modelos de grão, textura e laboratório da 1.6 usam números lidos de datasheets **públicos** da Kodak. Os pontos
+lidos ficam em `pelicula/data/datasheets/` com a fonte (publicação, revisão, página, figura e o SHA-256 do PDF
+lido); os gráficos e os PDFs não estão no app. A Kodak avisa que esses dados são representativos e não
+especificações, e o resultado continua sendo uma **aproximação**: o app não é um produto oficial e as marcas
+são dos donos.
+
+| Modelo | Ajuste | O que foi medido | Fonte |
+|---|---|---|---|
+| Nitidez por camada do negativo | **Diferença de nitidez entre camadas** | Curvas de MTF de cada camada: o vermelho cai mais cedo que o verde, e o verde mais cedo que o azul | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Modulation-Transfer Function Curves* |
+| Nitidez por camada da cópia | **Diferença de nitidez entre camadas** (com cópia) | Curvas de MTF da cópia: o azul é a camada mais macia, o verde a mais nítida | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC |
+| Grão de cada camada do negativo | **Grão no negativo** | Granularidade rms difusa (sigma D, abertura de 48 µm) de cada camada: azul 0,0126, verde 0,0071, vermelho 0,0061 (média pela exposição) | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Diffuse rms Granularity Curves* |
+| Negativos (datasheet) | **Laboratório › Negativo**: Vision3 250D, 500T e 200T (datasheet) | Curva característica de cada camada (Status M, −7,25 a +7,75 stops): gama, pé, ombro e largura | KODAK VISION3 250D 5207/7207 (H-1-5207), 500T 5219/7219 (H-1-5219) e 200T 5213/7213 (H-1-5213), revisão 3-26, p. 3, *Sensitometric Curves* |
+| Cópia (datasheet) | **Laboratório › Cópia**: Kodak 2383 (datasheet) | Curva característica de cada camada (Status A): gama, densidade máxima e largura; diafonia dos corantes pelas curvas de densidade espectral | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F002_1254AC, e p. 5, figura F010_0294AC |
+
+Como a conta é feita: cada camada ganha uma gaussiana (somada em quadratura) que leva a resposta da camada mais
+nítida à dela nas frequências do meio, de 20 a 62 ciclos/mm (`tools/ajustar_grao.py`). Ficam 4,3 µm no
+vermelho e 2,2 µm no verde do negativo e 2,3 µm no vermelho e 4,5 µm no azul da cópia, convertidos em pixels
+pelo tamanho do quadro da bitola (um quadro de 1080 linhas cobre a largura da imagem da bitola). A gaussiana
+fica a menos de 8% das razões publicadas no negativo e a menos de 18% na cópia; outros filmes usam os mesmos
+valores.
+
+No **Grão no negativo**, o sigma D de cada camada vale para o 35 mm com ISO 250 (o próprio 250D) e *Tamanho* 1:
+o app calcula quanto grão por pixel dá esse sigma D medido numa abertura de 48 µm (a média do grão nessa
+abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e a *Intensidade* multiplicam como no
+grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
+sua imagem. Com o modelo *Físico*, a mesma calibração: a fração de cada camada que os grãos cobrem é escolhida para
+que o sigma D na abertura de 48 µm, no cinza médio do 250D, seja o do datasheet (a conta é a exata do modelo de
+discos; medido no app a 2,5% do publicado). O *Tamanho do cristal* e a *Variação do tamanho* recalculam essa fração
+para o sigma D continuar o mesmo.
+
+Na **Estrutura pela densidade** (1.6), a força do grão por densidade vem da mesma figura do H-1-5207 (p. 3): as
+curvas de densidade e de granularidade de cada camada, lidas na mesma escala de log E (a leitura e os pontos que
+faltavam estão em `pelicula/data/datasheets/H-1-5207.json`, chave `granularidade`). A forma de cada camada da
+estrutura (grãos soltos, equilibrada, buracos soltos) vem da conta exata do modelo de discos (`tools/ajustar_grao.py`).
+O grão não usa placas gravadas nem scans: tudo continua procedural.
+
+No **Laboratório**, o que é calibrado nos filmes (datasheet) é exatamente isto (`tools/ajustar_lab.py`):
+
+- **negativo**: a curva de cada camada (gama, pé, ombro, uma largura comum), com o 0 stop do gráfico no cinza de
+  18%; o modelo passa a menos de 0,02 de densidade de todos os pontos lidos (rms 0,006). O vermelho tem gama 0,49
+  e o verde e o azul 0,53 a 0,55, como no gráfico. A **matriz de sensibilidade** (que faixa de cor cada camada
+  vê) e o **efeito entre camadas** continuam os do filme feito à mão: o datasheet não traz como medir isso sem
+  espectros de refletância de cenas;
+- **cópia 2383**: gama, densidade máxima e largura de cada camada, com o gráfico lido por bandas estreitas no
+  pico de cada corante (o Status A é um densitômetro de bandas estreitas); o modelo passa a menos de 0,09 dos
+  pontos (rms 0,02), errando mais no pé longo das altas luzes. A **diafonia** sai das curvas de densidade
+  espectral dos corantes vistas pelos canais da tela (observador CIE 1931 em Rec.709 sob luz branca de 5500 K):
+  o magenta absorve 31% no vermelho e o ciano 23% no verde, bem mais que na 2383 feita à mão;
+- a **posição** das curvas não importa (a calibração das luzes leva o cinza a 0,45 em qualquer combinação) e a
+  densidade mínima (base e máscara) fica fora, como em todo o Laboratório.
+
+A **respiração por camada** não é calibrada por datasheet: 100% é um ponto de copiadora de desvio, escolhido a olho.
+A **halação física** (*Halação › Modelo › Física*) não é calibrada por datasheet: o raio vem da geometria do
+reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (veja *Halação*).
+
+---
+
+## Cor por planos
+
+*Frente, fundo e pele com ajustes próprios.* Chave: liga a seção. **Recurso em teste (Beta)**: aparece quando o
+módulo *Cor por planos* está ligado em Configurações › Recursos (com *Mostrar recursos em teste*). Desligar o
+módulo só esconde o cartão: um projeto que usa a seção sai igual.
+
+O quadro é dividido em **frente** e **fundo** por um degradê, e a **pele** é achada pela cor. Cada parte tem os
+seus ajustes, aplicados na luz da cena logo depois da exposição e do balanço (antes da vinheta, do negativo e da
+cor da película): dá para escurecer e esfriar o fundo para destacar o assunto, tirar contraste e cor do que está
+longe (perspectiva aérea) ou cuidar só da pele.
+
+**Separação (degradê)** — distâncias em pixels de um quadro de 1080 linhas, a partir do centro:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Separação** | Degradê linear, Degradê radial | Linear | Linear: uma linha separa o fundo (do lado da *Direção*) da frente. Radial: a frente fica dentro do círculo e o fundo fora. |
+| **Direção** | −180° a 180° | 0° | Para que lado fica o fundo no degradê linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo. |
+| **Centro horizontal / vertical** | ±1920 / ±1080 px | 0 | Desloca a linha ou o círculo. |
+| **Raio** | 10–2000 px | 400 px | Tamanho do círculo do degradê radial. |
+| **Suavidade** | 0–2000 px | 300 px | Largura da passagem entre frente e fundo (0 = borda seca). |
+| **Trocar frente e fundo** | liga/desliga | desligado | Inverte os dois lados. |
+
+**Frente** e **Fundo** — os mesmos cinco ajustes em cada um:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Exposição** | ±3 EV | 0 | Mais ou menos luz só nesta parte. |
+| **Temperatura** / **Tonalidade** | ±100 | 0 | Balanço só nesta parte (a mesma mistura da *Entrada e exposição*). |
+| **Saturação** | ±100 % | 0 | −100 % deixa a parte em preto e branco. |
+| **Contraste** | ±100 % | 0 | Em torno do cinza médio, em stops (100 % = 1,5× a inclinação). |
+
+**Pele**:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Proteger a pele** | liga/desliga | ligado | Os ajustes da frente e do fundo não mexem na pele. |
+| **Matiz** | ±30° | 0 | Negativo puxa a pele para o vermelho; positivo para o amarelo. |
+| **Saturação** | ±100 % | 0 | Mais ou menos cor na pele. |
+| **Luz** | ±1,5 EV | 0 | Clareia ou escurece só a pele. |
+| **Uniformizar** | 0–100 % | 0 | Deixa a cor da pele mais uniforme (o matiz se aproxima da cor da pele e as manchas muito saturadas perdem cor). Só a cor: a claridade e a textura não mudam — não é um filtro de alisar. |
+| **Cor da pele** *(avançado)* | 0–360° | 64,5° | O matiz que a máscara procura. O **conta-gotas** do cartão acerta este valor clicando na pele da prévia. |
+| **Largura da cor da pele** *(avançado)* | 5–60° | 21° | Quanto o matiz pode se afastar da cor da pele. Estreite se madeira ou areia entrarem. |
+
+A máscara da pele olha a cor como ela aparece (matiz, saturação e claridade no espaço OkLab) e foi acertada
+para pegar todos os tons da escala Monk Skin Tone, do mais claro ao mais escuro, e deixar de fora laranja forte,
+madeiras avermelhadas, areia amarelada e cinzas. Uma máscara só de cor não separa a pele de uma madeira clara ou
+de uma areia da mesma cor: use o conta-gotas e a largura.
+
+- **Prontos**: *Destacar o assunto* (radial, fundo −0,5 EV, menos cor e mais frio), *Fundo frio, pele quente*,
+  *Perspectiva aérea* (fundo em cima com menos contraste e cor, um pouco mais claro e frio) e *Pele natural*
+  (uniformizar 50 %). Só preenchem os ajustes.
+- **Ver planos**: pinta por cima da prévia a frente em laranja, o fundo em azul e o contorno da pele. Só na
+  tela: nunca vai para a exportação nem para o "Salvar quadro".
+- Não entra no **LUT exportado** nem no **plugin do DaVinci** (depende do lugar e da cor de cada pixel).
+
+---
+
+## Zebra, falsa cor e referência (na prévia)
+
+Para acertar a exposição antes da película, a barra da prévia tem **Falsa cor** e **Zebra**, medidas em *stops*
+em relação ao cinza médio de 18% da **luz da cena** — o vídeo lido pelo *Perfil do vídeo*, com a exposição, o
+balanço, a lente e a vinheta (antes da Cor por planos, do negativo e da cor da película). Faixas da falsa cor:
+roxo < −6, azul −6 a −4,5, verde ±0,25 (cinza médio), rosa +0,75 a +1,25 (pele clara), amarelo +4,5 a +6 e
+vermelho > +6; o resto em cinza. A zebra marca o que passa de +2,5, +4,5 (padrão) ou +6 stops. A **Referência**
+fixa um quadro ou abre uma imagem para comparar em Dividido ou Lado a lado. Só na tela; detalhes em
+[EDICAO.md](EDICAO.md#zebra-falsa-cor-e-referência).
+
+---
+
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
 tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
 cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
-dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
-nitidez, lente, vinheta, projetor, defeitos, moldura e scan.
+dependem da posição do pixel, dos vizinhos ou do tempo): grão (também o grão no negativo), respiração por
+camada, halação, bloom, névoa, maciez,
+nitidez, lente, vinheta, projetor, defeitos, moldura, scan e cor por planos.
 
-A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o
-**código de 10 bits** da câmera, como nos LUTs oficiais da Sony, da Panasonic e da Nikon ("Full range"): no
+A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log, N-Log, F-Log, F-Log2 e
+D-Log ela é o **código de 10 bits** da câmera, como nos LUTs oficiais desses fabricantes ("Full range"): no
 DaVinci Resolve, ponha esses clipes em *Data Levels → Full* (Clip Attributes), como os fabricantes recomendam.
 Nos outros perfis a entrada é o próprio sinal (o clipe pode ficar em *Auto/Video*).
+
+---
+
+## Câmera, formato e montagem (1.6)
+
+Recursos novos da 1.6. Os de teste (Beta) começam desligados em *Configurações › Recursos*; todos começam com
+a chave desligada no look, e desligados a imagem é exatamente a de antes.
+
+### Obturador de película (Beta, recurso "Câmera de cinema")
+
+*O rastro de movimento de uma câmera de cinema, a partir de vídeo rápido.* Chave: liga o obturador.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Ângulo do obturador** | 45°, 90°, 144°, 172,8°, 180°, 270°, 360° | 180° | Quanto de cada quadro o obturador fica aberto: 180° = metade (1/48 s a 24 qps). Os quadros do vídeo dentro da janela aberta são misturados na luz, como a película recebia a luz. |
+
+Só funciona quando o vídeo tem **pelo menos o dobro** dos quadros por segundo da saída (50, 60 ou 120 qps
+exportados a 24, 25 ou 30). No modo Película vale na **exportação com outra taxa** (a *prévia da exportação*
+mostra; a prévia da janela fica na taxa do arquivo). No modo Edição vale em cada clipe rápido numa sequência mais
+lenta (e num clipe acelerado). Fica mais lento: lê e mistura 2 a 6 quadros por quadro (60 → 24 qps: 2,5×).
+
+### Lente anamórfica (Beta)
+
+*Desespremer, risco de luz, barril e bordas.* Chave: liga a lente.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. |
+| **Risco de luz** | 0–100% | 50% | A linha horizontal comprida das luzes fortes (só na horizontal). |
+| **Limiar do risco** | 0–5 stops | 2 | Quanto acima do cinza médio a luz precisa estar para riscar. |
+| **Comprimento do risco** | 40–1200 px | 420 | Em px de um quadro de 1080 linhas. |
+| **Cor do risco** | cor | azul | A cor do risco (o azul clássico das anamórficas). |
+| **Barril horizontal** | 0–100% | 30% | O centro estica um pouco na horizontal, mais na linha do meio. |
+| **Bordas macias** | 0–100% | 40% | As laterais ficam mais macias que o centro (até 6 px@1080). |
+
+### Data impressa (Beta)
+
+*A data laranja das câmeras dos anos 80 e 90.* Chave: liga a data.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Ano / Mês / Dia** | 1970–2099, 1–12, 1–31 | 1998, 10, 29 | A data mostrada (não usa o relógio do computador). |
+| **Formato** | '98 10 29, 10 29 '98, 29 10 '98, 1998 10 29 | '98 10 29 | A ordem dos números. |
+| **Canto** | embaixo/em cima, direita/esquerda | embaixo à direita | Onde a data fica. |
+| **Cor** | cor | laranja | A cor do mostrador. |
+| **Intensidade** | 0–100% | 60% | Quanto o mostrador expõe o negativo: forte, ele estoura e brilha em volta. |
+| **Tamanho** | 12–120 px | 34 | Altura dos números num quadro de 1080 linhas (a mesma em qualquer resolução). |
+| **Distância do canto** | 0–300 px | 60 | Avançado. |
+
+A data é **luz exposta no negativo**, como nas câmeras com data: passa pela halação (o brilho em volta), pela cor
+do negativo e da cópia, e o grão fica por cima dela.
+
+### A montagem na película (Beta)
+
+*Os cortes da montagem viram emendas, e os rolos de Super 8 acabam.* Chave: liga.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Emendas visíveis** | 0–100% | 70% | Em quantos cortes secos da faixa V1 a fita da emenda aparece no primeiro quadro do clipe novo. |
+| **Clarão no corte** | 0–100% | 40% | A luz que passa pela junta: o primeiro quadro depois do corte clareia (um pouco o segundo). |
+| **Pulo no corte** | 0–100% | 50% | A emenda pula na janela do projetor por um ou dois quadros. |
+| **Rolos de Super 8** | liga/desliga | desligado | Um rolo de 50 pés tem 3 600 quadros: 3 min 20 s a 18 qps, 2 min 30 s a 24. No fim de cada rolo a luz vela a película; o rolo seguinte começa velado e com um pulo. |
+| **Cadência do rolo** | 18, 24 qps | 18 | O comprimento de cada rolo. |
+| **Velamento no fim do rolo** | 0–100% | 70% | A força do velamento. |
+| **Cor do velamento** | cor | laranja | A cor da luz que vela. |
+
+As emendas precisam de uma montagem (modo Edição, ou a montagem como entrada do modo Película); só os cortes secos
+contam (um corte com transição não é emenda). Os rolos contam o tempo do vídeo e valem nos dois modos.
+
+### Máquina do tempo (painel de looks)
+
+O botão **Máquina do tempo…** (modo Película, abaixo da busca de looks) pede um **ano** (1920 a 2020) e **onde o
+filme passava** (cinema, televisão ou filme caseiro) e preenche, de uma vez, bitola, sensibilidade, preto e branco
+(com o filtro e a virada), cor, saturação, contraste, envelhecimento, cópia, grão, projetor, desgaste, moldura e
+halação como eram na época. A janela mostra o motivo histórico e a lista do que vai mudar antes de aplicar; depois,
+tudo continua editável e **Ctrl+Z** desfaz a máquina inteira de uma vez. A cadência de manivela da época (16 ou
+18 qps) aparece como sugestão para o modo Edição.
+
+### Formatos de foto
+
+Bitolas e formatos de scan novos: **Foto 35 mm (135, 36 × 24)**, **Foto meio quadro (18 × 24)** e **Foto médio
+formato (120)**; no *Scan da película*, 135 (8 furos), meio quadro (4 furos), 120 6 × 6 e 120 6 × 4,5 (sem furos).
+O 135, o meio quadro e o 6 × 6 aparecem com a tira deitada, como nos scans de foto. O grão segue o tamanho do
+quadro (maior quadro, grão menor: 120 < 135 < 35 mm de cinema < meio quadro).
+
+---
+
+## Luz por plano, fotômetro e presets novos (1.6)
+
+### Marcação de luz por plano (modo Edição)
+
+*O marcador de luz do laboratório acertava cada plano na copiadora.* No modo Edição, o inspetor de um clipe de vídeo
+tem o cartão **Luz da copiadora** (logo depois de *Câmera*): o mostrador clássico **25 · 25 · 25** (o TAPE padrão:
+as luzes no alvo, mais as do Laboratório do look e as deste clipe), botões −/+ de 1 ponto para vermelha, verde,
+azul e densidade (as três), **Zerar** e **Copiar luzes para os clipes selecionados**. Atalhos: **Alt+R / G /
+B / D** (+1 ponto) e com **Shift** (−1), nos clipes selecionados ou no plano da V1 sob o cursor.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Luz vermelha / verde / azul** | −24 a +24 pt | 0 | Somam às *Luzes da copiadora* do Laboratório nos quadros deste plano. Mais luz = cópia mais densa naquela cor (mais luz vermelha deixa a imagem menos vermelha). |
+| **Densidade (as três)** | −24 a +24 pt | 0 | Soma o mesmo nas três: mais = cópia mais escura. |
+
+1 ponto = 0,025 log E; **12 pontos = 1 stop da cópia**, cerca de 7 pontos = 1 stop da câmera. Precisa do
+**Laboratório** ligado no look (o cartão avisa quando está desligado). Vale o plano da faixa **V1**: clipes de
+V2 em diante não mudam a luz. Numa transição de dois clipes (dissolver, fusão, cortina…) a luz passa de um plano
+ao outro junto com a mistura; nas que passam pelo preto ou pelo branco ela troca no corte. No modo Película (o
+arquivo inteiro, sem montagem) não há planos: divida o clipe no modo Edição. Detalhes em
+[EDICAO.md](EDICAO.md#10-marcação-de-luz-por-plano-16).
+
+### Fotômetro da película (Beta, recurso "Fotômetro da película")
+
+*Onde cada parte da imagem cai na curva do negativo.* Ligue o recurso em *Configurações › Recursos*; o botão
+**Fotômetro** aparece na barra da prévia. Ligado, a prévia é pintada pela zona do negativo escolhido no
+Laboratório — com a revelação, a película vencida e a pré-exposição —, medida em stops da luz da cena em relação
+ao cinza de 18% (a mesma luz da falsa cor). Com um processo especial (*Reversível*, as *Revelações cruzadas*,
+*Technicolor*) com força de 50% ou mais, mede o filme do processo, que é quem decide a latitude: um slide
+reversível tem só uns −1 a +2 stops de trecho reto.
+
+| Cor | Zona | O que quer dizer |
+|---|---|---|
+| roxo | **Sem detalhe** | Abaixo do pé: o negativo quase não separa mais os tons (menos de 10% do contraste). |
+| azul | **Pé** | Sombras comprimidas, ainda com algum detalhe (10 a 50%). |
+| cinza (pela exposição) | **Trecho reto** | Detalhe completo; o cinza de 18% em verde. |
+| laranja | **Ombro** | Altas luzes comprimidas (50 a 10%). |
+| vermelho | **Estourado** | Além do ombro. |
+
+Ao lado do botão, o negativo e a **latitude** do trecho reto (a camada de cor mais estreita), por exemplo
+"Kodak Vision3 250D: −5,1 a +6,5 stops"; a dica mostra onde o detalhe acaba. A setinha do botão tem **Ler um
+ponto**: clique na imagem e a barra de status mostra os stops em relação ao cinza, a zona, quanto falta até o pé e
+o ombro e as camadas de cor que já estão noutra zona (uma luz vermelha forte chega ao ombro do vermelho antes).
+
+| Negativo e revelação | Trecho reto (stops) |
+|---|---|
+| Vision3 250D | −5,1 a +6,5 |
+| Vision3 500T | −5,5 a +6,1 |
+| Double-X (preto e branco) | −4,7 a +6,0 |
+| 250D forçado 1 stop / 2 stops | −4,9 / −4,6 a +6,5 (as sombras fecham) |
+| 250D puxado 1 stop | −5,4 a +6,5 |
+| 250D vencido há 20 anos | −3,3 a +7,1 (menos sensível e com véu) |
+| 250D com pré-exposição de 4 stops abaixo do cinza | −3,8 a +6,5 (sombras mais lisas; o detalhe fraco fica) |
+
+Sem o Laboratório ligado, o fotômetro usa o negativo padrão (Vision3 250D, revelação normal) e diz isso. Só na
+tela: nunca vai para a exportação, para um LUT nem para o plugin.
+
+### Presets novos (grupo Laboratório)
+
+Quatro presets usam os processos e os controles do Laboratório da 1.6 (cor pelo modelo de densidade; o *Cor da
+película* fica desligado):
+
+| Preset | O que liga | Resultado |
+|---|---|---|
+| **Slide reversível (laboratório)** | Processo *Reversível*, ISO 100 | Cromo projetado sem cópia: cor saturada, contraste alto, pouca latitude, altas luzes que estouram cedo. |
+| **Revelação cruzada: slide no C-41 (laboratório)** | Processo *Revelação cruzada: slide no C-41*, cópia 2383 | Contraste alto e cor virada entre sombras e altas luzes. |
+| **Película vencida (18 anos)** | Vision3 250D → 2383, *Película vencida* 18 anos, +0,5 EV, grão mais forte | Véu nas sombras, menos sensibilidade e contraste, azul mais fraco. |
+| **Pré-exposição (baixo contraste)** | Vision3 250D → 2383, *Pré-exposição* âmbar 3 stops abaixo do cinza, revelação puxada ½ stop, saturação 0,9 | Sombras abertas e lisas, contraste baixo, cor contida. |
+
+No plugin do DaVinci os quatro vêm no *Preset* do OpenFX e como nós DCTL; os dois últimos dependem da película
+vencida e da pré-exposição, que só o nó **Laboratorio** tem (o nó *Cor* desses presets sai sem elas).

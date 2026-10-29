@@ -235,7 +235,9 @@ no topo do painel.
 
 Um clique resolve o mais comum:
 
-- **Automático**: corrige exposição, contraste e balanço de branco olhando o quadro atual.
+- **Automático**: corrige exposição, níveis e balanço de branco olhando **o clipe inteiro** (9 quadros
+  espalhados por ele, sempre os mesmos). A setinha do botão tem **Só o quadro atual**, o jeito de antes. Os
+  clipes que já foram ajustados ficam como estão: só muda o que você clicar de novo.
 - **Mais vivo**, **Quente**, **Frio**, **Suave**, **Contraste**, **Preto e branco**, **Antigo**.
 - **Restaurar cor**: volta a cor e a luz ao original (o enquadramento e a velocidade ficam).
 - **Copiar ajustes / Colar / Aplicar a todos**: leva a cor e a luz de um clipe para outros — ótimo para
@@ -252,12 +254,50 @@ Um clique resolve o mais comum:
 | **Cor por faixa (HSL)** | Mude uma cor sem mexer nas outras: escolha a bolinha (vermelhos, laranjas, amarelos, verdes, cianos, azuis, roxos, magentas) e ajuste matiz, saturação e luminância. Bolinhas com um pontinho já têm ajuste |
 | **Detalhe** | Nitidez, clareza (contraste local: realça textura ou suaviza a pele), desfoque e redução de ruído |
 | **Efeitos** | Vinheta (escurece ou clareia as bordas) e desbotar (pretos lavados, como foto antiga) |
+| **Pele natural** *(cor simples)* | A pele não acompanha as mudanças de cor do clipe e fica com a cor mais uniforme (veja *Cor simples*, abaixo) |
+| **Cor escolhida** *(cor simples)* | Uma cor só (a que você clicou): matiz, saturação e luminância |
+| **Degradê** *(cor simples)* | Céu ou chão com luz e cor próprias |
 | **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
+| **Câmera** (1.6) | O **perfil do clipe**: como ele foi gravado (S-Log3, V-Log, Canon Log 3, HLG do celular, Rec.709…), para misturar câmeras diferentes numa montagem. O padrão, **Igual ao do look**, deixa o clipe como sempre. Avançado: *Log reescalado* e *EI do ARRI LogC3*, como no look (veja *Câmeras diferentes na mesma montagem*, abaixo) |
 
 > **Dissolver** mistura o começo deste clipe com o fim do clipe anterior da mesma faixa (encostado nele).
 > Para a mistura ficar bonita, o clipe anterior precisa ter um pouco de vídeo sobrando depois do corte.
+
+#### Cor simples
+
+Ferramentas de um clique sobre a cor do clipe (módulo **Cor simples**, ligado no perfil Criador; desligar só
+esconde a barra e os cartões). Tudo o que elas fazem vira ajuste comum do clipe: dá para mexer depois e desfazer
+com Ctrl+Z. A barra **Cor simples** fica embaixo dos ajustes rápidos:
+
+- **Neutro** (conta-gotas do balanço de branco): clique em algo que deveria ser branco ou cinza na prévia (uma parede, uma camiseta,
+  o céu nublado). A temperatura e a tonalidade do clipe ficam no ponto em que essa cor vira neutra. Esc cancela.
+- **Cor** (conta-gotas): clique numa cor da prévia — o carro vermelho, o céu, a grama. Ela vira a **Cor
+  escolhida** do clipe: no cartão *Cor escolhida*, mude o **Matiz** (gira para outra cor), a **Saturação** e a
+  **Luminância** só dela; a **Largura** diz quanto das cores vizinhas entra. O cartão HSL também abre na faixa
+  mais perto da cor clicada. Os cinzas nunca mudam.
+- **Igualar**: deixa a cor e a luz deste clipe parecidas com as de **outro clipe** (o quadro do meio dele, já
+  com os ajustes dele) ou de **uma imagem**. Mede a exposição, o balanço, a saturação e o contraste e escreve os
+  valores nos ajustes do clipe. Com **Proteger a pele** (ligado), os tons de pele ficam fora das contas — um rosto
+  não puxa o balanço — e a *Pele natural* do clipe vai a 50%.
+- **Grupo**: selecione dois ou mais clipes e use **Agrupar os selecionados**. Daí em diante, mexer na cor ou na
+  luz de um muda a dos outros do grupo (só os ajustes que você mexeu: o resto de cada clipe fica). O
+  enquadramento, a velocidade, as transições e as chaves de animação continuam de cada clipe. **Selecionar o
+  grupo** e **Tirar do grupo** estão no mesmo menu.
+
+Os cartões da cor simples:
+
+| Cartão | Ajuste | O que faz |
+|---|---|---|
+| **Pele natural** | Pele natural (0–100%) | Na pele (achada pela cor, do muito claro ao muito escuro), a cor volta à do arquivo, com a luz do clipe, e fica mais uniforme. Esfrie o clipe inteiro sem deixar o rosto azulado. Só a cor: a textura nunca é alisada |
+| | Cor da pele *(avançado)* | O matiz que a máscara da pele procura |
+| **Cor escolhida** | Cor, Largura | A cor que muda (matiz, 0–360°) e quanto as vizinhas entram |
+| | Matiz, Saturação, Luminância | O que muda nela |
+| **Degradê** | Forma | Linear (uma linha: céu ou chão) ou radial (dentro do círculo) |
+| | Direção | Que lado muda no linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo (chão) |
+| | Centro, Raio, Suavidade, Inverter | Onde fica a linha ou o círculo (em pixels de um quadro de 1080 linhas do próprio clipe: o degradê acompanha o enquadramento) |
+| | Exposição, Temperatura, Tonalidade, Saturação | O que muda no lado marcado |
 
 #### Transições de película
 
@@ -292,6 +332,29 @@ cada clipe repete a mesma queima e a mesma poeira toda vez. O som não muda: par
 **Transição de som** abaixo. Desligar o recurso só esconde os tipos novos e o menu; um projeto que já os
 usa continua saindo igual (o app avisa e oferece religar). Projetos com transições de película pedem a 1.5
 ou mais nova para abrir.
+
+#### Câmeras diferentes na mesma montagem
+
+O look de película lê a montagem inteira com um perfil só (Película › *Entrada e exposição* › **Perfil do
+vídeo**). Se a montagem mistura câmeras — a principal em S-Log3, um drone em D-Log, o celular em HLG —, escolha
+no look o perfil da câmera principal e, no cartão **Câmera** de cada clipe de outra câmera, o perfil dele. O
+app converte esse clipe para o perfil do look antes dos ajustes de cor do clipe (curva e cores da câmera dele →
+luz → curva e cores da câmera do look): a cor, as transições e o look veem todos os clipes como se viessem da
+mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
+
+- Os clipes com perfil próprio em log são lidos com as luzes acima do branco do vídeo (os super-brancos), e a
+  montagem passa ao look a luz inteira, sem cortar nem arredondar. Para isso valer também para um clipe da
+  câmera principal, escolha o perfil dele no cartão (em vez de *Igual ao do look*).
+- Sem película na prévia (o botão do filme desligado), os clipes com perfil próprio aparecem convertidos para
+  vídeo comum (Rec.709), como saem na exportação *Sem película (só a edição)*; os que seguem o look aparecem como
+  foram gravados (um log continua lavado).
+- **Proteger cores saturadas** (no look) vale para a montagem inteira, no espaço do look.
+- **Clipes novos já vêm com o perfil** quando os metadados do arquivo indicam um diferente do look (HDR marcado,
+  o XML da Sony, Apple Log, etiquetas de curva; veja *Sugestão pelos metadados* no guia dos efeitos). O primeiro
+  vídeo de uma montagem vazia não: ele mostra a sugestão para o próprio look, como no modo Película. Num look
+  HLG/PQ, um vídeo marcado como comum (BT.709/sRGB) entra como Rec.709. Clipes que já estão na montagem e
+  projetos reabertos nunca mudam.
+- Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
 ### Animar com chaves (losangos)
 
@@ -410,6 +473,24 @@ Acima dos ajustes há um monitor com quatro vistas:
 - **Vetor** (vetorscópio): o ângulo é a cor e a distância do centro é a saturação. A linha tracejada é o
   **tom de pele**: rostos bem corrigidos ficam perto dela.
 
+### Zebra, falsa cor e referência
+
+Na barra da prévia (nos dois modos, com o módulo **Scopes**):
+
+- **Falsa cor**: pinta a prévia pela exposição, em *stops* em relação ao cinza médio de 18% da luz da cena (a
+  mesma luz que o look lê do vídeo, pelo *Perfil do vídeo*, com a exposição e o balanço): **roxo** abaixo de −6
+  (preto), **azul** de −6 a −4,5 (sombra profunda), **verde** ±0,25 (cinza médio), **rosa** de +0,75 a +1,25
+  (pele clara, um stop acima do cinza), **amarelo** de +4,5 a +6 (quase estourado) e **vermelho** acima de +6
+  (estourado). O resto fica em cinza, mais claro quanto mais luz.
+- **Zebra**: listras pretas e brancas onde a exposição passa do limite; a setinha do botão escolhe +2,5, +4,5
+  (padrão) ou +6 stops.
+- **Referência**: **Fixar este quadro** guarda a prévia atual; **Abrir imagem…** usa uma foto ou um quadro de
+  outro filme. Com a referência, **Dividido** e **Lado a lado** mostram a referência no lugar do original
+  (**Comparar com a referência** liga e desliga; **Tirar a referência** volta ao original).
+
+Tudo isso é só na tela: nada vai para a exportação nem para o "Salvar quadro". No modo Edição sem película, a luz
+medida é a da montagem lida pelo *Perfil do vídeo* do look.
+
 ### Medidor de som
 
 Ao lado da prévia (nos dois modos) fica o medidor do som que está tocando:
@@ -477,6 +558,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Esc | Tirar a seleção e voltar para Selecionar |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
+| Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |
 | Ctrl+Shift+L | Painel de legendas (também no modo Película) |
 | Delete / Enter / Esc na faixa Legendas | Apagar / editar / tirar a seleção da legenda escolhida |
 
@@ -561,3 +643,65 @@ clipes escolhidos) e tira todos de uma vez:
 - **Tirar os marcados** corta todas as faixas destravadas e encosta o resto (som e imagem continuam
   juntos; marcadores, animações e legendas acompanham). Ctrl+Z desfaz tudo de uma vez. Faixas travadas
   (o cadeado) não mudam — por exemplo, uma música de fundo.
+
+## 9. Câmera de cinema e a montagem na película (1.6, Beta)
+
+Ligue em *Configurações › Recursos* os recursos **Câmera de cinema** e **A montagem na película** (em teste,
+começam desligados).
+
+### Manivela (no inspetor do clipe, depois de Velocidade)
+
+- **Cadência da manivela**: 16, 18, 20 ou 22 qps, como uma câmera de manivela projetada na velocidade da
+  sequência. O clipe fica mais rápido e aos saltos (16 qps numa sequência de 24 = 1,5×): a duração e o **som**
+  acompanham, como numa mudança de velocidade. Voltar a *Normal* devolve a velocidade de antes.
+- **Oscilação da mão**: a mão não gira a manivela num ritmo perfeito; a imagem adianta e atrasa um pouco (no
+  máximo 50 ms com 100%), sem atrasar o clipe. Só a imagem oscila; o som segue a velocidade média.
+- **Semente** (avançado): outro jeito da mão.
+
+### Obturador de película
+
+Com o look de película na montagem (*Com película*) e o **Obturador de película** ligado no look, cada clipe com
+pelo menos o dobro de quadros por segundo da sequência (60 qps numa sequência de 24, ou um clipe acelerado)
+ganha o rastro de movimento de um obturador de cinema: os quadros do arquivo dentro da janela aberta (180° =
+metade do quadro) são misturados na luz. A prévia, "Salvar quadro" e a exportação mostram o mesmo.
+
+### A montagem na película
+
+Com a seção **A montagem na película** ligada no look, cada **corte seco** da faixa V1 vira uma emenda: a fita
+aparece no primeiro quadro do clipe novo, a junta deixa passar um clarão e o quadro pula na janela do projetor.
+Cortes com transição (dissolver, queima, emenda com clarão…) não contam. **Rolos de Super 8** dividem o vídeo em
+rolos de 50 pés (3 min 20 s a 18 qps, 2 min 30 s a 24): o fim de cada rolo vela e a troca dá um pulo. Tudo é igual
+a cada reprodução (mesma semente, mesmos quadros).
+
+## 10. Marcação de luz por plano (1.6)
+
+No laboratório, o marcador de luz assiste ao filme montado e escolhe, **plano a plano**, as luzes vermelha, verde e
+azul da copiadora: um plano mais escuro ganha menos pontos, uma cena com dominante verde ganha um pouco mais de
+verde. O cartão **Luz da copiadora** do inspetor (logo depois de *Câmera*) faz isso com o **Laboratório** do look:
+os pontos de cada clipe **somam** às luzes da copiadora do Laboratório (Película › *Laboratório*) nos quadros em que
+o clipe é o plano da **V1**.
+
+- **Só com o Laboratório ligado** (e com a película na prévia, o botão do filme, para ver na tela; a exportação com
+  o look sempre usa). Sem ele o cartão avisa e as luzes não mudam nada.
+- O **mostrador** mostra as luzes do plano como numa folha de marcação: o TAPE padrão **25-25-25** (as luzes no
+  alvo do LAD da Kodak) mais as do look e as do clipe — por exemplo *27 · 24 · 25*. Embaixo, só o que é deste
+  plano (*R +2 · G −1 · B 0*).
+- **1 ponto = 0,025 log E**: 12 pontos = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera. Mais vermelho deixa a
+  cópia mais **ciano**, mais verde mais **magenta**, mais azul mais **amarela** (como no laboratório: a luz é
+  subtraída na cópia). **Densidade** soma nas três: mais pontos = plano mais escuro, sem mudar a cor.
+- **+1 / −1** em cada cor e na densidade, **Zerar** (volta às luzes do look) e **Copiar luzes para os clipes
+  selecionados** (selecione os outros clipes com Ctrl ou Shift na linha do tempo). Cada clique é um passo do
+  desfazer.
+- **Atalhos** (modo Edição): **Alt+R / G / B / D** somam 1 ponto de luz vermelha / verde / azul / densidade;
+  com **Shift**, tiram 1 ponto. Valem para os clipes de vídeo selecionados ou, sem seleção, para o plano da V1 sob
+  o cursor; a barra de status mostra as luzes do plano.
+- **Clipes nas faixas de cima** (V2, V3… — títulos, sobreposições) não mudam o plano: vale a luz do clipe da V1.
+- **Transições**: num *dissolver* ou numa transição de dois clipes (fusão ótica, queima, íris, empurrar, cortina,
+  zoom) a luz vai de um plano ao outro junto com a mistura. No laboratório, uma fusão ótica copia os dois
+  negativos, cada um com a sua luz; aqui o look tem uma luz por quadro, então ela caminha sem pulo e cada plano
+  tem a luz dele nas pontas. Surgir do preto ou do branco troca a luz no corte.
+- **Modo Película** com um arquivo só: não há planos. Para marcar a luz por plano, divida o vídeo nos cortes no
+  modo Edição (S) e dê a luz a cada pedaço; a montagem passa a ser a entrada do look.
+- O cartão some com o recurso **Laboratório** desligado (*Configurações › Recursos*). Um projeto com luz por plano
+  pede a 1.6 ou mais nova para abrir. O plugin do DaVinci não tem a montagem: lá a luz da copiadora fica no nó
+  Laboratorio (uma por nó; use um nó por plano).

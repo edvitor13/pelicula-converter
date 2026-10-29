@@ -205,6 +205,9 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     U["u_hsl_h"], U["u_hsl_s"], U["u_hsl_l"] = tuple(hh), tuple(hs), tuple(hl)
     U["u_vig"] = (float(v["vinheta"]), 0.2 + 0.8 * float(v["vinheta_tamanho"]))
     U["u_fadeblk"] = float(v["desbotar"])
+    if cc:  # 1.6: cor simples (`colorsimple.py`); sem ela, {} e o programa é o `CLIP` de sempre
+        from . import colorsimple
+        U.update(colorsimple.uniforms(v))
     if layer.transitions:  # 1.5: transições de película (`transitions.py`, programa `editshaders.CLIP_TR`)
         from . import transitions
         U = transitions.apply(U, seq, layer, transform(seq, clip, canvas_w, canvas_h, v), canvas_w, canvas_h, light)

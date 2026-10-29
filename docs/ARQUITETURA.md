@@ -33,6 +33,15 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 25. [Sequências de imagens, exportar com transparência, geradores e títulos](#25-sequências-de-imagens-exportar-com-transparência-geradores-e-títulos)
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
+28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
+29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
+30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
+    - [30.7 Grão físico: o modelo booleano no negativo](#307-grão-físico-o-modelo-booleano-no-negativo)
+    - [30.8 Grão completo](#308-grão-completo)
+31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
+32. [Laboratório na 1.6](#32-laboratório-na-16)
+33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
+35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 
 ---
 
@@ -103,7 +112,7 @@ Três ideias guiam o projeto:
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
 | `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
 | `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
-| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
+| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (48 presets; os 4 da 1.6 no fim), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels; transparência (`has_alpha`, `decodes_alpha`, leitura RGBA pré-multiplicada, seção 22.4). |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `frame_pipeline()`/`preview_frame()` (a receita de `frame.py` com os ajustes da exportação), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
@@ -317,7 +326,8 @@ vazamento, marca de rolo no canto superior direito) segue essa convenção.
   Gamut), todas com branco D65; enviadas como `mat3` coluna-maior (`mat3_uniform`).
 - **Curvas de câmera** em GLSL: N-Log, S-Log3, LogC3 (EI 800), V-Log, Cineon (685/300 com preto
   offset), DaVinci Intermediate, Log3G10, Blackmagic Film Gen 5, LogC4, Apple Log, HLG e PQ —
-  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log).
+  decodificação e codificação (a codificação serve para alimentar LUTs que esperam log). Os perfis da 1.6
+  (Canon, Fujifilm, DJI, S-Log2, L-Log e o LogC3 de outros EI) ficam em `camDec`/`camEnc` (seção 29.3).
 - **HLG e PQ** (BT.2100): HLG é a OETF inversa × `HLG_SCALE` (o cinza da BT.2408, 38% do sinal, vira
   0,18); PQ é a EOTF da ST 2084 (cd/m²) seguida da OOTF inversa do HLG a 1000 cd/m² (γ = 1,2 pela
   luminância BT.2100, como a conversão PQ → HLG da BT.2408) e da mesma escala. Acima de 1000 cd/m² não há
@@ -362,7 +372,8 @@ build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → 
   exportação (`export._encode`, também na estimativa) e o terminal (`quadro`, `exportar`).
 - **Modo Edição**: cada clipe é decodificado com a sua faixa e a tela montada guarda esses valores; o look
   usa a faixa da maioria dos clipes de vídeo (empate: o primeiro; imagens só contam sem vídeo). Clipes log de
-  faixas diferentes na mesma montagem ficam com uma faixa só (perfil por clipe fica para depois).
+  faixas diferentes na mesma montagem ficam com uma faixa só, a não ser que tenham perfil de câmera próprio
+  (1.6, §29.5: cada um é convertido com a faixa do próprio arquivo).
 - **`log_reescalado`** (avançado, fora dos presets): gravação externa em que a câmera mandou o log já
   reescalado para 64–940 (saída HDMI *Limited*, comum na Nikon) — desliga a volta ao código.
 - **LUTs**: o LUT externo (`lutEncode`) e os `.cube` exportados (`Engine.bake_lut`, padrão `legal=False`)
@@ -372,8 +383,10 @@ build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → 
 - **Plugin do Resolve**: o nó recebe o valor que o Resolve tem do clipe, sem saber a faixa do arquivo; o
   controle *Faixa do vídeo* (padrão *Vídeo* = `bake_lut(legal=True)`, *Cheia* = `legal=False`) faz o papel de
   `u_legal` (seção 15).
-- **Limite conhecido**: a saída RGB inteira do decodificador corta em 1,0 o que passa do código 940 (super
-  brancos). No S-Log3, que usa códigos até ~1000, isso corta as luzes mais de ~6,7 stops acima do cinza.
+- **Super-brancos** (1.6): até a 1.5 a saída RGB inteira do decodificador cortava em 1,0 o que passa do código
+  940 (no S-Log3, que usa códigos até ~1000, as luzes mais de ~6,7 stops acima do cinza). Agora log de câmera
+  num vídeo de faixa legal é lido em ponto flutuante (`media.float_input`): v passa de 1 (e fica abaixo de 0
+  no pé) e a curva recebe o código certo. Sem o zscale no ffmpeg, a leitura de antes (seção 29.1).
 
 ## 6. Determinismo e independência de resolução
 
@@ -484,9 +497,15 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
   BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj` (`_in_range`). `media.legal_range(info)`
   diz se o leitor expandiu a faixa legal — é o `legal` do `build_plan` (seção 5.1).
 - `MediaInfo.color_transfer` (`arib-std-b67` = HLG, `smpte2084` = PQ) sugere o perfil de entrada
-  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso.
+  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso. Na 1.6,
+  `media.suggest_input` (§29.6) sugere também os perfis log pelas etiquetas (`MediaInfo.tags`).
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
+- Log de câmera num vídeo de faixa legal (`profile=` o perfil do look; `media.float_input`), em qualquer
+  profundidade: `media._exact_graph` = `scale=L:A:flags=…:in_range=limited:out_range=limited,format=yuv444p16le,
+  zscale=matrixin=M:rangein=limited:range=full,format=gbrpf32le` → float32 (textura `f4`) sem cortar em 0–1
+  (seção 29.1). 16 bits de vídeo de faixa legal (`FrameReader.exact16`): o `rgb48le` de sempre, com a cor levada
+  de 0–65280 para 0–65535 em `read` (`media._legal16`, seção 29.2).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
   nele como se fosse um arquivo. A conexão espera o ffmpeg abrir o pipe e destrava sozinha se ele
   morrer antes (timeout de 60 s). Isso é bem mais rápido que `stdout` para quadros 4K.
@@ -2666,3 +2685,1131 @@ de cada palavra (as da transcrição) aparecem; qualquer mudança limpa as marca
   (botão, painel, faixa, módulo desligado, receita com a legenda, desfazer com o foco no painel), "Gerar
   legendas" (módulo, componentes faltando, fila, um passo de desfazer, erros, cancelar, outro projeto),
   "Remover silêncios" e "Cortar pelo texto".
+
+## 28. Base da 1.6: formato 4
+
+A 1.5 lê projetos até o formato 3 e descarta, sem avisar, o que não conhece: chave de ajuste desconhecida e
+opção de escolha que não está na lista (`params.Schema.sanitize`). Um projeto da 1.6 com um perfil de câmera
+novo ou um ajuste novo abriria nela sem o efeito. Por isso a 1.6 grava o **formato 4** quando o projeto usa algo
+dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
+
+- **Retrato da 1.5** (`pelicula/data/conhecidos_1_5.json`, `params.known_1_5()`): as chaves de cada esquema
+  (`"look"` = `params.FILM`, `"video"`/`"audio"` = ajustes de clipe) e, nas escolhas, as opções da 1.5.0.
+  Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção dele sumiu do app (o que
+  também pega renomeações).
+- `params.beyond_1_5(schema, known, values, keys)`: True com um ajuste fora do retrato e fora do padrão, uma
+  opção nova numa escolha antiga ou chaves de animação num ajuste novo. Ajuste novo no padrão não conta: um
+  projeto antigo salvo de novo continua no formato dele.
+- **Registros:** `project.FEATURES_V4` (do projeto; já tem `"ajustes_1_6"` = o look e as chaves do look) e
+  `timeline.FEATURES_V4` (da montagem; já tem `"ajustes_clipe_1_6"` = os ajustes e as chaves dos clipes). Uma
+  **estrutura nova** no JSON (campo ou bloco que a 1.5 ignoraria) ganha uma linha num deles. Os da 1.5
+  continuam em `project.FEATURES_V3` e `timeline.FEATURES`.
+- **Formatos:** projeto 4 (`project.FORMAT`; `FORMAT_15` = 3 para algo da 1.5); bloco `"edicao"` 3
+  (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
+  `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
+
+## 29. Entrada da câmera na 1.6
+
+O que a câmera gravou chega ao look sem perdas: a leitura guarda os super-brancos do log, os perfis de câmera
+ganham as curvas que faltavam, cores muito saturadas podem ser protegidas, o modo Edição normaliza clipes de
+câmeras diferentes e os metadados do arquivo sugerem o perfil. Com os ajustes padrão
+nada muda (referência da BASE em `tests/entrada_base.py`, conferida por `tests/test_entrada_base.py`: uniforms,
+quadros do look em 8 e 16 bits, LUTs exportados, montagem do modo Edição, nó Cor do plugin e leitura de 8 bits).
+
+### 29.1 Super-brancos na leitura de log
+
+Até a 1.5 o `FrameReader` pedia ao swscale RGB inteiro (`rgb24`/`rgb48le`) com a faixa legal expandida: tudo
+acima do código 940 virava 1,0 e tudo abaixo do 64 virava 0. As câmeras gravam log acima do 940 (o S-Log3 vai a
+~1000; o F-Log e o V-Log também passam), então as luzes mais altas se perdiam antes do shader.
+
+- `media.float_input(info, perfil)`: verdadeiro para um perfil log de câmera (todos menos `DISPLAY_PROFILES` =
+  Rec.709, linear, HLG e PQ) num vídeo YUV de faixa legal, com o zscale no ffmpeg (`media.has_zscale`, lido de
+  `ffmpeg -filters`; `reset_cache` esquece). Imagens, RGB e vídeo de faixa cheia não têm o que expandir.
+- `FrameReader(..., profile=)` / `grab_frame(..., profile=)`: nesse caso os filtros são os de
+  `media._exact_graph` com saída `gbrpf32le` (planar G, B, R; `read` devolve h × w × 3 float32 intercalado) em
+  qualquer `depth`. O swscale redimensiona como sempre, mas para YUV 4:4:4 de 16 bits sem mexer na faixa (o
+  código de 10 bits vira código·64, exato, também acima do 940); o zscale só aplica a matriz e expande a faixa.
+  Redimensionar no zscale mudaria a reconstrução do croma nas bordas de cor (até 17% num padrão de teste com
+  bordas de 1 pixel), por isso ele não redimensiona. O valor é o mesmo v = (código − 64)/876 de antes, sem corte; o shader não
+  muda: `toLinear` volta ao código das curvas `"cv"` (`legalToCv`) ou usa o sinal das `"sinal"` como sempre.
+  `Engine.set_input` envia float32 como textura `f4`.
+- **Quem passa o perfil**: `frame.Recipe.profile` (o `entrada` dos ajustes) na exportação (`export.open_reader`,
+  `preview_frame`), no terminal (`quadro`) e no "Salvar quadro"; a prévia (`FrameLoader.request`, `Player.start`)
+  usa o perfil atual e lê o quadro de novo quando a troca de perfil muda a leitura (`MainWindow._on_param`).
+- **Visualização**: a imagem "antes" da comparação, o histograma e os escopos convertem float32 para 8 bits só
+  para ver (`qimage_from`, `scopes._subsample`); legendas gravadas na cópia compõem em float sem cortar
+  (`subtitles.composite`).
+- **Mesmo arquivo, mesmo resultado em 8 e 16 bits**: a leitura em float não depende da profundidade da saída.
+- **Fora**: transparência (o caminho do alfa continua em inteiros), HLG/PQ (a 1.6 deixa como estava: a região
+  acima de 940 no HDR é rara e a leitura em float custa 4× a banda da prévia de 8 bits), o modo Edição com
+  montagem de verdade (a tela da montagem é inteira; veja 29.5) e ffmpeg sem zscale (leitura de antes).
+- **Custo**: 12 bytes por pixel no cano (1080p ≈ 25 MB por quadro, 4× o de 8 bits), só nos arquivos log.
+- **ffmpeg 8+**: ao gerar vídeo de teste a partir de `rawvideo`, a faixa vai também como opção de entrada
+  (`-color_range tv` antes do `-i`); sem ela o ffmpeg converte o "sem faixa" para a legal e corta os códigos
+  fora de 64–943 (`tests/entrada_base.synthetic_video`).
+
+### 29.2 16 bits exatos na faixa legal
+
+O swscale expande a faixa legal para RGB de 16 bits como se fosse 8 bits · 256 (`rgb48le`/`gbrap16le`: o branco
+940 sai em 65280–65283, 0,4% abaixo; acima do 940, até 65535 — o super-branco fica *acima* do branco). Isso pegava
+a exportação em 16 bits (ProRes, FFV1, DNxHR 444…) e o "Salvar quadro", sempre em 16 bits. Na 1.6, 16 bits de
+um vídeo de faixa legal (`FrameReader.exact16`, com ou sem transparência de mais de 8 bits) saem do swscale como
+sempre e `read` leva a cor para 0–65535 (`media._legal16`): c = mín(c, 65280); c += c >> 8 — o mesmo c·257/256 do
+passo de 8 para 16 bits, sem cópia (o buffer é nosso) e sem depender do zscale. O alfa não muda (já vai a 65535).
+Preto 0 e branco 65535 exatos; cada cinza a até 2 de 65535 de round((código − 64)/876 · 65535) em 4:4:4, 4:2:2 e
+4:2:0 de 10 bits e no 8 bits com `hq` (3), com ou sem redimensionamento (`tests/test_entrada_leitura.py`). A
+reconstrução do croma nas bordas de cor é a do swscale de sempre: o 16 bits continua igual ao 8 bits a menos de
+1/255 (`test_16bit_matches_8bit_and_keeps_the_chroma_of_swscale`).
+
+- **Por que não o zscale aqui**: a primeira versão levava os 16 bits pelo `_exact_graph` (o mesmo da leitura em
+  float); a matriz do zscale sobre o YUV 4:4:4 redimensionado pelo swscale muda o croma nas bordas de cor (até
+  7/255 do 8 bits com `lanczos`), e o 16 bits deixava de bater com a prévia. O float do log (29.1) fica no
+  zscale porque precisa passar de 1,0; ele é o mesmo na prévia e na exportação.
+- **Sem mudança**: 8 bits (`rgb24` do swscale já arredonda certo), faixa cheia, imagens RGB e alfa de 8 bits (já
+  ampliado ×257, exato). O 8 bits sem `hq` (prévia) segue arredondado a 8 bits pelo swscale também em 16 bits.
+- **Versões**: conferido com o ffmpeg 9.0.2 (gyan.dev, o que o app baixa) e com uma compilação de dezembro de
+  2023 (entre a 6.1 e a 7.0): o branco 940 sai em 65283 nas duas. A CI roda o 6.1 do Ubuntu 24.04.
+- **Para as notas da versão**: a exportação em 16 bits e o "Salvar quadro" de vídeo em faixa legal ficam até
+  0,4% mais claros nas luzes (o branco volta a 100%); o log de câmera ganha as luzes acima do código 940.
+
+### 29.3 Perfis de câmera novos
+
+Oito perfis no fim de `params.ENTRADAS` (e de `LUT_ENTRADAS`), com ids novos em `look.INPUT_IDS`; os 14 de antes
+mantêm chave, posição e id. Fórmulas dos documentos públicos dos fabricantes, citados em `shaders.camDec`,
+`look.INPUT_DOMAIN` e `tests/test_entrada.py` (a colour-science, BSD-3, só como conferência; nenhum PDF no
+repositório).
+
+| Chave | id | Domínio | Gamut | Fonte |
+|---|---|---|---|---|
+| `clog2` | 14 | sinal | `cinemagamut` | Canon, "Canon Log Gamma Curves – Input Transform Version 201612" (v1) |
+| `clog3` | 15 | sinal | `cinemagamut` | idem (reta entre ±0,014 em x/0,9) |
+| `flog` | 16 | cv | `2020` (F-Gamut) | Fujifilm, "F-Log Data Sheet" Ver.1.1 |
+| `flog2` | 17 | cv | `2020` (F-Gamut) | Fujifilm, "F-Log2 Data Sheet" |
+| `flog2c` | 18 | cv | `fgamutc` | Fujifilm, "F-Log2 C Data Sheet" Ver.1.0 (a curva do F-Log2) |
+| `dlog` | 19 | cv | `dgamut` | DJI, "White Paper on D-Log and D-Gamut of DJI Cinema Color System" (2017) |
+| `slog2` | 20 | sinal | `sgamut` | Sony, "S-Log2 Technical Paper" (2012) |
+| `llog` | 21 | sinal | `2020` | Leica, "L-Log Reference Manual" V1.9 (2026) |
+
+- **Shader**: as curvas novas ficam em funções novas (`clog2Dec`…`llogEnc`, `camDec`/`camEnc` em
+  `shaders.COMMON`, antes de `legalToCv`); `toLinear`, `lutEncode` e o `trEnc` das transições
+  (`editshaders.CLIP_TR`) ganham só um `if (id >= 14)`. Os ids 0–13 seguem o mesmo caminho, bit a bit
+  (`tests/test_entrada_base.py`).
+- **Domínio**: Fujifilm e DJI dão tabelas em código de 10 bits igual a 1023·fórmula ("cv", como o S-Log3); Canon
+  v1, S-Log2 e L-Log dão o sinal ("sinal"). O L-Log é gravado em faixa cheia no h.264/h.265 (código = 1023·L) e
+  reescalado para 64–940 no ProRes (tabela 2 do manual: código 897 → 88% IRE no ProRes); nos dois casos o valor
+  lido já é L.
+- **Gamuts** (`look._PRIMARIES`, branco D65): Cinema Gamut (Canon, 2014), F-Gamut C, D-Gamut (a matriz para
+  BT.709 que a DJI publica bate com a calculada em 2·10⁻⁴) e S-Gamut. O F-Gamut é o BT.2020; o L-Log usa o
+  BT.2020 (a SL tipo 601 grava BT.709 e não tem perfil próprio).
+- **EI do ARRI LogC3** (`logc3_ei`, escolha "160"…"1600", padrão "800", avançado, em `presets.SOURCE_KEYS` e
+  `ofx.KEEP_ON_PRESET`): `look.LOGC3_EI` traz (corte, a, b, c, d, e, f) da tabela SUP 3.x da ARRI ("ALEXA Log C
+  Curve – Usage in VFX"). Com o EI 800 nada muda (`u_input` = 4, a curva de sempre). Com outro EI,
+  `look.input_id` dá `u_input = LOGC3_EI_ID + k` (22 + a posição do EI) e o shader usa `logc3eDec` com a tabela
+  `shaders.LC3` (constante, sem uniforms novos: o `CLIP_TR` das transições inclui as curvas). Um parâmetro e não
+  onze perfis: a lista fica curta, o cinza é o mesmo em todos e o EI é um dado do clipe, como a faixa. As
+  transições misturam na luz do mesmo EI (`transitions.light_of` usa `look.input_id`); o LUT externo
+  (`lut_entrada` = LogC3) fica no EI 800.
+- **Plugin**: `pc_cam_dec` e `pc_logc3e_dec` em `resolve.K_DECODE`; tabela `PC_LC3` (6 números por EI, sem o `a`)
+  e `PC_LC3_STD`; o controle *EI do LogC3* logo depois de *Faixa do video* nos nós Cor e Laboratório (e no OFX,
+  `tools/gerar_ofx.py`). `tests/test_resolve.py` confere cada perfil e o EI contra o app na GPU.
+- **LUTs**: `luts.guess_input` reconhece CanonLog2/3, FLog/FLog2/FLog2C, DLog (não o D-Log M), SLog2 e L-Log/Leica
+  pelo nome, antes do N-Log ("CanonLog" contém "nlog").
+- **Leitura**: todos são log de câmera, então um arquivo de faixa legal é lido em float (29.1).
+- **Fora**: Apple Log 2 (a Apple não publicou a curva nem as primárias do Apple Wide Gamut; a documentação do
+  AVFoundation só cita o nome) e o D-Log M da DJI (sem documento público da curva).
+
+### 29.4 Proteger cores saturadas
+
+`proteger_cores` (seção "entrada", 0 a 100%, padrão 0, em `presets.SOURCE_KEYS` e `ofx.KEEP_ON_PRESET`): LED,
+neon e céu muito saturado gravados num gamut largo saem da matriz da câmera (`u_gamut`) com um canal negativo no
+Rec.709 linear do app; o `max(…, 0)` de `imageLin` o zera e o tom muda de repente (o negativo do Laboratório vê
+um canal "sem exposição", plano M4). `shaders.protectGamut` comprime essas cores logo depois da matriz, antes do
+`max`, da exposição, do look e do negativo, em `imageLin` (prévia e exportação) e no `BAKE` (LUT exportado).
+
+- **Algoritmo**: o da *ACES Reference Gamut Compression* (Academy Software Foundation / AMPAS; a especificação,
+  docs.acescentral.com/rgc/specification, é CC BY 4.0, e a fórmula foi escrita a partir dela, sem copiar código).
+  A = máx(r, g, b); por canal, d = (A − c)/|A|; abaixo do limiar t nada muda; acima,
+  d' = t + (d − t)/(1 + ((d − t)/s)^p)^(1/p), com s escolhido para o limite l ir a 1 (a borda do gamut);
+  c' = A − d'·|A|. Limiares (ciano, magenta, amarelo) 0,815, 0,803, 0,880 e p = 1,2, os da ACES
+  (`look.GC_THRESHOLDS`, `GC_POWER`; no shader, `GC_THR`/`GC_PWR`). A ACES comprime para o AP1; aqui o alvo é o
+  Rec.709 linear do app.
+- **Limites por perfil** (`look.gamut_limits`, uniform `u_gc_lim`): a maior distância das cores da fronteira do
+  gamut da câmera (faces do cubo RGB dela com um canal em 0) levadas ao Rec.709, nunca abaixo dos limites da ACES
+  (1,147, 1,264, 1,312). Com 100% o gamut inteiro da câmera cabe no Rec.709, sem canal negativo; no Rec.709 os
+  limites são os da ACES (nada fora do cubo vem do arquivo).
+- **Força**: `mix(c, comprimida, u_gc_amt)`. Com 0 o shader nem chama a compressão (`u_gc_amt > 0.0`): a cor é a
+  de sempre, bit a bit. `u_gc_amt` e `u_gc_lim` só vão no plano com o efeito ligado, então o plano de um projeto
+  antigo continua o mesmo (`tests/test_project_migration.py`); como um programa guarda o último valor de cada
+  uniform, o Engine manda antes do plano os neutros de `look.SPARSE_UNIFORMS` (`u_gc_amt` = 0) nos passos
+  "base" e "bake". Abaixo de 100% as cores mais extremas ainda passam da borda (é uma mistura).
+- **Edição**: a montagem entrega a imagem antes do look; a proteção vale para o look sobre ela, como o perfil.
+- **Plugin**: `pc_gamut_compress` em `resolve.K_DECODE`, aplicado no fim de `B_INPUT`; tabela `PC_GCL` (3 limites
+  por perfil) e `PC_GC_THR_R/G/B`, `PC_GC_PWR`; o controle logo depois de *Tonalidade* nos nós Cor e Laboratório
+  (e no OFX).
+- **Testes** (`tests/test_entrada_gamut.py`): a fórmula de referência em float64 (dentro do limiar nada muda, o
+  limite vai à borda, monótona, sem quina no limiar); a GPU contra ela; a fronteira de cada gamut sem canal
+  negativo com 100%; manchas em S-Gamut3.Cine varrendo a saturação com saída contínua em três presets; 0% igual
+  a não ter o ajuste, também no LUT. `tests/test_resolve.py` confere o plugin contra o app.
+
+### 29.5 Perfil de câmera por clipe (modo Edição)
+
+O look lê a montagem inteira com um perfil só (`entrada`, a faixa de `sequence.legal_range` e o EI). Para misturar
+câmeras, cada clipe de vídeo ganhou o cartão **Câmera** (`editparams` seção `"camera"`, a última de
+`VIDEO_SECTIONS`, fechada por padrão): `camera_entrada` (escolha, `"look"` = "Igual ao do look", o padrão, e depois
+as chaves de `params.ENTRADAS` na mesma ordem), `camera_reescalado` e `camera_ei` (avançados, como
+`log_reescalado` e `logc3_ei` do look). As três estão em `editparams.SPARSE_KEYS`: um clipe no padrão grava o JSON
+de sempre, não são cor ("Restaurar cor" não as toca) e não são animáveis. Com qualquer uma fora do padrão o
+retrato da 1.5 (`conhecidos_1_5.json`) não as conhece e `Sequence.features()` dá `"ajustes_clipe_1_6"`: o projeto
+pede o formato 4.
+
+- **Espaço comum = a entrada do look** (`camera.Target`: o `look.input_id`, o gamut de `look.INPUT_GAMUT` e se o
+  look volta ao código de 10 bits). Um clipe com perfil próprio passa, antes do `CLIP`, pelo `editshaders.CAMERA`
+  (`Engine._camera_pass`, textura f4 do mesmo tamanho): `toLinear` com a curva, a faixa (do arquivo do clipe,
+  `media.legal_range(source)`) e o gamut dele → Rec.709 linear → `lutEncode` com a curva e o gamut do look → a faixa
+  legal expandida, se o look lê o código de 10 bits. As mesmas funções do look (`shaders.COMMON`), sem uniforms
+  novos no `_CURVES` nem mudança no `CLIP`/`CLIP_TR` (os hashes de `test_transitions` ficam). Por que o espaço do
+  look e não um linear novo: os ajustes de cor do clipe, as transições da 1.5 (que já misturam na luz da entrada
+  do look, `transitions.light_of`) e o próprio look continuam vendo o que sempre viram; um clipe convertido fica
+  igual a um clipe da câmera do look.
+- **Leitura**: `camera.read_profile` dá o perfil para `media.FrameReader`/`grab_frame` (`sequence.grab`,
+  `_ClipStream`, `_ReverseStream`, cache com o perfil na chave): log de câmera em faixa legal vem em float32 com
+  os super-brancos (29.1); `Engine._clip_texture` aceita float32 (f4). Clipes que seguem o look são lidos como
+  sempre (inteiros: os super-brancos deles continuam cortados; para guardá-los, escolha o perfil do clipe).
+- **Tela em float** (`Engine.compose(camera=, float_out=)`, `editshaders.OUT_FLOAT`): com algum clipe de perfil
+  próprio (`camera.uses_profiles`) e o look ligado, `Recipe.montage` devolve a tela f4 inteira em float32, sem
+  cortar em 1,0 nem arredondar, e o look a recebe como a leitura em float da 29.1. Sem look (prévia do modo Edição
+  sem película) a saída é inteira, como antes, e o espaço é o Rec.709 (`Target()`): o mesmo da exportação "Sem
+  película", que desenha o preset "original" (entrada Rec.709) sobre a montagem, então prévia e exportação
+  continuam vendo a mesma montagem. Com transparência (`alpha`) a saída continua inteira.
+- **Sem perfil próprio nada muda**: `Recipe.montage` só passa `camera`/`float_out` se `uses_profiles`; os
+  programas e alvos são outros (`clip_cam*`, `canvas_outf`). `Sequence.is_trivial()` dá None com um perfil de
+  clipe (a montagem muda a imagem), então o modo Película deixa de ler o arquivo direto.
+- **Sem compressão de gamut no passo** (a "Proteger cores saturadas", 29.4, vale para a montagem no look): um
+  clipe de gamut largo num look Rec.709 pode chegar com canais negativos, que a tela em float guarda e o
+  `max(…, 0)` do look zera, como num arquivo daquela câmera.
+- **Testes** (`tests/test_entrada_camera.py`): padrões, chaves esparsas, JSON de ida e volta e formato 4; a receita
+  só pede o passo com perfis; clipe Rec.709 num look em S-Log3, LogC4, LogC3, Canon Log 3, linear, HLG e PQ igual
+  ao look em Rec.709; clipes "Igual ao do look" intactos com `camera`; luz acima de 1,0 na tela; transparência; e
+  dois vídeos de verdade (S-Log3 e V-Log em 10 bits 4:4:4 de faixa legal, com super-brancos) numa montagem com o
+  look em S-Log3: cada um sai igual ao look lendo o arquivo dele com o próprio perfil, na prévia e na leitura
+  em sequência da exportação. `tests/entrada_ui_cases.py`: o cartão no inspetor e a escolha num clipe só.
+
+### 29.6 Perfil sugerido pelos metadados
+
+`media.suggest_input(info) -> id | None`, função pura sobre o `MediaInfo`: regras em ordem (`media.SUGGEST_RULES`),
+a primeira que responde vale.
+
+1. `_rule_hdr`: `color_transfer` HLG/PQ (`detect_profile`).
+2. `_rule_linear`: EXR (codec ou extensão) ou `color_transfer` = `linear` → `linear`.
+3. `_rule_tags`: etiqueta cuja chave (a última parte, depois do ponto) tem *gamma*, *transfer*, *curve* ou
+   *color space*, com o nome de um perfil reconhecido por `luts.guess_input` (o texto como está e sem separadores:
+   "LOG-C" → LogC3; D-Log M fica de fora, como nos LUTs). Rec.709 e Cineon não contam.
+4. `_rule_apple_log`: marca Apple, primárias BT.2020 e transferência que não é HDR → `applelog` (dedução: o HDR do
+   iPhone vem marcado HLG e o vídeo comum BT.709; a Apple não marca o Apple Log).
+
+Nunca devolve `rec709`: muitas câmeras marcam o log como BT.709 e o padrão já é o Rec.709.
+
+- **Etiquetas** (`MediaInfo.tags`, último campo, `compare=False`; preenchido em `_info_from` por
+  `media.camera_tags`): só a marca e as etiquetas de curva das tags do format e do fluxo de vídeo, mais as do
+  XML da Sony (`media.sidecar_tags`: `<nome>M01.XML` ao lado do vídeo, até 1 MB, `Item name=… value=…` cuja
+  chave tem uma das palavras acima, e o `manufacturer` do `Device`). Local, datas, número de série e título
+  ficam de fora (a fila da exportação guarda o `MediaInfo` inteiro). `Source.to_info()` dá tags vazias.
+- **Película** (`MainWindow._offer_input`, `ui/input_notice.py` `InputNotice`): ao abrir um arquivo novo
+  (`load_media(detect=True)`, depois do `_detect_profile` da 1.4) e no primeiro vídeo de uma montagem vazia
+  (`_adopt_format`), se a sugestão difere do perfil do look, a faixa abaixo da barra do topo oferece "Usar este
+  perfil" (`store.set` + `commit`: entra no desfazer). Some ao fechar, ao abrir outro arquivo ou projeto
+  (`show_project`, `new_project`, `load_media` sem `detect`), quando o perfil do look passa a ser o sugerido
+  (`_on_param`) e na prévia em tela cheia (volta ao sair). O look nunca muda sozinho.
+- **Edição** (`TimelineModel.clip_profile_for`, chamado em `insert_media` no mesmo passo do desfazer; a janela
+  liga `MainWindow._clip_profile_for`): os clipes de vídeo novos de um arquivo recebem `camera_entrada` =
+  `camera.prefill(sugestão, ajustes do look, info)`: a sugestão quando difere da entrada do look; sem sugestão,
+  num look HLG/PQ, um arquivo de transferência SDR (`camera.SDR_TRANSFERS`; o `bt2020-10` não entra, porque
+  câmeras gravam HLG marcado assim) entra como `rec709`. O primeiro vídeo de uma montagem vazia fica em "Igual
+  ao do look" (o look se ajusta a ele). O `MediaInfo` vem de `media.probe_source(path, infos)` (o dicionário
+  `MainWindow._file_infos`), porque a `Source` não guarda etiquetas. Projetos reabertos, colar e duplicar não
+  passam por aí.
+- **Testes**: `tests/test_entrada_sugestao.py` (tabela de dicionários do ffprobe por `media._info_from`, o XML da
+  Sony, as etiquetas guardadas, `camera.prefill`) e `tests/entrada_ui_cases.py` (a faixa, o preenchimento num
+  passo do desfazer e a janela nos dois modos, com `media.suggest_input` falso).
+
+## 30. Grão e textura na 1.6
+
+Os modelos novos de grão e textura ficam em `pelicula/grao.py`; `look.build_plan`, os shaders, o `Engine` e o
+plugin só ganham ganchos pequenos. Todo ajuste novo começa num padrão neutro e, nele, o plano, os quadros, o LUT
+exportado e o plugin saem bit a bit os da BASE: `tests/grao_base.py` gravou a referência no código da BASE
+(`tests/data/grao_base.json`: planos de todos os presets e de looks com grão, halação, maciez e Laboratório;
+quadros do modo Película e do modo Edição em 8 e 16 bits; LUTs; nós do plugin em GLSL; o OpenFX compilado) e
+`tests/test_grao.py` confere (os hashes da GPU e do OpenFX só na mesma placa e no mesmo compilador da gravação).
+O comportamento de cada ajuste ligado fica em `tests/test_grao_efeitos.py`.
+
+### 30.1 Patentes conferidas antes da estrutura pela densidade (M1)
+
+> **Decisão de 29/10/2026 (fase 3 da 1.6):** o usuário decidiu fazer o grão de forma completa, independente de
+> patentes. A estrutura pela densidade (a M1 original, com camadas misturadas pela densidade) entrou (§30.8). Os
+> quadros de reivindicações abaixo e em §30.7 ficam como histórico; as licenças de código e de arquivos de
+> terceiros continuam valendo.
+
+Lidas em 29/10/2026, nas reivindicações publicadas (Google Patents):
+
+- **US 12,705,810 B2** (Northwestern University, "Real time film grain rendering and parameter estimation";
+  provisório 63/490,545 de 16/03/2023, pedido 18/608,381, concedida em 11/08/2026). As reivindicações
+  independentes (1, método; 12, sistema) recebem uma imagem, acham regiões de valor constante, tiram delas
+  estatísticas de segunda ordem (variância e correlação) e sintetizam um ruído correlacionado dependente do
+  sinal a partir dessas estatísticas; as dependentes cobrem o modelo booleano filtrado (centros de Poisson com
+  um parâmetro de densidade, raios i.i.d.). **Não conflita** com o grão do app enquanto ele não for estimado de
+  um quadro ou de um scan: os parâmetros vêm dos ajustes e das constantes σD dos datasheets.
+- **US 9,438,821 B1** (Suny Behar Parker, o Livegrain; prioridade 11/04/2014, concedida em 06/09/2016, em vigor
+  até cerca de 10/04/2035). Reivindicações 1, 12 e 20: receber "assets" de grão ligados a níveis de exposição,
+  dividir a imagem em mattes delimitados pela luminância, somar a cada matte um asset diferente e combinar
+  (2 a 5: três ou cinco mattes no pé, na reta e no ombro da curva D log E). A descrição usa placas de grão
+  escaneadas de um cartão cinza de −6 a +6 stops.
+- **US 9,692,987 B2** (continuação da anterior; concedida em 27/06/2017, em vigor até cerca de 10/04/2035).
+  Reivindicações 1 e 9: somar "um tratamento de grão diferente" a cada um de dois ou mais mattes delimitados
+  pela luminância e combinar. Reivindicação 16: aplicar um primeiro tratamento de grão a uma primeira faixa de
+  luminância e um segundo tratamento, diferente, a uma segunda faixa (sem mattes). Não exige grão escaneado.
+
+**Decisão: a M1 ficou de fora.** A proposta do plano (algumas camadas de ruído, cada uma com tamanho,
+aglomeração e assimetria próprios, misturadas por pesos suaves da densidade local) lê quase ao pé da letra as
+reivindicações 1 e 16 da US 9,692,987, e mesmo uma estrutura que muda de forma contínua com a densidade pode ser
+lida como "tratamentos de grão diferentes por faixa de luminância". Fica como pergunta para o usuário (e, se for
+o caso, para um advogado). O que a 1.6 faz com o grão continua sendo **um** campo procedural por quadro: a M3
+soma esse campo na densidade de cada camada do negativo e quem molda o grão visível é a curva da cópia (a
+transferência física do modelo), sem mattes nem tratamentos por faixa (§30.3).
+
+Depois, por decisão do usuário, a M1 entrou com outra forma (§30.7): um processo físico só (o modelo booleano), com
+um conjunto só de parâmetros, e o quadro das reivindicações dessas três patentes contra o código.
+
+### 30.2 Maciez pelo grão (M2)
+
+`grao_maciez` (seção Grão, 0–100%, padrão 0%) soma `sig_grao = k · s · quantidade` na mesma raiz quadrada da
+maciez (`soft = √(sig_g² + sig_u² + sig_m² + sig_grao²) · scale`), só com o grão ligado. `s` é o tamanho
+natural do grão em px@1080 (`grao.grain_size_1080`: `0,8 · Tamanho · bitola · ISO`, sem o mínimo de 1 px da
+grade, para valer igual em qualquer resolução) e `k = 1/√3` (`grao.GRAIN_SOFT_K`): a grade de gaussianas do
+ruído é interpolada por B-spline cúbica, a convolução de quatro caixas de uma célula, com variância `4·s²/12`
+por eixo; com 100% a imagem recebe a gaussiana desse mesmo envelope e deixa de ser mais nítida que o grão. Em 0%
+`sig_grao = 0` e a soma é exatamente a de antes. O nó *Textura* e o OpenFX fazem a mesma conta
+(`PC_GRAIN_SOFT_K`, de `resolve._grao_tables`).
+
+### 30.3 Diferença de nitidez entre camadas (M7)
+
+`mtf_camadas` (seção Película, ao lado do MTF; 0–100%, padrão 0%) dá a cada canal a maciez da sua camada. Os
+dados: os pontos das curvas de MTF de cada camada lidos dos datasheets públicos (regra 8), em
+`pelicula/data/datasheets/H-1-5207.json` (VISION3 250D, revisão 3-26, p. 3) e `H-1-2383.json` (cópia 2383,
+revisão 3-22, p. 4), cada um com a publicação, a página, a figura, as condições, o SHA-256 do PDF lido, o método
+da leitura (as imagens raster dos gráficos, a escala pela grade, o centro das linhas coluna a coluna) e o erro
+(±1 px ≈ ±1,2–1,7%). `tools/ajustar_grao.py` (numpy, offline) toma a camada mais nítida como referência e dá a
+cada outra camada a gaussiana que, em quadratura, leva a resposta da referência à dela:
+`MTF_c/MTF_ref ≈ exp(−2π²·Δσ²·f²)`, Δσ² = média de `−ln(razão)/(2π²f²)` entre 20 e 62 ciclos/mm (abaixo, o
+efeito de adjacência passa de 100%; acima, a cauda das curvas cai mais devagar que uma gaussiana). O resultado
+fica em `grao.MTF_NEG_DSIGMA_UM` (R 4,261, G 2,167, B 0 µm) e `grao.MTF_PRINT_DSIGMA_UM` (R 2,291, G 0,
+B 4,462 µm), e `tests/test_grao_efeitos.py` confere que são as do ajuste e que a gaussiana fica a menos de 8%
+(negativo) e de 18% (cópia, cujo azul cai mais devagar) das razões publicadas entre 25 e 50 ciclos/mm.
+
+O modelo (`grao.layer_sigmas`): sem cópia, o Δσ do negativo; com cópia (`grao.print_chosen`: a *Cópia* do look
+com força > 0, ou o Laboratório ligado com uma cópia que não seja "sem cópia"), negativo e cópia em quadratura
+por camada, menos a camada mais nítida do caminho (em quadratura), para que ela continue com a maciez escalar de
+antes. µm → px@1080 por `1920 / largura da imagem da bitola` (as larguras de `look.SCAN_FORMATS`; 8 mm, 65 mm
+e IMAX pela abertura de câmera publicada, em `grao.FRAME_W_MM_EXTRA`; "nenhuma" usa o 35 mm), vezes
+`2 · quantidade` (50% = o medido, como a *Quantidade do MTF*). O gancho `grao.layer_softness(plan, v, soft,
+scale)`, logo depois da maciez em `build_plan`, soma em quadratura `soft` e o Δσ de cada canal e grava
+`Plan.soft_sigma3` (`soft_sigma` = o maior, `u_soft_on = 1`, `u_soft_mix = 1`); em 0% não mexe em nada.
+
+A máquina do desfoque é a mesma da maciez: com `soft_sigma3`, o `Engine` usa `shaders.BLUR3` (a gaussiana
+separável do BLUR com um `vec3` de sigma, raio pelo maior; compilado no primeiro uso por `_lazy_program`) nas
+duas passadas da maciez. O FINAL não muda (a mistura `u_soft_mix` e a nitidez são as de antes). O nó *Textura*
+faz a mesma gaussiana 2D por canal no laço da maciez: os pesos viram `float3` só com a diferença ligada (sem ela,
+`pc_s3(w0)` dá os mesmos bits de antes no GLSL dos testes, onde um segundo laço mudava a compilação do
+primeiro). Como o nó não vê a cópia dos nós *Cor*/*Laboratorio*, ganhou o controle interno `ui_mtf_copia`
+("MTF - Camadas com copia"), cujo padrão vem de `grao.print_chosen` (`resolve.DERIVED`, preenchido por
+`_with_defaults` e por `ui_uniforms`); o OpenFX tem a cópia nos próprios valores, então o pula (`ofx.SKIP`) e o
+`pc_core.cpp` faz a conta com `copia`, `copia_forca`, `lab_on` e `lab_copia` (`blur_pass3`). As tabelas
+`PC_PX_MM` e `PC_MTF_LAYERS` e os índices `PC_COPIA_NENHUMA`/`PC_LAB_COPIA_NENHUMA` saem de
+`resolve._grao_tables`.
+
+### 30.4 Grão no negativo (M3)
+
+`lab_grao` (seção Laboratório, depois da revelação; padrão desligado) vale com o Laboratório e o grão ligados
+(`grao.negative_grain_on`). O gancho `grao.negative_grain(U, v, k)`, no fim do bloco do grão de `build_plan`, tira
+o grão da saída e o põe no negativo com `u_grain_on = 2` (1 = o grão de sempre) e `u_ngrain` = a amplitude por
+pixel de cada camada R, G, B. Nenhum uniform novo entra nos planos de sempre (`u_ngrain` só é lido com
+`u_grain_on = 2`, e esse plano sempre o grava; os planos dos projetos da 1.4 seguem iguais). A grade do ruído (`grain_size`, `grain_seed`, NOISE) é a de sempre. No FINAL, `negGrain(uv)` faz a mesma
+mistura de aspereza e de cor do `applyGrain`, **sem** a resposta por tom, e grava a global `g_ng` (COMMON) antes
+do `colorPipe`; `labPath` soma `g_ng` à densidade do negativo (`dn += g_ng`), nos dois caminhos do Laboratório e
+também no "sem cópia". O BAKE nunca escreve `g_ng` (fica zero): o LUT exportado não muda, e o teste confere bit a
+bit. É um campo procedural só (sem mattes nem tratamentos por faixa, §30.1): a curva da cópia é que esconde o grão
+nos pretos e nas altas luzes estouradas.
+
+A amplitude: `NEG_SIGMA_D` é a média da granularidade rms difusa de cada camada (sigma D numa abertura de 48 µm)
+lida de H-1-5207 p. 3 (`pelicula/data/datasheets/H-1-5207.json`): R 0,00611, G 0,00709, B 0,01262. O app põe
+grão por pixel; para que a média numa abertura de 48 µm tenha esse sigma D, divide-se pelo sigma da média do campo
+do grão (variância 1 por pixel) nessa abertura, `GRAN_APERTURE_SIGMA = 0,43215`, na referência: célula de 0,8
+px@1080 (35 mm, ISO 250, Tamanho 1) e abertura de 48 µm · 1920 / 24,9 mm = 3,70 px@1080. `tools/ajustar_grao.py`
+calcula esse sigma pela integral exata `∫∫ C(r)·K(r) d²r` (autocovariância do campo = B-spline cúbica
+correlacionada consigo mesma em x e em y; `K` = área comum de dois círculos / área²); a lei de Selwyn (sigma ∝ s/D)
+daria uns 15% a mais nessa abertura pequena, e uma simulação em numpy no teste confirma o valor exato. A amplitude
+final é `NEG_GRAIN_AMP · Intensidade · bitola · ISO · compensação · revelação · redes` (o mesmo multiplicador do
+grão de sempre). Medido no 35 mm com a 2383 e os ajustes padrão do grão: no cinza médio o verde fica com ≈ 1,4× o
+grão de sempre e o azul com ≈ 1,6× o verde; 4 stops acima do cinza (altas luzes estouradas) e 6 abaixo, menos de
+um terço do grão dos tons médios (`tests/test_grao_efeitos.py` confere essas relações e que o brilho médio de cada
+faixa muda menos de 0,003).
+
+Plugin: `pc_lab_path` ganhou o argumento `gn` (`dn = dn + gn`; o nó *Cor* passa zero). O nó *Laboratorio* ganhou
+`lab_grain_controls()` (o modo e os ajustes do grão que ele usa) e `B_NGRAIN` (no lugar de `/*NGRAIN*/` de
+`B_LAB`): a mesma grade do Textura (`pc_noise`, `K_RAND` + `K_TEXTURA`) e `pc_neg_grain` (`K_NGRAIN`), com
+`PC_NG_AMP` de `_grao_tables`. Como o nó de cor também serve de LUT, ele não usa `TIMELINE_FRAME_INDEX` (o teste
+`test_frame_index_is_version_guarded` exige isso): no DCTL o grão no negativo fica parado (semente sem o quadro).
+O OpenFX tem o controle `lab_grao` (`ofx.controls()` soma `lab_grain_controls()`; os outros já vêm do Textura),
+gera `pc_colorpipe_ng(V, lin, gn)` (o mesmo `B_LAB` com `gn = gn_in`) e, com o modo ligado, faz a cor exata por
+pixel com a densidade do grão (sem o LUT rápido, que não tem a posição) e não soma o grão na saída.
+
+### 30.5 Halação física
+
+`hal_modelo` (seção Halação; `"brilho"` = a de sempre, o padrão; `"fisica"`). O gancho
+`grao.physical_halation(plan, U, v, scale)`, logo depois da cadeia da halação em `build_plan`, troca a cadeia `hal`
+por uma sem limiar e sem misturar os canais (`Chain("hal", 0, sigma, HAL_PHYS_LIMIT, False, scan)`), com
+`sigma = hal_raio · FRAME_W(35 mm) / FRAME_W(bitola) · scale` (o anel tem o mesmo tamanho na película: ~2 ·
+espessura da base · tan(ângulo crítico) ≈ 0,23 mm), e põe `u_hal_on = 2` e `u_hal_amt = hal_forca · HAL_PHYS_K`.
+Nenhum uniform novo. No FINAL, antes do `colorPipe` (logo, antes da cópia e do Laboratório):
+
+    lin += a / (1 + a) · (halo.r − e(E)),   a = Cor · u_hal_amt,   e(E) = E / (1 + E / HAL_PHYS_LIMIT)
+
+com `E` = o vermelho de `t_lin` no ponto vezes o alfa (a máscara do scan; 1 sem ele), a mesma fonte do EXTRACT
+(`halSource` no FINAL, com a constante `HAL_PHYS_LIMIT` igual à de `grao`, o teste confere). A parte uniforme do
+reflexo (a de uma área lisa) já está nas curvas do filme, medidas com ele; só o desvio local entra, e uma área lisa
+fica igual em qualquer cor (com o arredondamento das texturas f2 da cadeia, < 1/4 de código de 8 bits). O limite
+suave da fonte (16, ~6,5 stops acima do cinza) existe porque o valor de uma luz estourada no arquivo é um palpite da
+entrada (o Rec.709 abre o branco do vídeo até ~700): sem ele, o halo de um ponto estourado cresceria sem fim.
+`HAL_PHYS_K = 0,18` (11% com a Intensidade padrão, na ordem de uma película sem anti-halo) não vem de datasheet: é
+escolhido para que o halo em volta de uma luz estourada tenha a força do modelo brilho com os mesmos ajustes
+(medido: 0,41 / 0,21 / 0,05 contra 0,41 / 0,19 / 0,05 de diferença no R, G, B logo fora de uma luz de 12 px, no
+35 mm). A cor não muda com a bitola (ela vem do filme, e não há dado publicado por bitola): só o raio.
+
+Plugin: o nó *Textura* tem o controle `hal_modelo` e, no modo físico, troca a flag `hal` por `halp` (a mesma
+espiral numa passada de `_glow`, sem limiar, `PC_HAL_PHYS_LIMIT`, sem misturar canais, raio `PC_HAL_PX[bitola]`)
+e soma o desvio local com `pc_extract` no próprio pixel. O OpenFX faz o mesmo na cadeia de verdade (`hal_phys` em
+`pc_core.cpp`). Tabelas em `_grao_tables`: `PC_HAL_PX`, `PC_HAL_PHYS_K`, `PC_HAL_PHYS_LIMIT`, `PC_HAL_FISICA`.
+
+### 30.6 Respiração por camada
+
+`grao_respiracao` (seção Grão; 0 = desligada, o padrão; vale com `grao_on`, mesmo com a Intensidade em 0). O modelo
+(`grao.breath_density`): cada camada tem, em cada quadro, um desvio de densidade do negativo
+
+    dD_c(q) = BREATH_SIGMA_D · Respiração · (0,8 · rápido_c(q) + 0,6 · lento_c(q))
+
+com `rápido = (look._hash(q, s_c) · 2 − 1) · √3` (de quadro em quadro) e `lento = look._vnoise(q / 24, s_c + 101) ·
+BREATH_SLOW_NORM` (ao longo da fita), os dois com variância 1 (`BREATH_SLOW_NORM = 2,0098` = 1 / desvio da
+`_vnoise`, conferido no teste), `s_c = semente · 3 + 7001 + c`. As camadas são independentes; a correlação de um
+quadro para o seguinte fica em ~0,36 (a parte lenta) e some em ~48 quadros. Está em quadros, não em segundos: o que
+varia é a fita. O desvio vira exposição pelo gama do negativo (`dlog E = dD / 0,6`) e o gancho
+`grao.breathing(U, v, frame)` grava `u_breath` = o fator `10^(dD/0,6)` de cada camada; o FINAL faz `lin *= u_breath`
+logo antes do `colorPipe` (depois de halação, bloom, névoa e vazamento: tudo o que expõe o quadro). O BAKE não o
+lê: o LUT exportado não muda. Sem a respiração o plano não grava `u_breath` (os planos de sempre não mudam) e o
+`Engine` põe o neutro `(1, 1, 1)` no FINAL antes do plano (`Engine.FINAL_NEUTRAL`), para que um quadro anterior com
+a respiração não deixe o valor no programa (o teste confere). `BREATH_SIGMA_D = 0,015` (100% ≈ 0,025 log E = um
+ponto de copiadora) não vem de datasheet.
+
+Plugin: `K_BREATH` (`pc_breath`, a mesma conta com `pc_hash`/`pc_vnoise`) no nó *Textura* e no OpenFX. O nó
+*Textura* vem depois da cor e usa `TIMELINE_FRAME_INDEX` (os nós de cor não podem): multiplica a luz da saída
+(`pc_code_to_lin`) pelo mesmo fator, o que é igual ao app com a cor neutra (teste de paridade) e uma aproximação com
+uma cópia ou o Laboratório. O OpenFX multiplica a luz antes da cor, como o app.
+
+### 30.7 Grão físico: o modelo booleano no negativo
+
+`lab_grao_modelo` (seção Laboratório, logo depois de `lab_grao`; `"ruido"` = a M3 de §30.4, o padrão; `"fisico"`)
+troca o **gerador** do grão no negativo. Vale só quando a M3 vale (`grao_fisico.on(v)` = `grao.negative_grain_on(v)`
+e o modelo físico); a linha fica escondida pelo módulo Beta **"grao_fisico"** (desligado, fora de todos os perfis;
+`ui/grao_fisico_ui.py`). Desligar o módulo só esconde a linha: `build_plan` nunca consulta `modules`, e um projeto
+com `"fisico"` sai igual (`modules.used_by` o aponta).
+
+**O modelo.** Um processo estocástico só, com um conjunto só de parâmetros para a imagem inteira: o modelo booleano
+(Matheron, 1975) de discos opacos de raio `r` com centros de Poisson. A intensidade local vem do valor da própria
+camada pela lei da cobertura:
+
+- Nutting (1913): uma camada com uma fração `u` coberta por partículas opacas transmite `T = 1 − u`, e a densidade é
+  `D = −log10 T`.
+- Newson, Delon e Galerne (2017): no modelo booleano com raios de segundo momento `E[r²]`, a cobertura média `u`
+  pede `λ = −ln(1 − u) / (π·E[r²])` centros por unidade de área. Com `u = 1 − 10^(−D)`: `λ·πr² = D·ln 10`.
+
+A covariância da cobertura a uma distância `h` é `(1 − u)²·(e^{λγ(h)} − 1)` (`γ` = área comum de dois discos;
+`grao_fisico.covariance`); em `h = 0` dá `u(1 − u)`. O que se vê **sai da lei**, nada é escolhido por faixa: numa
+camada fina (D pequeno) há grãos isolados (assimetria positiva), numa densa há buracos isolados (assimetria
+negativa), e a variância é máxima no meio (`u = 1/2`). Os raios são globais (um só `R_K · s`, `s` =
+`grao.grain_size_1080`). Implementado a partir dos artigos, sem código de terceiros.
+
+**Do negativo ao pixel.** Os grãos de verdade (nuvens de corante de ~0,25 µm) são muito menores que um pixel de 1080
+linhas. O app usa discos do tamanho do grão visível e uma fração `a` da transmitância por camada: com `û` = a
+cobertura vista pelo spot do pixel e `T̂ = 1 − û`, `T' = (1 − a)·T + a·T̂` (a transmitância média fica a do
+negativo) e o desvio de densidade é `dD = −log10(T'/T) = −log10(1 + a·(T̂ − T)/T)`. `a = KAPPA_c · Intensidade ·
+bitola · ISO · revelação · redes` (o mesmo multiplicador do grão de sempre, **sem** a compensação da prévia
+reduzida, para valer igual em qualquer resolução), com teto `AMP_MAX = 0,95`. O desvio entra no mesmo lugar do
+`g_ng` (`dn += …` em `labPath`), e a cópia molda o grão como na M3.
+
+**Calibração** (`tools/ajustar_grao.py`, offline; `tests/test_grao_fisico.py` confere que as constantes são as da
+ferramenta):
+
+- `R_K = 0,759`: o raio que dá a mesma meia-distância de correlação do campo de ruído da M3 (0,99 célula) no verde
+  da densidade de referência; o grão físico tem o mesmo tamanho visível do "ruido".
+- `REF_DENSITY` (R 0,96198, G 0,96198, B 0,94202): a densidade de cada camada no cinza médio do VISION3 250D
+  (`look.lab_paths`).
+- `KAPPA` (R 0,02564, G 0,02975, B 0,05393): a fração que dá, na densidade de referência, o sigma D numa abertura
+  de 48 µm igual a `grao.NEG_SIGMA_D` (H-1-5207, §30.4) no 35 mm com ISO 250 e *Tamanho* 1 (a abertura =
+  3,70 px@1080). O sigma da média na abertura vem da integral exata da covariância do modelo com a área comum de
+  dois círculos (passo de 0,01 raio). Medido no shader do look: R 0,00599, G 0,00695, B 0,01232 (−2,0%, −2,0%,
+  −2,4% do datasheet; azul > verde > vermelho).
+
+**A aproximação em tempo real** (`grao_fisico.GLSL`; o mesmo caminho na prévia e na exportação):
+
+- O spot do pixel são `N_SAMPLES = 16` pontos fixos (espiral de Vogel com raios pelos quantis de uma gaussiana de
+  sigma `FILTER_K = 0,75` raio), em px@1080: o mesmo número de pontos na prévia e na exportação, e a estatística
+  não depende da resolução. `û` = a fração dos pontos cobertos.
+- Grade de células de lado `CELL = REACH` (≈ 2,97 raios, o alcance do spot mais um raio); só as células que tocam o
+  círculo de alcance são visitadas. Em cada célula, os centros são as chegadas de Poisson no **eixo da
+  intensidade** (`t += −ln U` com o hash `pcg` de (célula, processo, semente)): o disco `i` existe numa camada se
+  `t_i < λ·área da célula`. Isso dá a contagem de Poisson do λ local e é aninhado (mais densidade = os mesmos
+  grãos e mais alguns). Teto de 64 discos por célula e processo (`CAP`; a média em `D_MAX = 3` é ≈ 19).
+- *Grão colorido*: um processo comum às três camadas (fração `1 − grao_cor` de λ) e um próprio de cada uma
+  (`grao_cor`); a soma continua Poisson(λ). Em 0 as três camadas têm os mesmos grãos.
+- Determinístico: a semente é `plan.grain_seed` (a do grão de sempre: muda a cada quadro com *Muda a cada quadro*).
+- Erro contra a referência numpy (`tests/test_grao_fisico.py`: rasterização global de Poisson com o mesmo spot)
+  e contra a variância exata do modelo:
+
+| D | `u` | média GPU | variância GPU / exata | assimetria GPU / numpy |
+|---|---|---|---|---|
+| 0,05 | 0,1087 | 0,1084 | −0,5% | +1,74 / +1,73 |
+| 0,3 | 0,4988 | 0,4964 | +0,2% | −0,14 / −0,15 |
+| 1,0 | 0,9000 | 0,8998 | −0,3% | −1,88 / −1,88 |
+| 2,0 | 0,9900 | 0,9898 | +1,8% (sorteio) | −4,88 / −5,02 |
+
+  Meia-distância de correlação: 1,43 r (numpy 1,40 r) em D = 0,3 e 1,29 r (1,28 r) em D = 1. A mesma cena em 1080 e
+  em 2160 linhas tem a mesma média e o mesmo desvio (±5%) depois de reduzida.
+- Custo (RTX 3060, cena de teste, render + leitura): o FINAL com "ruido" ≈ 2,2 ms em 1080p e ≈ 7 ms em 4K; com
+  "fisico" ≈ 13 ms e ≈ 41 ms. Com 8 pontos em vez de 16 cairia uns 10–25%; células de meio alcance ficaram mais
+  lentas (20/76 ms) e de dois alcances, iguais. A prévia e a exportação usam a mesma conta.
+
+**Onde está.** O gancho `grao_fisico.negative_grain(plan, U, v, gauge, scale, amt, net_grain)`, logo depois de
+`grao.negative_grain` em `build_plan`, troca `u_grain_on = 2` por `3`, tira `u_ngrain` e grava `u_pg_r`, `u_pg_k`
+(`1/scale`), `u_pg_amp`, `u_pg_chroma` e `u_pg_seed`; `plan.grain_size = 0` (sem a passada do NOISE). Com "ruido"
+o gancho não faz nada. O `Engine` (`_final_program`) usa `grao_fisico.FINAL_PG` só com `u_grain_on == 3`: o FINAL
+de sempre com `physGrain` somado depois de `dn += g_ng` e a posição `g_pg_pos = gl_FragCoord.xy · u_pg_k` (linha 0
+= topo), compilado no primeiro uso (`_lazy_program`). O FINAL e o BAKE continuam letra por letra: com "ruido" os
+planos, os quadros e o LUT são os de antes (`tests/test_grao.py`, `tests/test_cor_base.py`), e o LUT exportado nunca
+tem o grão físico (o BAKE não o escreve; teste). Nenhum uniform novo nos planos de sempre: os `u_pg_*` só existem
+no programa `final_pg`, e o plano que o usa sempre grava todos.
+
+Plugin: `K_PGRAIN` (`pc_pg_coverage`/`pc_pg_grain`, a mesma conta) e as constantes de `_pgrain_tables`
+(`PC_PG_OFS`, `PC_PG_RK`, `PC_PG_KAPPA`…). `pc_lab_path` ganhou `ga, gq, gs` (fração por camada, posição/raio/
+fração própria, semente) e o marcador `/*PGRAIN*/`, que só o nó *Laboratorio* e o OpenFX preenchem
+(`B_PGRAIN_LAB`); o nó *Cor* fica sem ele. Controle `lab_grao_modelo` em `lab_grain_controls()`. No DCTL o grão fica
+parado (como a M3); o OpenFX gera `pc_colorpipe_pg` e o anima (`pc_core.cpp`, semente `semente·7919 + quadro`).
+Paridade na GPU: `test_resolve.py` (nó *Laboratorio* × app: média < 0,5/255, menos de 0,2% dos pixels acima de
+2,5/255 — um disco exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do float) e
+`test_ofx.py` (quadros 0, 7 e 61). Custo do nó *Laboratorio* no harness GLSL (aproximação do DCTL, mesma placa):
+14,6 → 27,4 ms em 1080p e 52,6 → 95,3 ms em 4K; o OpenFX na CPU: 236 → 762 ms em 1080p.
+
+**Patentes: quadro das reivindicações.** Leitura factual das reivindicações publicadas contra o que o código faz.
+**Não é parecer jurídico**; a decisão de publicar é do usuário (e, se for o caso, de um advogado).
+
+| Patente / reivindicação | O que a reivindicação exige (resumo) | O grão físico |
+|---|---|---|
+| US 9,692,987 B2, reiv. 1 e 9 | gerar dois ou mais mattes delimitados pela luminância; somar a cada um "um tratamento de grão diferente"; combinar | não há mattes nem divisão da imagem; uma função só, com os mesmos parâmetros em todos os pixels |
+| US 9,692,987 B2, reiv. 16 | um primeiro tratamento de grão numa primeira faixa de luminância e um segundo, diferente, numa segunda faixa | não há faixas nem limites: `physGrain(D, posição, semente)` não tem ramo por valor; λ é uma função contínua da densidade da camada (a lei de Nutting, a física da transmitância), o mesmo processo em toda a imagem |
+| US 9,438,821 B1, reiv. 1, 12 e 20 | receber "assets" de grão ligados a níveis de exposição; mattes pela luminância; um asset diferente por matte; combinar | não há assets, placas nem scans: os discos são gerados pelo hash; não há mattes |
+| US 12,705,810 B2, reiv. 1 e 12 | receber uma imagem; achar regiões de valor constante; estimar delas estatísticas de segunda ordem; sintetizar ruído correlacionado dependente do sinal a partir delas (as dependentes cobrem o modelo booleano filtrado) | nada é estimado de um quadro ou de um scan: os parâmetros vêm dos ajustes e das constantes dos datasheets (`NEG_SIGMA_D`, `R_K`, `KAPPA`, calculadas offline). O modelo booleano das dependentes só pesa se os passos da independente existirem |
+
+Anterioridade (datas para conferência):
+
+- P. G. Nutting, "On the absorption of light in heterogeneous media", *Philosophical Magazine* 26 (1913): a densidade
+  de uma camada de partículas opacas pela fração coberta.
+- E. W. H. Selwyn, "A theory of graininess", *Photographic Journal* 75 (1935): a granularidade de um modelo de grãos
+  aleatórios e a lei `σ_D·√A` ≈ constante (o sigma D numa abertura, a medida usada pelos datasheets).
+- G. Matheron, *Random Sets and Integral Geometry* (Wiley, 1975): o modelo booleano.
+- ITU-T H.264 | ISO/IEC 14496-10, Anexo D, mensagem SEI *film grain characteristics* (das extensões FRExt, de
+  2004; na edição ITU-T H.264 de 03/2005): parâmetros de grão sintético transmitidos com o vídeo, com intervalos
+  de intensidade e um modelo de grão por intervalo — grão dependente do nível do sinal antes de 2014.
+- A. Newson, J. Delon e B. Galerne, "A Stochastic Film Grain Model for Resolution-Independent Rendering",
+  *Computer Graphics Forum* 36(8) (2017): o modelo booleano para renderizar grão, a relação λ ↔ cobertura e o
+  filtro do spot (anterior ao provisório de 2023 da US 12,705,810).
+
+### 30.8 Grão completo
+
+Fase 3 da 1.6, depois da decisão de 29/10 (§30.1): o grão "de forma completa, independente de patentes". Três
+partes: a **estrutura pela densidade** (a M1 original), o **tamanho do cristal** e a **variação do tamanho** do grão
+físico, e a decisão de **não** gravar placas de grão. Os padrões continuam bit a bit (`tests/grao_base.py`,
+`tests/cor_base.py`, `tests/entrada_base.py`; só a chave `plugin` de `cor_base.json` foi regravada, porque o texto
+dos nós *Laboratorio* e *Textura* mudou de propósito).
+
+**Estrutura pela densidade** (`pelicula/grao_estrutura.py`; `grao_estrutura` 0–100%, padrão 0%, seção Grão;
+`grao_aglomeracao` 0–100%, padrão 0%, avançado). A forma do grão muda com a densidade local, como no modelo booleano
+de §30.7, mas sobre o campo do grão de sempre (a mesma grade, as mesmas sementes, a mesma mistura de *Aspereza* e
+*Grão colorido*):
+
+- **Três camadas**, cada uma num ponto do modelo booleano com o spot do pixel (`tools/ajustar_grao.py`,
+  `structure_layers`): **fina** (D = 0,05, u ≈ 0,11; assimetria exata +1,74; 11% maior), **média** (D = 0,3, u ≈ 0,5;
+  −0,15; 9% maior) e **densa** (D = 1, u ≈ 0,9; −1,90; o tamanho do grão de sempre). A assimetria vem de uma
+  transformação não linear do campo gaussiano, `T_s(g) = (e^(s·g − s²/2) − 1) / (sinal(s)·√(e^(s²) − 1))` (média 0 e
+  variância 1 exatas; assimetria `(e^(s²) + 2)·√(e^(s²) − 1)`; `s` = 0,4976, −0,0486, −0,5304). A assimetria do
+  modelo booleano é integrada com o mesmo spot de 16 pontos (a união de três discos pela inclusão–exclusão, a área
+  comum dos três numa grade de 0,004 raio). O tamanho é a fração da amostra grossa do ruído (a da *Aspereza*) que dá
+  a meia-distância de correlação da camada em relação à densa (`STRUCT_COARSE` 0,318, 0,292, 0); a *Aglomeração* leva
+  a da camada densa até 1 (até 2,3× maior).
+- **Mistura**: `s01 = smoothstep(ln 0,05, ln 0,3, ln D)` e `s12 = smoothstep(ln 0,3, ln 1, ln D)`, com `D = ρ·DREF`
+  (`DREF` = `grao_fisico.REF_DENSITY`, a densidade de cada camada no cinza). Os parâmetros (s e a fração grossa) são
+  interpolados por esses pesos: um padrão só, aninhado, com variância 1 exata em toda densidade (sem emendas num
+  degradê, sem mattes). Com a *Estrutura* em `e`: `s·e`, fração grossa `aspereza + (1 − aspereza)·e·δ` e força
+  `1 + e·(envelope − 1)`; em 0 é o grão de sempre.
+- **Força por densidade e por camada** (H-1-5207, p. 3, figura *Diffuse rms Granularity Curves*): o sigma D de cada
+  camada em função de `ρ` = densidade relativa ao cinza `(D − Dmin)/(D_cinza − Dmin)`. A figura traz as curvas de
+  densidade (cheias) e o sigma D (tracejado) na mesma log E; as curvas cheias foram lidas agora (chave
+  `granularidade.densidade` do JSON, de 0,2 em 0,2 log E) e o cinza fica em log E 2,527 (onde cada curva chega à
+  densidade acima da base que a curva sensitométrica tem em 0 stop; as três camadas concordam). Os trechos que
+  faltavam (R e G sobrepostos de log E 2,0 a 2,6; azul em 2,6) estão em `granularidade.pontos_extras`. Os pontos de
+  antes não mudaram (o `NEG_SIGMA_D` da M3 é a média deles). Tabela `STRUCT_SIGMA_D_Q` (nós em √ρ, 0 a 1,6): pico
+  suave nas exposições baixas e médias (ρ ≈ 0,2–0,3), queda nas altas, azul > verde ≈ vermelho.
+  - Grão de sempre (`u_grain_on = 1`): `ρ` de cada canal sai da exposição da cena (`linToStops(lin)` antes do
+    `colorPipe`) pela curva da mesma figura (`STRUCT_RHO_X`, −8 a +8 stops); `envelope = σD(ρ)/σD(1) ×
+    STRUCT_RATIO` (razão das camadas no cinza: R 0,930, G 0,930, B 1,898; a média do Rec.709 é 1, então o brilho do
+    grão nos tons médios fica o de antes).
+  - Grão no negativo "ruido" (`u_grain_on = 2`): `ρ = dn/nmid` dentro de `labPath` (cada caminho do Laboratório com a
+    sua densidade); `envelope = σD(ρ)/NEG_SIGMA_D` (o absoluto do datasheet, já que `u_ngrain` é o NEG_SIGMA_D).
+  - Modelo "fisico" (`u_grain_on = 3`): a estrutura não se aplica (ele já é a estrutura).
+- **Os pesos por tom** (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) continuam multiplicando o grão de sempre
+  como antes, por cima da estrutura: eles dizem quanto a cópia mostra o grão (na luminância da saída), a estrutura
+  diz como o negativo o fez (na exposição da cena). No grão no negativo eles já não valiam (§30.4).
+- **A cópia (2383)** não ganhou grão próprio: a granularidade dela não foi digitalizada e, somada em quadratura, seria
+  ≲ 10% do grão do negativo nos tons médios e < 1/255 nos pretos. Fica de fora (documentado aqui).
+
+Na GPU: variante `final_gs` (`grao_estrutura.FINAL_GS`, substituição de texto de `shaders.FINAL`: a parte comum
+antes de `// Um caminho completo. lin:`, `gsNeg` no lugar de `dn += g_ng;`, `applyGrainS` no lugar de `applyGrain`,
+`gsSample` no lugar de `negGrain`), compilada só quando o plano traz `u_gs_amt` (o plano grava `u_gs_amt` e
+`u_gs_clump` só com a *Estrutura* > 0); com véu, pré-exposição ou scanner, `final_gs_lx` (`labx.patch_glsl`). O BAKE
+não muda (o LUT exportado nunca tem grão). Custo (RTX 3060, render + leitura de 16 bits): igual ao do grão de
+sempre dentro do ruído da medida (≈ 4–6 ms em 1080p, ≈ 14–16 ms em 4K).
+
+Testes (`tests/test_grao_estrutura.py`): as constantes são as da ferramenta; o sigma D por densidade de cada camada
+contra os pontos lidos; a referência numpy (`grao_estrutura.channel`) contra o GLSL (`gsChannel`); a estatística de
+cada camada medida no look (força, sinal e valor da assimetria, meia-distância de correlação, aglomeração); os pesos
+por tom por cima; o brilho médio igual; o grão no negativo; LUT igual; determinismo; prévia = exportação; a mesma
+razão para o grão de sempre a 1080 e a 2160 linhas.
+
+**Tamanho do cristal e variação do tamanho** (`grao_fisico.extras`; seção Laboratório, avançados, só com o modelo
+físico e escondidos com o módulo Beta "grao_fisico"):
+
+- `lab_grao_cristal` (0,5–2×, padrão 1): multiplica o raio dos discos. O KAPPA de cada camada é compensado
+  (`CRYSTAL_K`, nós de 2^(k/4)): o sigma D na abertura de 48 µm, na densidade de referência, continua o do datasheet;
+  o cristal muda a textura (grãos maiores e mais raros), não a granularidade. O *Tamanho* da seção Grão continua
+  mudando os dois (§30.7). Pela lei de Selwyn (σD·√A constante para A ≫ grão), o fator seria 1/m; com a abertura de
+  ~6 raios a conta exata dá 1,81 em m = 0,5 e 0,64 em m = 2.
+- `lab_grao_variacao` (0–100%, padrão 0%): cada grão ganha o seu raio, log-normal: `ρ = e^(s·z − s²)/√c`, `s = 0,5 ×
+  variação`, `z` gaussiana (Box–Muller de um hash do próprio grão) cortada em ±2,5, `c` = a média de `e^(2sz − 2s²)`
+  com o corte (fechada com erf), então `E[ρ²] = 1`: `λ·π·E[r²] = D·ln 10` continua e a densidade média não muda. A
+  covariância exata com raios aleatórios é `(1 − u)²·(e^(λ·E[γ_ρ(h)]) − 1)`, `γ_ρ(h) = ρ²·γ(h/ρ)` (quadratura de
+  161 nós); o KAPPA é compensado (`VARIATION_K`: 0,76 em 100%). O alcance da busca cresce com o maior raio (até 2,75
+  raios médios em 100%).
+- Compensações separáveis (`kappa_factor = CRYSTAL_K(m) × VARIATION_K(v)`), conferidas no shader com o cristal 0,7 e
+  a variação 50% juntos (sigma D a ±8% do datasheet, como em §30.7).
+- Programas: o cristal só muda valores (`u_pg_r`, `u_pg_amp`); a variação usa a variante `final_pgv`
+  (`grao_fisico.GLSL_V`: `pgRadius`, `pgHits(d, r²)`, alcance `PG_REACH − 1 + ρ_max`; uniform `u_pg_var` = s, 1/√c,
+  ρ_max) e `final_pgv_lx`. O `FINAL_PG` de sempre não mudou um caractere. O mesmo número de pontos do spot (16) na
+  prévia e na exportação.
+- Custo (RTX 3060, render + leitura de 16 bits, cena lisa no cinza): "ruido" 4,6 / 14,7 ms (1080p / 4K); "fisico"
+  14,9 / 49,0 ms; cristal 2: 12,4 / 43,4 ms; cristal 0,5: 14,8 / 54,7 ms; variação 50%: 21,7 / 75,6 ms; variação
+  100%: 27,0 / 91,8 ms.
+- Plugin: `pc_pg_grain_v` / `pc_pg_coverage_v` / `pc_pg_radius` / `pc_pg_kfactor` / `pc_pg_var` em `K_PGRAIN`, tabelas
+  `PC_PG_CRYS`, `PC_PG_VARK`, `PC_PG_VARINV` (1/√c de 0 a 100% de 5 em 5%; o maior raio sai em forma fechada),
+  `B_PGRAIN_LAB` escolhe a versão de raios variáveis quando `gw.z > 0`; controles "Lab - Tamanho do cristal" e "Lab -
+  Variacao do tamanho" no nó *Laboratorio* e no OpenFX (`pc_colorpipe_pgv`). O OpenFX agora passa o grão físico pelo
+  `labx.body` (véu, pré-exposição e scanner valiam no app e não no OpenFX com o grão físico).
+
+Testes (`tests/test_grao_fisico_extras.py`): padrão neutro (o plano igual); as tabelas contra a ferramenta (uma
+amostra: o cálculo inteiro leva ~30 s); `E[ρ²] = 1` (quadratura e Monte Carlo do Box–Muller cortado); na GPU, o desvio
+do log do raio cresce com a variação e `E[ρ²] = 1`; a cobertura média segue a lei de Nutting e a variância por pixel
+é a do modelo exato com raios aleatórios (±6%); o sigma D na abertura de 48 µm continua o do datasheet (±8%) com o
+cristal, a variação e os dois; brilho médio e LUT iguais; determinismo; nada velho no programa; prévia = exportação;
+resolução. Paridade: `test_resolve.py` e `test_ofx.py`.
+
+**Placas de grão gravadas: não.** A tarefa 3 do plano (placas de grão escaneadas ou gravadas por exposição, como os
+"assets" da US 9,438,821) não foi feita: o modelo físico já reproduz o modelo booleano a ~2% na variância e na
+assimetria (tabela de §30.7), sem arquivos grandes, em qualquer resolução e animado por semente. Ficam de fora
+também (adiadas): o perfil por cartela (M5), "igualar a um filme" e "grão de um scan".
+
+## 31. Cor simples e cor por planos
+
+Frente de cor da 1.6 (#38): máscaras de pele e de posição, "Cor por planos" no look (Beta), cor simples nos
+clipes do modo Edição, grupos de clipes e ferramentas da prévia (zebra, falsa cor e referência). Com os padrões
+nada muda: `tests/cor_base.py` grava na BASE (575c6f5) os planos do look de todos os presets, os uniforms dos
+clipes, o texto do plugin e os hashes dos quadros (8 e 16 bits), dos LUTs exportados e da montagem;
+`tests/test_cor_base.py` confere tudo (os hashes só na placa da gravação).
+
+### 31.1 Máscaras (`masks.py`)
+
+Funções em GLSL (`masks.GLSL`, incluído nos programas que usam) com a referência em numpy; `tests/test_masks.py`
+compara os dois na GPU.
+
+- **Pele** (`skin_mask` / `skinMask(code, vec2(centro, meia largura))`): a cor como vídeo (0 a 1) vai à luz com
+  gama 2,2 e ao OkLab (Ottosson 2020). Três janelas suaves: matiz OkLCh (centro `SKIN_HUE` = 64,5°, meia largura
+  21°, borda 7°), `C/L` entre 0,004–0,014 (tira cinzas) e 0,17–0,21 (tira laranja forte, madeira avermelhada,
+  tijolo) e claridade acima de 0,10–0,20. `C/L` e o matiz não mudam com a exposição (o OkLab é a raiz cúbica da
+  luz). No look a luz da cena passa antes pela curva neutra de exibição (`stopsToDisp(linToStops(lin))`): a
+  máscara vê a pele como ela aparece. Acertada com a escala Monk Skin Tone (Ellis Monk/Google, CC BY 4.0): os 10
+  tons entram no quadro e 1 stop abaixo; laranjas, madeiras escuras/avermelhadas, areia amarelada e cinzas
+  ficam de fora. Limite conhecido: nenhuma máscara só de cor separa a pele de madeira clara ou areia da mesma
+  cor; o conta-gotas (`skin_hue_of`, o matiz da média da luz de uma área) recentra a janela e a largura a estreita.
+- **Degradê** (`gradient_mask` / `gradMask(p, g, k)`, uniforms de `gradient_uniform`): `p` em px@1080 do centro
+  do quadro, y para baixo (`frame_points` / `framePoint(uv, aspecto)`). Linear: linha pelo centro escolhido, valor
+  1 do lado da direção (0° = para cima, 90° = para a direita); radial: 1 dentro do raio. Suavidade em px@1080
+  (0 = borda seca); "Inverter" troca os lados. Por ser em px@1080, a máscara cai no mesmo lugar em qualquer
+  resolução.
+- **Uniformizar a pele** (`skin_even` / `skinEven(lab, centro, k)`): no OkLab, o matiz se aproxima do centro
+  (70% com k = 1) e o `C/L` acima de 0,12 cai pela metade; a claridade não muda. `lch_adjust` / `lchAdjust` gira o
+  matiz e multiplica o croma.
+
+### 31.2 Cor por planos no look (`planes.py`, módulo Beta "cor_planos")
+
+- **Seção** `params.SECTIONS[-1]` ("planos", chave `planos_on`, acrescentada no fim): geometria do degradê
+  (`planos_tipo`, `_angulo`, `_pos_x`, `_pos_y`, `_raio`, `_suavidade`, `_inverter`, em px@1080), cinco ajustes
+  por plano (`planos_{frente,fundo}_{exposicao,temperatura,tonalidade,saturacao,contraste}`), pele
+  (`planos_proteger_pele` = True, `planos_pele_{matiz,saturacao,luz,uniformizar}`) e a janela da máscara
+  (`planos_pele_centro`, `planos_pele_largura`, avançados). Todos os efeitos com padrão 0.
+- **Onde**: `look.build_plan` chama `planes.uniforms(v)` (um gancho depois de `u_vig`). Sem nada a fazer (seção
+  desligada ou ajustes em zero) devolve `{}` e o plano é o de sempre; com ajuste, os uniforms `u_cp_*` fazem o
+  `Engine._base_program` usar `planes.BASE_CP` — o `shaders.BASE` letra por letra, com `imageLin` renomeada para
+  `imageLinRaw` e uma `imageLin` nova que passa por `planes(lin, uv)` (compilado só na primeira vez). Assim a
+  mudança das outras frentes dentro de `imageLin` (entrada) vem junto sem conflito, e um look sem a seção usa o
+  mesmo programa da BASE. `tests/test_planes.py` confere que tirar o gancho devolve `shaders.BASE`.
+- **Matemática** (`planes.apply` em numpy = `planes()` no GLSL): frente = degradê (linear com o lado invertido:
+  a direção aponta para o fundo; radial: miolo); cada plano = ganho por canal (`2^(EV + mistura de
+  temperatura/tonalidade)`), contraste na luminância em stops em torno de 0,18 e saturação em torno da luminância;
+  os dois planos saem da mesma luz e se misturam pelo degradê; com "Proteger a pele", o resultado volta à luz
+  original na medida da máscara da pele. A pele é ajustada na cor exibida (curva neutra → vídeo → OkLab:
+  `skinEven` e `lchAdjust`), volta à luz pela curva inversa e recebe a luz (ganho). A máscara da pele lê a luz
+  pela curva neutra (`stopsToDisp(linToStops(lin))`).
+- **Fora do `colorPipe`**: o `BAKE` (LUT exportado) e o plugin do DaVinci não mudam (`tests/test_cor_base.py`,
+  `tests/test_planes.py`); `docs/DAVINCI.md` diz que o plugin não tem a seção e a mensagem do LUT exportado avisa.
+- **"Ver planos"** (`Engine.plane_view(plano, valores)`): o `BASE_CP` com `u_cp_view = 1` e a vinheta zerada
+  devolve (frente·(1 − proteção·pele), fundo·(1 − proteção·pele), pele, cobertura) num alvo f4; `ui/planes_ui`
+  pinta (laranja, azul, contorno da pele em 0,5) e a camada vai ao `Viewer` por `ui/preview_tools`. O conta-gotas
+  lê a luz da cena (`Engine.scene_light`) em volta do clique, passa pela curva neutra e usa `masks.skin_hue_of`.
+- **Interface** (`ui/planes_ui.py`): o `SectionCard` gerado é reagrupado (barra com Prontos, conta-gotas da pele e
+  "Ver planos"; geometria; blocos Frente, Fundo e Pele). Prontos (`planes.PRONTOS`) só preenchem os controles, um
+  passo do desfazer. A janela liga tudo por `ui/cor_ui.py` (`install`, `after_render`, `module_tools`,
+  `apply_modules`, Esc cancela o conta-gotas).
+
+### 31.3 Cor simples no modo Edição (`colorsimple.py`, módulo "cor_simples")
+
+- **Ajustes de clipe**: três seções de cor acrescentadas no fim de `editparams.VIDEO_SECTIONS` e de
+  `COLOR_SECTIONS` — "pele" (`pele_natural`, `pele_centro`), "alvo" (`alvo_matiz`, `_largura`, `_desvio`,
+  `_sat`, `_luz`) e "degrade" (`degrade_tipo`, `_angulo`, `_x`, `_y`, `_raio`, `_suavidade`, `_inverter`,
+  `_exposicao`, `_temperatura`, `_tonalidade`, `_saturacao`). Seções à parte porque o cartão HSL só mostra as
+  linhas de uma faixa; o inspetor as põe perto das parecidas (`ui/edit_panels.DISPLAY_AFTER`). Todas em
+  `SPARSE_KEYS` (JSON só fora do padrão) e, por serem de cor, entram em `color_active`, nos ajustes rápidos,
+  no "Restaurar cor", no copiar/colar e nas chaves de animação. Fora do padrão o projeto vai para o formato 4
+  ("ajustes_clipe_1_6").
+- **Shader**: `compositor.clip_uniforms` acrescenta `colorsimple.uniforms(v)` quando a cor do clipe está ligada;
+  sem nenhum dos três ajustes devolve `{}`. Com `u_cs_on`, o `Engine.compose` usa `editshaders.CLIP_CS` (ou
+  `CLIP_TR_CS` com transição): o `CLIP`/`CLIP_TR` letra por letra mais `colorsimple.GLSL` (as funções de
+  `masks.GLSL` e `colorSimple`) e, em volta do `colorCorrect`, `vec3 c_in = c;` e `c = colorSimple(c_in, c, uv);`
+  (`tests/test_colorsimple.py` confere a reconstrução). O `CLIP` não muda (o hash dele está em
+  `tests/test_transitions.py`).
+- **`colorSimple(cin, c, uv)`**, na ordem: cor escolhida (peso pelo matiz HSV da cor do arquivo `cin`, cheio até
+  metade da largura e zero na largura, vezes `smoothstep(0,02; 0,2; saturação)`; muda matiz, saturação e valor
+  de `c`); degradê (`gradMask(framePoint(uv, aspecto do clipe))`: ganho por canal na luz, `exp2((EV + mistura
+  do balanço)·g)`, e saturação em volta da luminância); pele natural (máscara `skinMask(cin)` × força; no OkLab,
+  a claridade de `c` com o `a, b` de `cin` na mesma proporção `C/L`, depois `skinEven`). `colorsimple.apply` é a
+  mesma conta em numpy (`tests/test_colorsimple.py` compara com a GPU).
+- **Ferramentas** (funções puras em `colorsimple`, interface em `ui/color_tools.py`):
+  `white_balance_from(rgb)` resolve exatamente `want = média(log2) − log2(luz)` = EV + mistura da temperatura e da
+  tonalidade (a mesma de `compositor.wb_gains_ev`); `sample_frames(clip)` dá 9 quadros no meio de partes iguais
+  do clipe e `auto_adjust_frames` passa os quadros empilhados ao `compositor.auto_adjust` (o clique do
+  "Automático"; "Só o quadro atual" no menu do botão chama o de antes); `match_adjust(src, ref, protect_skin)`
+  mede a mediana da luz, a média dos canais nos tons médios, a cor média e o desvio da luminância (as duas
+  últimas relativas à luminância média), sem os pixels de pele, e `match_values` soma a diferença aos ajustes
+  da referência (outro clipe) ou a zero (uma imagem); `pick_target`/`nearest_band` dão o matiz HSV e a faixa do
+  HSL. O ponto clicado vira uv do clipe por `compositor.transform` (`clip_point`) e a cor vem da imagem
+  decodificada da camada (antes dos ajustes).
+- **Grupos de cor**: `Clip.color_group` (JSON "grupo" só quando usado; `timeline.FEATURES_V4["grupos_cor"]`).
+  `TimelineModel.set_clip_values` passa as chaves de cor que mudaram para os outros clipes de vídeo do grupo
+  (`_group_follow`, no mesmo passo do desfazer); `set_color_group`, `group_selected`, `ungroup_selected`,
+  `select_color_group`. As chaves de animação continuam de cada clipe.
+
+### 31.4 Ferramentas da prévia (`exposure.py`, `ui/preview_tools.py`, `ui/preview_bar.py`, módulo "scopes")
+
+- **Camadas da tela**: `PreviewTools` chama, depois de cada `render_now` (`cor_ui.after_render`), os provedores
+  registrados — "planos" (`planes_ui`), "falsa_cor" e "zebra" (`preview_bar`), nessa ordem — e junta o RGBA deles
+  (`over`) numa imagem que o `Viewer` desenha só sobre o lado processado (`set_overlay`). A receita do quadro
+  (`frame.Recipe`, a mesma da exportação e do "Salvar quadro") não sabe dessas camadas; um provedor que falha só
+  grava `last_error`.
+- **Luz medida** (`Context.light`): `Engine.scene_light(plano)` roda o `BASE` do look num alvo f4 (RGB = luz da
+  cena, A = quanto do pixel é imagem). No modo Película e na Edição com película, o plano é o do look da prévia
+  (entrada `toLinear` pelo perfil e pela faixa do arquivo, gamut, exposição, balanço, lente, vinheta e a geometria
+  do scan, então a camada cai no lugar certo); na Edição sem película, `exposure.decode_values` — o padrão com só a
+  seção "Entrada e exposição" do look (qualquer ajuste novo dela vem junto) e sem a vinheta da bitola. A leitura é
+  sempre a do shader do look (nenhuma cópia das curvas), então os perfis novos da entrada valem aqui sem mudança.
+- **`exposure`**: `stops = log2(Y/0,18)` (Y Rec.709 da luz); `false_color` (faixas `BANDS`, o resto em cinza de
+  −6 a +6); `zebra` (listras diagonais de período `altura/90` px, determinísticas, alfa 0,85 a partir do limite
+  `ZEBRA_LEVELS`).
+- **Referência**: `Viewer.set_reference(QImage)` e `set_compare_reference(True)`: em Dividido, Lado a lado,
+  Original e no botão direito, `_other()` devolve a referência (rótulo "REFERÊNCIA") no lugar do original; uma
+  referência de outra proporção fica inteira e centralizada (`_fit_in`).
+- **Conta-gotas** (`Viewer.start_pick`/`pick_at`/`cancel_pick`, sinais `picked(fx, fy)` e `pickCanceled`): o
+  próximo clique esquerdo na imagem processada dá a fração do ponto; botão direito ou Esc cancelam. Usado pela pele
+  da Cor por planos e pelo neutro e pela cor da cor simples.
+
+### 31.5 Módulos da cor
+
+- **"cor_planos"** (Beta, começa desligado, fora dos perfis): esconde o cartão "Cor por planos" do look. A máscara
+  da pele só por cor ainda erra em madeira clara e areia, e a separação frente/fundo é só um degradê (a
+  profundidade fica para a 1.8), por isso Beta.
+- **"cor_simples"** (estável, grupo "cor", nos perfis Criador, Cinema e Tudo; fora do Simples): esconde a barra
+  "Cor simples" do inspetor e os cartões "Pele natural", "Cor escolhida" e "Degradê". Estável porque cada
+  ferramenta só preenche ajustes comuns do clipe (temperatura, HSL, exposição…), que o usuário vê e desfaz, e os
+  três cartões novos começam neutros. Quem já tinha escolhido o perfil Simples não ganha a ferramenta ao atualizar
+  (`modules.is_enabled` segue o perfil). `used_by` só o aponta quando um clipe tem grupo de cor ou um dos ajustes
+  novos muda a imagem (`colorsimple.active`).
+- **Zebra, falsa cor e referência** entram no módulo **"scopes"** que já existia (a mesma família: medir a
+  imagem), só com a descrição nova; por ficarem na barra da prévia, `cor_ui.apply_modules` os esconde, fora de
+  `_module_tools` (que já usa a chave "scopes" para o painel).
+- Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
+  projeto salvo sai igual.
+
+## 32. Laboratório na 1.6
+
+O Laboratório (§14) ganhou na 1.6 conferências pelo LAD da Kodak (M9), películas calibradas pelos datasheets
+públicos (M8), o tipo de scanner do "Sem cópia" (M6) e processos novos (reversível, película vencida, pré-exposição e
+revelação cruzada). Regra de sempre: **os filmes e processos que já existiam não mudam um bit**; o que é novo entra
+como id novo no fim das listas (o plugin do DaVinci grava a posição) ou como ajuste com padrão neutro.
+
+### 32.1 Conferências pelo LAD (M9)
+
+`tests/test_lab_lad.py` mede o modelo de sempre contra o LAD (*Laboratory Aim Density*: Pytlak e Fleischer,
+SMPTE Journal 85, out/1976, p. 781–786; Kodak H-61, H-61A e H-61B, 1992). As densidades do app são **acima da
+base** (projeção `10^(−d/2,6)`, base limpa = branco). Medido com a 2383, processo normal e sem forçar:
+
+| Conferência | LAD | App | Situação |
+|---|---|---|---|
+| Cinza de 16% na cópia (densidade visual) | 1,0 com a base (Status A R 1,09, G 1,06, B 1,03) | 0,971–0,976 acima da base nos Vision3 (2393: 0,976–0,984); a base da cópia soma ~0,05 | Bate (teste: 0,95–1,05) |
+| Cinza de 18% (o alvo do app) | — | 0,9017 = −2,6 · log10(0,45), 0,07 menos denso que o de 16% | Bate com a conta da M9 |
+| 1 ponto da copiadora | 0,025 log E | 0,025 log E (`LAB_POINT`) | Igual |
+| Densidade por ponto perto do alvo | ≈ 0,07 | 0,059–0,060 (2383), 0,064 (2393) | **Desvia ~15%**: a reta da 2383 do app tem gama 2,85–3,00, mas no cinza a cópia ainda está na curva do pé (inclinação efetiva ≈ 2,4) |
+| Pontos para 1 stop de câmera | ≈ 7 | 7,2 (250D), 7,0 (500T), 7,5 (50D), com 2383 e 2393 | Bate (teste: 6,5–8) |
+| 12 pontos | 0,30 log E = 1 stop da cópia | 0,300 log E = 0,997 stop | Igual |
+| TAPE 25-25-25 | Luzes do analisador no alvo | 0 pontos = cinza calibrado neutro; ±7 pontos juntos dão no máximo 0,006 de cor | Bate |
+| Escala de cinza 2,5–90% sem "contraste descasado" | Neutra | 16–20%: ≤ 0,0072 entre canais; preto de 2,5%: até 0,073 nos Vision3/Eterna (sombras um pouco quentes, altas luzes um pouco frias) e até 0,14 no 5247 dos anos 70 com a 2393 (virada de propósito dos filmes antigos) | Bate nos modernos (teste < 0,08); antigos < 0,15 |
+| Mancha do LAD no negativo | Status M R 0,80, G 1,20, B 1,60 (com a máscara); menos a densidade mínima do 250D no datasheet (R 0,18, G 0,58, B 0,85): ≈ 0,62/0,62/0,75 | 0,931/0,931/0,911 acima da base + véu (250D) | **Desvia**: o pé do negativo do app fica mais longe do cinza. Não muda a cópia (as luzes calibradas absorvem); fica só medido |
+
+Os desvios não foram corrigidos (os filmes de sempre não mudam). Eles são metas das películas calibradas da M8
+(§32.2), que partem dos pontos dos datasheets e por isso não herdam os números à mão.
+
+### 32.2 Películas calibradas pelos datasheets (M8)
+
+`tools/ajustar_lab.py` (só numpy, offline) ajusta o modelo de §14 aos pontos lidos dos gráficos públicos da Kodak
+(`pelicula/data/datasheets/`: H-1-5207, H-1-5219, H-1-5213 e H-1-2383, com publicação, revisão, página, figura,
+SHA-256, método e erro da leitura e a tolerância do ajuste). As constantes viram ids **novos no fim** das listas:
+`vision3_250d_v2`, `vision3_500t_v2`, `vision3_200t_v2` (`NEGATIVES`) e `2383_v2` (`LAB_PRINTS`), rotulados
+"(datasheet)"; os filmes de sempre não mudam. `tests/test_lab_datasheet.py` confere que as constantes são as do
+ajuste, que o erro fica dentro da tolerância gravada no JSON e que os ids novos estão no fim.
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Unidades do negativo | Eixo "Camera Stops" (0 = cinza de 18%), log E relativo = stops · log10 2; densidade Status M com base | Mesma convenção de `le = log10(e/0,18)`; a densidade mínima fica fora (o modelo é acima da base) |
+| Curva do negativo | Levenberg–Marquardt: gama, pé e ombro por camada e uma largura comum, depois do efeito entre camadas do filme à mão | Erro ≤ 0,019 (rms 0,006); gama R 0,49, G 0,55, B 0,53–0,54 (o vermelho do Vision3 é mais suave no Status M) |
+| Curva da cópia | Mesma exposição nas três camadas; canais Status A lidos por bandas estreitas no pico de cada corante (`densitometer`); gama limitado a 6 (acima vira logística sem melhorar o ajuste) | Erro ≤ 0,083 (rms 0,021), o maior no pé longo; gama 5,6/4,2/6,0 e dmax 3,8/3,3/3,4 (camadas) |
+| Diafonia da cópia | Curvas de densidade espectral dos corantes (p. 5) vistas pelos canais da tela: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2013) em Rec.709, só a parte positiva, sob corpo negro de 5500 K; coluna dividida pela diagonal | Magenta no vermelho 0,31, ciano no verde 0,23, magenta no azul 0,23 (a 2383 à mão tem 0,06–0,14) |
+| Matriz de sensibilidade e efeito entre camadas | Não calibrados: precisariam de espectros de refletância de cenas com licença livre | Os do filme feito à mão (`_SENS_V3`/`_SENS_V3T`, 0,38/0,36/0,37) |
+| Posição das curvas e densidade mínima | Fora do modelo | A calibração das luzes leva o cinza a 0,45 em qualquer combinação |
+
+Conferências pelo LAD com o par do datasheet (negativo + `2383_v2`): o cinza de 16% sai com densidade visual
+1,008 (meta 1,0; os filmes à mão dão 0,97); 6,5 pontos por stop de câmera (meta ≈ 7); a mancha do LAD no negativo
+(modelo + densidade mínima) dá 0,86/1,37/1,61 contra 0,80/1,20/1,60. Desvio que fica: **0,10 de densidade por
+ponto** (meta ≈ 0,07), porque a diafonia larga da tela soma às camadas no cinza (as camadas sozinhas têm
+inclinação ≈ 2,9 no cinza, como o Status A lido; a soma vista pelo canal dá ≈ 3,9). Escala de cinza do LAD com o
+par: ≤ 0,012 entre 16% e 20% e até 0,125 no preto de 2,5% (azul mais denso: o pé longo do azul da 2383). Os
+negativos do datasheet com as cópias à mão (e o contrário) viram até 0,2 nas sombras: Status M (negativo) e
+Status A (cópia) só fecham o cinza entre si, e o vermelho mais suave do negativo medido é compensado pelo gama
+maior do vermelho na cópia medida. Esses pares ficam fora do teste da escala de cinza de §32.1.
+
+Ficaram de fora o 50D 5203 (a curva do vermelho é pontilhada no gráfico e o leitor de traço não a segue) e a 2393
+(não lida nesta versão). O selo "Desatualizada" nos filmes à mão **não** foi ligado (decisão do
+usuário).
+
+### 32.3 Tipo de scanner no Sem cópia (M6)
+
+`lab_scanner` (escolha no fim do Laboratório; padrão `rgb`, igual bit a bit ao de antes). Com `branca` e a cópia
+*Sem cópia*, a inversão do caminho A troca a densidade de cada camada pela de cada canal visto em luz branca:
+
+```
+T_c = Σ_k M_ck · 10^(−(d_k + Dmin_k))        d_c = −log10 T_c        (o mesmo no cinza: dm_c)
+st_c = (d_c − dm_c) / (γef_c · log10 2) − luz_c / log10 2,   γef_c = Σ_k J_ck · γ_k,   J_ck = M_ck · 10^(−(dm_k + Dmin_k)) / Tm_c
+```
+
+`M` (linhas somam 1) é a absorção de cada corante do 250D (H-1-5207, p. 4, *Spectral Dye Density Curves*) vista
+por cada canal: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2(2), 2013) levado ao
+Rec.709, só a parte positiva, sob corpo negro de 5500 K (`tools/ajustar_lab.py`, `scan_mix`):
+R = 0,644 C + 0,294 M + 0,062 Y, G = 0,115/0,765/0,120, B = 0,066/0,070/0,864. `Dmin` = base + máscara do 250D
+(0,175/0,574/0,834, do ajuste da §32.2). Como `γef` é o gama efetivo no cinza, o cinza sai igual ao do RGB
+estreito; as cores perdem saturação (cerca de 40% na média de cores ao acaso nos testes). A câmera "típica" é o observador padrão
+(nenhuma curva de sensor de fabricante): é a escolha conservadora com fonte pública.
+
+### 32.4 Película vencida, pré-exposição e processos novos
+
+**Módulo `labx.py`** (ganchos pequenos em `look._make_path`, `look.build_plan`, `Engine`, `resolve.spec` e
+`ofx`). Véu e pré-exposição são **exposição somada** a cada camada antes da curva do negativo
+(`e = sens · luz + soma`; `soma = sens · flash + véu`); a calibração do cinza recebe a mesma soma, então o cinza
+continua em 0,45. `LabPath` ganhou `add` e `white` e `LabMods` ganhou `age`, `flash` e `white`, todos com
+padrão neutro no fim (o cache e os planos de sempre não mudam).
+
+| Recurso | Modelo | Conferido em `tests/test_lab_processos.py` |
+|---|---|---|
+| Película vencida (`lab_vencida`, 0–30 anos) | Por década (`a` = anos/10, peso `w` da camada = `grao.NEG_SIGMA_D` normalizado: R 0,484, G 0,562, B 1): gama ÷ (1 + 0,10·a·w), pé e ombro + 0,15·a·w log E, véu = 0,18 · 0,02 · a·w · 10^(0,15·a·w) (o véu medido na sensibilidade da película vencida). Preto e branco: o peso médio nas três | Dmin do negativo sobe a cada ano em todas as camadas (azul > verde > vermelho; P&B cinza); cinza calibrado; preto lavado, sombras azuladas, altas luzes amareladas, menos contraste no cinza |
+| Pré-exposição (`lab_pre_exposicao`, stops, cor) | Luz `0,18 · 2^(−stops)` na cor escolhida (normalizada na luminância Rec.709), somada à cena antes da sensibilidade | Sombras sobem a cada stop a menos; com ≥ 4 stops, +3 e +4 stops mudam < 0,012; cor tinge as sombras |
+| Reversível | Caminho B (`LAB_PROCESSES`): estágio "negativo" linear (gama 1, pé −6, ombro +6: densidade = log E na faixa da cena) e a curva positiva do slide como "cópia" (gama 2,2, dmax 3,5, largura 0,18), sensibilidade `_SENS_VIVID` | A cópia escolhida não muda nada; contraste no cinza > 1,3 × o do caminho normal; preto mais denso |
+| Slide no C-41 | Negativo de emulsão de slide (gama 1,10/1,00/0,92, pé −1,05, ombro 1,25, "interimage" 0,55) copiado numa 2383 | Contraste > 1,3 × o normal; sombras azuladas, altas luzes amareladas |
+| Negativo no E-6 | Estágio linear e positivo de pouco contraste (gama 1,25/1,12/0,98, dmax 2,5/2,4/2,3) | Contraste < o normal; preto > 0,08; altas luzes quentes, sombras azuladas |
+
+As constantes da película vencida são **regra prática** (decisão conservadora; a calibração por dados de
+filmes vencidos fica em aberto). Tudo é determinístico (só ajustes; nada de sorteio).
+
+**Uniforms e programas.** Nada novo entra nos planos padrão. Com algum recurso de `labx` ligado o plano traz
+`u_lx_on`, `u_lx_add_a`, `u_lx_add_b` e `u_lx_white` (sempre os quatro) e o `Engine` usa `final_lx`/`bake_lx`
+(`Engine._lab_program`), compilados na primeira vez: o texto do FINAL/BAKE com `labPathX` (uma cópia de
+`labPath` com `+ add` na exposição e o scanner de luz branca) no lugar de `labPath` nas duas chamadas do
+`labPipe`. Os processos novos não precisam da variante (são caminhos B com tabelas novas).
+
+**Plugin.** Os controles novos (`labx.CONTROLS`) ficam só no nó **Laboratorio** e no OpenFX (o nó Cor está perto
+do limite de controles do DCTL). No nó Laboratorio, `labx.body` troca `pc_lab_path` por `pc_lab_path_x` (cópia
+de `pc_lab_path` com idade, pré-exposição e scanner em blocos com guarda, depois das expressões originais) e
+`labx.tables` acrescenta `PC_LX_*`. O nó Cor continua com o texto de antes, a menos das tabelas
+(`PC_NEG`, `PC_LPR`, `PC_PROC` com as linhas novas no fim). Paridade na GPU (`tests/test_resolve.py`,
+`tests/test_ofx.py`, casos `LABX_CASES`): diferença ≤ 0,000002. Com os ajustes novos no padrão, LUT, quadros, nós
+do plugin e OpenFX ficam iguais à BASE bit a bit (suítes douradas de §30/§31).
+
+## 33. Câmera, formato e montagem na 1.6
+
+Frente E da 1.6 (#38). Sete recursos, todos com padrão neutro (o plano e os bits de sempre com eles desligados) e
+pelo caminho único `frame.Recipe` (prévia = exportação). Os módulos novos ficam em `ui/filme_ui.py` (um ponto só de
+ligação com a janela: `install`, `module_tools`, `apply_modules`).
+
+### 33.1 Obturador de película (`tempo_camera.py`, módulo Beta "camera_cinema")
+
+Vídeo rápido (≥ 2× a taxa da saída, `tempo_camera.MIN_RATIO`) vira o rastro de movimento de um obturador de cinema:
+cada quadro da saída é a média, **na luz linear**, dos quadros do arquivo que caem na janela aberta (ângulo/360 do
+período; 180° = metade). `window_weights` dá os pesos pela sobreposição de cada quadro com a janela (somam 1, no
+máximo `MAX_FRAMES`); fechando a janela, sobra o quadro mais próximo, o mesmo do filtro `fps` do ffmpeg.
+
+- **Onde mora.** No modo Película com o arquivo direto, é um ajuste do look (seção "obturador"; o ângulo é uma
+  escolha, então não anima: a janela decide quais quadros ler). Só vale quando a exportação muda a taxa: a
+  exportação e a "prévia da exportação" leem o arquivo na taxa dele (`tempo_camera.WindowReader` em
+  `export.open_reader`; `grab_window` em `export.preview_frame`). A prévia da janela, "Salvar quadro" e o `quadro` da
+  linha de comando trabalham na taxa do arquivo: lá não há o que misturar. No modo Edição o obturador é **por
+  clipe**: `Sequence.src_window(clip, t, ângulo)` (a janela entre `src_time(t)` e `src_time(t+1)`, com a manivela)
+  só existe quando o clipe passa ≥ 2 quadros do arquivo por quadro da sequência (60 qps numa sequência de 24, ou um
+  clipe acelerado). A troca de taxa da sequência para a exportação continua no quadro mais próximo.
+- **Leitura.** `sequence.grab(..., shutter=)` e `SequenceReader(..., shutter=)` devolvem `LayerImage.stack`
+  ((imagens…), (pesos…)); a leitura em sequência guarda os últimos quadros do `_ClipStream` (`keep`) para as janelas
+  que se sobrepõem, sem quebrar o leitor contínuo; o reverso usa o cache de blocos de sempre. Sem obturador, `stack`
+  é None e nada muda. A janela principal relê o quadro quando o obturador muda (`MainWindow._shutter`).
+- **Mistura.** `Engine.temporal_blend` (programas `shutter_acc`/`shutter_enc`, compilados no primeiro uso): 4
+  quadros por passo, decodifica pela curva (`toLinear` da entrada do look, ou do perfil de câmera do clipe com a faixa
+  do arquivo dele: `Recipe._blend_layer`), acumula e volta à curva em float32 (a imagem que o look ou o compositor
+  leem). Alfa pré-multiplicado. `tempo_camera.blend_numpy` é a referência.
+- **Custo** (GPU da máquina de desenvolvimento, 1080p): 11,5 ms com 2 quadros, 13 ms com 3 (60 → 24 a 180°), 17 ms
+  com 6 (8 ou 16 bits); mais a decodificação de 2,5× quadros (60 → 24), que domina a exportação.
+
+### 33.2 Manivela (`tempo_camera.py`, ajuste de clipe "manivela")
+
+Câmera de manivela a 16/18/20/22 qps projetada na taxa da sequência: trocar a cadência multiplica a velocidade do
+clipe por `crank_factor` (`Sequence.set_values`, 24 ÷ 16 = 1,5×; voltar a "Normal" desfaz e preserva a velocidade
+manual), então a duração, o som (atempo, pela velocidade de sempre) e os vínculos seguem o caminho da velocidade. A
+"Oscilação da mão" desloca o instante de cada imagem (`Sequence.src_frame` → `crank_offset`, ruído de valor com a
+semente do clipe, no máximo `CRANK_JITTER_S` = 50 ms, nunca acumula nem volta). Só a imagem oscila (o som segue a
+velocidade média): pergunta aberta. Por que por clipe e não no look: o tempo pertence a `timeline.Sequence`, e o
+modo Película não pode mudar a duração do arquivo. O cartão fica no inspetor logo depois de "Velocidade"
+(`edit_panels.DISPLAY_AFTER`).
+
+### 33.3 Lente anamórfica (`anamorfico.py`, módulo Beta "anamorfico")
+
+Seção "anamorfico" do look. No BASE, `filmLight(uv, vuv)` (desligado é `imageLin(uv) * vignette(vuv)`, bit a bit):
+desespremer (1,33/1,5/1,8/2×) em caixa de letra (`(y − 0,5)·S + 0,5`, borda suave), barril horizontal maior na
+linha do meio e bordas macias (5 amostras horizontais com raio ∝ x²). Uniform `u_anam` (neutro em
+`look.SPARSE_UNIFORMS`; `imageLin` ganhou um protótipo antes de `filmLight`, para o `planes.BASE_CP` compilar). O
+risco de luz é a cadeia "streak" (`Chain` com esse nome, sem campo novo no `Plan`): `Engine._streak` extrai num alvo
+sem mipmaps, reduz só a largura pela metade a cada passo (altura inteira: nada vaza na vertical) e termina com uma
+gaussiana; o FINAL soma `t_streak × u_streak_col × u_streak_amt` ao lado do bloom (`u_streak_on` neutro em
+`Engine.FINAL_NEUTRAL`). Com o scan ligado o anamórfico não desespreme: o scan mostra o negativo espremido, como um
+scan de verdade (o risco vale). O plugin não tem o anamórfico (geometria e desfoque horizontal longo fora do nó
+Textura).
+
+Nota de compilação: chamar `filmLight` (ou qualquer código novo) no meio do caminho do scan mudou o código gerado
+pelo driver e alguns pixels em 1/2048; por isso a data entra no scan só no fim do `main` e a tira deitada é outra
+variante do programa (33.5). `Engine._alpha_out` agora manda `look.SPARSE_UNIFORMS` antes do plano (um programa
+"base" que só serviu à Cor por planos não guarda valores velhos).
+
+### 33.4 Data impressa (`data_impressa.py`, módulo Beta "data_impressa")
+
+Sete segmentos procedurais (`shaders.dateMask`, segmentos com bordas suaves, itálico de 0,1), glifos em
+`u_date_g0..g2` (bits a=1…g=64, 128 = apóstrofo, 0 = espaço), caixa em px@1080 do quadro da câmera (`layout`; a
+mesma posição e tamanho em qualquer resolução; com o anamórfico, dentro da caixa de letra). **Etapa:** a câmera
+expõe o negativo com o mostrador, então a data é luz da cena no BASE, somada depois da vinheta: passa pela halação
+(o brilho em volta), pela cor do negativo e da cópia, e o grão fica por cima. `u_date_on` neutro em
+`SPARSE_UNIFORMS` e desligado em `alphashaders.ALPHA_GEOMETRY` (é luz, não transparência). Sem relógio: ano, mês e
+dia são parâmetros.
+
+### 33.5 Formatos de foto no scan (`scanformatos.py`)
+
+135 (36 × 24 mm, 8 furos KS, passo 38 mm), meio quadro (18 × 24, 4 furos, 19 mm) e 120 (6 × 6 a cada 60 mm e
+6 × 4,5 a cada 45 mm, 61,5 mm de largura, sem furos: o furo fica em x < 0, fora da película) no fim de
+`SCAN_FORMATS`, `GAUGES`, `GAUGE_SCAN`, `params.BITOLAS` e da escolha `scan_formato`; textos de borda próprios
+(`scanformatos.EDGE_TEXTS`). O grão segue o lado maior do quadro (`grao.FRAME_W_MM_EXTRA`: 36, 24, 56 mm). 135, meio
+quadro e 6 × 6 mostram a tira deitada: `scanformatos.rotated` gira o sistema de coordenadas da película no `main`
+do scan por substituição de texto (do BASE ou do BASE da Cor por planos) e `Engine._base_program` escolhe
+`base_rot`/`base_cp_rot` quando o plano traz `u_scan_rot` (uma marca, não um uniform); o BASE de sempre não muda. As
+bitolas novas entram nas tabelas do plugin (`resolve._gauge_tables`), com paridade (`tests/test_resolve.py`; chave
+`plugin` de `tests/data/cor_base.json` regravada).
+
+### 33.6 Máquina do tempo (`maquina.py`, `ui/maquina_ui.py`, módulo estável "maquina_tempo")
+
+Ano 1920–2020 × lugar (cinema, televisão, filme caseiro) → uma linha de `maquina.ROWS` com título, motivo histórico
+e valores. Toda linha escreve as mesmas chaves (`maquina.KEYS`, completadas por `maquina.BASE`), então o resultado
+não depende do que estava nelas; o resto do look fica. A janela (botão no painel de looks, modo Película) mostra a
+época, o motivo e cada ajuste que muda (de → para); "Aplicar" chama `ParamStore.set_all` (um passo de desfazer) e
+avisa na barra de status. A cadência da manivela das épocas mudas e do Super 8 aparece como sugestão (é tempo da
+montagem, por clipe). Estável e no perfil Criador porque só escreve ajustes estáveis que o usuário vê e desfaz.
+
+### 33.7 A montagem comanda a película (`montagem_filme.py`, módulo Beta "montagem_pelicula")
+
+`frame.Recipe.plan` calcula, com a seção ligada e uma montagem, `montagem_filme.edit_info(seq, índice, fps)`: os
+quadros da saída desde o último corte seco da V1 (clipe com `entrada_tipo` "corte" e início > 0; corte com
+transição não é emenda) e o número do corte; `look.build_plan(..., edit=)` chama `montagem_filme.apply` depois dos
+defeitos. A emenda (com a probabilidade "Emendas visíveis" e a semente) usa o desenho da Emenda (`u_splice`) no
+primeiro quadro; o clarão soma exposição (quente) no primeiro e um pouco no segundo quadro; o pulo desloca o quadro
+(`u_shift`). Rolos de Super 8: 3 600 quadros (50 pés) = 200 s a 18 qps ou 150 s a 24, contados no tempo da saída
+(valem também no modo Película sem montagem); velamento crescente nos últimos 2,5 s e na ponta do rolo seguinte
+pelo vazamento de luz (`u_leak*`), pulo no primeiro quadro do rolo novo. Nenhum programa novo nem estrutura nova no
+JSON (só parâmetros do look; sem linha em `FEATURES_V4`).
+
+### 33.8 Módulos e plugin
+
+Beta (começam desligados, fora dos perfis): "camera_cinema" (cartão Obturador + cartão Manivela do inspetor),
+"anamorfico", "data_impressa", "montagem_pelicula" — efeitos novos de imagem cujo resultado ainda precisa de
+olho humano. Estável: "maquina_tempo" (só preenche ajustes estáveis). Formatos de foto não são módulo: são
+entradas novas nos registros da bitola e do scan (módulo "scan" de sempre). O plugin do DaVinci recebe só as
+bitolas novas; obturador, manivela e montagem são tempo da linha do tempo do app, e anamórfico e data ficam fora
+do nó Textura (docs/DAVINCI.md).
+
+### 33.9 Testes
+
+`tests/test_camera_tempo.py` (pesos, 180° = meio período, barras em movimento num FFV1 sem perdas com a energia
+conservada, desligado = leitor de sempre, prévia da exportação = exportação, `grab` = `SequenceReader`, tabelas da
+manivela, oscilação limitada e determinística), `tests/test_formato_camera.py` (anamórfico e data: neutros, caixa
+de letra, círculo, barril, bordas, risco só horizontal, pixels da data em duas resoluções, etapa antes da
+película), `tests/test_scan_foto.py`, `tests/test_maquina.py`, `tests/test_montagem_filme.py` e os casos de janela
+em `tests/filme_ui_cases.py` (`test_filme_ui.py`).
+
+## 35. Luz por plano e fotômetro da película
+
+Frente I da 1.6 (#38, "Diferenciais de cor"): a marcação de luz por plano (os pontos da copiadora de cada clipe), o
+fotômetro da película (onde o negativo escolhido está no pé, na reta ou no ombro) e presets dos processos da 1.6.
+Nada muda no Laboratório (curvas, filmes, `labPath`, `labx`): a luz por plano só soma às luzes da copiadora que já
+existiam e o fotômetro só lê o mesmo modelo. Ponto único de ligação com a janela: `ui/luz_fotometro_ui.py`
+(`install`, `module_tools`, `apply_modules`).
+
+### 35.1 Marcação de luz por plano (`luz_plano.py`, `ui/luz_plano_ui.py`)
+
+**Ajustes do clipe.** Seção nova no fim de `editparams.VIDEO_SECTIONS`: `luz_r`, `luz_g`, `luz_b` e `luz_densidade`
+(pontos, −24 a +24, passo 1, padrão 0; em `SPARSE_KEYS`; fora de `COLOR_SECTIONS`, então não animam, não entram em
+"Restaurar cor", no copiar/colar da cor nem nos grupos de cor). Ajuste novo de clipe: sem registro no formato 4 (o
+retrato da 1.5 não tem as chaves, então `ajustes_clipe_1_6` pega). Um clipe com luz própria deixa de ser neutro
+(`editparams.is_neutral`), e um arquivo inteiro com luz passa pela montagem (`Sequence.is_trivial` = None).
+
+**Gancho da receita.** `frame.Recipe.plan`, com o Laboratório ligado e uma montagem (`self.seq`), troca os valores do
+look por `luz_plano.apply(valores, luz_plano.shot_lights(seq, índice, fps))` antes de `look.build_plan`: os pontos
+do plano somam a `lab_luz_r/g/b` (a densidade nas três), e `look.lab_lights` os leva a `u_la_off`/`u_lb_off` como
+sempre. Nenhum uniform, programa ou campo de `Plan` novo; sem nenhum clipe com luz (`luz_plano.uses` falso)
+`shot_lights` devolve None e o dicionário é o mesmo (plano bit a bit igual). Com o Laboratório desligado nada é
+somado (as luzes da copiadora não existem sem ele). Como a troca é na receita, a prévia, "Salvar quadro", a prévia
+da exportação, a exportação e a linha de comando dão o mesmo quadro (`tests/test_luz_plano.py`).
+
+**Qual plano.** O tempo é `índice / fps` da saída, levado ao quadro da sequência como o `SequenceReader`
+(`floor(i · fps_seq / fps_saída)`). O plano é a camada de `Sequence.layers_at(t)` da faixa 0 que não é extensão
+(faixa escondida: nenhum plano, luz 0). Clipes de V2+ nunca mudam o plano. Numa transição de dois clipes (a camada
+"extensão" da cauda do anterior: o `dissolver` de antes ou `editparams.EXTRA_TWO_CLIP`) a luz é
+`(1 − k)·anterior + k·atual`, com `k` o andamento da própria transição (`Transition.progress`; no `dissolver`,
+`(pos + 1)/(n + 1)`, o mesmo `alpha` de `layers_at`). Uma fusão ótica de verdade copia os dois negativos, cada um
+com a sua luz; aqui a montagem mistura as imagens antes do look, que tem uma luz por quadro, então a interpolação em
+pontos (log E, como a copiadora) é a escolha que deixa as pontas exatas e a passagem sem pulo. Transições de um
+clipe (surgir/sumir no preto ou branco, as da 1.5 sem cauda) trocam a luz no corte.
+
+**Interface.** O cartão do esquema (sliders) aparece depois de "Câmera" (`edit_panels.DISPLAY_AFTER`) e ganha no
+alto o `LightsPanel`: mostrador clássico `luz_plano.classic` = TAPE 25 + `lab_luz_*` + `lab_densidade` do look +
+pontos do clipe (H-61: TAPE 25-25-25 = luzes no alvo), aviso sem Laboratório ou sem película na prévia, ±1 ponto por
+canal, Zerar e "Copiar luzes para os clipes selecionados". Atalhos `QShortcut` na janela: Alt+R/G/B/D (+1) e
+Alt+Shift+R/G/B/D (−1), só no modo Edição, nos clipes de vídeo selecionados ou no plano da V1 sob o cursor
+(`luz_plano.shot_at`). Tudo por `TimelineModel.update_clip_values({id: {chave: valor}})` (novo: muda só as chaves
+dadas em vários clipes, um passo do desfazer; faixa travada fica de fora). O cartão e os atalhos são do módulo
+"laboratorio" (`luz_plano_ui.apply_modules`, fora de `_module_tools`, cuja chave "laboratorio" já é o cartão do
+look); `modules.used_by` aponta "laboratorio" quando um clipe tem luz própria.
+
+**Modo Película e plugin.** Com o arquivo direto não há planos (não há montagem); dividir o clipe no modo Edição é o
+caminho (a montagem vira a entrada do look). Luz por segmento entre marcadores não foi feita: precisaria de uma
+estrutura nova no JSON e de uma segunda fonte de verdade para o "plano"; a montagem já é essa fonte. O plugin do
+DaVinci não muda: a luz por plano é tempo da montagem do app, e o nó Laboratorio já tem as luzes da copiadora
+(docs/DAVINCI.md).
+
+### 35.2 Fotômetro da película (`fotometro.py`, `ui/fotometro_ui.py`)
+
+Módulo Beta "fotometro" (grupo "pelicula", começa desligado; nenhum perfil o liga). Só tela, como a zebra e a falsa
+cor do §31: nenhum arquivo do caminho de render (`frame`, `export`, `look`, `engine`, `shaders`, `cli`, `sequence`,
+`compositor`) cita o módulo (`tests/test_fotometro.py` confere), e `exposure.py` não mudou.
+
+**O negativo.** `fotometro.negative_path(v)` = `look.lab_paths_for(v)[0]`, o caminho A do Laboratório: as curvas do
+negativo escolhido já com a revelação (`ng·(1 + 0,12·push)`, `nt + 0,08·push`), a idade (`labx.aged`) e a exposição
+somada `add` (pré-exposição e véu, `labx.added_exposure`). Sem `lab_on`, os valores de `params.defaults()` (Vision3
+250D), marcados `Latitude.default`. Nada do modelo muda; o fotômetro só lê.
+
+**A conta.** Para a exposição da cena `E = 0,18·2^s` no eixo do cinza (as linhas de `sens` somam 1), cada camada tem
+`x = log10((E + add)/0,18)` e o contraste relativo `ρ(s) = [σ((x − pé)/w) − σ((x − ombro)/w)] · E/(E + add)` —
+a derivada de `D` em relação a `log E` da cena dividida pela gama da camada (1 no trecho reto). O fator
+`E/(E + add)` é a pré-exposição e o véu comprimindo as sombras. `latitude` varre `s` de −16 a +16 stops (passo
+0,005, `lru_cache` por `LabPath`) e acha, por camada, onde `ρ ≥ 0,5` (trecho reto: `lo`, `hi`) e `ρ ≥ 0,1` (com
+detalhe: `lo_detail`, `hi_detail`); o resultado é a camada mais estreita em cada ponta. Num negativo sem forçar e sem
+`add`, `ρ = ½` no pé e no ombro exatos (`σ(0) = ½`), então a latitude é `pé/log10 2` a `ombro/log10 2`.
+
+**Camada e leitura.** `ui/fotometro_ui.FilmMeter` registra a camada "fotometro" em `preview_tools.PreviewTools`: os
+stops por pixel são `exposure.stops` da `Context.light()` (a mesma `Engine.scene_light` da falsa cor) e
+`fotometro.false_color` pinta as cinco zonas (`ZONES`; o trecho reto em cinza pela exposição e ±0,25 stop do cinza
+em verde), com o alfa da cobertura. O texto ao lado do botão é o negativo + `latitude_text` ("−5,1 a +6,5 stops").
+"Ler um ponto" (menu do botão) usa o conta-gotas do `Viewer` (`start_pick`/`picked`, como `color_tools` e
+`planes_ui`, cada um com o seu estado `_picking`): média ponderada pela cobertura de 5 × 5 pixels da luz da cena e
+`fotometro.spot` — stops, zona, distância ao pé e ao ombro e a zona de cada camada vista pela matriz `sens` do
+negativo. Os valores do look são os do quadro (`Context.values`, com as chaves) ou os do painel.
+
+**O que fica de fora.** É o eixo do cinza: uma cor saturada pode cair noutra zona numa camada (a leitura de um ponto
+mostra; a camada pinta pela luminância, como a falsa cor). A cópia não entra: o fotômetro mede o negativo, que é
+onde a latitude da câmera mora. **Processos especiais** (decisão do usuário, 29/10): com um processo de força ≥ 50%
+(`fotometro.uses_process`: reversível, cruzados, Technicolor) mede o caminho B, o filme do processo, e o nome
+mostrado é o do processo (`Latitude.negative = "processo:<id>"`). No reversível o estágio do negativo é linear (não há
+negativo): `relative_slope` mede a imagem final do caminho (`LabPath.eval` numa rampa de cinza, inclinação do
+valor de exibição por stop dividida pela maior da camada), o que dá cerca de −1,1 a +1,8 stops de reta e −3,3 a
++2,9 de detalhe, a latitude curta de um slide.
+
+### 35.3 Presets dos processos da 1.6
+
+Quatro ids novos no fim de `presets.BUILTIN` (um `BUILTIN += [...]` depois de "original", para que nenhum preset
+antigo mude de índice: o *Preset* do OpenFX é um índice): `lab_slide_reversivel` (`lab_processo="reversivel"`),
+`lab_cruzado_slide_c41` (`"cruzado_e6c41"`), `lab_vencida_18_anos` (`lab_vencida=18`, +0,5 EV) e
+`lab_flashing_suave` (pré-exposição âmbar a 3 stops, revelação −0,5, saturação final 0,9), todos no grupo
+"Laboratório" com `cor_on=False` e a cópia antiga desligada, como os outros do grupo. `tools/gerar_ofx.py` regenera
+`pc_params.h` (`PC_PRESET_COUNT` 48).
+
+As bases douradas (`tests/cor_base.py`, `tests/entrada_base.py`) iteram só `BUILTIN[:BASE_PRESETS]` (44, os da
+gravação): nenhuma referência foi regravada, e os presets novos são conferidos por `tests/test_presets_16.py` (fim da
+lista, processo certo, e no eixo do cinza: slide com mais contraste, pré-exposição com menos e sombras mais altas,
+véu da vencida, virada de cor da cruzada) e pelos testes que percorrem todos os presets (`test_presets`,
+`test_engine`, `test_look`, `test_ofx`, `test_resolve`). No DCTL, película vencida e pré-exposição só existem no
+nó Laboratorio, então `test_cor_node_matches_the_app_for_every_preset` pula os dois presets que as usam (o nó
+Laboratorio deles é conferido em `test_laboratorio_node_matches_the_app`).
+
+### 35.4 Testes
+
+`tests/test_luz_plano.py` (luz por plano: neutra no padrão, quadros certos, transições, V2, 12 pontos = 1 stop da
+cópia, JSON e formato 4, desfazer, prévia = exportação, GPU), `tests/test_fotometro.py` (latitude e zonas),
+`tests/test_presets_16.py` e os casos de janela em `tests/luz_fotometro_ui_cases.py` (`test_luz_fotometro_ui.py`).

@@ -37,12 +37,23 @@ pelicula/
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
-                             (needed_format, FEATURES_V3) e migração passo a passo (MIGRATIONS)
+                             (needed_format, FEATURES_V3, FEATURES_V4) e migração passo a passo (MIGRATIONS)
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
                              Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
-  shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
+  grao.py                    grão e textura da 1.6 (ARQUITETURA §30): modelos chamados por ganchos de build_plan
+                             (maciez pelo grão, nitidez por camada, grão no negativo, halação física,
+                             respiração por camada), constantes calibradas por datasheets
+  grao_fisico.py             1.6, grão físico (ARQUITETURA §30.7; módulo Beta grao_fisico): modelo booleano no
+                             negativo, gancho negative_grain (u_grain_on = 3, u_pg_*), GLSL e FINAL_PG (o FINAL
+                             com physGrain, compilado só quando usado), referência exata (covariance, pixel_stats)
+                             e, na fase 3 (§30.8), extras (tamanho do cristal, variação do tamanho: FINAL_PGV)
+  grao_estrutura.py          1.6 (fase 3), estrutura pela densidade (ARQUITETURA §30.8): gancho structure (u_gs_*),
+                             FINAL_GS (só quando usado), referência numpy (channel) e constantes do H-1-5207
+  labx.py                    1.6, Laboratório (ARQUITETURA §32): scanner de luz branca, película vencida, pré-exposição;
+                             variante FINAL_LX/BAKE_LX (só com u_lx_on) e o pc_lab_path_x do nó Laboratório/OFX
+  shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
@@ -50,11 +61,14 @@ pelicula/
                              legendas gravadas (burn: "copia" antes do look, "digital" depois)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
-  presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
                              transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
-                             sequências de imagens: find_sequence, probe_sequence, sequence_input (image2)
+                             sequências de imagens: find_sequence, probe_sequence, sequence_input (image2);
+                             1.6: log em float com os super-brancos (float_input), 16 bits exatos da faixa legal
+                             (_legal16), perfil sugerido pelos metadados (suggest_input, SUGGEST_RULES, camera_tags,
+                             sidecar_tags do XML da Sony)
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
                              alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
@@ -72,7 +86,8 @@ pelicula/
   corridorkey.py             CorridorKey (módulo Beta recorte_ia, sem Qt): placa NVIDIA 8.0+ (nvidia-smi),
                              linha de comando e progresso do infer.py, run() num processo separado
   data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/);
-                             fontes/ (fontes SIL OFL do app, com OFL.txt e SOURCE.txt: origem e SHA-256)
+                             fontes/ (fontes SIL OFL do app, com OFL.txt e SOURCE.txt: origem e SHA-256);
+                             datasheets/ (pontos lidos de datasheets públicos, com a fonte; regra 8)
   fontfile.py                leitor de TrueType (métricas, cmap, contornos da glyf) e cópia com nome único
   textrender.py              texto em RGBA igual em qualquer sistema: FAMILIES (fontes do app), TextStyle, layout(),
                              render() (contorno, sombra, caixa, destaque por palavra; 8/16 bits, alfa direto), paste()
@@ -112,9 +127,39 @@ pelicula/
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
-                             pré-multiplicada, alfa na cobertura) e a saída da tela
+                             pré-multiplicada, alfa na cobertura) e a saída da tela; CLIP_CS/CLIP_TR_CS (1.6: o
+                             CLIP/CLIP_TR com a cor simples, só quando a camada traz u_cs_on), CAMERA (1.6: perfil
+                             de câmera do clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32)
+  masks.py                   1.6, máscaras sem Qt nem GPU: pele em OkLab/OkLCh (skin_mask, conta-gotas skin_hue_of,
+                             skin_even) e degradê linear/radial em px@1080 (gradient_mask); GLSL + referência numpy
+  planes.py                  1.6, "Cor por planos" do look (módulo Beta cor_planos): uniforms u_cp_*, referência
+                             numpy (apply), PRONTOS e BASE_CP (o BASE com imageLin passando por planes())
+  colorsimple.py             1.6, cor simples do modo Edição (módulo cor_simples): uniforms u_cs_* e GLSL (cor
+                             escolhida, degradê, pele natural), conta-gotas do balanço, "Automático" do clipe
+                             inteiro, igualar a outro clipe/imagem, clicar numa cor (sem Qt)
+  exposure.py                1.6, zebra e falsa cor da prévia em stops em relação ao cinza de 18% (sem Qt)
+  tempo_camera.py            1.6, câmera de cinema (módulo Beta camera_cinema): obturador (pesos da janela aberta,
+                             WindowReader/grab_window do arquivo, GLSL da mistura na luz da curva; Engine.temporal_blend)
+                             e manivela por clipe (crank_factor, crank_offset); ARQUITETURA §33
+  anamorfico.py              1.6, lente anamórfica (módulo Beta): desespremer, barril, bordas (u_anam no BASE,
+                             shaders.filmLight) e o risco horizontal (cadeia "streak", Engine._streak)
+  data_impressa.py           1.6, data de sete segmentos (módulo Beta): texto, layout em px@1080, u_date_* (BASE)
+  scanformatos.py            1.6, formatos de foto no scan (135, meio quadro, 120): textos de borda e a variante do
+                             BASE com a tira deitada (rotated, por substituição de texto; Engine._base_program)
+  maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
+  montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
+                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
+  luz_plano.py               1.6, marcação de luz por plano: pontos da copiadora por clipe (luz_r/g/b, luz_densidade)
+                             somados a lab_luz_* no plano da V1 (shot_lights, via frame.Recipe.plan; transição de dois
+                             clipes interpolada), mostrador TAPE 25-25-25 (classic); ARQUITETURA §35
+  fotometro.py               1.6, fotômetro da película (só tela): latitude do negativo escolhido (caminho A do
+                             Laboratório) em stops do cinza, zonas sem detalhe/pé/reta/ombro/estourado, false_color,
+                             leitura de um ponto (spot)
   transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
                              (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
+  camera.py                  perfil de câmera por clipe (1.6, sem GPU nem Qt): FOLLOW ("Igual ao do look"), Target
+                             (a entrada do look), uses_profiles(), read_profile(), uniforms() do CAMERA, prefill()
+                             (clipes novos pela sugestão dos metadados)
   alphashaders.py            GLSL da saída com transparência: PREMUL/CANVAS_OUT (tela RGBA de cor direta) e ALPHA
                              (alfa do look com a geometria do BASE, ALPHA_GEOMETRY)
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
@@ -154,7 +199,17 @@ pelicula/
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
-                             recurso desligado em uso)
+                             recurso desligado em uso), input_notice (1.6: perfil sugerido pelos metadados, com
+                             um botão);
+                             1.6, cor: cor_ui (ponto único de ligação com a janela), planes_ui (cartão da Cor
+                             por planos), color_tools (barra "Cor simples" do inspetor), preview_tools (camadas
+                             da tela: Context, PreviewTools), preview_bar (zebra, falsa cor, referência);
+                             1.6, grao_fisico_ui (a linha "Modelo do grão no negativo" sob o módulo grao_fisico);
+                             1.6, câmera e formato: filme_ui (ponto único de ligação: cartões dos módulos novos e o
+                             botão da máquina do tempo), maquina_ui (janela da máquina do tempo)
+                             1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
+                             "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D), fotometro_ui (botão
+                             Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -162,7 +217,9 @@ plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): 
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
 tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated),
-                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas)
+                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas),
+                             ajustar_grao.py (constantes de grao.py a partir de data/datasheets, offline)
+                             ajustar_lab.py (filmes "(datasheet)" do Laboratório e matrizes de corante, offline)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
                              (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
                              <nome>_ui_cases.py de widgets num subprocesso offscreen)
@@ -221,8 +278,13 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    `es.json` (o teste `tests/test_i18n.py` falha se faltar tradução). Chaves de parâmetros e
    identificadores ficam em português sem acento (`grao_forca`, `scan_on`); docstrings e
    comentários em PT-BR.
-8. **Nomes de filmes são aproximações artísticas.** Presets com nomes de marcas descrevem um estilo;
-   não use dados, perfis ou LUTs dos fabricantes e mantenha o aviso legal (README e "Sobre").
+8. **Dados de fabricantes só de publicações públicas.** Curvas e números de datasheets e publicações técnicas
+   públicas (Kodak, Fujifilm, fórmulas de log das câmeras…) podem calibrar os modelos, com a fonte registrada
+   junto dos dados (publicação, revisão, página e figura; decisão do autor em 23/10/2026). Não copie PDFs nem
+   gráficos para o repositório, não inclua LUTs proprietários (Adobe, Blackmagic), não use perfis de terceiros
+   sem licença e não apresente o resultado como oficial. Presets com nomes de marcas continuam sendo
+   aproximações; mantenha o aviso legal (README e "Sobre": as marcas são dos donos e o app não é um produto
+   oficial) e, quando um modelo for calibrado por datasheet, diga isso nele e no `docs/EFEITOS.md`.
 9. **Compatibilidade de presets.** Presets são JSON com chaves de `params.PARAMS` e passam por
    `params.sanitize()`. Não renomeie nem remova chaves sem migração. Parâmetros novos precisam de um
    **padrão neutro** (que não mude o visual de presets antigos). IDs de presets prontos são gravados
@@ -244,13 +306,16 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (3) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (4) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
-    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5, listado
-    em `"recursos"`. Recurso novo que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES`
-    (da montagem) ou `project.FEATURES_V3` (do projeto) e o campo dele no JSON só quando usado — assim um
-    projeto que não usa nada novo continua abrindo nas versões antigas, e um que usa é recusado com aviso
-    em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
+    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
+    algo da 1.6 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não precisa de registro:
+    o retrato do que a 1.5 lê (`pelicula/data/conhecidos_1_5.json`, `params.beyond_1_5`; nunca editar) faz o
+    projeto ir para o 4 quando o valor sai do padrão ou é uma opção nova. **Estrutura nova no JSON** (campo,
+    bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES_V4` (da
+    montagem) ou `project.FEATURES_V4` (do projeto) — os da 1.5 ficam em `timeline.FEATURES` e
+    `project.FEATURES_V3` — e o campo dele no JSON só quando usado. Assim um projeto que não usa nada novo
+    continua abrindo nas versões antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
     `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 em `tests/data/projetos_1_4/`);
     aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
@@ -358,8 +423,28 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_transitions.py` | transições de película: escolhas só no fim, JSON enxuto (projeto antigo grava o mesmo JSON), formato 3, camadas e andamentos de cada tipo, uniforms do `CLIP_TR`; na GPU: pontas iguais aos clipes puros (8 e 16 bits), determinismo, cinza neutro em rec709/S-Log3/LogC3, fusão e exposição pelas fórmulas da curva, prévia = exportação e transições antigas iguais à BASE (`transicoes_base.py` + `data/transicoes_base.json`) |
 | `tests/test_transicoes_ui.py` | casos de `transicoes_ui_cases.py`: inspetor (ícones, dicas, ajustes do tipo, módulo desligado), menu "Transição" do corte (alvo, desfazer num passo, última duração, faixa travada), desenho na linha do tempo e o módulo na janela |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
+| `tests/test_lab_lad.py` | Laboratório conferido pelo LAD da Kodak (M9): cinza de 16%, pontos da copiadora, escala de cinza |
+| `tests/test_lab_processos.py` | Laboratório da 1.6 (`labx.py`): scanner de luz branca, película vencida (véu sobe com os anos), pré-exposição, reversível e revelação cruzada; desligados não mudam nada; GPU (prévia e LUT) = numpy |
+| `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
+| `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
+| `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
+| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): no fim da lista, processo certo, efeito no eixo do cinza |
+| `tests/test_fotometro.py` | fotômetro: latitude por negativo (Vision3 × Double-X), revelação, vencida e pré-exposição movem os limites como documentado, zonas da camada em stops conhecidos, leitura de um ponto, nada no caminho de render |
+| `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
+| `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
+| `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |
+| `tests/test_grao_ui.py` | os controles de grão e textura da 1.6 nos cartões das seções (casos em `grao_ui_cases.py`, subprocesso offscreen) |
+| `tests/test_grao_fisico.py` | grão físico (1.6): padrão "ruido" e módulo Beta, plano em px@1080, constantes = `tools/ajustar_grao.py`, referência numpy do modelo booleano (cobertura média, variância exata, pico no meio, sinal da assimetria, correlação ~ raio), sigma D na abertura = datasheet, cópia molda o grão, LUT igual, determinismo sem estado preso, prévia = exportação, independência da resolução |
+| `tests/test_grao_estrutura.py` | estrutura pela densidade (1.6, fase 3): padrão neutro, constantes = `tools/ajustar_grao.py`, sigma D por densidade = pontos do H-1-5207, numpy = GLSL, assimetria/força/tamanho de cada camada no look, aglomeração, pesos por tom, brilho médio, grão no negativo, LUT igual, determinismo, prévia = exportação, resolução |
+| `tests/test_grao_fisico_extras.py` | tamanho do cristal e variação do tamanho do grão físico (1.6, fase 3): padrão neutro, tabelas = ferramenta, E[ρ²] = 1, espalhamento do raio na GPU, variância = modelo exato com raios aleatórios, sigma D na abertura = datasheet, brilho/LUT iguais, determinismo, prévia = exportação, resolução |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
+| `tests/test_entrada_base.py` | a entrada da 1.6 não muda os padrões: Película e Edição em 8/16 bits, LUT exportado e plugin iguais à BASE (`entrada_base.py` + `data/entrada_base.json`) |
+| `tests/test_entrada_leitura.py` | leitura de log com super-brancos (códigos acima de 940 sobrevivem, em float32) e 16 bits exatos da faixa legal (preto, cinza e branco) com o ffmpeg |
+| `tests/test_entrada_gamut.py` | "Proteger cores saturadas": a fórmula da ACES RGC em float64, a GPU contra ela, limites por gamut, continuidade varrendo a saturação, 0% = sem o ajuste (também no LUT) |
+| `tests/test_entrada_camera.py` | perfil de câmera por clipe: chaves esparsas, JSON e formato 4, clipe Rec.709 num look log, luz acima de 1,0 na tela, transparência e dois vídeos log de verdade (S-Log3 + V-Log) numa montagem |
+| `tests/test_entrada_sugestao.py` | perfil sugerido pelos metadados: tabela de dicionários do ffprobe, XML da Sony, etiquetas guardadas, preenchimento dos clipes novos |
+| `tests/test_entrada_ui.py` | casos de `entrada_ui_cases.py`: cartão "Câmera" do inspetor, aviso da sugestão (um clique, nunca ao reabrir), clipes novos preenchidos num passo do desfazer |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
@@ -419,7 +504,9 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    `frame`/`t` + semente.
 3. **`shaders.py`**: declare o `uniform` no shader certo (`COMMON` para cor — vale também para o
    `BAKE` —, `BASE` para geometria/entrada, `FINAL` para efeitos sobre a imagem) e use-o. Mantenha
-   y para baixo.
+   y para baixo. Um uniform do FINAL que o plano só grava com o efeito ligado (para os planos de
+   sempre não mudarem) precisa do valor neutro em `Engine.FINAL_NEUTRAL`, senão o valor de um quadro
+   anterior fica no programa.
 4. Se o efeito é **só de cor**, coloque-o dentro de `colorPipe()` para que entre também nos LUTs
    exportados (`BAKE`). Efeitos espaciais ou temporais não cabem num LUT.
 5. Se um preset precisar dele, ajuste `presets.FILM_BASE` ou o preset.
@@ -690,6 +777,12 @@ renumere), `look.INPUT_GAMUT` (e `_PRIMARIES` se o gamut for novo), **`look.INPU
 a curva em `resolve.K_DECODE` (`pc_to_linear`), depois `python tools/gerar_ofx.py`. Pontos de referência do
 fabricante em `tests/test_entrada.py`. Documente em `docs/EFEITOS.md` e no README.
 
+O resto acompanha sozinho: o cartão "Câmera" dos clipes (`editparams` `camera_entrada` usa `params.ENTRADAS`),
+os limites de "Proteger cores saturadas" (`look.gamut_limits` pelo gamut; no plugin, a tabela `PC_GCL`) e a
+sugestão pelos metadados (`media.suggest_input` reconhece os nomes por `luts.guess_input`; acrescente lá o nome
+da curva e um caso em `tests/test_entrada_sugestao.py`). Se a curva é log de câmera, a leitura em float com os
+super-brancos vale para ela (`media.float_input`: todo perfil fora de `media.DISPLAY_PROFILES`).
+
 **Toda curva declara o seu domínio** em `look.INPUT_DOMAIN`, com a fonte (documento do fabricante) num
 comentário:
 
@@ -722,7 +815,10 @@ Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem 
 
 `look.GAUGES` (multiplicadores e proporção), `look.GAUGE_SCAN` (qual geometria de scan usar),
 `params.BITOLAS`; se tiver geometria própria de scan, `look.SCAN_FORMATS` e a escolha em
-`scan_formato`. Documente a tabela de bitolas.
+`scan_formato`. Documente a tabela de bitolas. Se o grão deve seguir uma largura de quadro que não é a
+largura da imagem no scan, `grao.FRAME_W_MM_EXTRA`. A bitola nova entra sozinha nas tabelas do plugin
+(`resolve._gauge_tables`): regrave a chave `plugin` de `tests/data/cor_base.json` e rode `tests/test_resolve.py`.
+Tira deitada no scan (foto): `scanformatos.ROTATED`.
 
 ### Mexer no ffmpeg / dependências
 

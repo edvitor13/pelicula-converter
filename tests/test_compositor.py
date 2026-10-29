@@ -15,14 +15,17 @@ W, H = 320, 180
 _SIZES = {"int": 1, "float": 1, "vec2": 2, "vec3": 3, "vec4": 4, "mat3": 9}
 
 
-def _declared() -> dict[str, tuple[str, int]]:
+def _declared(src: str = editshaders.CLIP) -> dict[str, tuple[str, int]]:
     out = {}
-    for typ, name, arr in re.findall(r"uniform\s+(\w+)\s+(u_\w+)\s*(?:\[(\d+)\])?\s*;", editshaders.CLIP):
+    for typ, name, arr in re.findall(r"uniform\s+(\w+)\s+(u_\w+)\s*(?:\[(\d+)\])?\s*;", src):
         out[name] = (typ, int(arr) if arr else 1)
     return out
 
 
 DECLARED = _declared()
+DECLARED_CS = _declared(editshaders.CLIP_CS)  # 1.6: os da cor simples só vêm com ela (`colorsimple.uniforms`)
+GEOMETRY = {"degrade_tipo", "degrade_angulo", "degrade_x", "degrade_y", "degrade_raio", "degrade_suavidade",
+            "degrade_inverter"}
 
 
 def one_clip(w=W, h=H, image=True, **values):
@@ -41,9 +44,10 @@ def uniforms(seq, c, tex=(W, H), canvas=(W, H), neutral=False, layer=None):
 
 
 def assert_matches_shader(U: dict):
+    declared = DECLARED_CS if "u_cs_on" in U else DECLARED
     for k, val in U.items():
-        assert k in DECLARED, f"{k} não existe no shader CLIP"
-        typ, n = DECLARED[k]
+        assert k in declared, f"{k} não existe no shader CLIP"
+        typ, n = declared[k]
         got = len(val) if isinstance(val, (tuple, list)) else 1
         assert got == _SIZES[typ] * n, f"{k}: {typ}[{n}] recebeu {val!r}"
         assert not isinstance(val, list), f"{k}: use tupla"
@@ -76,6 +80,8 @@ def _non_default(p):
         return not p.default
     if p.kind == "choice":
         return next(v for v, _l in p.choices if v != p.default)
+    if p.kind == "int":  # 1.6: semente da manivela
+        return p.max if p.default != p.max else p.min
     if p.kind == "wheel":
         return [0.6, 0.3]
     raise AssertionError(p.kind)
@@ -182,10 +188,20 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
     for key, p in editparams.VIDEO.params.items():
         if key in ("velocidade", "congelar") or key in transition_keys:  # transições: tests/test_transitions.py
             continue
+        if key.startswith("camera_"):  # perfil de câmera do clipe (1.6): pela receita, tests/test_entrada_camera.py
+            continue
+        if key.startswith("manivela"):  # 1.6: tempo do clipe (`Sequence.src_frame`), tests/test_camera_tempo.py
+            continue
+        if key.startswith("luz_"):  # 1.6: luz da copiadora por plano, no look (`luz_plano.py`, tests/test_luz_plano.py)
+            continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)
-        if key not in ("vinheta_tamanho", "mesclagem", "encaixe"):  # encaixe: mesma proporção da tela
+        # encaixe: mesma proporção da tela; 1.6: a janela da pele, a cor escolhida e a forma do degradê só valem
+        # com os ajustes deles
+        alone = ("pele_centro", "alvo_matiz", "alvo_largura") + tuple(k for k in editparams.VIDEO.params
+                                                                  if k.startswith("degrade_") and k in GEOMETRY)
+        if key not in ("vinheta_tamanho", "mesclagem", "encaixe") + alone:
             assert not np.array_equal(out, test_rgb), f"{key} não mudou a imagem"
 
 

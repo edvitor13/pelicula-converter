@@ -14,7 +14,7 @@ import copy
 from typing import Any
 
 from .i18n import N_
-from .params import B, C, F, Param, Schema, Section
+from .params import ENTRADAS, LOGC3_EIS, B, C, F, I, Param, Schema, Section
 
 # Faixas de cor do HSL: (chave, rótulo, matiz central em graus no círculo de cores RGB).
 HSL_COLORS: list[tuple[str, str, float]] = [
@@ -172,6 +172,94 @@ VIDEO_SECTIONS: list[Section] = [
         F("saida_anel", "Anel preto", 0.0, 0, 200, 1, 0, " px",
           "Anel preto em volta do círculo, como nos filmes mudos (0 = sem anel)."),
     ], "Dissolver, surgir do preto e sumir"),
+
+    # 1.6 (`camera.py`): perfil de câmera do clipe. "look" segue a entrada do look, como antes (bit a bit).
+    Section("camera", "Câmera", None, [
+        C("camera_entrada", "Perfil do clipe", "look", [("look", N_("Igual ao do look"))] + list(ENTRADAS),
+          "Como este clipe foi gravado, para misturar câmeras numa montagem: o clipe é convertido para o perfil do "
+          "look (Película › Entrada e exposição), que lê a montagem inteira. “Igual ao do look” deixa o clipe "
+          "como está."),
+        B("camera_reescalado", "Log reescalado (HDMI “Limited”)", False,
+          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log: ligue se este clipe veio de uma gravação externa "
+          "com o log já reescalado para a faixa legal (saída HDMI em “Limited”).", advanced=True),
+        C("camera_ei", "EI do ARRI LogC3", "800", LOGC3_EIS,
+          "Só para o ARRI LogC3: o EI com que este clipe foi gravado (está nos metadados do clipe).", advanced=True),
+    ], "Perfil de cor da câmera deste clipe"),
+]
+
+# 1.6, cor simples (`colorsimple.py`, módulo "cor_simples"): seções de cor novas, acrescentadas no fim (o inspetor as
+# mostra perto das parecidas: `ui/edit_panels.DISPLAY_AFTER`). Todo padrão é neutro e as chaves vão para o JSON só
+# fora do padrão (`SPARSE_KEYS`). O HSL mostra só as linhas de uma faixa por vez, por isso a cor escolhida é outra
+# seção.
+VIDEO_SECTIONS += [
+    Section("pele", "Pele natural", None, [
+        _pct("pele_natural", "Pele natural", lo=0.0,
+             tip="A pele não acompanha as mudanças de cor deste clipe (balanço, saturação, rodas, cor escolhida, "
+                 "degradê) e fica com a cor mais uniforme. Só a cor: a textura não muda."),
+        F("pele_centro", "Cor da pele", 64.5, 0, 360, 0.5, 1, "°",
+          "Matiz da pele que a máscara procura (o conta-gotas da pele acerta este valor).", advanced=True),
+    ], "Protege e uniformiza a cor da pele"),
+
+    Section("alvo", "Cor escolhida", None, [
+        F("alvo_matiz", "Cor", 0.0, 0, 360, 1, 0, "°",
+          "A cor que muda (matiz). O conta-gotas \"Cor\" acerta este valor clicando na prévia."),
+        F("alvo_largura", "Largura", 30.0, 5, 90, 1, 0, "°", "Quanto o matiz pode se afastar da cor escolhida."),
+        F("alvo_desvio", "Matiz", 0.0, -180, 180, 1, 0, "°", "Gira a cor escolhida para outra."),
+        _pct("alvo_sat", "Saturação"),
+        _pct("alvo_luz", "Luminância"),
+    ], "Clique numa cor da prévia e mude só ela"),
+
+    Section("degrade", "Degradê", None, [
+        C("degrade_tipo", "Forma", "linear", [("linear", N_("Linear (céu ou chão)")),
+                                              ("radial", N_("Radial (dentro do círculo)"))]),
+        F("degrade_angulo", "Direção", 0.0, -180, 180, 1, 0, "°",
+          "Que lado muda no degradê linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo (chão)."),
+        F("degrade_x", "Centro horizontal", 0.0, -1920, 1920, 10, 0, " px",
+          "Desloca a linha ou o círculo (px de um quadro de 1080 linhas do clipe; 0 = centro)."),
+        F("degrade_y", "Centro vertical", 0.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        F("degrade_raio", "Raio", 500.0, 10, 2000, 10, 0, " px", "Tamanho do círculo do degradê radial."),
+        F("degrade_suavidade", "Suavidade", 400.0, 0, 2000, 10, 0, " px",
+          "Largura da passagem (0 = borda seca)."),
+        B("degrade_inverter", "Inverter", False, "Troca o lado que muda."),
+        F("degrade_exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV", "Mais ou menos luz só no lado marcado."),
+        F("degrade_temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
+        F("degrade_tonalidade", "Tonalidade", 0.0, -100, 100, 1, 0, "",
+          "Negativo puxa para verde, positivo para magenta."),
+        _pct("degrade_saturacao", "Saturação"),
+    ], "Céu ou chão com cor e luz próprias"),
+]
+
+# 1.6, manivela (`tempo_camera.py`, módulo Beta "camera_cinema"): o clipe "filmado" a 16/18 qps e projetado na taxa da
+# sequência. Trocar a cadência acelera o clipe (`Sequence.set_values`: 24 ÷ 16 = 1,5×; o som segue pela velocidade); a
+# oscilação da mão desloca o instante de cada imagem (`Sequence.src_frame`). Padrão: sem manivela (o clipe de sempre).
+VIDEO_SECTIONS += [
+    Section("manivela", "Manivela", None, [
+        C("manivela", "Cadência da manivela", "nenhuma", [
+            ("nenhuma", N_("Normal (sem manivela)")), ("16", N_("16 qps (cinema mudo)")),
+            ("18", N_("18 qps (Super 8, manivela)")), ("20", N_("20 qps")), ("22", N_("22 qps"))],
+          "Quadros por segundo em que a câmera de manivela teria filmado. Projetado na velocidade da sequência, o "
+          "movimento fica mais rápido e aos saltos, como nos filmes mudos: escolher a cadência acelera o clipe "
+          "(16 qps numa sequência de 24 = 1,5×) e o som acompanha pela velocidade."),
+        _pct("manivela_oscila", "Oscilação da mão", lo=0.0,
+             tip="A mão não gira a manivela num ritmo perfeito: a velocidade oscila um pouco, sem atrasar o clipe. "
+                 "Só a imagem oscila; o som segue a velocidade média (diferença de no máximo 50 ms com 100%)."),
+        I("manivela_semente", "Semente", 3, 0, 9999, "Muda o jeito da mão.", advanced=True),
+    ], "Cadência de câmera de manivela (16 ou 18 qps)"),
+]
+
+# 1.6, marcação de luz por plano (`luz_plano.py`): os pontos da copiadora deste plano, somados às luzes do
+# Laboratório do look nos quadros em que o clipe é o plano da V1. Só valem com o Laboratório ligado. Padrão: 0 (a
+# luz do look, como antes); as chaves vão para o JSON só fora do padrão (`SPARSE_KEYS`).
+VIDEO_SECTIONS += [
+    Section("luz_copiadora", "Luz da copiadora", None, [
+        F("luz_r", "Luz vermelha", 0.0, -24, 24, 1, 0, " pt",
+          "Pontos de luz vermelha da copiadora só neste plano, somados aos do Laboratório do look (12 pontos = 1 "
+          "stop da cópia; cerca de 7 pontos = 1 stop da câmera). Mais vermelho deixa a cópia mais ciano."),
+        F("luz_g", "Luz verde", 0.0, -24, 24, 1, 0, " pt", "Mais verde deixa a cópia mais magenta."),
+        F("luz_b", "Luz azul", 0.0, -24, 24, 1, 0, " pt", "Mais azul deixa a cópia mais amarela (quente)."),
+        F("luz_densidade", "Densidade (as três)", 0.0, -24, 24, 1, 0, " pt",
+          "Pontos nas três luzes juntas: mais pontos = plano mais escuro na cópia, sem mudar a cor."),
+    ], "Marcação de luz deste plano (pontos da copiadora do Laboratório)"),
 ]
 
 AUDIO_SECTIONS: list[Section] = [
@@ -202,7 +290,8 @@ VIDEO = Schema(VIDEO_SECTIONS)
 AUDIO = Schema(AUDIO_SECTIONS)
 SCHEMAS = {"video": VIDEO, "audio": AUDIO}
 
-COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
+COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos",
+                  "pele", "alvo", "degrade")  # 1.6: cor simples (acrescentadas no fim)
 
 # Ajustes que aceitam chaves de animação (`keyframes.py`, `Clip.keys`): enquadramento e opacidade, todo ajuste
 # numérico de cor, luz, detalhe e efeitos (e as rodas) e o volume do som. Escolhas, liga/desliga, corte,
@@ -265,7 +354,11 @@ SPARSE_KEYS: set[str] = {
     "entrada_direcao", "entrada_suavidade", "entrada_centro_x", "entrada_centro_y", "entrada_anel", "entrada_ponta",
     "entrada_zoom", "entrada_quadros", "entrada_clarao",
     "saida_suavidade", "saida_centro_x", "saida_centro_y", "saida_anel",
+    "camera_entrada", "camera_reescalado", "camera_ei",  # 1.6: perfil de câmera do clipe (`camera.py`)
+    "manivela", "manivela_oscila", "manivela_semente",  # 1.6: manivela (`tempo_camera.py`)
 }
+SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
+SPARSE_KEYS |= {"luz_r", "luz_g", "luz_b", "luz_densidade"}  # 1.6: marcação de luz por plano (`luz_plano.py`)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

@@ -44,15 +44,19 @@ do OpenFX. Para desinstalar, apague essa pasta.
 1. Página **Color**: abra **OpenFX** (botão *Effects*), procure **PeliculaConverter** (categoria
    *PeliculaConverter*) e arraste para um nó. Página **Edit**: *Effects › OpenFX › PeliculaConverter*
    sobre o clipe.
-2. Grupo **Look**: escolha um **Preset** (os 44 do app; trocar o preset troca os ajustes do look, num
+2. Grupo **Look**: escolha um **Preset** (os 48 do app; trocar o preset troca os ajustes do look, num
    passo só de desfazer — o *Perfil do vídeo* e a *Faixa do vídeo* são do clipe e ficam, como no app) ou
    **Carregar look do PeliculaConverter (.json)** — um preset exportado pelo app (menu ⋯ dos presets ›
    *Exportar preset (.json)…*) ou um projeto `.plc`. **Recarregar o look** lê o arquivo de novo.
 3. **Perfil do vídeo** (grupo *Entrada e exposição*): a curva da câmera (S-Log3, LogC3, LogC4, V-Log,
-   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon), **HLG** ou **PQ** para
-   vídeo HDR (celulares gravam em HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou
-   ponha um *Color Space Transform* antes). **Faixa do vídeo** só muda S-Log3, V-Log e N-Log, curvas que os
-   fabricantes escrevem no código de 10 bits (o cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
+   N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon e, desde a 1.6, Canon Log 2
+   e 3, F-Log, F-Log2, F-Log2 C, D-Log, S-Log2 e L-Log), **HLG** ou **PQ** para vídeo HDR (celulares gravam em
+   HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou ponha um *Color Space Transform*
+   antes). No LogC3, **EI do LogC3** escolhe a curva do EI do clipe (padrão 800). **Proteger cores saturadas**
+   (1.6, padrão 0%) traz LED, neon e céu muito saturado para dentro do Rec.709 antes do look, como no app.
+   **Faixa do vídeo** só muda
+   S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, curvas que os fabricantes escrevem no código de 10 bits (o
+   cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
    legal)** com o clipe em *Data Levels* Auto/Video (o padrão do Resolve para arquivos de câmera, que ele
    expande de 64–940 para 0–1 — o plugin volta ao código da câmera) e escolha **Cheia** quando o valor já é o
    código: clipe em *Full* (Clip Attributes, como a Sony recomenda para S-Log) ou log que a câmera mandou
@@ -90,7 +94,7 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 ### Igual ao app?
 
 - **Cor**: a mesma conta, gerada a partir do mesmo kernel dos DCTLs. Comparado com `Engine.bake_lut`
-  (GPU): diferença < 0,0001 nos 44 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
+  (GPU): diferença < 0,0001 nos 48 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
   (no PQ, que vai até 10000 cd/m², cores HDR muito saturadas chegam a 0,001); em todas as combinações de
   negativo × cópia × processo, mediana 0,000001 e máximo 0,0005 (nos ombros mais íngremes, onde a precisão
   do float da GPU pesa).
@@ -107,11 +111,14 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 - Só CPU por enquanto (sem GPU/CUDA): é mais lento que o app; use o Render Cache.
 - Sem o **scan da película** (furos, texto da borda, quadros vizinhos) e sem o **LUT externo** (ponha o
   seu LUT num nó próprio). Sem pontilhado: a saída é float.
+- Sem a **Cor por planos** do app (frente, fundo e pele, 1.6): ela depende do lugar e da cor de cada pixel e fica
+  fora da cor do look. No Resolve, use uma janela (Power Window) ou um qualificador num nó próprio.
 - Os rótulos estão em português (o OpenFX não informa o idioma do editor).
 - Os mipmaps das cadeias de brilho são médias 2×2; o driver do OpenGL do app pode filtrar um pouco
   diferente em tamanhos ímpares.
 - O alfa passa direto; a cor entra como no app (código do vídeo de 0 a 1, no perfil escolhido). O plugin
-  não sabe a faixa do arquivo: confira a *Faixa do vídeo* nos clipes S-Log3, V-Log e N-Log.
+  não sabe a faixa do arquivo: confira a *Faixa do vídeo* nos clipes S-Log3, V-Log, N-Log, F-Log, F-Log2 e
+  D-Log.
 - Compilado para Windows x64 e Linux x64 (o macOS está desativado no app).
 - Conferido com um host OpenFX de teste (`tests/ofxhost.py`: descrever, criar, trocar preset, carregar
   `.json`, identidade e render); a instalação de verdade no Resolve é feita pelo usuário, pelo app.
@@ -127,7 +134,7 @@ de **Laboratorio (ou Cor) → Textura → Projetor**.
 |---|---|---|
 | **PeliculaConverter Laboratorio** | Só o **Laboratório**, como um nó de emulação de filme: perfil do vídeo, exposição e balanço, negativo, cópia, revelação, separação de cores (Hue Split) e o eixo, luzes da copiadora, densidade da cópia e por cor, pé da cópia, rolagens, saturação do filme e final, pele, bleach bypass no negativo e na cópia, curvas neutras, processo (Technicolor, retenção de prata), chave, diafonia e força geral. **Mostrar curva** desenha por cima da imagem as curvas R, G e B do ajuste (eixo horizontal de −8 a +8 stops em volta do cinza médio; a linha cinza marca o 0,45). | **Sim.** É o app com *Laboratório* ligado, *Cor da película* desligada e *Cópia (print)* em *Nenhuma* (como nos presets do grupo *Laboratório*). Diferença < 0,000001 nos testes. |
 | **PeliculaConverter Cor** | Perfil do vídeo (Rec.709, log das câmeras), exposição e balanço, **Laboratório** (negativo, revelação, luzes da copiadora, cópia, Technicolor 3 tiras / 2 cores, retenção de prata), look de película (curva, saturação, densidade, tons de sombra/luz, pele, P&B e viragens), cópia 2383/2393/3513, envelhecimento e força geral. | **Sim.** É a mesma conta de `colorPipe()` (diferença < 0,002 nos testes, normalmente 0,000001). |
-| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado), halação, bloom, névoa (filtro difusor), maciez da bitola e da lente, **MTF da película** (close, plano médio, plano aberto, 16 mm, Super 8), recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
+| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado, maciez pelo grão, respiração por camada), halação (modelo brilho ou física), bloom, névoa (filtro difusor), maciez da bitola e da lente, **MTF da película** (close, plano médio, plano aberto, 16 mm, Super 8; diferença entre camadas), recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
 | **PeliculaConverter Projetor** | Tremor do quadro, cintilação, clarões de fim de rolo, cor instável, emendas, vazamento de luz, poeira, riscos, fio de cabelo, manchas químicas, marcas de troca de rolo e moldura (proporção, cantos, borda irregular). | **Sim** (< 1/255), quadro a quadro, com as mesmas sementes. |
 
 Além dos três nós "em branco" (que já abrem com o preset inicial do app, Kodak Vision3 250D), o pacote
@@ -177,12 +184,13 @@ atualizar, instale de novo pela versão nova do app: a pasta inteira é trocada.
    **ou** o *Cor*, não os dois: o *Cor* já contém o laboratório inteiro (com a chave *Laboratorio negativo
    e copia*) mais o look paramétrico, a cópia 2383/2393/3513 e o envelhecimento.
 3. **Gestão de cor.** No primeiro nó, escolha em **Perfil do video** a curva da câmera (S-Log3, LogC3,
-   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon) ou HLG / PQ
-   para vídeo HDR. Se a linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um
+   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon e, desde a
+   1.6, Canon Log 2 e 3, F-Log, F-Log2, F-Log2 C, D-Log, S-Log2 e L-Log) ou HLG / PQ para vídeo HDR. Se a linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um
    *Color Space Transform* antes do primeiro nó convertendo para Rec.709 / Gamma 2.4. A saída dos nós é
    Rec.709 (como no app). **Faixa do video**: *Video faixa legal* (padrão) para clipes em *Data Levels*
    Auto/Video; *Cheia* para clipes em *Full* ou log reescalado pela saída HDMI *Limited* (só muda S-Log3,
-   V-Log e N-Log; veja o plugin OpenFX acima).
+   V-Log, N-Log, F-Log, F-Log2 e D-Log; veja o plugin OpenFX acima). **EI do LogC3** e **Proteger cores
+   saturadas** funcionam como no plugin OpenFX.
 4. Na *Textura* e no *Projetor*, escolha a **mesma bitola** (ela muda o tamanho do grão, a maciez, o
    tremor e a vinheta). No *Projetor*, escolha os **quadros por segundo** da linha do tempo: o tremor, a
    cintilação e os defeitos seguem o tempo real.
@@ -201,6 +209,41 @@ Dicas:
 - Os nós *Laboratorio* e *Cor* podem ser aplicados também como LUT (botão direito no nó › *DCTL*), com os
   valores padrão.
 - A **Qualidade do brilho** (nó *Textura*) troca velocidade por suavidade da halação/bloom/névoa.
+- **Lab - Grao no negativo** (nó *Laboratorio*): o nó ganhou os ajustes do grão que esse modo usa (ligar,
+  intensidade, tamanho, aspereza, colorido, semente, bitola e ISO) e põe o grão na densidade das camadas, como
+  no app. Ligado, **desligue o Grão do nó Textura** para não somar dois grãos. No DCTL esse grão fica **parado**
+  (o nó de cor também funciona como LUT, sem o número do quadro); o plugin OpenFX o anima como o app. O nó *Cor*
+  não tem esse modo.
+- **Lab - Modelo do grao no negativo** (nó *Laboratorio*, com o *Grao no negativo* ligado): *Ruido* (o de sempre)
+  ou *Fisico* (os grãos de prata do app, veja [EFEITOS.md](EFEITOS.md#laboratório-negativo-e-cópia)). Como o
+  outro, parado no DCTL e animado no OpenFX. É mais pesado: no nó DCTL, uns 2× o tempo do nó com o *Ruido* em
+  1080p e 4K; no OpenFX (CPU), uns 3×. O nó *Cor* não tem esse modo.
+- **Lab - Tamanho do cristal** e **Lab - Variacao do tamanho** (nó *Laboratorio* e plugin OpenFX, 1.6, só com o
+  modelo *Fisico*): grãos maiores ou menores com a mesma granularidade e cada grão com o seu tamanho, iguais ao
+  app. A *Variação* deixa o nó mais pesado (até uns 2× o do *Fisico* com 100%).
+- **Grao - Estrutura pela densidade** e **Grao - Aglomeracao** (nó *Textura*, e no *Laboratorio* para o grão no
+  negativo *Ruido*; plugin OpenFX, 1.6): o grão muda de forma e de força com a densidade, como no app. No nó
+  *Laboratorio* e no OpenFX a densidade é a de cada camada do negativo, igual ao app. No nó *Textura* a densidade
+  sai da imagem que chega ao nó (lida como o código de vídeo do app, antes da cor), então ele é igual ao app só
+  quando a cor da árvore é neutra (para o resultado exato, use o grão no negativo do nó *Laboratorio*); o plugin OpenFX vê a exposição da cena e segue o app. O nó *Cor* não tem esses
+  controles. Com o *Fisico* a estrutura não muda nada (ele já a tem).
+- **Lab - Tipo de scanner**, **Lab - Pelicula vencida anos** e **Lab - Pre-exposicao** (com os stops abaixo do
+  cinza e a cor) (nó *Laboratorio* e plugin OpenFX, 1.6): o scanner de luz branca do *Sem cópia*, o véu e a
+  perda de contraste da película vencida e o *flashing*, iguais ao app (diferença < 0,000003 nos testes). O nó
+  *Cor* não tem esses controles (fica perto do limite de controles do DCTL): use o *Laboratorio*. Os processos
+  novos (*Reversível* e as duas *Revelações cruzadas*) e os filmes "(datasheet)" aparecem nas listas dos dois
+  nós. Os presets *Película vencida (18 anos)* e *Pré-exposição (baixo contraste)* existem nos dois pacotes, mas
+  no nó *Cor* saem sem a vencida e sem a pré-exposição: para o efeito completo, use o nó *Laboratorio*; como as listas ganham itens no fim, nós salvos com versões antigas continuam com os mesmos filmes.
+- **MTF - Camadas com copia** (nó *Textura*): o nó não vê a cópia escolhida nos nós *Cor* ou *Laboratorio*;
+  ligue-o quando houver uma cópia (print) na sua árvore, para a *Diferença entre camadas* amaciar também o
+  azul, como no app. Os nós gerados pelo app já vêm com ele certo; o plugin OpenFX vê a cópia sozinho.
+- **Grao - Respiracao por camada** (nó *Textura*): o nó vem depois da cor, então a variação de cada camada
+  multiplica a luz da saída: é igual ao app com a cor neutra; com uma cópia ou o Laboratório falta a curva deles
+  (a variação fica um pouco diferente nos pretos e nas altas luzes). O plugin OpenFX a põe antes da cor, como o
+  app.
+- **Halacao - Modelo** (nó *Textura*): *Física (reflexo na base)* faz a halação física do app (sem limiar, raio
+  pelo quadro da bitola, áreas lisas iguais). No DCTL ela é a mesma aproximação numa passada da halação de
+  sempre; o plugin OpenFX segue o app de perto.
 
 ### Resolve Studio × gratuito
 
@@ -258,7 +301,7 @@ Dicas:
 plugins/ofx/
   openfx/        OpenFX 1.4 oficial (cabeçalhos + biblioteca de apoio C++), BSD-3: LICENSE e SOURCE.txt
                  (endereço, commit e SHA-256 de cada arquivo); só leitura
-  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 44 presets),
+  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 48 presets),
                  gerados por pelicula/ofx.py — não edite; rode python tools/gerar_ofx.py
   src/           pc_core.cpp (as passadas do Engine.render na CPU), pc_ofx.cpp (o efeito OpenFX),
                  pc_capi.cpp (interface C para os testes), pc_json.h (leitor dos looks .json/.plc)
@@ -278,8 +321,8 @@ plugins/ofx/
   vazamento, cor, grão, defeitos, força geral, moldura). Distâncias em px@1080 (`scale = altura/1080`),
   quadro e sementes como no app (determinístico). Imagens com a linha 0 no topo; a cola OpenFX inverte as
   linhas (o OpenFX tem a origem embaixo).
-- **Parâmetros**: os controles dos nós Cor + Textura + Projetor (sem *Qualidade* e *fps*, que o OpenFX não
-  precisa), nas seções do app, com rótulos e dicas de `params.py`. O efeito novo abre com o preset padrão
+- **Parâmetros**: os controles dos nós Cor + Textura + Projetor (sem *Qualidade*, *fps* e *Camadas com copia*,
+  que o OpenFX não precisa), nas seções do app, com rótulos e dicas de `params.py`. O efeito novo abre com o preset padrão
   do app. Presets e looks `.json` viram o vetor de valores (`ofx.ui_values`); a leitura do `.json` em C++
   segue `params.sanitize` (chave ausente = padrão do app).
 - **Testes** (`tests/test_ofx.py`, compila na hora ou usa `plugins/ofx/dist` se foi compilado das mesmas
@@ -292,4 +335,23 @@ plugins/ofx/
   `verificar_deb.sh` conferem o pacote instalado. O aviso da licença BSD do OpenFX vai junto
   (`Contents/Resources/OpenFX-LICENSE.txt`).
 
-Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes.
+Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes. O grão no negativo e a diferença de nitidez entre camadas usam números de datasheets públicos da Kodak.
+
+## Câmera, formato e montagem da 1.6 no plugin
+
+- **Formatos de foto** (Foto 35 mm 135, Foto meio quadro, Foto médio formato 120): entram na escolha *Bitola* dos
+  nós e do OpenFX, com o mesmo grão, maciez, tremor, vinheta e halação do app (paridade conferida em
+  `tests/test_resolve.py`). O scan da película continua fora do plugin.
+- **Fora do plugin**, porque são tempo da linha do tempo do app ou geometria que o nó Textura não tem:
+  - *Obturador de película* (mistura vários quadros do arquivo: no Resolve, use o Motion Blur do Resolve Studio ou
+    exporte do app a partir do vídeo rápido);
+  - *Manivela* (velocidade e oscilação por clipe: no Resolve, Retime/Speed Change);
+  - *A montagem na película* (emendas nos cortes e rolos de Super 8: o plugin vê um quadro de cada vez, sem os
+    cortes da timeline);
+  - *Marcação de luz por plano* (os pontos da copiadora de cada clipe do modo Edição: é tempo da montagem do app;
+    no Resolve, o nó **Laboratorio** já tem as luzes da copiadora, então use um nó por plano ou mude as luzes no
+    nó de cada clipe);
+  - *Lente anamórfica* (desespremer, barril, bordas e o risco horizontal longo: no Resolve, o desespremer fica
+    nos atributos do clipe e o risco num efeito de brilho);
+  - *Data impressa* (desenhada na luz da cena antes da película: use um texto no Fusion antes dos nós do
+    Película Converter).

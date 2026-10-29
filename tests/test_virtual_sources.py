@@ -61,7 +61,7 @@ def test_virtual_source_json_round_trip_and_format_3():
     back = tl.Sequence.from_json(d)
     assert back.sources[src.path] == src and back.clips[0].src == src.path
     assert {"gerador", "alfa"} <= seq.features()
-    assert project.Project(sequence=d).to_json()["formato"] == project.FORMAT
+    assert project.Project(sequence=d).to_json()["formato"] == project.FORMAT_15
     with pytest.raises(ValueError):
         tl.Source.virtual(tl.SOURCE_FILE, W, H)
     with pytest.raises(ValueError):
@@ -124,7 +124,7 @@ def test_project_keeps_virtual_sources_without_relative_paths(tmp_path, sample_v
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     fontes = {f["caminho"]: f for f in raw["edicao"]["fontes"]}
     assert "relativo" not in fontes[v.path] and "relativo" in fontes[sample_video]
-    assert raw["formato"] == project.FORMAT
+    assert raw["formato"] == project.FORMAT_15
     back = tl.Sequence.from_json(project.load(path).sequence)
     assert back.sources[v.path] == v
 

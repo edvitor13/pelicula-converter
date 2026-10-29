@@ -183,12 +183,103 @@ def pq_enc3(rgb):
     return np.array([pq_inv_eotf(1000.0 * float(c)) for c in s * y ** 0.2])
 
 
+# ---- perfis da 1.6 (fórmulas reescritas dos documentos de cada fabricante)
+def clog2_enc(x):  # Canon, "Canon Log Gamma Curves – Input Transform Version 201612" (v1): sinal, x/0,9
+    r = x / 0.9
+    if r < 0.0:
+        return -(0.281863093 * math.log10(-r * 87.09937546 + 1.0) - 0.035388128)
+    return 0.281863093 * math.log10(r * 87.09937546 + 1.0) + 0.035388128
+
+
+def clog2_dec(y):
+    if y < 0.035388128:
+        return -(10.0 ** ((0.035388128 - y) / 0.281863093) - 1.0) / 87.09937546 * 0.9
+    return (10.0 ** ((y - 0.035388128) / 0.281863093) - 1.0) / 87.09937546 * 0.9
+
+
+def clog3_enc(x):  # Canon Log 3 v1: reta entre ±0,014 (em x/0,9), log espelhado dos dois lados
+    r = x / 0.9
+    if r < -0.014:
+        return -0.42889912 * math.log10(-r * 14.98325 + 1.0) + 0.07623209
+    if r <= 0.014:
+        return 2.3069815 * r + 0.073059361
+    return 0.42889912 * math.log10(r * 14.98325 + 1.0) + 0.069886632
+
+
+def clog3_dec(y):
+    if y < 0.04076162:
+        r = -(10.0 ** ((0.07623209 - y) / 0.42889912) - 1.0) / 14.98325
+    elif y <= 0.105357102:
+        r = (y - 0.073059361) / 2.3069815
+    else:
+        r = (10.0 ** ((y - 0.069886632) / 0.42889912) - 1.0) / 14.98325
+    return r * 0.9
+
+
+def _fuji(a, b, c, d, e, f, cut1, cut2):  # Fujifilm, "F-Log Data Sheet" Ver.1.1 / "F-Log2 Data Sheet"
+    def enc(x):
+        return c * math.log10(a * x + b) + d if x >= cut1 else e * x + f
+
+    def dec(y):
+        return 10.0 ** ((y - d) / c) / a - b / a if y >= cut2 else (y - f) / e
+    return enc, dec
+
+
+flog_enc, flog_dec = _fuji(0.555556, 0.009468, 0.344676, 0.790453, 8.735631, 0.092864, 0.00089, 0.100537775223865)
+flog2_enc, flog2_dec = _fuji(5.555556, 0.064829, 0.245281, 0.384316, 8.799461, 0.092864, 0.000889,
+                             0.100686685370811)
+
+
+def dlog_enc(x):  # DJI, "White Paper on D-Log and D-Gamut of DJI Cinema Color System" (2017)
+    return 6.025 * x + 0.0929 if x <= 0.0078 else math.log10(x * 0.9892 + 0.0108) * 0.256663 + 0.584555
+
+
+def dlog_dec(y):
+    return (y - 0.0929) / 6.025 if y <= 0.14 else (10.0 ** (3.89616 * y - 2.27752) - 0.0108) / 0.9892
+
+
+def _slog(r):  # Sony S-Log (sinal, antes da faixa legal)
+    return 0.432699 * math.log10(r + 0.037584) + 0.616596 + 0.03 if r >= 0.0 else r * 5.0 + 0.030001222851889303
+
+
+def slog2_enc(x):  # Sony, "S-Log2 Technical Paper": S-Log de x·155/219, reflexão sobre o branco 90%
+    return _slog(x * 155.0 / 219.0 / 0.9)
+
+
+def slog2_dec(y):
+    r = 10.0 ** ((y - 0.616596 - 0.03) / 0.432699) - 0.037584 if y >= _slog(0.0) else (y - 0.030001222851889303) / 5
+    return r * 0.9 * 219.0 / 155.0
+
+
+def llog_enc(x):  # Leica, "L-Log Reference Manual" V1.9, seção 4.1
+    return 8.0 * x + 0.09 if x <= 0.006 else 0.27 * math.log10(1.3 * x + 0.0115) + 0.6
+
+
+def llog_dec(y):  # seção 4.2
+    return (y - 0.09) / 8.0 if y <= 0.138 else (10.0 ** ((y - 0.6) / 0.27) - 0.0115) / 1.3
+
+
+def logc3_ei(ei):  # ARRI, "ALEXA Log C Curve – Usage in VFX", SUP 3.x, por EI
+    cut, a, b, c, d, e, f = look.LOGC3_EI[ei]
+
+    def enc(x):
+        return c * math.log10(a * x + b) + d if x > cut else e * x + f
+
+    def dec(t):
+        return (10.0 ** ((t - d) / c) - b) / a if t > e * cut + f else (t - f) / e
+    return enc, dec
+
+
 CURVES = {  # perfil: (codificar, decodificar) da luz linear (canal a canal) para o valor da fórmula
     "slog3": (slog3_enc, slog3_dec), "vlog": (vlog_enc, vlog_dec), "nlog": (nlog_enc, nlog_dec),
     "logc3": (logc3_enc, logc3_dec), "logc4": (logc4_enc, logc4_dec), "applelog": (apple_enc, apple_dec),
     "bmd_gen5": (bmd5_enc, bmd5_dec), "dwg": (di_enc, di_dec), "log3g10": (l3g10_enc, l3g10_dec),
     "cineon": (cineon_enc, cineon_dec), "hlg": (hlg_enc, hlg_dec),
+    "clog2": (clog2_enc, clog2_dec), "clog3": (clog3_enc, clog3_dec), "flog": (flog_enc, flog_dec),
+    "flog2": (flog2_enc, flog2_dec), "flog2c": (flog2_enc, flog2_dec), "dlog": (dlog_enc, dlog_dec),
+    "slog2": (slog2_enc, slog2_dec), "llog": (llog_enc, llog_dec),
 }
+NEW_16 = ["clog2", "clog3", "flog", "flog2", "flog2c", "dlog", "slog2", "llog"]
 
 
 def legal(code10: float) -> float:
@@ -200,8 +291,9 @@ def legal(code10: float) -> float:
 def test_every_profile_declares_its_domain():
     assert set(look.INPUT_DOMAIN) == set(look.INPUT_IDS) == set(ENTRADAS)
     assert set(look.INPUT_DOMAIN.values()) <= {"cv", "sinal"}
-    # Sony, Panasonic e Nikon gravam o código da fórmula direto no arquivo de faixa legal.
-    assert {e for e in ENTRADAS if look.code_value_curve(e)} == {"slog3", "vlog", "nlog"}
+    # Sony (S-Log3), Panasonic, Nikon, Fujifilm e DJI gravam o código da fórmula direto no arquivo de faixa legal.
+    assert {e for e in ENTRADAS if look.code_value_curve(e)} == {"slog3", "vlog", "nlog", "flog", "flog2", "flog2c",
+                                                                 "dlog"}
     assert set(params.PARAMS["lut_entrada"].choices[i][0] for i in range(len(params.LUT_ENTRADAS))) <= set(ENTRADAS)
 
 
@@ -210,7 +302,35 @@ def test_new_profiles_keep_the_old_ids():
            "log3g10": 8, "bmd_gen5": 9, "logc4": 10, "applelog": 11}
     assert {k: look.INPUT_IDS[k] for k in old} == old
     assert look.INPUT_IDS["hlg"] == 12 and look.INPUT_IDS["pq"] == 13
-    assert ENTRADAS[-2:] == ["hlg", "pq"] and look.INPUT_GAMUT["hlg"] == look.INPUT_GAMUT["pq"] == "2020"
+    assert ENTRADAS[12:14] == ["hlg", "pq"] and look.INPUT_GAMUT["hlg"] == look.INPUT_GAMUT["pq"] == "2020"
+
+
+def test_profiles_of_16_are_appended_with_new_ids():
+    """Os perfis da 1.6 entram no fim da lista, com ids novos (o F-Log2 C, curva do F-Log2 com o F-Gamut C, tem o
+    seu, como todo perfil)."""
+    assert ENTRADAS[14:] == NEW_16
+    ids = {e: look.INPUT_IDS[e] for e in NEW_16}
+    assert ids == {"clog2": 14, "clog3": 15, "flog": 16, "flog2": 17, "flog2c": 18, "dlog": 19, "slog2": 20,
+                   "llog": 21}
+    assert look.LOGC3_EI_ID > max(look.INPUT_IDS.values())
+    gam = {e: look.INPUT_GAMUT[e] for e in NEW_16}
+    assert gam == {"clog2": "cinemagamut", "clog3": "cinemagamut", "flog": "2020", "flog2": "2020",
+                   "flog2c": "fgamutc", "dlog": "dgamut", "slog2": "sgamut", "llog": "2020"}
+    lut = [k for k, _l in params.LUT_ENTRADAS]
+    assert lut[:14] == ["rec709", "cineon", "logc3", "slog3", "nlog", "vlog", "log3g10", "dwg", "bmd_gen5", "logc4",
+                        "applelog", "linear", "hlg", "pq"]
+    assert lut[14:] == NEW_16
+
+
+def test_new_gamuts_match_the_published_matrices():
+    # DJI publica a matriz D-Gamut → BT.709 (4 casas) no próprio documento
+    dji = np.array([[1.6746, -0.5797, -0.0949], [-0.0981, 1.3340, -0.2359], [-0.0410, -0.2430, 1.2840]])
+    np.testing.assert_allclose(look.gamut_to_709("dgamut"), dji, atol=2e-4)
+    for g in ("cinemagamut", "fgamutc", "dgamut", "sgamut"):
+        m = look.gamut_to_709(g)
+        np.testing.assert_allclose(m.sum(axis=1), 1.0, atol=1e-9)  # branco D65 → branco
+    # o F-Gamut do F-Log e do F-Log2 é o BT.2020
+    assert look.INPUT_GAMUT["flog"] == look.INPUT_GAMUT["flog2"] == "2020"
 
 
 @pytest.mark.parametrize("entrada", ENTRADAS)
@@ -274,6 +394,68 @@ def test_signal_curves_reference_points():
     assert cineon_enc(1.0) * 1023 == pytest.approx(685.0) and cineon_enc(0.0) * 1023 == pytest.approx(95.0)
 
 
+def test_reference_points_of_the_16_profiles():
+    def legal_cv(signal):  # sinal → código/1023 num arquivo de faixa legal
+        return (64.0 + 876.0 * signal) / 1023.0
+
+    # Canon (constantes v1; o código no arquivo é o das constantes v1.2): 18% → 39,8255% e 34,3389% de 1023
+    assert legal_cv(clog2_enc(0.18)) * 100 == pytest.approx(39.8254694, abs=1e-6)
+    assert legal_cv(clog3_enc(0.18)) * 100 == pytest.approx(34.3389369, abs=1e-6)
+    assert clog3_dec(clog3_enc(0.0126)) == pytest.approx(0.0126)                   # na emenda da reta (±0,014)
+    # Fujifilm: F-Log 95 / 470 / 705, F-Log2 95 / 400 / 570 (0%, 18%, 90%) em código de 10 bits
+    assert [round(flog_enc(x) * 1023) for x in (0.0, 0.18, 0.90)] == [95, 470, 705]
+    assert [round(flog2_enc(x) * 1023) for x in (0.0, 0.18, 0.90)] == [95, 400, 570]
+    assert flog_enc(0.18) == pytest.approx(0.4593184, abs=1e-7)
+    # DJI D-Log: 95 / 408 / 586
+    assert [round(dlog_enc(x) * 1023) for x in (0.0, 0.18, 0.90)] == [95, 408, 586]
+    # Sony S-Log2 (faixa legal): 90 / 347 / 582
+    assert [round(legal_cv(slog2_enc(x)) * 1023) for x in (0.0, 0.18, 0.90)] == [90, 347, 582]
+    # Leica L-Log, tabela 1: 0% → 92, 2% → 220, 18% → 445, 90% → 634, 23,30 → 1023 (código de 10 bits)
+    assert [round(llog_enc(x) * 1023) for x in (0.0, 0.02, 0.18, 0.90, 23.30)] == [92, 220, 445, 634, 1023]
+    for name in NEW_16:
+        enc, dec = CURVES[name]
+        rel = 1e-5 if name == "dlog" else 1e-9  # a DJI publica a inversa com 6 algarismos (3,89616 e 2,27752)
+        for x in (-0.01, 0.0, 0.001, 0.01, 0.18, 0.9, 4.0):
+            assert dec(enc(x)) == pytest.approx(x, rel=rel, abs=1e-12), (name, x)
+
+
+@pytest.mark.parametrize("ei", sorted(look.LOGC3_EI, key=int))
+def test_logc3_per_ei_reference_points(ei):
+    """ARRI SUP 3.x: o cinza 18% fica em 0,391 em todos os EI; o EI 800 é a curva de sempre."""
+    enc, dec = logc3_ei(ei)
+    assert enc(0.18) == pytest.approx(0.391007, abs=2e-6)
+    cut, a, b, c, d, e, f = look.LOGC3_EI[ei]
+    assert e * cut + f == pytest.approx(c * math.log10(a * cut + b) + d, abs=2e-6)  # a reta emenda no log
+    assert dec(enc(2.0)) == pytest.approx(2.0)
+    if ei == "800":
+        assert enc(0.5) == pytest.approx(logc3_enc(0.5)) and dec(0.6) == pytest.approx(logc3_dec(0.6))
+
+
+def test_logc3_ei_param_is_neutral_and_kept_by_presets():
+    p = params.PARAMS["logc3_ei"]
+    assert p.default == "800" and [k for k, _l in p.choices] == sorted(look.LOGC3_EI, key=int)
+    assert "logc3_ei" in presets.SOURCE_KEYS
+    v = dict(params.defaults(), entrada="logc3")
+    assert look.build_plan(v, 64, 36, 0, 24.0).uniforms["u_input"] == 4               # EI 800: o id de sempre
+    U = look.build_plan(dict(v, logc3_ei="1600"), 64, 36, 0, 24.0).uniforms
+    assert U["u_input"] == look.LOGC3_EI_ID + 10
+    assert look.input_id(dict(v, logc3_ei="160")) == look.LOGC3_EI_ID
+    # o EI só vale para o LogC3
+    assert look.build_plan(dict(v, entrada="slog3", logc3_ei="1600"), 64, 36, 0, 24.0).uniforms["u_input"] == 3
+    assert look.input_id(dict(v, logc3_ei="999")) == 4
+    # as transições misturam na mesma luz que o look lê
+    from pelicula import transitions
+    assert transitions.light_of(dict(v, logc3_ei="1600")) == (look.LOGC3_EI_ID + 10, False)
+    assert transitions.light_of(v) == (4, False)
+
+
+def test_shader_logc3_table_follows_look():
+    m = re.search(r"const float LC3\[66\] = float\[66\]\(([^)]*)\);", shaders.COMMON)
+    vals = [float(x) for x in m.group(1).replace("\n", " ").split(",")]
+    want = [x for row in look.LOGC3_EI.values() for i, x in enumerate(row) if i != 1]
+    assert vals == pytest.approx(want, abs=1e-9)
+
+
 def test_hlg_and_pq_reference_points():
     # BT.2408: cinza 18% = 38% HLG = 26 cd/m² PQ (38% PQ); branco de referência = 75% HLG = 203 cd/m² (58% PQ)
     assert hlg_dec(0.38) == pytest.approx(0.18)
@@ -305,7 +487,8 @@ void main() {
 
 
 class Probe:
-    """Roda toLinear / lutEncode do shaders.COMMON sobre valores quaisquer (float32), no contexto dos testes."""
+    """Roda toLinear / lutEncode do shaders.COMMON sobre valores quaisquer (float32), no contexto dos testes.
+    `curve_id`: outro id de curva (o LogC3 com outro EI)."""
 
     def __init__(self, eng):
         self.ctx = eng.ctx
@@ -313,7 +496,7 @@ class Probe:
         self.vao = self.ctx.vertex_array(self.prog, [(eng.vbo, "2f", "in_pos")])
         self.prog["u_lut_gamut"].value = look.mat3_uniform(np.eye(3))
 
-    def run(self, x, entrada: str, cv: bool = False, encode: bool = False) -> np.ndarray:
+    def run(self, x, entrada: str, cv: bool = False, encode: bool = False, curve_id: int | None = None) -> np.ndarray:
         import moderngl
         a = np.asarray(x, dtype=np.float32)
         a = np.repeat(a[:, None], 3, axis=1) if a.ndim == 1 else a
@@ -324,7 +507,7 @@ class Probe:
         try:
             tex.use(0)
             self.prog["t_x"].value = 0
-            self.prog["u_id"].value = look.INPUT_IDS[entrada]
+            self.prog["u_id"].value = look.INPUT_IDS[entrada] if curve_id is None else curve_id
             self.prog["u_cv"].value = int(cv)
             self.prog["u_mode"].value = int(encode)
             fbo.use()
@@ -353,6 +536,22 @@ def test_shader_curves_match_the_reference_formulas(probe, entrada):
     lin = np.array([0.0005, 0.002, 0.01, 0.05, 0.18, 0.5, 0.9, 2.0, 8.0])
     got = probe.run(lin, entrada, cv=False, encode=True)[:, 0]
     np.testing.assert_allclose(got, [enc(float(v)) for v in lin], rtol=1e-5, atol=2e-6)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("ei", ["160", "400", "1000", "1600"])
+def test_logc3_ei_shader_matches_the_reference(probe, ei):
+    enc, dec = logc3_ei(ei)
+    cid = look.input_id({"entrada": "logc3", "logc3_ei": ei})
+    xs = np.linspace(-0.05, 1.05, 221)
+    np.testing.assert_allclose(probe.run(xs, "logc3", curve_id=cid)[:, 0], [dec(float(x)) for x in xs],
+                               rtol=2e-4, atol=2e-6)
+    lin = np.array([0.0005, 0.002, 0.01, 0.05, 0.18, 0.5, 0.9, 2.0, 8.0])
+    np.testing.assert_allclose(probe.run(lin, "logc3", encode=True, curve_id=cid)[:, 0],
+                               [enc(float(v)) for v in lin], rtol=1e-5, atol=2e-6)
+    # o EI muda as pontas, não o cinza
+    assert probe.run([0.391007], "logc3", curve_id=cid)[0, 0] == pytest.approx(0.18, rel=2e-4)
+    assert abs(probe.run([0.9], "logc3", curve_id=cid)[0, 0] - logc3_dec(0.9)) > 0.05
 
 
 @pytest.mark.gpu

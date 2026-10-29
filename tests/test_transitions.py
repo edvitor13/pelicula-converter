@@ -121,7 +121,7 @@ def test_using_a_new_type_needs_format_3():
         p = project.Project(media_path="C:/v/a.mp4", sequence=seq.to_json(), mode="edicao")
         data = p.to_json()
         assert data["formato"] == 3 and "transicoes" in data["recursos"], kind
-        assert seq.to_json()["formato"] == tl.FORMAT
+        assert seq.to_json()["formato"] == tl.FORMAT_15
     # um ajuste novo fora do padrão com um tipo antigo não precisa da 1.5 (a 1.4 o ignora e desenha igual)
     seq.set_values(b.id, {**editparams.VIDEO.defaults(), "entrada_tipo": "dissolver", "entrada_anel": 30.0})
     assert "transicoes" not in seq.features()

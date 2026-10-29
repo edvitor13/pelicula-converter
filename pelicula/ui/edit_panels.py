@@ -22,6 +22,21 @@ from .timeline_view import MIME_SOURCE
 from .widgets import SectionCard, Segmented, timecode
 
 THUMB = QSize(72, 42)
+# 1.6: as seções de cor novas (acrescentadas no fim de `editparams.VIDEO_SECTIONS`) aparecem depois destas.
+DISPLAY_AFTER = {"pele": "cor", "alvo": "hsl", "degrade": "efeitos", "manivela": "tempo",
+                 "luz_copiadora": "camera"}  # 1.6: manivela; luz da copiadora por plano (`luz_plano.py`)
+
+
+def display_order(sections):
+    """As seções na ordem do inspetor: as de `DISPLAY_AFTER` logo depois da seção parecida."""
+    later = [s for s in sections if s.key in DISPLAY_AFTER]
+    out = [s for s in sections if s.key not in DISPLAY_AFTER]
+    for s in later:
+        at = next((i for i, x in enumerate(out) if x.key == DISPLAY_AFTER[s.key]), len(out) - 1)
+        while at + 1 < len(out) and out[at + 1].key in DISPLAY_AFTER:
+            at += 1
+        out.insert(at + 1, s)
+    return out
 
 
 def fmt_seconds(sec: float) -> str:
@@ -331,6 +346,7 @@ class ClipInspector(QWidget):
     (`seekRequested`)."""
 
     autoRequested = Signal(str)
+    autoFrameRequested = Signal(str)  # 1.6: "Automático" só com o quadro atual (o clique analisa o clipe inteiro)
     seekRequested = Signal(int)
 
     OPEN_VIDEO = {"luz", "cor"}
@@ -408,7 +424,7 @@ class ClipInspector(QWidget):
         il.setContentsMargins(0, 0, 8, 8)
         il.setSpacing(8)
         cards = []
-        for sec in sections:
+        for sec in display_order(sections):
             card = SectionCard(sec, store, expanded=sec.key in open_keys)
             cards.append(card)
             il.addWidget(card)

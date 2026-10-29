@@ -574,6 +574,30 @@ def _draw_components(name: str, p: QPainter, c: QColor) -> None:
         body.quadTo(17.2, 13.6, 17.5, 19.5)
         body.closeSubpath()
         p.drawPath(body)
+    else:
+        _draw_color(name, p, c)
+
+
+def _draw_color(name: str, p: QPainter, c: QColor) -> None:
+    """Ícones das ferramentas de cor da 1.6 (mesma grade de 24 unidades)."""
+    if name == "eyedropper":
+        # Conta-gotas inclinado: bulbo em cima à direita, ponta embaixo à esquerda.
+        _pen(p, c)
+        p.drawLine(QPointF(5, 19), QPointF(13.5, 10.5))
+        p.drawLine(QPointF(5, 19), QPointF(4, 20))
+        p.drawLine(QPointF(11, 8), QPointF(16, 13))
+        p.setBrush(QBrush(c))
+        p.drawEllipse(QPointF(17, 7), 3.2, 3.2)
+    elif name == "zebra":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5.5, 17, 13), 2, 2)
+        for x in (6, 10.5, 15):
+            p.drawLine(QPointF(x, 18.5), QPointF(x + 5, 5.5))
+    elif name == "reference":
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3, 6, 8, 12), 1.5, 1.5)
+        p.drawRoundedRect(QRectF(13, 6, 8, 12), 1.5, 1.5)
+        p.drawLine(QPointF(12, 3.5), QPointF(12, 20.5))
 
 
 @lru_cache(maxsize=256)

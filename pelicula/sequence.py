@@ -26,7 +26,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import media, timeline
+from . import camera, media, timeline
 
 
 @dataclass
@@ -36,6 +36,9 @@ class LayerImage:
     desfaz a multiplicação depois de amostrar e usa o alfa como cobertura."""
     layer: timeline.Layer
     image: np.ndarray
+    # 1.6, obturador do look (`tempo_camera`): ((imagens…), (pesos…)) dos quadros do arquivo que a janela aberta cobre;
+    # `frame.Recipe.montage` mistura na luz linear antes da montagem. None = só `image` (o de sempre).
+    stack: tuple | None = None
 
 
 @dataclass
@@ -147,19 +150,21 @@ def present(src: timeline.Source) -> bool:
     return media.path_exists(src.path, src.seq_start)
 
 
-def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, hq: bool) -> np.ndarray:
+def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, hq: bool,
+                 profile: str | None = None) -> np.ndarray:
     try:
         mtime = os.path.getmtime(media.sequence_file(src.path, src.seq_start + frame) if src.is_sequence
                                  else src.path)
     except OSError:
         mtime = 0.0
-    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq, src.has_alpha)
+    key = (src.path, mtime, 0 if src.is_image else frame, w, h, depth, hq, src.has_alpha, profile)
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
         if hit is not None:
             _CACHE.move_to_end(key)
             return hit
-    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq, alpha=src.has_alpha)
+    img = media.grab_frame(src.to_info(), 0 if src.is_image else frame, w, h, depth, hq=hq, alpha=src.has_alpha,
+                           profile=profile)
     img.setflags(write=False)
     with _CACHE_LOCK:
         _CACHE[key] = img
@@ -169,8 +174,9 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
 
 
 def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth: int = 8,
-         hq: bool = False) -> FrameLayers:
-    """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread)."""
+         hq: bool = False, shutter: float = 0.0) -> FrameLayers:
+    """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread). `shutter` (1.6): o ângulo do
+    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`)."""
     out = []
     for layer in seq.layers_at(frame):
         src = seq.sources.get(layer.clip.src)
@@ -182,7 +188,12 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
             continue
         if not present(src):
             continue
-        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq)))
+        prof = camera.read_profile(layer.clip.values)
+        win = seq.src_window(layer.clip, frame, shutter) if shutter > 0 else None
+        stack = None
+        if win is not None:
+            stack = (tuple(_cached_grab(src, k, w, h, depth, hq, prof) for k, _w in win), tuple(wt for _k, wt in win))
+        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq, prof), stack))
     return FrameLayers(int(frame), out)
 
 
@@ -194,24 +205,30 @@ REVERSE_MAX_FRAMES = 48             # quadros por bloco (no máximo)
 class _ClipStream:
     """Um FrameReader de um clipe, andando para a frente no arquivo."""
 
-    def __init__(self, src: timeline.Source, start: int, w: int, h: int, depth: int, hq: bool, perf):
+    def __init__(self, src: timeline.Source, start: int, w: int, h: int, depth: int, hq: bool, perf,
+                 profile: str | None = None):
         self.src, self.w, self.h, self.depth, self.hq, self.perf = src, w, h, depth, hq, perf
+        self.profile = profile  # 1.6: perfil de câmera do clipe (log em faixa legal vem em float32)
         self.reader: media.FrameReader | None = None
         self.next = 0
         self.last: np.ndarray | None = None
         self.last_idx = -1
         self.error = ""
+        self.keep = 0  # 1.6, obturador: quantos quadros recentes guardar (a janela relê quadros já passados)
+        self.recent: OrderedDict = OrderedDict()
         self._open(start)
 
     def _open(self, f: int) -> None:
         self.close()
         self.reader = media.FrameReader(self.src.to_info(), self.w, self.h, self.depth, max(0, f), None,
-                                        hq=self.hq, perf=self.perf, alpha=self.src.has_alpha)
+                                        hq=self.hq, perf=self.perf, alpha=self.src.has_alpha, profile=self.profile)
         self.next = max(0, f)
 
     def get(self, f: int, jump: int) -> np.ndarray:
         if f == self.last_idx and self.last is not None:
             return self.last
+        if self.keep and f in self.recent:
+            return self.recent[f]
         if self.reader is None or f < self.next or f - self.next > jump:
             self._open(f)
         while self.next <= f:
@@ -221,6 +238,10 @@ class _ClipStream:
                     self.error = self.reader.error
                 break
             self.last, self.last_idx = img, self.next
+            if self.keep:
+                self.recent[self.next] = img
+                while len(self.recent) > self.keep:
+                    self.recent.popitem(last=False)
             self.next += 1
         if self.last is None:
             self.last = _blank(self.w, self.h, self.depth)
@@ -238,9 +259,13 @@ class _ReverseStream:
     quadro pedido) e entregue de trás para a frente. Enquanto um bloco é mostrado, o anterior do arquivo é
     decodificado ao fundo; a memória fica em dois blocos de até `REVERSE_BUDGET` bytes cada."""
 
-    def __init__(self, src: timeline.Source, start: int, w: int, h: int, depth: int, hq: bool, perf):
+    def __init__(self, src: timeline.Source, start: int, w: int, h: int, depth: int, hq: bool, perf,
+                 profile: str | None = None):
         self.src, self.w, self.h, self.depth, self.hq, self.perf = src, w, h, depth, hq, perf
+        self.profile = profile  # 1.6: perfil de câmera do clipe (log em faixa legal vem em float32)
         bpp = (4 if src.has_alpha else 3) * (1 if depth == 8 else 2)
+        if profile is not None and not src.has_alpha and media.float_input(src.to_info(), profile):
+            bpp = 12
         self.n = max(2, min(REVERSE_MAX_FRAMES, REVERSE_BUDGET // max(1, w * h * bpp)))
         self.error = ""
         self.loads = 0  # blocos decodificados (os testes conferem que a leitura anda em blocos)
@@ -254,7 +279,7 @@ class _ReverseStream:
         lo = max(0, f - self.n + 1)
         out: dict[int, np.ndarray] = {}
         reader = media.FrameReader(self.src.to_info(), self.w, self.h, self.depth, lo, f - lo + 1, hq=self.hq,
-                                   perf=self.perf, alpha=self.src.has_alpha)
+                                   perf=self.perf, alpha=self.src.has_alpha, profile=self.profile)
         try:
             for k in range(lo, f + 1):
                 img = reader.read()
@@ -316,8 +341,9 @@ class SequenceReader:
 
     def __init__(self, seq: timeline.Sequence, canvas_w: int, canvas_h: int, depth: int = 8, start: int = 0,
                  count: int | None = None, hq: bool = False, perf: media.Perf | None = None,
-                 fps_out: str | None = None, lookahead: float = 1.5):
+                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0):
         self.seq = seq.copy()
+        self.shutter = float(shutter)  # 1.6: ângulo do obturador do look (0 = o quadro de sempre)
         self.w, self.h, self.depth, self.hq = int(canvas_w), int(canvas_h), depth, hq
         self.perf = perf or media.Perf()
         self.start = max(0, int(start))
@@ -350,7 +376,8 @@ class SequenceReader:
     def _new_stream(self, clip: timeline.Clip, first: int) -> _ClipStream | _ReverseStream:
         w, h = self._size(clip)
         kind = _ReverseStream if clip.reverse and not clip.frozen else _ClipStream
-        return kind(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf)
+        return kind(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf,
+                    camera.read_profile(clip.values))
 
     def _stream(self, clip: timeline.Clip, f: int) -> _ClipStream:
         st = self._streams.get(clip.id)
@@ -428,7 +455,17 @@ class SequenceReader:
                 img = self._image(c)
             else:
                 active.add(c.id)
-                img = self._stream(c, layer.src_frame).get(layer.src_frame, self.jump)
+                stream = self._stream(c, layer.src_frame)
+                win = self.seq.src_window(c, t, self.shutter) if self.shutter > 0 else None
+                if win is not None:  # 1.6, obturador: os quadros da janela, na ordem em que o leitor anda
+                    if isinstance(stream, _ClipStream):
+                        stream.keep = max(stream.keep, 2 * len(win) + 2)
+                    order = sorted((k for k, _w in win), reverse=c.reverse)
+                    got = {k: stream.get(k, self.jump) for k in order}
+                    img = stream.get(layer.src_frame, self.jump) if layer.src_frame not in got else got[layer.src_frame]
+                    out.append(LayerImage(layer, img, (tuple(got[k] for k, _w in win), tuple(wt for _k, wt in win))))
+                    continue
+                img = stream.get(layer.src_frame, self.jump)
             out.append(LayerImage(layer, img))
         for cid in [k for k in self._streams if k not in active]:
             c = self.seq.find(cid)
@@ -468,8 +505,9 @@ def legal_range(seq: timeline.Sequence) -> bool:
     Cada clipe é decodificado com a sua faixa (vídeo YUV de faixa legal chega expandido; imagens e vídeo
     de faixa cheia, como estão) e a tela guarda esses valores; o look lê a tela com um perfil só. Vale a
     faixa da maioria dos clipes de vídeo (empate: a do primeiro na linha do tempo); imagens paradas e
-    clipes sem arquivo (RGB de faixa cheia) só contam numa montagem sem vídeo. Limitação conhecida: clipes
-    log de faixas diferentes na mesma montagem usam uma faixa só (perfil de entrada por clipe fica para depois).
+    clipes sem arquivo (RGB de faixa cheia) só contam numa montagem sem vídeo. Clipes log de faixas diferentes
+    na mesma montagem usam uma faixa só, a não ser que tenham perfil de câmera próprio (1.6, `camera.py`): esses
+    são convertidos com a faixa do próprio arquivo para a entrada do look nesta faixa.
     """
     clips = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track))
     srcs = [seq.sources[c.src] for c in clips if c.src in seq.sources and seq.sources[c.src].has_video]

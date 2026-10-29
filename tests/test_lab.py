@@ -136,7 +136,8 @@ def test_grey_ramp_is_monotonic_and_inside_0_1(neg, copia, proc):
     y = look.lab_eval(v, stops(np.linspace(-14, 14, 561)))
     assert np.isfinite(y).all() and (y >= 0).all() and (y <= 1.0 + 1e-9).all()
     assert (np.diff(y, axis=0) >= -1e-9).all()
-    assert y[-1].min() > 0.9 and y[0].max() < 0.1
+    # Os negativos "(datasheet)" têm o gama medido (menor que o feito à mão): com a cópia P&B o preto fica em 0,10–0,11.
+    assert y[-1].min() > 0.9 and y[0].max() < (0.11 if neg.endswith("_v2") else 0.1)
 
 
 @pytest.mark.parametrize("proc", PROCS)
@@ -391,7 +392,7 @@ def test_new_lab_controls_are_neutral_by_default():
     U = look.build_plan(lab_values(), 320, 180, 0, 24.0).uniforms
     assert U["u_lab_ops"] == 0
     for pid in [p["id"] for p in presets.BUILTIN if p["valores"] and p["valores"].get("lab_on")]:
-        if pid in ("lab_technicolor_hue_split", "lab_teal_orange_5201"):
+        if pid in ("lab_technicolor_hue_split", "lab_teal_orange_5201", "lab_flashing_suave"):  # usam de propósito
             continue
         v = presets.builtin_values(pid)
         assert look.build_plan(v, 64, 36, 0, 24.0).uniforms["u_lab_ops"] == 0, pid

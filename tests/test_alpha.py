@@ -104,7 +104,7 @@ def test_source_keeps_alpha_in_json_and_marks_the_feature(make_info):
     assert src.has_alpha and src.to_info().has_alpha
     seq = tl.Sequence.for_source(src)
     d = json.loads(json.dumps(seq.to_json()))
-    assert d["fontes"][0]["alfa"] is True and "alfa" in seq.features() and d["formato"] == tl.FORMAT
+    assert d["fontes"][0]["alfa"] is True and "alfa" in seq.features() and d["formato"] == tl.FORMAT_15
     assert tl.Sequence.from_json(d).sources[src.path].has_alpha
     # um arquivo com alfa sem mudanças continua "sem edição", mas o modo Película o lê pela montagem
     assert seq.is_trivial() == src.path and seq.direct_file() is None

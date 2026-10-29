@@ -174,6 +174,36 @@ void blur_pass(const Img& src, Img& dst, int dx, int dy, float sigma) {
     });
 }
 
+// BLUR3 do app (1.6, nitidez por camada): a mesma gaussiana separável com um sigma por canal.
+void blur_pass3(const Img& src, Img& dst, int dx, int dy, float3 sigma) {
+    dst.resize(src.w, src.h);
+    float sm = std::max(sigma.x, std::max(sigma.y, sigma.z));
+    int r = (int)std::min(std::ceil(sm * 3.0f), 48.0f);
+    std::vector<float3> wts(2 * r + 1);
+    float sx = std::max(sigma.x, 1e-3f), sy = std::max(sigma.y, 1e-3f), sz = std::max(sigma.z, 1e-3f);
+    float3 k = make_float3(-0.5f / (sx * sx), -0.5f / (sy * sy), -0.5f / (sz * sz));
+    float3 wsum = make_float3(0.0f, 0.0f, 0.0f);
+    for (int i = -r; i <= r; ++i) {
+        float d2 = (float)(i * i);
+        wts[i + r] = make_float3(std::exp(d2 * k.x), std::exp(d2 * k.y), std::exp(d2 * k.z));
+        wsum = wsum + wts[i + r];
+    }
+    for (auto& w : wts) w = make_float3(w.x / wsum.x, w.y / wsum.y, w.z / wsum.z);
+    parallel_rows(src.h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < src.w; ++x) {
+                float3 acc = make_float3(0.0f, 0.0f, 0.0f);
+                for (int i = -r; i <= r; ++i) {
+                    int px = clampi(x + i * dx, 0, src.w - 1);
+                    int py = clampi(y + i * dy, 0, src.h - 1);
+                    acc = acc + src.at(px, py) * wts[i + r];
+                }
+                dst.at(x, y) = acc;
+            }
+        }
+    });
+}
+
 // Um nível de mipmap a partir do anterior (média 2x2).
 void downsample(const Img& src, Img& dst) {
     int w = std::max(1, src.w / 2), h = std::max(1, src.h / 2);
@@ -553,7 +583,11 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     float sig_g = V.bitola_desfoque_on == 1 ? gauge(gi, 2) * V.bitola_resolucao : 0.0f;
     float sig_u = V.lente_on == 1 ? V.raio_maciez * V.maciez * 2.0f : 0.0f;
     float sig_m = PC_MTF[V.mtf] * 2.0f * V.mtf_forca;
-    float soft = std::sqrt(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m) * scale;
+    float sig_r = 0.0f;  // 1.6: maciez pelo grão (grao.soft_sigma)
+    if (V.grao_maciez > 0.0f && V.grao_on == 1 && V.grao_forca > 0.0f)
+        sig_r = PC_GRAIN_SOFT_K * 0.8f * V.grao_tamanho * gauge(gi, 0) * std::pow(PC_ISO[V.iso] / 250.0f, 0.18f) *
+                V.grao_maciez;
+    float soft = std::sqrt(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m + sig_r * sig_r) * scale;
     float sharp = V.lente_on == 1 ? V.nitidez : 0.0f;
     float soft_sigma = 0.0f, soft_mix = 0.0f;
     if (soft > 0.05f) {
@@ -562,11 +596,35 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     } else if (sharp > 0.0f) {
         soft_sigma = std::max(V.raio_maciez * scale, 0.6f);
     }
+    // 1.6: diferença de nitidez entre camadas (grao.layer_softness): um sigma por canal
+    bool layers = false;
+    float3 s3 = make_float3(0.0f, 0.0f, 0.0f);
+    if (V.mtf_camadas > 0.0f) {
+        bool with_print = (V.copia != PC_COPIA_NENHUMA && V.copia_forca > 0.0f) ||
+                          (V.lab_on == 1 && V.lab_copia != PC_LAB_COPIA_NENHUMA);
+        int lo = with_print ? 3 : 0;
+        float kl = 2.0f * V.mtf_camadas * PC_PX_MM[gi] * 0.001f * scale;
+        float dr = PC_MTF_LAYERS[lo] * kl, dg = PC_MTF_LAYERS[lo + 1] * kl, db = PC_MTF_LAYERS[lo + 2] * kl;
+        float3 t3 = make_float3(std::sqrt(soft * soft + dr * dr), std::sqrt(soft * soft + dg * dg),
+                                std::sqrt(soft * soft + db * db));
+        float tm = std::max(t3.x, std::max(t3.y, t3.z));
+        if (tm > 0.05f) {
+            layers = true;
+            s3 = t3;
+            soft_sigma = tm;
+            soft_mix = 1.0f;
+        }
+    }
     Img softimg;
     if (soft_sigma > 0.0f) {
         Img t;
-        blur_pass(lin, t, 1, 0, soft_sigma);
-        blur_pass(t, softimg, 0, 1, soft_sigma);
+        if (layers) {
+            blur_pass3(lin, t, 1, 0, s3);
+            blur_pass3(t, softimg, 0, 1, s3);
+        } else {
+            blur_pass(lin, t, 1, 0, soft_sigma);
+            blur_pass(t, softimg, 0, 1, soft_sigma);
+        }
     }
 
     PC_MARK("soft");
@@ -579,6 +637,15 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
         hal.limit = 8.0f;
         hal.lum_only = 1;
     }
+    // 1.6: halação física (grao.physical_halation): exposição do vermelho, sem limiar, raio pelo quadro da bitola
+    const bool hal_phys = hal.on && V.hal_modelo == PC_HAL_FISICA;
+    if (hal_phys) {
+        hal.thr = 0.0f;
+        hal.sigma = V.hal_raio * PC_HAL_PX[gi] * scale;
+        hal.limit = PC_HAL_PHYS_LIMIT;
+        hal.lum_only = 0;
+    }
+    const float3 hal_a = V.hal_cor * (V.hal_forca * PC_HAL_PHYS_K);
     if (V.bloom_on == 1 && V.bloom_forca > 0.0f) {
         bloom.on = true;
         bloom.thr = 0.18f * std::exp2(V.bloom_limiar);
@@ -600,6 +667,7 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     // ---------------------------------------------------------------- grão (grade de ruído)
     NoiseGrid noise;
     float grain_amt = 0.0f;
+    float ng_k = 0.0f;  // 1.6: multiplicador do grão no negativo (o de grain_amt sem o 0,011)
     const bool grain = V.grao_on == 1 && V.grao_forca > 0.0f;
     if (grain) {
         float iso = PC_ISO[V.iso];
@@ -613,7 +681,46 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
         int gh = std::max(2, (int)std::ceil(H / gsz));
         float push = V.lab_on == 1 ? std::pow(1.15f, V.lab_revelacao) : 1.0f;
         grain_amt = 0.011f * V.grao_forca * gauge(gi, 1) * iso_amt * std::sqrt(std::min(1.0f, size)) * push;
+        ng_k = V.grao_forca * gauge(gi, 1) * iso_amt * std::sqrt(std::min(1.0f, size)) * push;
         noise.build(gw, gh, (uint)seed * 8u);
+    }
+    // 1.6: grão no negativo (grao.negative_grain): o mesmo campo na densidade das camadas, dentro da cor
+    const bool ngrain = grain && V.lab_on == 1 && V.lab_grao == 1;
+    float3 ng_amp = make_float3(0.0f, 0.0f, 0.0f);
+    if (ngrain) ng_amp = make_float3(PC_NG_AMP[0], PC_NG_AMP[1], PC_NG_AMP[2]) * ng_k;
+    // 1.6: grão físico (grao_fisico.negative_grain): o modelo booleano na densidade, em px@1080 (sem a compensação
+    // da prévia reduzida), a cada quadro como o grão de sempre
+    const bool pgrain = ngrain && V.lab_grao_modelo == PC_GRAO_FISICO;
+    float3 pg_amp = make_float3(0.0f, 0.0f, 0.0f);
+    float pg_r = 1.0f, pg_k = 1.0f;
+    int pg_seed = 0;
+    float4 pg_w = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): raios variáveis (pc_pg_var)
+    if (pgrain) {
+        float iso = PC_ISO[V.iso];
+        float mul = V.grao_forca * gauge(gi, 1) * std::pow(iso / 250.0f, 0.35f)
+                    * (V.lab_on == 1 ? std::pow(1.15f, V.lab_revelacao) : 1.0f);
+        pg_amp = make_float3(std::fmin(PC_PG_KAPPA[0] * mul, PC_PG_AMP_MAX), std::fmin(PC_PG_KAPPA[1] * mul, PC_PG_AMP_MAX),
+                             std::fmin(PC_PG_KAPPA[2] * mul, PC_PG_AMP_MAX));
+        pg_r = PC_PG_RK * (0.8f * V.grao_tamanho * gauge(gi, 0) * std::pow(iso / 250.0f, 0.18f));
+        pg_k = 1080.0f / H;
+        long long seed = (long long)V.grao_semente * 7919LL + (V.grao_animado == 1 ? frame : 0);
+        pg_seed = (int)(seed % 2147483647LL);
+        if (V.lab_grao_cristal != 1.0f || V.lab_grao_variacao > 0.0f) {
+            // 1.6 (fase 3): tamanho do cristal e variação do tamanho (grao_fisico.extras)
+            float3 kf = pc_pg_kfactor(V.lab_grao_cristal, V.lab_grao_variacao);
+            pg_amp = make_float3(std::fmin(PC_PG_KAPPA[0] * kf.x * mul, PC_PG_AMP_MAX),
+                                 std::fmin(PC_PG_KAPPA[1] * kf.y * mul, PC_PG_AMP_MAX),
+                                 std::fmin(PC_PG_KAPPA[2] * kf.z * mul, PC_PG_AMP_MAX));
+            pg_r = pg_r * V.lab_grao_cristal;
+            if (V.lab_grao_variacao > 0.0f) pg_w = pc_pg_var(V.lab_grao_variacao);
+        }
+    }
+    // 1.6: respiração por camada (grao.breathing): a exposição de cada camada neste quadro, antes da cor
+    const bool breath = V.grao_on == 1 && V.grao_respiracao > 0.0f;
+    float3 breath_m = make_float3(1.0f, 1.0f, 1.0f);
+    if (breath) {
+        float3 bd = pc_breath(frame, V.grao_semente, V.grao_respiracao) * (2.3025851f / PC_BREATH_NEG_GAMMA);
+        breath_m = make_float3(std::exp(bd.x), std::exp(bd.y), std::exp(bd.z));
     }
 
     PC_MARK("noise");
@@ -655,14 +762,45 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                     l = l + (m - l) * (0.3f * V.nevoa_forca) + m * (0.35f * V.nevoa_forca);
                 }
                 if (bloom.on) l = l + sample(bloom_b, u, v) * (V.bloom_forca * 0.22f);
-                if (hal.on) l = l + V.hal_cor * (sample(hal_b, u, v).x * V.hal_forca * 0.32f);
+                if (hal.on && !hal_phys) l = l + V.hal_cor * (sample(hal_b, u, v).x * V.hal_forca * 0.32f);
+                if (hal_phys) {  // só o desvio local: o halo menos a exposição do vermelho no ponto
+                    float dp = sample(hal_b, u, v).x - pc_extract(lin.at(x, y), 0.0f, PC_HAL_PHYS_LIMIT, 0).x;
+                    l = l + make_float3(hal_a.x / (1.0f + hal_a.x) * dp, hal_a.y / (1.0f + hal_a.y) * dp,
+                                        hal_a.z / (1.0f + hal_a.z) * dp);
+                }
                 if (F.leak_on > 0.0f) l = l + pc_leak(u, v, W / H, F.L0, F.L1, V.vazamento_cor, V.vazamento);
-                float3 yv = lut ? lut_color(lut->data, lut->exact, V, l) : pc_colorpipe(V, l);
-                if (grain) {
+                if (breath) l = make_float3(l.x * breath_m.x, l.y * breath_m.y, l.z * breath_m.z);
+                float3 yv;
+                if (pgrain) {
+                    float4 gq = make_float4(((float)x + 0.5f) * pg_k, ((float)y + 0.5f) * pg_k, pg_r, V.grao_cor);
+                    if (pg_w.z > 0.0f)
+                        yv = pc_colorpipe_pgv(V, l, pg_amp, gq, pg_seed, pg_w);
+                    else
+                        yv = pc_colorpipe_pg(V, l, pg_amp, gq, pg_seed);
+                } else if (ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
-                    yv = pc_apply_grain(yv, nf, nc, V.grao_aspereza, V.grao_cor,
-                                        make_float3(V.grao_sombras, V.grao_meios, V.grao_luzes), grain_amt);
+                    if (V.grao_estrutura > 0.0f)  // 1.6 (fase 3): estrutura pela densidade (grao_estrutura.py)
+                        yv = pc_colorpipe_gs(V, l, ng_amp, nf, nc,
+                                             make_float4(V.grao_estrutura, V.grao_aglomeracao, V.grao_aspereza,
+                                                         V.grao_cor));
+                    else
+                        yv = pc_colorpipe_ng(V, l, pc_neg_grain(nf, nc, V.grao_aspereza, V.grao_cor) * ng_amp);
+                } else {
+                    yv = lut ? lut_color(lut->data, lut->exact, V, l) : pc_colorpipe(V, l);
+                }
+                if (grain && !ngrain) {
+                    float4 nf = noise.sample(u, v) * 2.08f;
+                    float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
+                    float grr = V.grao_aspereza, grc = V.grao_cor;
+                    if (V.grao_estrutura > 0.0f) {  // 1.6 (fase 3): a exposição da cena (l) decide a forma do grão
+                        nf = pc_gs_field(l, nf, nc, grr, grc, V.grao_estrutura, V.grao_aglomeracao);
+                        nc = nf;
+                        grr = 0.0f;
+                        grc = 1.0f;
+                    }
+                    yv = pc_apply_grain(yv, nf, nc, grr, grc, make_float3(V.grao_sombras, V.grao_meios, V.grao_luzes),
+                                        grain_amt);
                 }
                 if (damage) {
                     yv = pc_damage(yv, u, v, W, H, frame, F.sd, F.stain_amt, F.stain_seed, F.hair_on, F.hair_seed,

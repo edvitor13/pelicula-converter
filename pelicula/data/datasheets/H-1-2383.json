@@ -1,0 +1,65 @@
+{
+  "documento": "KODAK VISION Color Print Film 2383 / 3383 - Technical Data",
+  "publicacao": "H-1-2383",
+  "revisao": "Revised 3-22 (março de 2022)",
+  "endereco": "https://www.kodak.com/content/products-brochures/Film/KODAK-VISION-Color-Print-Film-2383-3383-data-sheet.pdf",
+  "sha256": "181eecf54c11da2dab995ffc230a549d675883bd30cced41e7d823302c2c4db2",
+  "aviso": "Pontos lidos dos gráficos do datasheet só para calibrar modelos do app (nenhum gráfico nem PDF no repositório). A Kodak avisa que os dados são representativos e não especificações; Kodak e Vision são marcas da Eastman Kodak Company. O app não é um produto oficial.",
+  "leitura": {
+    "data": "2026-10-29",
+    "metodo": "O gráfico da página 4 é uma imagem raster dentro do PDF: extraída na resolução original, as linhas da grade dão a escala log dos dois eixos e o centro das linhas de cada curva foi lido coluna a coluna.",
+    "erro": "±1 px da imagem: ±1,7% na resposta (138 px por década)."
+  },
+  "mtf": {
+    "pagina": 4,
+    "figura": "Modulation-Transfer Function Curves (F010_0292AC)",
+    "condicoes": "Exposure: Tungsten 3200 K; Process: ECP-2D; Densitometry: Status A; 35% Modulation Target",
+    "unidade": "resposta em % por frequência espacial em ciclos/mm",
+    "ciclos_mm": [22.3, 25.5, 30.7, 40.4, 46.3, 52.3, 60.0, 65.7, 72.0],
+    "R": [76.6, 74.1, 71.6, 67.0, 64.8, 62.7, 60.6, 59.1, 57.7],
+    "G": [80.5, 80.5, 80.5, 80.5, 80.5, 79.2, 79.2, 76.6, 72.2],
+    "B": [61.6, 56.7, 51.3, 43.4, 40.6, 37.7, 35.0, 33.2, 32.2]
+  },
+  "sensitometria": {
+    "tolerancia_ajuste": 0.1,
+    "pagina": 4,
+    "figura": "Sensitometric Curves (F002_1254AC)",
+    "condicoes": "Exposure: 1/500 sec Tungsten plus KODAK Heat Absorbing Glass No. 2043 and Series 1700 filter; Process: ECP-2D; Densitometry: Status A",
+    "unidade": "log E (lux·s) em que cada camada chega a cada densidade (com base e véu); patamar = densidade máxima lida no fim da curva",
+    "leitura": {
+      "data": "2026-10-29",
+      "metodo": "Imagem raster do PDF; a grade dá a escala (64 px por unidade nos dois eixos). No trecho reto as curvas foram lidas linha a linha (log E em cada densidade) na imagem transposta; no pé e no ombro, coluna a coluna.",
+      "erro": "±1 px da imagem: ±0,016 log E e ±0,016 de densidade (64 px por unidade)."
+    },
+    "R": {
+      "densidade": [0.12, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.05],
+      "log_e": [0.35, 0.434, 0.531, 0.661, 0.751, 0.817, 0.867, 0.91, 0.947, 0.977, 1.006, 1.033, 1.062, 1.086, 1.109, 1.134, 1.156, 1.176, 1.201, 1.22, 1.247, 1.266, 1.286, 1.311, 1.33, 1.351, 1.375, 1.395, 1.422, 1.447, 1.47, 1.5, 1.531, 1.561, 1.594, 1.632, 1.68, 1.731, 1.797, 1.887, 1.992, 2.062],
+      "patamar": 4.105
+    },
+    "G": {
+      "densidade": [0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.05],
+      "log_e": [0.09, 0.181, 0.299, 0.382, 0.448, 0.5, 0.549, 0.592, 0.632, 0.668, 0.702, 0.728, 0.761, 0.788, 0.813, 0.843, 0.866, 0.89, 0.915, 0.938, 0.964, 0.986, 1.013, 1.032, 1.059, 1.085, 1.109, 1.139, 1.16, 1.193, 1.221, 1.254, 1.289, 1.33, 1.371, 1.416, 1.473, 1.537, 1.622, 1.754, 1.917],
+      "patamar": 4.105
+    },
+    "B": {
+      "densidade": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.05],
+      "log_e": [-0.236, -0.066, 0.04, 0.118, 0.182, 0.238, 0.282, 0.328, 0.363, 0.397, 0.426, 0.454, 0.484, 0.506, 0.531, 0.551, 0.578, 0.595, 0.615, 0.64, 0.658, 0.685, 0.703, 0.724, 0.749, 0.766, 0.79, 0.815, 0.841, 0.861, 0.891, 0.922, 0.954, 0.995, 1.038, 1.09, 1.156, 1.25, 1.408, 1.556],
+      "patamar": 4.105
+    }
+  },
+  "densidade_espectral": {
+    "pagina": 5,
+    "figura": "Spectral Dye Density Curves (F010_0294AC)",
+    "condicoes": "Process: CP-2D; corantes normalizados para formar uma densidade visual neutra de 1,0 com iluminante de projeção de arco de xenônio",
+    "unidade": "densidade espectral difusa por comprimento de onda em nm",
+    "leitura": {
+      "data": "2026-10-29",
+      "metodo": "Imagem raster do PDF; as marcas do eixo de baixo (a cada 50 nm, de 250 a 750 nas bordas da escala; os números impressos estão comprimidos e não valem) e a grade de densidade dão a escala. Cada curva foi seguida a partir do pico; caudas e cruzamentos lidos pelos traços de cada coluna.",
+      "erro": "±1 px da imagem: ±1,6 nm (0,61 px por nm) e ±0,005 de densidade (220 px por unidade); ±0,02 onde duas curvas se tocam (perto de 390, 450 e 490 nm)."
+    },
+    "nm": [360, 370, 380, 390, 400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720, 730, 740, 750],
+    "Y": [0.233, 0.189, 0.202, 0.274, 0.384, 0.511, 0.644, 0.752, 0.804, 0.806, 0.766, 0.664, 0.526, 0.39, 0.267, 0.175, 0.114, 0.072, 0.052, 0.041, 0.032, 0.025, 0.02, 0.016, 0.013, 0.01, 0.009, 0.008, 0.008, 0.007, 0.007, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005],
+    "M": [0.257, 0.271, 0.284, 0.285, 0.283, 0.247, 0.196, 0.141, 0.098, 0.072, 0.111, 0.17, 0.255, 0.39, 0.509, 0.651, 0.757, 0.833, 0.876, 0.857, 0.766, 0.613, 0.451, 0.31, 0.209, 0.13, 0.091, 0.064, 0.048, 0.035, 0.029, 0.023, 0.016, 0.011, 0.01, 0.008, 0.008, 0.008, 0.008, 0.008],
+    "C": [0.057, 0.044, 0.039, 0.043, 0.058, 0.069, 0.078, 0.093, 0.075, 0.069, 0.045, 0.034, 0.031, 0.03, 0.026, 0.037, 0.049, 0.07, 0.104, 0.15, 0.211, 0.29, 0.373, 0.498, 0.619, 0.739, 0.855, 0.953, 1.025, 1.07, 1.086, 1.076, 1.035, 0.963, 0.87, 0.758, 0.647, 0.533, 0.426, 0.36]
+  }
+}

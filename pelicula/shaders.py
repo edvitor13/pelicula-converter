@@ -167,6 +167,111 @@ vec3 pqEnc(vec3 x) {
     return pow((PQ_C1 + PQ_C2 * t) / (1.0 + PQ_C3 * t), vec3(PQ_M2));
 }
 
+// ---------------------------------------------------------------- perfis de câmera da 1.6 (look.INPUT_IDS 14+)
+// Fórmulas publicadas pelos fabricantes (a biblioteca colour-science, BSD-3, serviu só de conferência).
+// Canon Log 2 e Canon Log 3: Canon, "Canon Log Gamma Curves – Input Transform Version 201612" (v1). A
+// fórmula usa a reflexão sobre o branco 90% (luz/0,9) e é espelhada abaixo de 0, como a da Canon.
+float clog2Dec(float y) {
+    float r = (y < 0.035388128) ? -(pow(10.0, (0.035388128 - y) / 0.281863093) - 1.0) / 87.09937546
+                                : (pow(10.0, (y - 0.035388128) / 0.281863093) - 1.0) / 87.09937546;
+    return r * 0.9;
+}
+float clog2Enc(float x) {
+    float r = x / 0.9;
+    return (r < 0.0) ? -(0.281863093 * log10f(-r * 87.09937546 + 1.0) - 0.035388128)
+                     : 0.281863093 * log10f(r * 87.09937546 + 1.0) + 0.035388128;
+}
+float clog3Dec(float y) {
+    float r;
+    if (y < 0.04076162) r = -(pow(10.0, (0.07623209 - y) / 0.42889912) - 1.0) / 14.98325;
+    else if (y <= 0.105357102) r = (y - 0.073059361) / 2.3069815;
+    else r = (pow(10.0, (y - 0.069886632) / 0.42889912) - 1.0) / 14.98325;
+    return r * 0.9;
+}
+float clog3Enc(float x) {
+    float r = x / 0.9;
+    if (r < -0.014) return -0.42889912 * log10f(-r * 14.98325 + 1.0) + 0.07623209;
+    if (r <= 0.014) return 2.3069815 * r + 0.073059361;
+    return 0.42889912 * log10f(r * 14.98325 + 1.0) + 0.069886632;
+}
+// Fujifilm F-Log ("F-Log Data Sheet" Ver.1.1) e F-Log2 ("F-Log2 Data Sheet"; o F-Log2 C, id 18, usa a mesma curva):
+// código de 10 bits / 1023; c·log10(a·x + b) + d acima de cut1, e·x + f abaixo.
+float flogDec(float y) {
+    return (y < 0.100537775223865) ? (y - 0.092864) / 8.735631
+                                   : pow(10.0, (y - 0.790453) / 0.344676) / 0.555556 - 0.009468 / 0.555556;
+}
+float flogEnc(float x) { return (x < 0.00089) ? 8.735631 * x + 0.092864 : 0.344676 * log10f(0.555556 * x + 0.009468) + 0.790453; }
+float flog2Dec(float y) {
+    return (y < 0.100686685370811) ? (y - 0.092864) / 8.799461
+                                   : pow(10.0, (y - 0.384316) / 0.245281) / 5.555556 - 0.064829 / 5.555556;
+}
+float flog2Enc(float x) { return (x < 0.000889) ? 8.799461 * x + 0.092864 : 0.245281 * log10f(5.555556 * x + 0.064829) + 0.384316; }
+// DJI D-Log: "White Paper on D-Log and D-Gamut of DJI Cinema Color System" (2017), código de 10 bits / 1023.
+float dlogDec(float y) { return (y <= 0.14) ? (y - 0.0929) / 6.025 : (pow(10.0, 3.89616 * y - 2.27752) - 0.0108) / 0.9892; }
+float dlogEnc(float x) { return (x <= 0.0078) ? 6.025 * x + 0.0929 : log10f(x * 0.9892 + 0.0108) * 0.256663 + 0.584555; }
+// Sony S-Log2: "S-Log2 Technical Paper" (2012). Sinal (antes da faixa legal) do S-Log com x·155/219 e a
+// reflexão sobre o branco 90%.
+float slog2Dec(float y) {
+    float r = (y >= 0.030001222851889303) ? pow(10.0, (y - 0.646596) / 0.432699) - 0.037584
+                                          : (y - 0.030001222851889303) / 5.0;
+    return r * 0.9 * 219.0 / 155.0;
+}
+float slog2Enc(float x) {
+    float r = x * 155.0 / 219.0 / 0.9;
+    return (r >= 0.0) ? 0.432699 * log10f(r + 0.037584) + 0.646596 : r * 5.0 + 0.030001222851889303;
+}
+// Leica L-Log: "L-Log Reference Manual" V1.9 (2026), seção 4. O manual tem um degrau de 0,0009 em 0,006 entre
+// a reta e o log; fica como está.
+float llogDec(float y) { return (y <= 0.138) ? (y - 0.09) / 8.0 : (pow(10.0, (y - 0.6) / 0.27) - 0.0115) / 1.3; }
+float llogEnc(float x) { return (x <= 0.006) ? 8.0 * x + 0.09 : 0.27 * log10f(1.3 * x + 0.0115) + 0.6; }
+// ARRI LogC3 com outro EI (`logc3_ei` ≠ 800): id 22 + k, k = posição do EI em look.LOGC3_EI (160, 200, 250,
+// 320, 400, 500, 640, 800, 1000, 1280, 1600). Corte, b, c, d, e, f de cada EI (a = 5,555556 em todos).
+const float LC3[66] = float[66](
+    0.005561, 0.080216, 0.269036, 0.381991, 5.842037, 0.092778,
+    0.006208, 0.076621, 0.266007, 0.382478, 5.776265, 0.092782,
+    0.006871, 0.072941, 0.262978, 0.382966, 5.710494, 0.092786,
+    0.007622, 0.068768, 0.259627, 0.383508, 5.637732, 0.092791,
+    0.008318, 0.064901, 0.256598, 0.383999, 5.571960, 0.092795,
+    0.009031, 0.060939, 0.253569, 0.384493, 5.506188, 0.092800,
+    0.009840, 0.056443, 0.250219, 0.385040, 5.433426, 0.092805,
+    0.010591, 0.052272, 0.247190, 0.385537, 5.367655, 0.092809,
+    0.011361, 0.047996, 0.244161, 0.386036, 5.301883, 0.092814,
+    0.012235, 0.043137, 0.240810, 0.386590, 5.229121, 0.092819,
+    0.013047, 0.038625, 0.237781, 0.387093, 5.163350, 0.092824
+);
+float logc3eDec(float t, int k) {
+    float cut = LC3[k * 6], b = LC3[k * 6 + 1], c = LC3[k * 6 + 2], d = LC3[k * 6 + 3];
+    float e = LC3[k * 6 + 4], f = LC3[k * 6 + 5];
+    return (t > e * cut + f) ? (pow(10.0, (t - d) / c) - b) / 5.555556 : (t - f) / e;
+}
+float logc3eEnc(float x, int k) {
+    float cut = LC3[k * 6], b = LC3[k * 6 + 1], c = LC3[k * 6 + 2], d = LC3[k * 6 + 3];
+    float e = LC3[k * 6 + 4], f = LC3[k * 6 + 5];
+    return (x > cut) ? c * log10f(5.555556 * x + b) + d : e * x + f;
+}
+vec3 camDec(vec3 c, int id) {
+    if (id == 14) return vec3(clog2Dec(c.r), clog2Dec(c.g), clog2Dec(c.b));
+    if (id == 15) return vec3(clog3Dec(c.r), clog3Dec(c.g), clog3Dec(c.b));
+    if (id == 16) return vec3(flogDec(c.r), flogDec(c.g), flogDec(c.b));
+    if (id == 17 || id == 18) return vec3(flog2Dec(c.r), flog2Dec(c.g), flog2Dec(c.b));  // F-Log2 (C)
+    if (id == 19) return vec3(dlogDec(c.r), dlogDec(c.g), dlogDec(c.b));
+    if (id == 20) return vec3(slog2Dec(c.r), slog2Dec(c.g), slog2Dec(c.b));
+    if (id == 21) return vec3(llogDec(c.r), llogDec(c.g), llogDec(c.b));
+    int k = id - 22;
+    return vec3(logc3eDec(c.r, k), logc3eDec(c.g, k), logc3eDec(c.b, k));
+}
+vec3 camEnc(vec3 n, int id) {
+    if (id == 14) return vec3(clog2Enc(n.r), clog2Enc(n.g), clog2Enc(n.b));
+    if (id == 15) return vec3(clog3Enc(n.r), clog3Enc(n.g), clog3Enc(n.b));
+    if (id == 16) return vec3(flogEnc(n.r), flogEnc(n.g), flogEnc(n.b));
+    if (id == 17 || id == 18) return vec3(flog2Enc(n.r), flog2Enc(n.g), flog2Enc(n.b));  // F-Log2 (C)
+    if (id == 19) return vec3(dlogEnc(n.r), dlogEnc(n.g), dlogEnc(n.b));
+    if (id == 20) return vec3(slog2Enc(n.r), slog2Enc(n.g), slog2Enc(n.b));
+    if (id == 21) return vec3(llogEnc(n.r), llogEnc(n.g), llogEnc(n.b));
+    int k = id - 22;
+    return vec3(logc3eEnc(n.r, k), logc3eEnc(n.g, k), logc3eEnc(n.b, k));
+}
+
 // Curvas em código de 10 bits (look.INPUT_DOMAIN == "cv"): o decodificador expande a faixa legal
 // (v = (código − 64)/876) e a fórmula do fabricante espera CV = código/1023.
 vec3 legalToCv(vec3 v) { return (v * 876.0 + 64.0) / 1023.0; }
@@ -188,6 +293,7 @@ vec3 toLinear(vec3 c, int id, bool cv) {
     if (id == 11) return vec3(appleDec(c.r), appleDec(c.g), appleDec(c.b));
     if (id == 12) return vec3(hlgDec(c.r), hlgDec(c.g), hlgDec(c.b));
     if (id == 13) return pqDec(c);
+    if (id >= 14) return camDec(c, id);
     return vec3(cineonDec(c.r), cineonDec(c.g), cineonDec(c.b));
 }
 
@@ -323,6 +429,7 @@ vec3 lutEncode(vec3 lin, int id) {
     if (id == 11) return vec3(appleEnc(n.r), appleEnc(n.g), appleEnc(n.b));
     if (id == 12) return vec3(hlgEnc(n.r), hlgEnc(n.g), hlgEnc(n.b));
     if (id == 13) return pqEnc(n);
+    if (id >= 14) return camEnc(n, id);
     return vec3(cineonEnc(n.r), cineonEnc(n.g), cineonEnc(n.b));
 }
 vec3 sampleLut(vec3 c) {
@@ -387,12 +494,17 @@ vec3 labCurve(vec3 x, vec3 g, vec3 xt, vec3 xs, float w) {
     return g * w * (a - b);
 }
 
+// 1.6: grão no negativo (grao.negative_grain): densidade somada a cada camada do negativo. Só o FINAL a preenche;
+// no resto (BAKE, o LUT exportado) fica zero.
+vec3 g_ng = vec3(0.0);
+
 // Um caminho completo. lin: luz linear Rec.709 (0,18 = cinza médio). Devolve o valor de exibição.
 vec3 labPath(vec3 lin, mat3 sens, vec3 ng, vec3 nt, vec3 ns, float nw, mat3 ii, vec3 pg, vec3 pt, vec3 ps,
              float pw, mat3 dye, vec3 off, vec3 key, vec3 nmid, int scan) {
     vec3 e = max(sens * lin, vec3(1e-7));
     vec3 le = vec3(log10f(e.r / 0.18), log10f(e.g / 0.18), log10f(e.b / 0.18));  // log10 relativo ao cinza
     vec3 dn = ii * labCurve(le, ng, nt, ns, nw);  // densidade do negativo (com o efeito entre camadas)
+    dn += g_ng;
     if (scan == 1) {
         // Sem cópia: inverte o negativo com o gama nominal (guardado em pg; 0,30103 = log10(2), um stop)
         // e mostra com a curva neutra.
@@ -469,6 +581,39 @@ vec3 colorPipe(vec3 lin) {
     }
     return y;
 }
+
+// ---------------------------------------------------------------- 1.6: proteger cores saturadas
+// Compressão suave do gamut logo depois da matriz da câmera (u_gamut), antes do look e do negativo. Algoritmo da
+// "ACES Reference Gamut Compression" (Academy Software Foundation / AMPAS, especificação em CC BY 4.0): a
+// distância de cada canal ao acromático A = máx(r, g, b) é d = (A − c)/|A|; abaixo do limiar t nada muda, acima
+// a distância é comprimida por d' = t + (d − t)/(1 + ((d − t)/s)^p)^(1/p), com s tal que o limite l vá para 1.
+// Aqui o espaço é o Rec.709 linear do app e o limite (u_gc_lim, look.gamut_limits) cobre a fronteira inteira do
+// gamut da câmera: a cor mais saturada que ela grava cai na borda do Rec.709, sem canal negativo.
+uniform float u_gc_amt;  // 0..1 (proteger_cores); 0 = a cor de sempre, bit a bit (look.SPARSE_UNIFORMS)
+uniform vec3 u_gc_lim;   // limite da distância por canal (ciano, magenta, amarelo)
+const vec3 GC_THR = vec3(0.815, 0.803, 0.880);
+const float GC_PWR = 1.2;
+
+float gcCompress(float d, float lim, float thr) {
+    if (d < thr) return d;
+    float s = (lim - thr) / pow(pow((1.0 - thr) / (lim - thr), -GC_PWR) - 1.0, 1.0 / GC_PWR);
+    float nd = (d - thr) / s;
+    return thr + (d - thr) / pow(1.0 + pow(nd, GC_PWR), 1.0 / GC_PWR);
+}
+
+vec3 gamutCompress(vec3 c, vec3 lim) {
+    float a = max(c.r, max(c.g, c.b));
+    if (a == 0.0) return c;
+    float aa = abs(a);
+    vec3 d = (vec3(a) - c) / aa;
+    vec3 cd = vec3(gcCompress(d.r, lim.r, GC_THR.r), gcCompress(d.g, lim.g, GC_THR.g),
+                   gcCompress(d.b, lim.b, GC_THR.b));
+    return vec3(a) - cd * aa;
+}
+
+vec3 protectGamut(vec3 c) {
+    return u_gc_amt > 0.0 ? mix(c, gamutCompress(c, u_gc_lim), u_gc_amt) : c;
+}
 """
 
 BASE = COMMON + """
@@ -527,7 +672,8 @@ vec3 imageLin(vec2 uv) {
     } else {
         code = texture(t_in, lens(uv, 1.0)).rgb;
     }
-    return max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
+    return max(protectGamut(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1)), vec3(0.0))
+           * exp2(u_gain);
 }
 
 float vignette(vec2 uv) {
@@ -557,9 +703,87 @@ float edgeText(vec2 mm) {
     return m;
 }
 
+// 1.6: anamórfico (`anamorfico.py`) e data impressa (`data_impressa.py`), módulos Beta. Desligados
+// (look.SPARSE_UNIFORMS: u_anam = (1, 0, 0, 0), u_date_on = 0), `filmLight` é a conta de sempre, bit a bit.
+vec3 imageLin(vec2 uv);
+uniform vec4 u_anam;       // compressão (1 = nenhuma), barril horizontal, maciez das bordas (px@1080), ligado
+uniform int u_date_on;
+uniform vec4 u_date_box;   // canto de cima à esquerda do texto e altura do dígito (px@1080 do quadro da câmera), glifos
+uniform vec4 u_date_g0;    // segmentos de cada glifo (bits a=1 … g=64; 128 = apóstrofo; 0 = espaço)
+uniform vec4 u_date_g1;
+uniform vec4 u_date_g2;
+uniform vec3 u_date_col;   // cor × intensidade, luz linear somada à cena (a câmera expõe o negativo)
+
+float dateSeg(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    return length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0));
+}
+float dateGlyph(int i) { return i < 4 ? u_date_g0[i] : (i < 8 ? u_date_g1[i - 4] : u_date_g2[i - 8]); }
+float dateAdvance(float g) { return g > 127.5 ? 0.32 : (g < 0.5 ? 0.5 : 0.78); }
+float dateDigit(vec2 p, int b) {
+    const float W = 0.56;
+    float d = 1e3;
+    if ((b & 1) != 0) d = min(d, dateSeg(p, vec2(0.07, 0.0), vec2(W - 0.07, 0.0)));
+    if ((b & 2) != 0) d = min(d, dateSeg(p, vec2(W, 0.07), vec2(W, 0.43)));
+    if ((b & 4) != 0) d = min(d, dateSeg(p, vec2(W, 0.57), vec2(W, 0.93)));
+    if ((b & 8) != 0) d = min(d, dateSeg(p, vec2(0.07, 1.0), vec2(W - 0.07, 1.0)));
+    if ((b & 16) != 0) d = min(d, dateSeg(p, vec2(0.0, 0.57), vec2(0.0, 0.93)));
+    if ((b & 32) != 0) d = min(d, dateSeg(p, vec2(0.0, 0.07), vec2(0.0, 0.43)));
+    if ((b & 64) != 0) d = min(d, dateSeg(p, vec2(0.07, 0.5), vec2(W - 0.07, 0.5)));
+    return d;
+}
+float dateMask(vec2 px) {
+    vec2 p = (px - u_date_box.xy) / u_date_box.z;
+    if (p.y < -0.25 || p.y > 1.25 || p.x < -0.25) return 0.0;
+    float aa = max(1080.0 / u_res.y / u_date_box.z, 0.035);
+    p.x -= (1.0 - p.y) * 0.1;  // itálico, como os mostradores de sete segmentos das câmeras
+    float x = 0.0;
+    float m = 0.0;
+    int n = int(u_date_box.w + 0.5);
+    for (int i = 0; i < 12; i++) {
+        if (i >= n) break;
+        float g = dateGlyph(i);
+        vec2 q = vec2(p.x - x, p.y);
+        float d = 1e3;
+        if (g > 127.5) d = dateSeg(q, vec2(0.12, 0.0), vec2(0.08, 0.2));
+        else if (g > 0.5) d = dateDigit(q, int(g + 0.5));
+        m = max(m, smoothstep(0.075 + aa, 0.075 - aa, d));
+        x += dateAdvance(g);
+    }
+    return m;
+}
+
+// A luz da imagem no quadro da câmera: desespremer (caixa de letra), barril horizontal e bordas macias da lente
+// anamórfica, vinheta e a data impressa pela câmera no negativo.
+vec3 filmLight(vec2 uv, vec2 vuv) {
+    if (u_anam.w == 0.0 && u_date_on == 0) return imageLin(uv) * vignette(vuv);
+    float S = max(u_anam.x, 1.0);
+    vec2 cam = vec2(uv.x, (uv.y - 0.5) * S + 0.5);
+    vec2 vcam = vec2(vuv.x, (vuv.y - 0.5) * S + 0.5);
+    float cov = 1.0;
+    if (S > 1.0) cov = clamp((0.5 - abs(cam.y - 0.5)) * u_res.y / S + 0.5, 0.0, 1.0);
+    vec2 s = clamp(cam, 0.0, 1.0);
+    vec2 q = s * 2.0 - 1.0;
+    if (u_anam.y != 0.0) s.x = 0.5 + 0.5 * q.x / (1.0 + u_anam.y * (1.0 - q.y * q.y));
+    int taps = (u_anam.z > 0.0) ? 2 : 0;
+    float r = u_anam.z * q.x * q.x * (u_res.y / 1080.0) / u_res.x;
+    vec3 c = vec3(0.0);
+    float wsum = 0.0;
+    for (int i = -taps; i <= taps; i++) {
+        float w = 3.0 - float(abs(i));
+        c += w * imageLin(s + vec2(0.5 * r * float(i), 0.0));
+        wsum += w;
+    }
+    c /= wsum;
+    c *= vignette(clamp(vcam, 0.0, 1.0));
+    if (u_date_on == 1) c += u_date_col * dateMask(s * vec2(S * u_res.x / u_res.y * 1080.0, 1080.0));
+    return c * cov;
+}
+
 void main() {
     if (u_scan_on == 0) {
-        f_out = vec4(imageLin(weave(v_uv)) * vignette(v_uv), 1.0);
+        f_out = vec4(filmLight(weave(v_uv), v_uv), 1.0);
         return;
     }
     // Scan da película: a tira inteira (furos, bordas e quadros) treme junto.
@@ -612,6 +836,8 @@ void main() {
     lin = mix(lin, img, inImg);
     float edge = max(smoothstep(aa, -aa, mm.x), smoothstep(-aa, aa, mm.x - u_scan_view.x));
     lin = mix(lin, u_scan_outside, edge);
+    if (u_date_on == 1)  // 1.6: a data no quadro da câmera, dentro da janela da película
+        lin += inImg * inContent * u_date_col * dateMask(clamp(cuv, 0.0, 1.0) * vec2(Av * 1080.0, 1080.0));
     f_out = vec4(lin, inImg);
 }
 """
@@ -654,6 +880,27 @@ void main() {
 }
 """
 
+# 1.6: o mesmo desfoque da maciez com um sigma por canal ("Diferença de nitidez entre camadas", grao.py).
+BLUR3 = COMMON + """
+uniform sampler2D t_src;
+uniform vec2 u_dir;
+uniform vec3 u_sigma3;
+void main() {
+    float sm = max(u_sigma3.r, max(u_sigma3.g, u_sigma3.b));
+    float r = min(ceil(sm * 3.0), 48.0);
+    vec3 s = max(u_sigma3, vec3(1e-3));
+    vec3 k = -0.5 / (s * s);
+    vec3 acc = vec3(0.0);
+    vec3 wsum = vec3(0.0);
+    for (float i = -r; i <= r; i += 1.0) {
+        vec3 w = exp(i * i * k);
+        acc += texture(t_src, v_uv + u_dir * i).rgb * w;
+        wsum += w;
+    }
+    f_out = vec4(acc / wsum, 1.0);
+}
+"""
+
 NOISE = COMMON + """
 uniform int u_seed;
 void main() {
@@ -677,6 +924,10 @@ uniform sampler2D t_hal;
 uniform sampler2D t_bloom;
 uniform sampler2D t_mist;
 uniform sampler2D t_noise;
+uniform sampler2D t_streak;  // 1.6: risco horizontal do anamórfico (Engine._streak)
+uniform int u_streak_on;     // 0 fora do plano (Engine.FINAL_NEUTRAL)
+uniform float u_streak_amt;
+uniform vec3 u_streak_col;
 uniform vec2 u_res;
 uniform float u_scale;
 uniform int u_frame;
@@ -761,6 +1012,19 @@ vec3 applyGrain(vec3 y, vec2 uv) {
             + u_grain_resp.y * exp(-pow((L - 0.45) / 0.22, 2.0))
             + u_grain_resp.z * exp(-pow((L - 0.88) / 0.16, 2.0));
     return y + g * u_grain_amt * w;
+}
+
+// 1.6: o mesmo campo do grão, sem a resposta por tom, em sigma D por camada (grão no negativo)
+uniform vec3 u_ngrain;  // só com u_grain_on = 2
+uniform vec3 u_breath;  // 1.6: exposição de cada camada neste quadro (Engine.FINAL_NEUTRAL sem a respiração)
+vec3 negGrain(vec2 uv) {
+    vec4 nf = texBicubic(t_noise, uv) * 2.08;
+    vec4 nc = texBicubic(t_noise, uv * 0.4347 + vec2(0.311, 0.173)) * 2.08;
+    float r = u_grain_rough;
+    vec4 n = (nf * (1.0 - r) + nc * r) / sqrt((1.0 - r) * (1.0 - r) + r * r);
+    float c = u_grain_chroma;
+    vec3 g = (vec3(n.a) * (1.0 - c) + n.rgb * c) / sqrt((1.0 - c) * (1.0 - c) + c * c);
+    return g * u_ngrain;
 }
 
 vec3 leak(vec2 uv) {
@@ -915,6 +1179,14 @@ vec3 frameMask(vec3 y, vec2 uv) {
     return mix(u_bar_color, y, m);
 }
 
+// 1.6: a fonte da halação física no ponto, igual à do EXTRACT da cadeia (limiar 0; o alfa é a máscara do scan, 1
+// sem ele): e = E / (1 + E / limite), com o limite de grao.HAL_PHYS_LIMIT
+const float HAL_PHYS_LIMIT = 16.0;
+float halSource(vec4 s) {
+    float e = s.r * s.a;
+    return e / (1.0 + e / HAL_PHYS_LIMIT);
+}
+
 void main() {
     vec2 uv = v_uv;
     vec3 code0 = texture(t_in, uv).rgb;
@@ -929,8 +1201,15 @@ void main() {
         lin = mix(lin, m, 0.3 * u_mist_amt) + m * (0.35 * u_mist_amt);
     }
     if (u_bloom_on == 1) lin += texture(t_bloom, uv).rgb * u_bloom_amt;
+    if (u_streak_on == 1) lin += texture(t_streak, uv).r * u_streak_col * u_streak_amt;
     if (u_hal_on == 1) lin += texture(t_hal, uv).r * u_hal_color * u_hal_amt;
+    if (u_hal_on == 2) {  // 1.6: halação física (grao.physical_halation): só o desvio local do reflexo na base
+        vec3 a = u_hal_color * u_hal_amt;
+        lin += a / (1.0 + a) * (texture(t_hal, uv).r - halSource(texture(t_lin, uv)));
+    }
     if (u_leak_on == 1) lin += leak(uv);
+    lin *= u_breath;  // 1.6: respiração por camada (grao.breathing); (1, 1, 1) sem ela
+    if (u_grain_on == 2) g_ng = negGrain(uv);
     vec3 y = colorPipe(lin);
     if (u_grain_on == 1) y = applyGrain(y, uv);
     if (u_dmg_on == 1) y = damage(y, uv);
@@ -955,7 +1234,8 @@ uniform mat3 u_gamut;
 uniform vec3 u_gain;
 void main() {
     vec3 code = texelFetch(t_grid, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec3 lin = max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
+    vec3 lin = max(protectGamut(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1)), vec3(0.0))
+               * exp2(u_gain);
     f_out = vec4(colorPipe(lin), 1.0);
 }
 """

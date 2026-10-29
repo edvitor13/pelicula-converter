@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 
@@ -41,10 +41,11 @@ def _candidates() -> list[Path]:
 
 def reset_cache() -> None:
     """Esquece codificadores e acelerações detectados (depois de trocar o ffmpeg)."""
-    global _ENCODERS, _HWACCELS, _DECODERS
+    global _ENCODERS, _HWACCELS, _DECODERS, _FILTERS
     _ENCODERS = None
     _HWACCELS = None
     _DECODERS = None
+    _FILTERS = None
     _WORKING.clear()
 
 
@@ -119,6 +120,9 @@ class MediaInfo:
     has_alpha: bool = False  # imagem com transparência (`stream_has_alpha`; WebM com alpha_mode=1; PNG com paleta)
     # Sequência de imagens numeradas (`path` é o padrão do ffmpeg, plano_%04d.png): número do 1º quadro; -1 = não é.
     seq_start: int = -1
+    # 1.6: metadados de câmera para `suggest_input` (`camera_tags`): só a marca e as etiquetas de curva/gamma do
+    # arquivo e do XML da Sony ao lado dele; nada de local, data ou número de série.
+    tags: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def ext(self) -> str:
@@ -238,20 +242,28 @@ def probe(path: str, fps_str: str = "") -> MediaInfo:
     return _info_from(path, _probe_json(path))
 
 
-def probe_source(path: str):
+def probe_source(path: str, infos: dict | None = None):
     """Arquivo para o modo Edição: vídeo, imagem parada ou só áudio (música, narração).
 
-    Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`.
+    Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`. `infos` (1.6): se dado, recebe
+    {caminho: MediaInfo} de um arquivo com imagem (as etiquetas de câmera de `suggest_input`, que a `Source` não
+    guarda).
     """
     from . import timeline
     if is_sequence_pattern(path):
-        return timeline.Source.from_info(probe(path))
+        info = probe(path)
+        if infos is not None:
+            infos[info.path] = info
+        return timeline.Source.from_info(info)
     data = _probe_json(path)
     streams = data.get("streams", [])
     has_video = any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
                     for s in streams)
     if has_video:
-        return timeline.Source.from_info(_info_from(path, data))
+        info = _info_from(path, data)
+        if infos is not None:
+            infos[path] = info
+        return timeline.Source.from_info(info)
     aus = next((s for s in streams if s.get("codec_type") == "audio"), None)
     if aus is None:
         raise RuntimeError(_("O arquivo não tem imagem nem som."))
@@ -302,6 +314,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         frames, dur = 1, 0.0
     pix = vs.get("pix_fmt", "")
     alpha = stream_has_alpha(vs) or (is_image and pix == "pal8" and _palette_alpha(path))
+    tags = camera_tags(fmt.get("tags"), vs.get("tags"), sidecar_tags(path) if not is_image else None)
     return MediaInfo(
         path=path, width=w, height=h, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
         frames=max(frames, 1), duration=dur, pix_fmt=pix, bit_depth=_depth(pix, vs.get("bits_per_raw_sample")),
@@ -310,7 +323,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         color_space=vs.get("color_space", "") or "", color_range=vs.get("color_range", "") or "",
         color_transfer=vs.get("color_transfer", "") or "", color_primaries=vs.get("color_primaries", "") or "",
         has_audio=aus is not None, audio_codec=(aus or {}).get("codec_name", ""),
-        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha),
+        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha), tags=tags,
     )
 
 
@@ -544,6 +557,40 @@ def legal_range(info) -> bool:
     return _in_range(info) == "limited"
 
 
+# Perfis de entrada que não são log de câmera: a leitura deles continua em inteiros de 0 a 1 (8 ou 16 bits).
+# Os outros (log) num vídeo de faixa legal são lidos em ponto flutuante (`float_input`).
+DISPLAY_PROFILES = frozenset({"rec709", "linear", "hlg", "pq"})
+
+# Matriz YUV → RGB do arquivo (`_in_matrix`) com o nome que o zscale (zimg) usa.
+_ZSCALE_MATRIX = {"bt709": "709", "bt601": "470bg", "bt2020": "2020_ncl", "smpte240m": "240m"}
+
+
+def float_input(info, profile: str | None) -> bool:
+    """A leitura de `info` para o perfil de entrada `profile` vem em ponto flutuante (super-brancos)?
+
+    Log de câmera num vídeo YUV de faixa legal: o decodificador expande a faixa (v = (código − 64)/876) sem
+    cortar em 0–1 — o que a câmera gravou acima do código 940 (e abaixo do 64) chega ao shader, que volta ao
+    domínio da curva como sempre (`look.INPUT_DOMAIN`). Precisa do filtro zscale no ffmpeg (`has_zscale`); sem
+    ele, e em Rec.709, linear, HLG e PQ, imagens e arquivos de faixa cheia, a leitura de sempre (8 ou 16 bits).
+    """
+    if not profile or profile in DISPLAY_PROFILES or getattr(info, "is_image", False):
+        return False
+    return legal_range(info) and has_zscale()
+
+
+def _exact_graph(info, width: int, height: int, flags: str, threads: int, pix: str) -> str:
+    """Filtros da leitura em float de log num vídeo de faixa legal (`FrameReader.float`), saindo em `pix`
+    (`gbrpf32le`).
+
+    O swscale redimensiona como sempre, mas fica em YUV 4:4:4 de 16 bits sem mexer na faixa (o código de 10 bits
+    vira código·64, exato, inclusive acima do 940); o zscale só aplica a matriz do arquivo e expande a faixa, sem
+    cortar em 0–1. O swscale direto para RGB corta em 0–1. Redimensionar no zscale mudaria a reconstrução do croma
+    nas bordas de cor (até 17% num padrão de teste): por isso ele não redimensiona."""
+    return (f"scale={width}:{height}:flags={flags}:in_range=limited:out_range=limited:threads={threads},"
+            f"format=yuv444p16le,zscale=matrixin={_ZSCALE_MATRIX[_in_matrix(info)]}:rangein=limited:range=full,"
+            f"format={pix}")
+
+
 # Transferências HDR do ffprobe (`color_transfer`) → perfil de entrada. O vídeo HDR do iPhone (Dolby
 # Vision 8.4) é marcado como HLG (arib-std-b67).
 HDR_TRANSFERS = {"arib-std-b67": "hlg", "smpte2084": "pq"}
@@ -565,6 +612,122 @@ def auto_profile(current: str, info, default: str = "rec709") -> str | None:
         return None
     want = detect_profile(info) or default
     return None if want == current else want
+
+
+# ------------------------------------------------------------------ 1.6: perfil sugerido pelos metadados
+# `suggest_input(info)`: o perfil de entrada que os metadados do arquivo indicam, ou None. Só uma sugestão: no modo
+# Película a janela mostra um aviso com um botão (nunca muda o look sozinha, nem ao reabrir um projeto); no modo
+# Edição preenche o perfil de câmera dos clipes novos (`camera.prefill`). Regras em `SUGGEST_RULES`, em ordem: a
+# primeira que responde vale. Nunca sugere Rec.709 a partir de uma etiqueta BT.709: muitas câmeras marcam o log
+# assim, e o perfil padrão já é o Rec.709.
+
+# Chaves de etiqueta (format/stream do ffprobe e o XML da Sony) que dizem a curva: só as que têm uma destas palavras.
+_CURVE_KEY = re.compile(r"gamma|transfer|curve|colou?r_?space", re.IGNORECASE)
+_MAKE_KEYS = ("com.apple.quicktime.make", "make", "manufacturer", "com.android.manufacturer")
+_SIDECAR_MAX = 1 << 20  # o XML da Sony tem poucos KB
+
+
+def camera_tags(*groups) -> dict[str, str]:
+    """As etiquetas que interessam a `suggest_input`: a marca e as de curva/gamma (o resto, como local e data, fica
+    de fora). `groups`: dicionários de etiquetas (format, stream, XML ao lado), o primeiro com a chave vale."""
+    out: dict[str, str] = {}
+    for g in groups:
+        for k, v in (g or {}).items():
+            k, v = str(k), str(v).strip()
+            if not v or len(v) > 200 or k in out:
+                continue
+            if k.lower() in _MAKE_KEYS or _CURVE_KEY.search(k.rsplit(".", 1)[-1]):
+                out[k] = v
+    return out
+
+
+def sidecar_tags(path: str) -> dict[str, str]:
+    """Etiquetas de curva do XML que as câmeras da Sony gravam ao lado do vídeo (C0001.MP4 → C0001M01.XML,
+    `NonRealTimeMeta`: `<Item name="CaptureGammaEquation" value="s-log3-cine"/>`); vazio se não há."""
+    p = Path(str(path))
+    if not p.suffix or "%" in p.name:
+        return {}
+    for name in (p.stem + "M01.XML", p.stem + "M01.xml"):
+        x = p.with_name(name)
+        try:
+            if not x.is_file() or x.stat().st_size > _SIDECAR_MAX:
+                continue
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(x.read_bytes())
+        except (OSError, ValueError, SyntaxError):
+            continue
+        out: dict[str, str] = {}
+        for el in root.iter():
+            k, v = el.get("name"), el.get("value")
+            if k and v and _CURVE_KEY.search(k):
+                out.setdefault("sony." + k, v)
+        dev = next((el for el in root.iter() if el.tag.rsplit("}", 1)[-1] == "Device"), None)
+        if dev is not None and dev.get("manufacturer"):
+            out.setdefault("manufacturer", dev.get("manufacturer"))
+        return out
+    return {}
+
+
+def _curve_in_text(text: str) -> str | None:
+    """Um perfil log pelo nome escrito numa etiqueta ("s-log3-cine", "LOG-C", "Canon Log 3"…), pelo mesmo
+    reconhecimento dos nomes de LUT (`luts.guess_input`); None para Rec.709/nada reconhecido."""
+    from . import luts
+    t = re.sub(r"[\\/]+", " ", str(text)).strip()
+    for cand in (t, re.sub(r"[^A-Za-z0-9]+", "", t)):
+        g = luts.guess_input(cand) if cand else "rec709"
+        if g not in ("rec709", "cineon"):
+            return g
+    return None
+
+
+def _rule_hdr(info) -> str | None:
+    """Vídeo HDR marcado: HLG ou PQ (`color_transfer`), como `detect_profile`."""
+    return detect_profile(info)
+
+
+def _rule_linear(info) -> str | None:
+    """Luz linear: EXR (sempre linear de cena) ou `color_transfer` "linear"."""
+    path = str(getattr(info, "path", ""))
+    if str(getattr(info, "codec", "")).lower() == "exr" or Path(path).suffix.lower() == ".exr":
+        return "linear"
+    return "linear" if str(getattr(info, "color_transfer", "")).strip().lower() == "linear" else None
+
+
+def _rule_tags(info) -> str | None:
+    """Etiqueta de curva com o nome de um perfil log (ARRI, a Sony pelo XML, gravadores que marcam a curva)."""
+    tags = getattr(info, "tags", None) or {}
+    for k, v in tags.items():
+        if _CURVE_KEY.search(k.rsplit(".", 1)[-1]):
+            found = _curve_in_text(v)
+            if found:
+                return found
+    return None
+
+
+def _rule_apple_log(info) -> str | None:
+    """iPhone em Apple Log: marca Apple e primárias BT.2020 sem transferência HDR (o HDR do iPhone vem marcado como
+    HLG; o vídeo comum, como BT.709). É uma dedução: a Apple não marca a curva Apple Log no arquivo."""
+    tags = {k.lower(): v for k, v in (getattr(info, "tags", None) or {}).items()}
+    make = next((tags[k] for k in _MAKE_KEYS if k in tags), "")
+    if make.strip().lower() != "apple" or str(getattr(info, "color_primaries", "")).lower() != "bt2020":
+        return None
+    return "applelog" if detect_profile(info) is None else None
+
+
+SUGGEST_RULES = (_rule_hdr, _rule_linear, _rule_tags, _rule_apple_log)
+
+
+def suggest_input(info) -> str | None:
+    """Perfil de entrada (chave de `params.ENTRADAS`) que os metadados de `info` (`MediaInfo`) indicam, ou None.
+
+    Função pura: não abre arquivos (as etiquetas já vêm em `info.tags`, lidas pelo `probe`)."""
+    if info is None:
+        return None
+    for rule in SUGGEST_RULES:
+        found = rule(info)
+        if found:
+            return found
+    return None
 
 
 PRIORITY = {"baixa": 0x00004000, "normal": 0, "alta": 0x00008000}
@@ -666,6 +829,13 @@ def use_named_pipes() -> bool:
 class FrameReader:
     """Decodifica quadros RGB (8 ou 16 bits) já na resolução pedida.
 
+    `profile` (o perfil de entrada do look, `params` "entrada"): log de câmera num vídeo de faixa legal sai em
+    float32 (h × w × 3) com o que passa do branco e do preto nominais (`float_input`), em qualquer `depth`.
+
+    16 bits de um vídeo de faixa legal (`exact16`): o swscale expande a faixa para 0–65280 (o branco 0,4% abaixo,
+    o branco de 8 bits · 256); `read` leva a cor a 0–65535 (`_legal16`). Vale também para a transparência de mais de
+    8 bits (o alfa já sai em 0–65535).
+
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
 
@@ -678,19 +848,24 @@ class FrameReader:
 
     def __init__(self, info: MediaInfo, width: int, height: int, depth: int = 8, start_frame: int = 0,
                  max_frames: int | None = None, fps_out: str | None = None, hq: bool = False,
-                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
+                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False,
+                 profile: str | None = None):
         perf = perf or Perf()
         alpha = alpha and decodes_alpha(info)
         self.w, self.h, self.depth = width, height, depth
         self.channels = 4 if alpha else 3
         # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
         self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
+        self.float = not alpha and float_input(info, profile)
+        self.exact16 = not self.float and depth != 8 and not self._widen and _in_range(info) == "limited"
         if alpha:
             self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
+        elif self.float:
+            self.pix = "gbrpf32le"  # planar (G, B, R); `read` entrega RGB intercalado
         else:
             self.pix = "rgb24" if depth == 8 else "rgb48le"
-        self.dtype = np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
-        self.frame_bytes = width * height * self.channels * (1 if self.dtype == np.uint8 else 2)
+        self.dtype = np.float32 if self.float else np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
+        self.frame_bytes = width * height * self.channels * np.dtype(self.dtype).itemsize
         args = [ffmpeg(), "-v", "error", "-nostdin", "-hide_banner"]
         numbered = getattr(info, "seq_start", -1) >= 0
         if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha and not numbered:
@@ -714,6 +889,8 @@ class FrameReader:
         th = max(0, perf.threads)
         if alpha:
             vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
+        elif self.float:
+            vf.append(_exact_graph(info, width, height, flags, th, self.pix))
         else:
             vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
                       f":in_range={_in_range(info)}:threads={th}")
@@ -769,7 +946,12 @@ class FrameReader:
             if not n:
                 return None
             got += n
+        if self.float:
+            g, b, r = np.frombuffer(buf, dtype="<f4").reshape(3, self.h, self.w)
+            return np.dstack([r, g, b])
         img = np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, self.channels)
+        if self.exact16:
+            return _legal16(img)
         return img.astype(np.uint16) * np.uint16(257) if self._widen else img
 
     def close(self) -> None:
@@ -787,6 +969,17 @@ class FrameReader:
                     st.close()
             except Exception:  # noqa: BLE001
                 pass
+
+
+def _legal16(img: np.ndarray) -> np.ndarray:
+    """Cor de 16 bits do swscale para um vídeo de faixa legal (o branco em 65280 = 255·256, o que passa dele até
+    65535) → branco em 65535: c·257/256 (o mesmo passo de 8 para 16 bits), com o que passa de 65280 no branco.
+    Cada código sai a até 2 de 65535 do valor exato; preto 0 e branco 65535 exatos. O alfa não muda."""
+    out = img if img.flags.writeable else img.copy()
+    c = out[..., :3]
+    np.minimum(c, 65280, out=c)
+    c += c >> 8
+    return out
 
 
 def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: int, pix: str) -> str:
@@ -809,14 +1002,15 @@ def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: 
 
 
 def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False,
-               crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
-    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado, veja `FrameReader`)."""
-    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha)
+               crop: tuple[int, int, int, int] | None = None, alpha: bool = False, profile: str | None = None):
+    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado; com `profile` log, float32: veja `FrameReader`)."""
+    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha, profile=profile)
     try:
         img = r.read()
         if img is None and frame > 0:
             r.close()
-            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha)
+            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha,
+                            profile=profile)
             img = r.read()
         if img is None:
             raise RuntimeError(r.error or _("Falha ao ler o quadro."))
@@ -828,6 +1022,25 @@ def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int 
 _ENCODERS: set[str] | None = None
 _WORKING: dict[str, bool] = {}
 _DECODERS: set[str] | None = None
+_FILTERS: set[str] | None = None
+
+
+def filters() -> set[str]:
+    """Filtros desta compilação do ffmpeg (nomes)."""
+    global _FILTERS
+    if _FILTERS is None:
+        try:
+            res = subprocess.run([ffmpeg(), "-hide_banner", "-filters"], capture_output=True, creationflags=NO_WINDOW)
+            lines = res.stdout.decode("utf-8", "replace").splitlines()
+        except OSError:
+            lines = []
+        _FILTERS = {parts[1] for parts in (ln.split() for ln in lines) if len(parts) >= 3 and "->" in parts[2]}
+    return _FILTERS
+
+
+def has_zscale() -> bool:
+    """O ffmpeg tem o zscale (zimg)? É ele que lê log com super-brancos (veja `_exact_graph`)."""
+    return "zscale" in filters()
 
 
 def decoders() -> set[str]:

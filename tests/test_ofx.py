@@ -161,7 +161,9 @@ def test_generated_tables_have_no_floating_noise():
 def test_plugin_has_every_control_of_the_dctl_nodes():
     names = [s.ctl.name for s in ofx.slots()]
     assert len(names) == len(set(names))
-    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()}
+    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()
+            + resolve.lab_grain_controls()  # 1.6: "Grão no negativo" do Laboratório
+            + resolve.lab_extra_controls()}  # 1.6 (labx.py): scanner, película vencida e pré-exposição
     assert set(names) == want - set(ofx.SKIP)
     keys = {s.ctl.key for s in ofx.slots() if s.ctl.key}
     for k in ("lab_separacao", "lab_dens_r", "lab_bypass_copia", "lab_neutro_negativo", "mtf", "entrada",
@@ -382,7 +384,7 @@ def test_video_range_is_a_plugin_control_in_the_input_group():
     assert ofx.choice_labels(s.ctl)[0].startswith("Vídeo") and ofx.choice_labels(s.ctl)[1].startswith("Cheia")
     src = (ROOT / "plugins" / "ofx" / "generated" / "pc_params.h").read_text(encoding="ascii")
     assert ofx._cstr("Vídeo (faixa legal, 64–940)") in src
-    assert set(ofx.KEEP_ON_PRESET) == {"entrada", "faixa_video"}
+    assert set(ofx.KEEP_ON_PRESET) == {"entrada", "faixa_video", "logc3_ei", "proteger_cores"}
     assert {k for k in presets.SOURCE_KEYS if k in fields} <= set(ofx.KEEP_ON_PRESET)  # como no app
 
 
@@ -473,11 +475,44 @@ RENDER_CASES = [
                      queima_on=True, queima=1.0)),
     ("moldura", _neutral(mold_on=True, proporcao="2.39", cantos=0.05, borda_irregular=0.5)),
     ("halacao", _neutral(hal_on=True, hal_forca=1.0, hal_limiar=1.0)),
+    ("halacao_fisica", _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica")),
+    ("halacao_fisica_super8", _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica", bitola="super8",
+                                       bitola_desfoque_on=False, bitola_vinheta=0.0, hal_raio=6.0)),
     ("bloom", _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0)),
     ("nevoa", _neutral(bloom_on=True, bloom_forca=0.0, nevoa_forca=0.6)),
     ("super8_kodachrome", _scene("super8_kodachrome")),
     ("vision3_500t", _scene("vision3_500t")),
     ("lab_teal_orange", _scene("lab_teal_orange_5201")),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("camadas", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_copia", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=1.0, copia="k2383")),
+    ("camadas_lab", _neutral(bitola="super8", bitola_vinheta=0.0, mtf_camadas=0.6, lab_on=True)),
+    ("grao_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True)),
+    ("grao_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
+                                    grao_cor=0.8, lab_revelacao=1.0)),
+    ("respiracao", _neutral(grao_on=True, grao_forca=0.0, grao_respiracao=1.0)),
+    ("respiracao_lab", _neutral(lab_on=True, grao_on=True, grao_respiracao=1.0, lab_grao=True)),
+    # 1.6: grão físico (pelicula/grao_fisico.py)
+    ("grao_fisico", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico")),
+    ("grao_fisico_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
+                                  grao_cor=0.8, lab_revelacao=1.0, iso="500", lab_grao_modelo="fisico")),
+    # 1.6 (fase 3): estrutura pela densidade (pelicula/grao_estrutura.py)
+    ("grao_estrutura", _neutral(grao_on=True, grao_forca=1.5, grao_estrutura=1.0)),
+    ("grao_estrutura_s8", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
+                                   grao_estrutura=0.6, grao_aglomeracao=0.8, grao_cor=0.7, lab_on=True)),
+    ("grao_estrutura_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True, grao_estrutura=1.0)),
+    ("grao_estrutura_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True,
+                                              lab_processo="tech3", grao_estrutura=0.7, grao_aglomeracao=1.0,
+                                              lab_vencida=10.0)),
+    # (o grão físico com véu/pré-exposição no OpenFX passa pelo labx como as outras contas)
+    ("grao_fisico_vencida", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico",
+                                     lab_vencida=15.0, lab_pre_exposicao=True)),
+    ("grao_fisico_cristal_variacao", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico",
+                                              lab_grao_cristal=1.5, lab_grao_variacao=0.8)),
+    ("grao_fisico_variacao_vencida", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True,
+                                              lab_grao_modelo="fisico", lab_grao_cristal=0.6, lab_grao_variacao=0.4,
+                                              lab_vencida=10.0)),
 ]
 
 
@@ -494,7 +529,10 @@ def test_full_frame_matches_the_app(core, gl_engine, test_rgb, name, vals):
         d = np.abs(want - got).max(axis=2) * 255
         assert np.percentile(d, 99) < 1.0 and d.mean() < 0.5, f"{name} quadro {frame}"
         limit = 4.0 if name in ("nitidez", "halacao") else 2.0
-        assert (d > limit).mean() < 5e-4, f"{name} quadro {frame}: {d.max():.2f}"
+        # grão físico: um disco exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do
+        # float (GLSL × C++); são pixels soltos
+        frac = 2e-3 if name.startswith("grao_fisico") else 5e-4
+        assert (d > limit).mean() < frac, f"{name} quadro {frame}: {d.max():.2f}"
 
 
 @pytest.mark.gpu
@@ -716,3 +754,25 @@ app.exit(0)
     res = subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=str(ROOT), env=env,
                          capture_output=True, timeout=120)
     assert res.returncode == 0 and b"OK" in res.stdout, res.stderr.decode("utf-8", "replace")[-2000:]
+
+# ------------------------------------------------------------------ 1.6: laboratório (labx.py e processos novos)
+LABX_CASES = [
+    dict(lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_copia="nenhuma", lab_scanner="branca", lab_vencida=12.0, lab_revelacao=1.0, lab_luz_g=2.0),
+    dict(lab_vencida=25.0),
+    dict(lab_negativo="double_x", lab_copia="2302", lab_vencida=20.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=3.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=2.0, lab_pre_exposicao_cor="ambar", lab_vencida=8.0),
+    dict(lab_processo="reversivel"),
+    dict(lab_processo="reversivel", lab_vencida=10.0, lab_pre_exposicao=True, lab_pre_exposicao_cor="azul"),
+    dict(lab_processo="cruzado_e6c41", lab_processo_forca=0.7, lab_revelacao=1.0),
+    dict(lab_processo="cruzado_c41e6", lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_negativo="vision3_500t_v2", lab_copia="2383_v2", lab_luz_r=2.0),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", LABX_CASES, ids=[str(i) for i in range(len(LABX_CASES))])
+def test_color_matches_the_app_with_the_16_lab(core, gl_engine, over):
+    v = dict(params.defaults(), lab_on=True, lab_luz_b=-1.0, **over)
+    assert _color_diff(core, gl_engine, params.sanitize(v), n=9) < 1e-4

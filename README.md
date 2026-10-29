@@ -170,11 +170,13 @@ quadros vizinhos:
   prévia (picos L/R e loudness EBU R128: momentânea, curto prazo, integrada e true peak).
 
 ### Entrada
-- **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine),
-  ARRI LogC3 (EI 800), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
+- **Perfis de câmera**: Rec.709/sRGB, Linear, Nikon N-Log, Sony S-Log3 (S-Gamut3.Cine) e S-Log2 (S-Gamut),
+  ARRI LogC3 (EI 160 a 1600), ARRI LogC4 (Wide Gamut 4), Panasonic V-Log, RED Log3G10 (RWG — para R3D e
   Nikon N-RAW convertidos), Blackmagic Film Gen 5 (Blackmagic Wide Gamut), Apple Log (iPhone),
-  DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa e a faixa do
-  arquivo levada em conta (S-Log3, V-Log e N-Log são lidos no código de 10 bits da câmera).
+  Canon Log 2 e Canon Log 3 (Cinema Gamut), Fujifilm F-Log, F-Log2 e F-Log2 C, DJI D-Log (D-Gamut),
+  Leica L-Log, DaVinci Intermediate (DaVinci Wide Gamut) e Cineon/DPX log, com a conversão de gamut certa e a
+  faixa do arquivo levada em conta (S-Log3, V-Log, N-Log, F-Log e D-Log são lidos no código de 10 bits da
+  câmera; os super-brancos acima do 940 chegam inteiros ao look).
 - **Vídeo HDR**: **HLG** (o HDR dos celulares, inclusive o do iPhone) e **PQ / HDR10** (Rec.2100), com o
   cinza de referência da BT.2408 no cinza médio do app. Ao abrir um vídeo HDR o perfil é escolhido sozinho.
 - Os presets mudam o look, **não** o perfil do vídeo.
@@ -201,7 +203,7 @@ quadros vizinhos:
   (furos escuros).
 
 ### Presets e LUTs
-- **44 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
+- **48 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
   branco, Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro
   e busca.
 - **Presets do usuário**: salvar como, atualizar, excluir, voltar ao preset, importar e exportar
@@ -557,7 +559,7 @@ mesmo preset aparece na lista do painel **Ajustes**.
 | Grupo | Presets |
 |---|---|
 | Cinema 35 mm | Kodak Vision3 250D · Kodak Vision3 50D · Kodak Vision3 200T · Kodak Vision3 500T · Fujifilm Eterna 250D · Fujifilm Eterna Vivid 500 · Blockbuster (teal & orange) |
-| Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) · Technicolor (5297 → 5386, Hue Split) · Teal & orange (5201 → 2393, Hue Split) |
+| Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) · Technicolor (5297 → 5386, Hue Split) · Teal & orange (5201 → 2393, Hue Split) · Slide reversível · Revelação cruzada: slide no C-41 · Película vencida (18 anos) · Pré-exposição (baixo contraste) |
 | Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm |
 | Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo |
 | Fotografia | Kodak Portra 400 · Kodak Ektar 100 · Fujifilm Velvia 50 · Fujifilm Superia 400 · CineStill 800T |
@@ -644,7 +646,7 @@ A seção **LUT externo** aplica qualquer LUT 3D `.cube`.
 
 **Exportar LUTs do próprio app**: *⋯ → Exportar a cor como LUT .cube* grava a parte de cor do look
 atual (curva, cópia, tons, saturação, LUT externo e exposição/balanço) com entrada no mesmo perfil
-escolhido em *Perfil do vídeo* (em S-Log3, V-Log e N-Log, o código de 10 bits da câmera, como os LUTs dos
+escolhido em *Perfil do vídeo* (em S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, o código de 10 bits da câmera, como os LUTs dos
 fabricantes: no Resolve, clipe em *Data Levels → Full*). *Exportar todos os presets como LUTs (pacote)* gera um `.cube` de
 33 pontos para cada preset, com entrada Rec.709 — um pacote de LUTs gratuito que funciona no
 Premiere, Resolve, Final Cut, CapCut, OBS e qualquer programa que aceite `.cube`. Grão, halação,
@@ -962,7 +964,7 @@ gratuito** e no Studio, nas páginas *Color* e *Edit*.
   pede permissão de administrador, porque a pasta do OpenFX é do sistema) ou com
   `pelicula-cli resolve --ofx-instalar`, e reabra o Resolve.
 - Na página **Color**, arraste **OpenFX → PeliculaConverter** para um nó; na **Edit**, *Effects → OpenFX →
-  PeliculaConverter*. Escolha um dos **44 presets** ou **carregue um look `.json`** exportado pelo app.
+  PeliculaConverter*. Escolha um dos **48 presets** ou **carregue um look `.json`** exportado pelo app.
 - Calcula na CPU (1080p: ~0,25–0,3 s por quadro com o look completo; 4K: ~1 s); use o *Render Cache* do
   Resolve para tocar em tempo real.
 
@@ -1124,7 +1126,9 @@ O **Scan da película** desenha a tira com as medidas reais em milímetros:
 
 **Os nomes "Kodak Vision3", "Portra", "Velvia"… são os filmes de verdade?**
 Não. São **aproximações artísticas** do estilo de cada filme, feitas com os controles do app, sem
-dados nem relação com os fabricantes. Veja o [aviso legal](#aviso-legal).
+relação com os fabricantes. Desde a 1.6, dois modelos de textura (o grão no negativo e a diferença de
+nitidez entre camadas) usam números de datasheets **públicos** da Kodak; isso não torna nenhum preset
+uma reprodução oficial. Veja o [aviso legal](#aviso-legal).
 
 **O grão muda a cada quadro?**
 Sim, por padrão (*Grão muda a cada quadro*). Desligue para um grão fixo. A *Semente* troca o padrão.
@@ -1413,8 +1417,14 @@ parte deste repositório com o programa compilado do código oficial, sem mudan�
   Tri-X, Portra, Ektar, Ektachrome, Kodachrome, Fujifilm, Eterna, Velvia, Superia, Ilford, HP5,
   CineStill, Technicolor e outros) **apenas descrevem o estilo** que cada preset tenta lembrar.
   São **aproximações artísticas**, feitas com os controles do app, **sem relação, parceria ou
-  endosso** dos fabricantes, e sem uso de dados, perfis ou LUTs deles. Todas as marcas pertencem
-  aos seus donos. O texto de borda do *Scan da película* é decorativo.
+  endosso** dos fabricantes. Nenhum perfil ou LUT deles é distribuído. Alguns modelos usam números
+  de publicações **públicas**: o grão no negativo e a diferença de nitidez entre camadas vêm dos
+  datasheets da Kodak (Vision3 250D H-1-5207 e cópia 2383 H-1-2383; os filmes "(datasheet)" do
+  Laboratório, Vision3 250D, 500T H-1-5219 e 200T H-1-5213 e a cópia 2383, têm as curvas ajustadas às
+  publicadas; os pontos lidos e a fonte ficam em `pelicula/data/datasheets/`, sem copiar os PDFs nem os
+  gráficos), e as curvas dos perfis de
+  câmera seguem as fórmulas que cada fabricante publica. Nada disso é apresentado como oficial.
+  Todas as marcas pertencem aos seus donos. O texto de borda do *Scan da película* é decorativo.
 - **LUTs da Adobe e da Blackmagic Design não são distribuídos.** O PeliculaConverter apenas
   **lê**, no próprio computador do usuário, os arquivos que o Premiere Pro e o DaVinci Resolve
   instalaram; nenhum desses arquivos é copiado para o repositório, para o executável ou para os

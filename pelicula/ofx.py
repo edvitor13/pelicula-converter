@@ -8,7 +8,7 @@ também no gratuito (páginas Color e Edit). Este módulo:
   tremor/defeitos), em `plugins/ofx/generated/`. A orquestração das passadas (desfoques, mipmaps,
   grão por grade, montagem final) fica em `plugins/ofx/src/pc_core.cpp`, escrita à mão seguindo
   `Engine.render()`;
-- descreve os parâmetros do efeito (rótulos e dicas do app, faixas dos DCTLs, os 44 presets prontos e
+- descreve os parâmetros do efeito (rótulos e dicas do app, faixas dos DCTLs, os presets prontos e
   a leitura de um look .json/.plc exportado pelo app);
 - acha, instala e confere o pacote `PeliculaConverter.ofx.bundle` (a instalação pede administrador:
   a pasta padrão do OFX fica em Program Files / /usr).
@@ -28,7 +28,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import APP_NAME, __version__, look, params, presets, resolve
+from . import APP_NAME, __version__, labx, look, params, presets, resolve
 from .i18n import _
 from .resolve import CPP, Ctl
 
@@ -43,10 +43,12 @@ SRC_DIR = ROOT / "plugins" / "ofx"
 GENERATED = ("pc_kernels.h", "pc_params.h")
 KIND_CODES = {"float": 0, "int": 1, "check": 2, "combo": 3, "color": 4}
 SKIP = ("ui_qualidade", "ui_fps")  # só fazem sentido no DCTL (o OFX tem a imagem inteira e o fps do clipe)
+SKIP += ("ui_mtf_copia",)  # 1.6: o OFX vê a cópia direto (copia, lab_on, lab_copia)
 # Rótulo, dica e opções com acento dos controles só do plugin (os do app vêm de params.py).
 INTERNAL_TEXT = {
     "ui_faixa_video": ("Faixa do vídeo",
-                       "Só muda S-Log3, V-Log e N-Log, curvas escritas no código de 10 bits. Vídeo (padrão): clipe "
+                       "Só muda S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, curvas escritas no código de 10 bits. "
+                       "Vídeo (padrão): clipe "
                        "em Data Levels Auto ou Video, que o Resolve expande de 64–940 para 0–1 (o plugin volta ao "
                        "código da câmera). Cheia: o valor já é o código — clipe em Full em Clip Attributes (como "
                        "a Sony recomenda) ou log que a câmera mandou reescalado pela saída HDMI “Limited”.",
@@ -54,7 +56,7 @@ INTERNAL_TEXT = {
 }
 # Ajustes do clipe, não do look: escolher um preset ou carregar um look .json não muda (como no app,
 # presets.SOURCE_KEYS que existem no plugin) — o perfil e a faixa do vídeo dependem do clipe no Resolve.
-KEEP_ON_PRESET = ("entrada", "faixa_video")
+KEEP_ON_PRESET = ("entrada", "faixa_video", "logc3_ei", "proteger_cores")
 
 
 class OfxError(RuntimeError):
@@ -84,7 +86,9 @@ def _section_of(key: str) -> str:
 def controls() -> list[Ctl]:
     """Todos os controles do plugin: os do nó Cor + Textura + Projetor, sem repetir."""
     out, seen = [], set()
-    for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls():
+    extra = resolve.lab_grain_controls()  # 1.6: "Grão no negativo" (o resto já vem do Textura)
+    extra += resolve.lab_extra_controls()  # 1.6 (labx.py): scanner, película vencida e pré-exposição
+    for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls() + extra:
         if c.name in SKIP or c.name in seen:
             continue
         seen.add(c.name)
@@ -249,9 +253,17 @@ def kernels_source() -> str:
     head.append(resolve._define("PC_DSLOPE", look.D_SLOPE) + resolve._define("PC_DMID", look.D_MID)
                 + resolve._define("PC_DP", look.D_P))
     tables = (resolve._cor_tables(CPP) + resolve._lab_tables(CPP) + resolve._gauge_tables(CPP)
-              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP))
-    kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_LAB + resolve.K_CURVE
-              + resolve.K_RAND + resolve.K_TEXTURA + resolve.K_PROJETOR).replace("PC_DEVICE ", "static inline ")
+              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP)
+              + labx.tables(resolve._define, resolve._table, CPP))
+    # 1.6: K_RAND e o grão físico (K_PGRAIN) antes do laboratório, que soma o grão físico na densidade; o
+    # pc_lab_path_x (labx) é cópia do pc_lab_path já com o grão físico
+    # 1.6 (fase 3): a estrutura pela densidade (K_GSTRUCT) também entra no pc_lab_path (argumentos gf, gc, gw)
+    k_lab = resolve.gstruct(resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB), True)
+    kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_RAND + resolve.K_PGRAIN
+              + resolve.K_GSTRUCT + k_lab + resolve.K_CURVE
+              + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
+              + labx.kernel(k_lab)
+              ).replace("PC_DEVICE ", "static inline ")
     body = []
     body.append("\n// ---------------------------------------------------------------- valores (formato do app)\n")
     body.append("struct pc_vals {\n" + "".join(f"    {_ctype(s.ctl)} {s.field};\n" for s in sl) + "};\n")
@@ -274,8 +286,37 @@ def kernels_source() -> str:
     body.append(f"static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {{\n{loc}{resolve.B_GAIN}"
                 "    return lin;\n}\n")
     body.append("// colorPipe do app: laboratorio + look + copia + envelhecimento (B_LAB + B_LOOK)\n")
-    body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{resolve.B_LAB}"
+    lab = labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "")  # 1.6: com véu, pré-exposição e scanner (labx.py)
+    lab = resolve.gstruct(lab, True)
+    body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{lab}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6: a mesma conta com o grão no negativo (`gn_in` = densidade do grão de cada camada neste pixel)
+    lab_ng = resolve.gstruct(labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "        gn = gn_in;\n"), True)
+    body.append("// colorPipe com o grao no negativo (grao.negative_grain)\n")
+    body.append(f"static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in) {{\n{loc}{lab_ng}"
+                f"{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6: a mesma conta com o grão físico (`ga_in` = fração por camada, `gq_in` = posição px@1080, raio e fração
+    # própria, `gs_in` = semente do quadro); a densidade de cada camada decide o resto dentro de pc_lab_path
+    # (fase 3: com labx.body, como as outras: véu, pré-exposição e scanner também valem com o grão físico)
+    lab_pg = labx.body(resolve.B_LAB).replace("/*NGRAIN*/",
+                                              "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n")
+    lab_pg = resolve.gstruct(lab_pg, True)
+    # 1.6 (fase 3): o grão físico com a variação do tamanho (`gw_in` = 0, maior raio, s, 1/√c: pc_pg_var)
+    lab_pgv = resolve.gstruct(labx.body(resolve.B_LAB).replace(
+        "/*NGRAIN*/", "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n        gw = gw_in;\n"), True)
+    body.append("// colorPipe com o grao fisico no negativo (grao_fisico.negative_grain)\n")
+    body.append("static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
+                f"int gs_in) {{\n{loc}{lab_pg}{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6 (fase 3): a mesma conta com a estrutura pela densidade no grão no negativo (`gn_in` = amplitude de cada
+    # camada, `gf_in`/`gc_in` = amostras fina e grossa do ruído, `gw_in` = estrutura, aglomeração, aspereza, cor)
+    lab_gs = resolve.gstruct(labx.body(resolve.B_LAB).replace(
+        "/*NGRAIN*/", "        gn = gn_in;\n        gf = gf_in;\n        gc = gc_in;\n        gw = gw_in;\n"), True)
+    body.append("// colorPipe com o grao fisico de raios variaveis (grao_fisico.extras)\n")
+    body.append("static inline float3 pc_colorpipe_pgv(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
+                f"int gs_in, float4 gw_in) {{\n{loc}{lab_pgv}{resolve.B_LOOK}    return y;\n}}\n")
+    body.append("// colorPipe com o grao no negativo e a estrutura pela densidade (grao_estrutura.py)\n")
+    body.append("static inline float3 pc_colorpipe_gs(const pc_vals& V, float3 lin, float3 gn_in, float4 gf_in, "
+                f"float4 gc_in, float4 gw_in) {{\n{loc}{lab_gs}{resolve.B_LOOK}    return y;\n}}\n")
     frame_body = resolve.B_FRAME
     for a, b in _FRAME_FIX:
         assert a in frame_body, a

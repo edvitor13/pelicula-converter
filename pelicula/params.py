@@ -7,8 +7,11 @@ convertidas para a resolução real, então a prévia e o vídeo final ficam igu
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -49,6 +52,9 @@ BITOLAS = [
     ("35mm", "35 mm"),
     ("65mm", "65 mm"),
     ("imax", "IMAX 70 mm (15/70)"),
+    ("135", "Foto 35 mm (135, 36 × 24)"),  # 1.6: formatos de foto (`scanformatos.py`)
+    ("meio_quadro", "Foto meio quadro (18 × 24)"),
+    ("120", "Foto médio formato (120)"),
 ]
 
 ISOS = [(str(v), f"ISO {v}") for v in (50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200)]
@@ -65,7 +71,7 @@ ENTRADAS = [
     ("linear", "Linear"),
     ("nlog", "Nikon N-Log"),
     ("slog3", "Sony S-Log3 (S-Gamut3.Cine)"),
-    ("logc3", "ARRI LogC3 (EI 800)"),
+    ("logc3", "ARRI LogC3 (ARRI Wide Gamut 3)"),
     ("vlog", "Panasonic V-Log"),
     ("log3g10", "RED Log3G10 (RWG) — R3D, Nikon N-RAW e R3D NE"),
     ("dwg", "DaVinci Intermediate (DaVinci Wide Gamut)"),
@@ -75,7 +81,20 @@ ENTRADAS = [
     ("applelog", "Apple Log (Rec.2020) — iPhone"),
     ("hlg", "HLG (HDR de celular, Rec.2100)"),
     ("pq", "PQ / HDR10 (Rec.2100)"),
+    # 1.6: perfis com fórmula publicada pelo fabricante (look.INPUT_IDS 14+)
+    ("clog2", "Canon Log 2 (Cinema Gamut)"),
+    ("clog3", "Canon Log 3 (Cinema Gamut)"),
+    ("flog", "Fujifilm F-Log (F-Gamut)"),
+    ("flog2", "Fujifilm F-Log2 (F-Gamut)"),
+    ("flog2c", "Fujifilm F-Log2 C (F-Gamut C)"),
+    ("dlog", "DJI D-Log (D-Gamut)"),
+    ("slog2", "Sony S-Log2 (S-Gamut)"),
+    ("llog", "Leica L-Log (Rec.2020)"),
 ]
+
+# EI do ARRI LogC3 (look.LOGC3_EI): a ALEXA grava uma curva para cada EI; 800 é a de sempre.
+LOGC3_EIS = [(ei, f"EI {ei}") for ei in ("160", "200", "250", "320", "400", "500", "640", "800", "1000", "1280",
+                                          "1600")]
 
 LUT_ENTRADAS = [
     ("rec709", "Rec.709 (LUTs criativos, Premiere)"),
@@ -92,9 +111,19 @@ LUT_ENTRADAS = [
     ("linear", "Linear"),
     ("hlg", "HLG (Rec.2100)"),
     ("pq", "PQ / HDR10 (Rec.2100)"),
+    ("clog2", "Canon Log 2"),
+    ("clog3", "Canon Log 3"),
+    ("flog", "Fujifilm F-Log"),
+    ("flog2", "Fujifilm F-Log2"),
+    ("flog2c", "Fujifilm F-Log2 C"),
+    ("dlog", "DJI D-Log"),
+    ("slog2", "Sony S-Log2"),
+    ("llog", "Leica L-Log"),
 ]
 
-# Laboratório: aproximações artísticas do comportamento de cada filme (sem dados dos fabricantes).
+# Laboratório: aproximações artísticas do comportamento de cada filme, menos os marcados "(datasheet)": as curvas
+# desses foram ajustadas às curvas publicadas pela Kodak (tools/ajustar_lab.py; fonte em pelicula/data/datasheets/).
+# Película calibrada por datasheet público entra como id novo no fim, com a fonte registrada (regra 8 do AGENTS.md).
 NEGATIVOS = [
     ("vision3_50d", "Kodak Vision3 50D"),
     ("vision3_250d", "Kodak Vision3 250D"),
@@ -110,6 +139,9 @@ NEGATIVOS = [
     ("vision_5263", "Kodak Vision 5263 500T"),
     ("vision2_5229", "Kodak Vision2 Expression 5229 500T"),
     ("double_x", "Kodak Double-X 5222 (P&B)"),
+    ("vision3_250d_v2", "Kodak Vision3 250D (datasheet)"),
+    ("vision3_500t_v2", "Kodak Vision3 500T (datasheet)"),
+    ("vision3_200t_v2", "Kodak Vision3 200T (datasheet)"),
 ]
 
 COPIAS_LAB = [
@@ -120,6 +152,17 @@ COPIAS_LAB = [
     ("e5385", "Eastman Color Print 5385"),
     ("2302", "Kodak 2302 (cópia preto e branco)"),
     ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
+    ("2383_v2", "Kodak 2383 (datasheet)"),
+]
+
+HAL_MODELOS = [  # 1.6: halação física (grao.physical_halation)
+    ("brilho", "Brilho (acima do limiar)"),
+    ("fisica", "Física (reflexo na base)"),
+]
+
+GRAO_MODELOS = [  # 1.6: modelo do grão no negativo (grao_fisico.py; "fisico" no módulo Beta grao_fisico)
+    ("ruido", "Ruído (campo procedural)"),
+    ("fisico", "Físico (grãos de prata)"),
 ]
 
 PROCESSOS = [
@@ -127,6 +170,23 @@ PROCESSOS = [
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
     ("tech2", "Technicolor 2 cores (anos 20)"),
     ("prata", "Retenção de prata (bleach bypass)"),
+    ("reversivel", "Reversível (slide, sem cópia)"),
+    ("cruzado_e6c41", "Revelação cruzada: slide no C-41"),
+    ("cruzado_c41e6", "Revelação cruzada: negativo no E-6"),
+]
+
+# 1.6 (labx.py): scanner do "Sem cópia" e cor da pré-exposição.
+SCANNERS = [
+    ("rgb", "RGB estreito (cada camada sozinha)"),
+    ("branca", "Luz branca (camadas misturadas)"),
+]
+
+CORES_PRE_EXPOSICAO = [
+    ("neutra", "Neutra"),
+    ("ambar", "Âmbar (quente)"),
+    ("azul", "Azul (fria)"),
+    ("verde", "Verde"),
+    ("magenta", "Magenta"),
 ]
 
 # MTF da película: maciez fina que tira a nitidez "digital" (poros, serrilhado) e mantém o detalhe maior.
@@ -154,6 +214,11 @@ PROPORCOES = [
     ("2.39", "2,39 (Scope)"),
     ("2.76", "2,76 (Ultra Panavision)"),
 ]
+
+
+# 1.6: ângulos do obturador (`tempo_camera`); a escolha não anima (a janela decide quais quadros ler)
+ANGULOS = [("45", "45°"), ("90", "90°"), ("144", "144°"), ("172.8", "172,8° (sem cintilação a 50 Hz)"),
+           ("180", "180° (o padrão do cinema)"), ("270", "270°"), ("360", "360° (todo aberto)")]
 
 
 def F(key, label, default, lo, hi, step=0.01, decimals=2, unit="", tip="", advanced=False, percent=False):
@@ -195,6 +260,11 @@ SECTIONS: list[Section] = [
           "um filme. Escolha pelo enquadramento: close suaviza mais a pele; plano aberto, menos."),
         F("mtf_forca", "Quantidade do MTF", 0.5, 0, 1, percent=True,
           tip="50% = o valor do enquadramento escolhido; 100% = o dobro."),
+        F("mtf_camadas", "Diferença de nitidez entre camadas", 0.0, 0, 1, percent=True,
+          tip="Cada cor fica com a nitidez da sua camada na película: no negativo o vermelho é o mais macio; com "
+              "uma cópia escolhida, o azul também perde nitidez. Dá franjas sutis nas bordas de alto contraste. "
+              "50% = a diferença medida nos datasheets da Kodak (Vision3 250D e cópia 2383), convertida pelo "
+              "tamanho do quadro da bitola; 100% = o dobro."),
         F("bitola_vinheta", "Vinheta da bitola", 1.0, 0, 1, percent=True,
           tip="Escurecimento natural das bordas em bitolas pequenas."),
         F("mix_geral", "Força geral do efeito", 1.0, 0, 1, percent=True,
@@ -206,13 +276,23 @@ SECTIONS: list[Section] = [
           "Como o vídeo foi gravado. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR "
           "(os celulares costumam gravar em HLG). Trocar de preset não muda este ajuste."),
         B("log_reescalado", "Log reescalado (HDMI “Limited”)", False,
-          "Só para S-Log3, V-Log e N-Log, que a câmera grava no código de 10 bits. Ligue em gravações externas em "
+          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, que a câmera grava no código de 10 bits. "
+          "Ligue em gravações externas em "
           "que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em “Limited”, comum na Nikon): "
           "o app deixa de converter de volta para o código da câmera. Trocar de preset não muda este ajuste.",
+          advanced=True),
+        C("logc3_ei", "EI do ARRI LogC3", "800", LOGC3_EIS,
+          "Só para o ARRI LogC3: a ALEXA grava uma curva para cada EI (veja nos metadados do clipe). O cinza fica "
+          "no mesmo lugar; muda a compressão das luzes e das sombras. Trocar de preset não muda este ajuste.",
           advanced=True),
         F("exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
         F("temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
         F("tint", "Tonalidade", 0.0, -100, 100, 1, 0, "", "Negativo puxa para verde, positivo para magenta."),
+        F("proteger_cores", "Proteger cores saturadas", 0.0, 0, 1, percent=True,
+          tip="Traz com suavidade para dentro do Rec.709 as cores que a câmera grava além dele (LED, neon, céu "
+              "muito saturado), antes do look e do negativo: em vez de estourar um canal e mudar de tom de "
+              "repente, elas chegam à borda das cores. As cores comuns não mudam. Trocar de preset não muda este "
+              "ajuste."),
     ], "Perfil de cor e balanço"),
 
     Section("lab", "Laboratório (negativo e cópia)", "lab_on", [
@@ -221,6 +301,25 @@ SECTIONS: list[Section] = [
           "Filme da câmera. Cada um tem latitude, contraste e mistura de camadas próprios (aproximações artísticas)."),
         F("lab_revelacao", "Revelação (puxar / forçar)", 0.0, -2, 3, 0.5, 1, " stop",
           "Forçar (+) aumenta o contraste, fecha as sombras e aumenta o grão; puxar (−) suaviza."),
+        B("lab_grao", "Grão no negativo", False,
+          "Põe o grão (seção Grão, que precisa estar ligada) dentro do negativo, na densidade de cada camada, "
+          "antes da cópia: a curva da cópia molda o grão, que some nos pretos e nas altas luzes estouradas, e o "
+          "azul tem mais grão que o verde e o vermelho, como nos datasheets da Kodak. A resposta por tom da "
+          "seção Grão deixa de valer: quem decide é a cópia."),
+        C("lab_grao_modelo", "Modelo do grão no negativo", "ruido", GRAO_MODELOS,
+          "Ruído: o campo do grão de sempre somado à densidade. Físico (Beta): cada camada vira grãos de prata "
+          "opacos espalhados ao acaso, tantos quanto a densidade daquele ponto pede (lei de Nutting); nas partes "
+          "finas do negativo aparecem grãos soltos, nas densas, buracos soltos, sem nenhum ajuste por faixa de "
+          "brilho. A força segue os datasheets da Kodak e o tamanho segue a bitola, o ISO e o Tamanho do grão. "
+          "Mais pesado para a placa de vídeo."),
+        F("lab_grao_cristal", "Tamanho do cristal", 1.0, 0.5, 2.0, 0.05, 2, "×",
+          "Só no modelo Físico: o tamanho dos grãos de prata. Maior = grãos maiores e mais raros, com a mesma "
+          "granularidade do datasheet (a força medida numa área de 48 µm não muda); muda a textura, não a "
+          "quantidade de grão. O Tamanho da seção Grão muda os dois.", advanced=True),
+        F("lab_grao_variacao", "Variação do tamanho", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Só no modelo Físico: em vez de todos os grãos do mesmo tamanho, uma mistura de grãos pequenos e "
+              "grandes, como numa emulsão de verdade, com a mesma densidade média e a mesma granularidade do "
+              "datasheet. Um pouco mais pesado para a placa de vídeo. 0% = todos iguais."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,
@@ -230,8 +329,8 @@ SECTIONS: list[Section] = [
         F("lab_chave", "Chave preta (Technicolor)", 0.3, 0, 1, percent=True,
           tip="Imagem preto e branco de baixo contraste somada aos corantes: pretos mais profundos."),
         F("lab_luz_r", "Luz vermelha da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
-          "Pontos de luz da copiadora (12 pontos = 1 stop). Mais vermelho deixa a cópia mais ciano, como no "
-          "laboratório."),
+          "Pontos de luz da copiadora (12 pontos = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera). Mais "
+          "vermelho deixa a cópia mais ciano, como no laboratório."),
         F("lab_luz_g", "Luz verde da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
           "Mais verde deixa a cópia mais magenta."),
         F("lab_luz_b", "Luz azul da copiadora", 0.0, -12, 12, 0.5, 1, " pt",
@@ -275,6 +374,20 @@ SECTIONS: list[Section] = [
         F("lab_diafonia", "Mistura entre camadas", 1.0, 0, 2, 0.01, 2, "×",
           "Absorções indesejadas dos corantes: acima de 1 a cor fica mais suja e densa; abaixo, mais pura.",
           advanced=True),
+        C("lab_scanner", "Tipo de scanner", "rgb", SCANNERS,
+          "Só na cópia \"Sem cópia\". RGB estreito lê cada camada do negativo sozinha (o de sempre); luz branca "
+          "vê as camadas misturadas, como uma câmera fotografando o negativo numa mesa de luz: cores menos "
+          "saturadas, cinza igual."),
+        F("lab_vencida", "Película vencida", 0.0, 0, 30, 1, 0, " anos",
+          "Anos guardada fora da geladeira: véu que levanta e tinge as sombras, menos sensibilidade e menos "
+          "contraste, mais na camada do azul (a mais rápida). Regra prática dos laboratórios, não uma medida."),
+        B("lab_pre_exposicao", "Pré-exposição (flashing)", False,
+          "Uma luz uniforme no negativo antes da cena: levanta e suaviza as sombras e quase não mexe nas altas "
+          "luzes."),
+        F("lab_pre_exposicao_stops", "Pré-exposição abaixo do cinza", 4.0, 1, 8, 0.5, 1, " stops",
+          "Quanto abaixo do cinza médio fica a luz da pré-exposição: menos stops, mais efeito."),
+        C("lab_pre_exposicao_cor", "Cor da pré-exposição", "neutra", CORES_PRE_EXPOSICAO,
+          "Cor da luz da pré-exposição: tinge as sombras."),
     ], "Simula a película de verdade: negativo, revelação, luzes da copiadora e cópia"),
 
     Section("cor", "Cor da película", "cor_on", [
@@ -341,6 +454,23 @@ SECTIONS: list[Section] = [
         F("grao_luzes", "Nas altas luzes", 0.45, 0, 2, 0.01, 2),
         B("grao_animado", "Grão muda a cada quadro", True),
         I("grao_semente", "Semente", 7, 0, 9999, "Muda o padrão aleatório do grão.", advanced=True),
+        F("grao_maciez", "Maciez pelo grão", 0.0, 0, 1, percent=True,
+          tip="Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma "
+              "imagem mais nítida que ele. 100% = a maciez do grão; 0% = como antes."),
+        F("grao_respiracao", "Respiração por camada", 0.0, 0, 1, percent=True,
+          tip="A cor e o brilho de cada quadro variam um pouco, de leve e cada camada por si (vermelho, verde e "
+              "azul), como na película: a emulsão, a revelação e a luz da copiadora nunca são iguais de um "
+              "quadro para outro. Muda a cada quadro e devagar ao longo da fita, sempre igual para o mesmo quadro "
+              "e a mesma semente. 100% = cerca de um ponto de copiadora; 0% = desligado."),
+        F("grao_estrutura", "Estrutura pela densidade", 0.0, 0, 1, percent=True,
+          tip="A forma do grão muda com a densidade do negativo, como na película: nas partes finas (sombras) "
+              "aparecem grãos soltos, um pouco maiores; nas densas (tons médios e altas luzes), buracos soltos. A "
+              "força em cada densidade e em cada camada segue o datasheet da Kodak (o azul tem mais grão). Os "
+              "ajustes Nas sombras, Nos tons médios e Nas altas luzes continuam valendo por cima. 0% = o grão de "
+              "sempre."),
+        F("grao_aglomeracao", "Aglomeração nas altas densidades", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Com a Estrutura pela densidade, junta o grão das partes densas do negativo em aglomerados maiores "
+              "(até 2,3 vezes). 0% = o tamanho calibrado."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [
@@ -349,6 +479,11 @@ SECTIONS: list[Section] = [
         F("hal_raio", "Raio", 14, 1, 100, 0.5, 1, " px", "Medido num quadro de 1080 linhas."),
         F("hal_limiar", "Limiar", 2.5, 0, 6, 0.05, 2, " EV", "A partir de quantos stops acima do cinza médio brilha."),
         COR("hal_cor", "Cor", (1.0, 0.27, 0.05)),
+        C("hal_modelo", "Modelo", "brilho", HAL_MODELOS,
+          "Brilho: o halo nasce só acima do Limiar e é somado por cima (como sempre foi). Física: a luz que "
+          "atravessa a emulsão volta refletida pela base do filme e expõe de novo a camada do vermelho, antes da "
+          "cópia; nasce de toda a imagem na proporção da exposição (o Limiar não vale), o raio segue o tamanho do "
+          "quadro da bitola e o brilho de áreas lisas não muda: o halo só aparece em volta das luzes fortes."),
     ], "Brilho avermelhado em volta das luzes"),
 
     Section("bloom", "Bloom e difusão", "bloom_on", [
@@ -427,7 +562,9 @@ SECTIONS: list[Section] = [
         B("scan_on", "Ativo", False),
         C("scan_formato", "Película", "bitola", [
             ("bitola", "Da bitola escolhida"), ("35mm", "35 mm (4 furos por quadro)"), ("16mm", "16 mm (1 furo)"),
-            ("super16", "Super 16"), ("super8", "Super 8")],
+            ("super16", "Super 16"), ("super8", "Super 8"),
+            ("135", "Foto 35 mm (135, 8 furos)"), ("meio_quadro", "Foto meio quadro (4 furos)"),
+            ("120_66", "Foto 120, 6 × 6 (sem furos)"), ("120_645", "Foto 120, 6 × 4,5 (sem furos)")],
           "Medidas reais de cada película: furos, linhas entre quadros e bordas."),
         C("scan_tipo", "Tipo de scan", "copia", [
             ("copia", "Cópia projetada (furos claros)"), ("negativo", "Negativo invertido (furos escuros)")]),
@@ -441,6 +578,119 @@ SECTIONS: list[Section] = [
         F("scan_luz", "Brilho dos furos", 1.0, 0.3, 2.0, 0.01, 2, "×"),
         COR("scan_base", "Cor da base", (0.035, 0.03, 0.027), "Cor da película fora da imagem."),
     ], "Bordas, furos e quadros vizinhos, como num scan real"),
+
+    # 1.6: Cor por planos (módulo Beta "cor_planos"; `planes.py`). Distâncias em px@1080 a partir do centro.
+    Section("planos", "Cor por planos", "planos_on", [
+        B("planos_on", "Ativo", False),
+        C("planos_tipo", "Separação", "linear", [
+            ("linear", "Degradê linear (o fundo do lado da direção)"),
+            ("radial", "Degradê radial (a frente dentro do círculo)")],
+          "Como separar a frente do fundo: uma linha (céu e chão) ou um círculo em volta do assunto."),
+        F("planos_angulo", "Direção", 0.0, -180, 180, 1, 0, "°",
+          "Para que lado fica o fundo no degradê linear: 0° = em cima, 90° = à direita, 180° = embaixo."),
+        F("planos_pos_x", "Centro horizontal", 0.0, -1920, 1920, 1, 0, " px",
+          "Desloca a linha ou o círculo para os lados (px de um quadro de 1080 linhas; 0 = centro)."),
+        F("planos_pos_y", "Centro vertical", 0.0, -1080, 1080, 1, 0, " px",
+          "Desloca a linha ou o círculo para cima (negativo) ou para baixo (positivo)."),
+        F("planos_raio", "Raio", 400.0, 10, 2000, 1, 0, " px", "Tamanho do círculo do degradê radial."),
+        F("planos_suavidade", "Suavidade", 300.0, 0, 2000, 1, 0, " px",
+          "Largura da passagem entre frente e fundo. 0 = borda seca."),
+        B("planos_inverter", "Trocar frente e fundo", False),
+        F("planos_frente_exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
+        F("planos_frente_temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
+        F("planos_frente_tonalidade", "Tonalidade", 0.0, -100, 100, 1, 0, "",
+          "Negativo puxa para verde, positivo para magenta."),
+        F("planos_frente_saturacao", "Saturação", 0.0, -100, 100, 1, 0, " %", "-100% deixa em preto e branco."),
+        F("planos_frente_contraste", "Contraste", 0.0, -100, 100, 1, 0, " %"),
+        F("planos_fundo_exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
+        F("planos_fundo_temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
+        F("planos_fundo_tonalidade", "Tonalidade", 0.0, -100, 100, 1, 0, "",
+          "Negativo puxa para verde, positivo para magenta."),
+        F("planos_fundo_saturacao", "Saturação", 0.0, -100, 100, 1, 0, " %", "-100% deixa em preto e branco."),
+        F("planos_fundo_contraste", "Contraste", 0.0, -100, 100, 1, 0, " %"),
+        B("planos_proteger_pele", "Proteger a pele", True,
+          "Os ajustes da frente e do fundo não mexem na pele (ela só muda pelos ajustes da pele)."),
+        F("planos_pele_matiz", "Matiz", 0.0, -30, 30, 1, 0, "°",
+          "Negativo puxa a pele para o vermelho; positivo para o amarelo."),
+        F("planos_pele_saturacao", "Saturação", 0.0, -100, 100, 1, 0, " %"),
+        F("planos_pele_luz", "Luz", 0.0, -1.5, 1.5, 0.05, 2, " EV"),
+        F("planos_pele_uniformizar", "Uniformizar", 0.0, 0, 1, percent=True,
+          tip="Deixa a cor da pele mais uniforme (menos manchas avermelhadas). Só a cor: a textura fica igual."),
+        F("planos_pele_centro", "Cor da pele", 64.5, 0, 360, 0.5, 1, "°",
+          "Matiz da pele que a máscara procura. O conta-gotas acerta este valor clicando na pele da prévia.",
+          advanced=True),
+        F("planos_pele_largura", "Largura da cor da pele", 21.0, 5, 60, 0.5, 1, "°",
+          "Quanto o matiz pode se afastar da cor da pele. Estreite se madeira ou areia entrarem na máscara.",
+          advanced=True),
+    ], "Frente, fundo e pele com ajustes próprios"),
+
+    # 1.6 (`tempo_camera.py`, módulo Beta "camera_cinema"): obturador de película a partir de vídeo rápido.
+    Section("obturador", "Obturador de película", "obturador_on", [
+        B("obturador_on", "Ativo", False),
+        C("obturador_angulo", "Ângulo do obturador", "180", ANGULOS,
+          "Quanto tempo de cada quadro o obturador fica aberto: 180° = metade (1/48 s a 24 qps), o rastro de "
+          "movimento do cinema. Vale quando o vídeo tem pelo menos o dobro dos quadros por segundo da saída "
+          "(50, 60 ou 120 qps exportados a 24, 25 ou 30): os quadros dentro da janela aberta são misturados na luz. "
+          "No modo Película, a exportação com outra taxa (a prévia da exportação mostra); no modo Edição, cada "
+          "clipe rápido numa sequência mais lenta."),
+    ], "Rastro de movimento de uma câmera de cinema"),
+
+    # 1.6 (`anamorfico.py`, módulo Beta "anamorfico"): lente anamórfica.
+    Section("anamorfico", "Lente anamórfica", "anam_on", [
+        B("anam_on", "Ativo", False),
+        C("anam_compressao", "Desespremer", "nenhuma", [
+            ("nenhuma", "Não (o vídeo já está na proporção certa)"), ("1.33", "1,33× (adaptador em 16:9 → 2,37:1)"),
+            ("1.5", "1,5×"), ("1.8", "1,8×"), ("2.0", "2× (cinema em 4:3 → 2,66:1)")],
+          "Para vídeo filmado com lente ou adaptador anamórfico, que chega espremido na horizontal: a imagem é "
+          "esticada na largura e fica numa caixa de letra (faixas pretas em cima e embaixo)."),
+        F("anam_flare", "Risco de luz", 0.5, 0, 1, percent=True,
+          tip="A linha horizontal comprida que as luzes fortes fazem numa lente anamórfica."),
+        F("anam_flare_limiar", "Limiar do risco", 2.0, 0, 5, 0.1, 1, " stops",
+          "Quanto acima do cinza médio a luz precisa estar para riscar."),
+        F("anam_flare_comprimento", "Comprimento do risco", 420.0, 40, 1200, 10, 0, " px"),
+        COR("anam_flare_cor", "Cor do risco", (0.35, 0.6, 1.0)),
+        F("anam_barril", "Barril horizontal", 0.3, 0, 1, percent=True,
+          tip="O centro estica um pouco na horizontal, mais na linha do meio (o \"mumps\" das anamórficas)."),
+        F("anam_bordas", "Bordas macias", 0.4, 0, 1, percent=True,
+          tip="As laterais ficam mais macias que o centro."),
+    ], "Desespremer, risco de luz e bordas"),
+
+    # 1.6 (`data_impressa.py`, módulo Beta "data_impressa"): a data laranja das câmeras com data.
+    Section("data", "Data impressa", "data_on", [
+        B("data_on", "Ativo", False),
+        I("data_ano", "Ano", 1998, 1970, 2099),
+        I("data_mes", "Mês", 10, 1, 12),
+        I("data_dia", "Dia", 29, 1, 31),
+        C("data_formato", "Formato", "aa_mm_dd", [
+            ("aa_mm_dd", "'98 10 29 (ano, mês, dia)"), ("mm_dd_aa", "10 29 '98 (mês, dia, ano)"),
+            ("dd_mm_aa", "29 10 '98 (dia, mês, ano)"), ("aaaa_mm_dd", "1998 10 29")]),
+        C("data_canto", "Canto", "inf_dir", [
+            ("inf_dir", "Embaixo à direita"), ("inf_esq", "Embaixo à esquerda"),
+            ("sup_dir", "Em cima à direita"), ("sup_esq", "Em cima à esquerda")]),
+        COR("data_cor", "Cor", (1.0, 0.45, 0.08)),
+        F("data_intensidade", "Intensidade", 0.6, 0, 1, percent=True,
+          tip="Quanto o mostrador expõe o negativo: forte, ele estoura e brilha em volta (com a halação)."),
+        F("data_tamanho", "Tamanho", 34.0, 12, 120, 1, 0, " px", "Altura dos números (num quadro de 1080 linhas)."),
+        F("data_margem", "Distância do canto", 60.0, 0, 300, 1, 0, " px", advanced=True),
+    ], "A data laranja das câmeras dos anos 80 e 90"),
+
+    # 1.6 (`montagem_filme.py`, módulo Beta "montagem_pelicula"): os cortes da montagem viram emendas na película.
+    Section("montagem_filme", "A montagem na película", "mfilme_on", [
+        B("mfilme_on", "Ativo", False),
+        F("mfilme_emenda", "Emendas visíveis", 0.7, 0, 1, percent=True,
+          tip="Em quantos cortes secos da faixa V1 a fita da emenda aparece no primeiro quadro do clipe novo."),
+        F("mfilme_clarao", "Clarão no corte", 0.4, 0, 1, percent=True,
+          tip="A luz que passa pela junta da emenda: o primeiro quadro depois do corte clareia."),
+        F("mfilme_salto", "Pulo no corte", 0.5, 0, 1, percent=True,
+          tip="A emenda é mais grossa e pula na janela do projetor por um ou dois quadros."),
+        I("mfilme_semente", "Semente", 7, 0, 9999, advanced=True),
+        B("rolo_on", "Rolos de Super 8", False,
+          "Um rolo de 50 pés tem 3 600 quadros: no fim dele a luz vela a película e a troca de rolo dá um pulo."),
+        C("rolo_cadencia", "Cadência do rolo", "18", [
+            ("18", "18 qps (3 min 20 s por rolo)"), ("24", "24 qps (2 min 30 s por rolo)")]),
+        F("rolo_velamento", "Velamento no fim do rolo", 0.7, 0, 1, percent=True),
+        COR("rolo_cor", "Cor do velamento", (1.0, 0.42, 0.12)),
+    ], "Emendas nos cortes e rolos de Super 8"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])
@@ -531,3 +781,39 @@ def defaults() -> dict[str, Any]:
 def sanitize(values: dict[str, Any]) -> dict[str, Any]:
     """Completa e limita valores vindos de presets ou arquivos."""
     return FILM.sanitize(values)
+
+
+# ------------------------------------------------------------------ 1.6: o que a 1.5 lê (formato 4)
+# Retrato das chaves e das opções de escolha da 1.5.0, por esquema ("look" = FILM, "video"/"audio" = ajustes de
+# clipe). A 1.5 descarta chave desconhecida e opção que não conhece (`Schema.sanitize`), então um projeto que usa
+# um ajuste da 1.6 abriria nela sem o efeito: com algo fora do retrato, o projeto vai para o formato 4, que a
+# 1.5 recusa com aviso (`project.FEATURES_V4`, `timeline.FEATURES_V4`). Ajuste novo não precisa de registro.
+KNOWN_1_5_FILE = Path(__file__).with_name("data") / "conhecidos_1_5.json"
+
+
+@lru_cache(maxsize=1)
+def known_1_5() -> dict[str, dict[str, list[str] | None]]:
+    """{"look"|"video"|"audio": {chave: opções da escolha, ou None}} como a 1.5.0 conhecia."""
+    data = json.loads(KNOWN_1_5_FILE.read_text(encoding="utf-8"))
+    return {k: data[k] for k in ("look", "video", "audio")}
+
+
+def beyond_1_5(schema: Schema, known: dict[str, list[str] | None], values: dict[str, Any] | None,
+               keys: dict[str, Any] | None = None) -> bool:
+    """Se os valores usam algo que a 1.5 não lê: um ajuste novo fora do padrão, uma opção nova numa escolha
+    ou chaves de animação num ajuste novo."""
+    for k, v in (values or {}).items():
+        p = schema.params.get(k)
+        if p is None:
+            continue
+        try:
+            v = _clean(p, v)
+        except (TypeError, ValueError):
+            continue
+        if k not in known:
+            if v != _default_of(p):
+                return True
+        elif p.kind == "choice" and known[k] is not None and v not in known[k]:
+            return True
+    return any(k in schema.params and k not in known for k in (keys or {}))
+

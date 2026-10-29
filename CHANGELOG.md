@@ -7,6 +7,90 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Perfis de câmera novos**, pelas fórmulas que os fabricantes publicam: Canon Log 2 e Log 3, Fujifilm
+  F-Log, F-Log2 e F-Log2 C, DJI D-Log, Sony S-Log2 e Leica L-Log, e o **EI do ARRI LogC3** (avançado).
+  Também no plugin do DaVinci.
+- **Proteger cores saturadas** (seção *Entrada*): comprime com suavidade as cores fora do gamut (LED,
+  neon), a partir da ACES Reference Gamut Compression. Também no plugin.
+- **Perfil de câmera por clipe** no modo Edição (cartão *Câmera*): câmeras diferentes na mesma montagem;
+  cada clipe é convertido para a entrada do look, e a montagem leva ao look a luz acima do branco.
+- **Sugestão do perfil pelos metadados**: ao abrir um arquivo, uma faixa oferece *Usar este perfil* (o look
+  só muda com o clique); no modo Edição, clipes novos de outra câmera já entram com o perfil.
+- **Grão e textura**: *Maciez pelo grão* e *Respiração por camada* (seção *Grão*), *Diferença de nitidez
+  entre camadas* (seção *Película*, pelas curvas de MTF dos datasheets públicos da Kodak), **Grão no
+  negativo** (seção *Laboratório*: o grão na densidade de cada camada, moldado pela curva da cópia, com a
+  granularidade publicada; também no nó *Laboratorio* do plugin) e o modelo **Física** da halação (o
+  reflexo na base volta à camada do vermelho antes da cópia).
+- **Cor por planos** (Beta, desligado): frente, fundo e pele com ajustes próprios no look, separados por
+  degradê, com conta-gotas da pele e *Ver planos*. Não vai para o LUT exportado nem para o plugin.
+- **Cor simples** no modo Edição (módulo, ligado a partir do perfil *Criador*): conta-gotas do balanço de
+  branco, *Automático* analisando o clipe inteiro, igualar a outro clipe ou a uma imagem protegendo a pele,
+  clicar numa cor da prévia e mudar só ela, *Pele natural*, degradê e grupos de cor.
+- **Zebra, falsa cor e referência na prévia** (módulo *Scopes*): exposição em stops em relação ao cinza de
+  18% e um quadro fixado ou uma imagem para comparar (Dividido ou Lado a lado). Só na tela.
+- **Processos novos no Laboratório**: *Reversível* (slide, sem negativo nem cópia: mais contraste, pretos
+  densos, pouca latitude) e a **Revelação cruzada** nos dois sentidos (*slide no C-41*: sombras azuladas e
+  altas luzes amareladas; *negativo no E-6*: pouco contraste, preto lavado e altas luzes quentes). Também no
+  plugin.
+- **Película vencida** (0 a 30 anos: menos sensibilidade e contraste e um véu nas sombras) e **Pré-exposição**
+  (*flashing*: uma luz uniforme no negativo que abre e suaviza as sombras), no Laboratório. Também no plugin
+  (nó *Laboratorio* e OpenFX).
+- **Tipo de scanner** do *Sem cópia*: *Luz branca* (uma câmera fotografando o negativo na mesa de luz, com as
+  camadas misturadas e as cores menos saturadas) além do *RGB estreito* de sempre. Também no plugin.
+- **Filmes "(datasheet)"** no Laboratório: Vision3 250D, 500T e 200T e a cópia 2383, com as curvas ajustadas
+  às publicadas pela Kodak (gama, pé, ombro, densidade máxima e diafonia dos corantes). Feitos para andar
+  juntos: negativo e cópia "(datasheet)" dão a escala de cinza quase neutra. Os filmes de antes não mudam.
+- **Conferência pelo LAD da Kodak** no Laboratório: o cinza de 16% sai na cópia com a densidade-alvo dos
+  laboratórios, e cerca de 7 pontos de copiadora compensam 1 stop da câmera.
+- **Obturador de película** (Beta, recurso *Câmera de cinema*): o rastro de movimento de 180° (ou 45° a 360°) a
+  partir de vídeo de 50, 60 ou 120 qps exportado a 24, 25 ou 30. No modo Edição vale por clipe.
+- **Manivela por clipe** no modo Edição (Beta, *Câmera de cinema*): 16 a 22 qps com a oscilação da mão, no
+  inspetor do clipe depois de *Velocidade*.
+- **Lente anamórfica** (Beta): desespremer (1,33× a 2×) com caixa de letra, risco de luz horizontal azul,
+  barril e bordas macias. Não vai para o plugin.
+- **Data impressa** (Beta): a data laranja de sete segmentos das câmeras dos anos 80 e 90, exposta no
+  negativo (passa pela halação, pela cor e pelo grão). Não usa o relógio do computador.
+- **Formatos de foto**: bitolas *Foto 35 mm (135)*, *Foto meio quadro* e *Foto médio formato (120)*, e no
+  *Scan da película* o 135, o meio quadro e o 120 (6 x 6 e 6 x 4,5). Também no plugin.
+- **A montagem na película** (Beta): os cortes secos da faixa V1 viram emendas (fita, clarão e pulo na
+  janela) e rolos de Super 8 de 50 pés com o velamento no fim. Não vai para o plugin.
+- **Máquina do tempo** (módulo, ligado): botão no painel de looks; escolha um ano (1920 a 2020) e onde o filme
+  passava, e ele preenche bitola, filme, cor, grão, projeção, desgaste e moldura da época, com o motivo de
+  cada escolha. Ctrl+Z desfaz tudo de uma vez.
+- **Grão físico** (Beta, desligado, recurso *Grão físico*): novo *Modelo do grão no negativo* (*Físico*), com
+  grãos de prata espalhados ao acaso, tantos quanto a densidade de cada camada pede, na granularidade do
+  datasheet. Ajustes avançados *Tamanho do cristal* e *Variação do tamanho*. No plugin, no nó *Laboratorio*
+  (parado no DCTL, animado no OpenFX).
+- **Grão completo**: *Estrutura pela densidade* (grãos soltos nas sombras, buracos soltos nas altas luzes,
+  seguindo a granularidade de cada camada) e *Aglomeração nas altas densidades*, na seção *Grão*. Também no
+  plugin (nós *Textura* e *Laboratorio*).
+- **Luz da copiadora por clipe** (modo Edição): cartão *Luz da copiadora* no inspetor, com o mostrador
+  25 · 25 · 25, botões de vermelha, verde, azul e densidade, *Zerar* e *Copiar luzes para os clipes
+  selecionados*; atalhos **Alt+R / G / B / D** (+1 ponto) e com **Shift** (−1). Vale para a faixa V1 e precisa
+  do Laboratório ligado.
+- **Fotômetro da película** (Beta, desligado, recurso *Fotômetro da película*): na prévia, pinta a imagem pela
+  zona do negativo escolhido (sem detalhe, pé, trecho reto, ombro, estourado), mostra a latitude em stops e lê
+  um ponto. Com um processo especial dominante (*Reversível*, revelações cruzadas, Technicolor) mede o filme do
+  processo. Só na tela.
+- **Quatro presets novos** (grupo *Laboratório*): *Slide reversível*, *Revelação cruzada: slide no C-41*,
+  *Película vencida (18 anos)* e *Pré-exposição (baixo contraste)*. Também no plugin (os dois últimos, com o
+  efeito completo, só no nó *Laboratorio*).
+
+### Corrigido
+- **Super-brancos em vídeo log de faixa legal**: o que passava do código 940 era cortado ao abrir o
+  arquivo (no S-Log3, a partir de uns 6,7 stops acima do cinza). Agora chega ao look na prévia, na
+  exportação, no *Salvar quadro* e no `pelicula-cli`. **Isso muda a saída desses arquivos**: as altas luzes
+  acima do branco legal deixam de estourar duro. Vídeo Rec.709/sRGB e os demais casos saem iguais.
+- **Saída de 16 bits de arquivo de faixa legal** ficava uns 0,4% escura (o branco saía 0,9962): o branco
+  agora é 65535 exato, na exportação e no *Salvar quadro*.
+
+### Alterado
+- Projeto `.plc` no **formato 4** (bloco da montagem 3) quando usa algo da 1.6: a 1.5 recusa o projeto com
+  aviso em vez de abri-lo sem os ajustes novos. Projetos sem nada da 1.6 continuam no formato de antes.
+- Dados de fabricantes: números de publicações públicas podem calibrar modelos, com a fonte registrada
+  (`pelicula/data/datasheets/`); o aviso legal do README explica o que é usado.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

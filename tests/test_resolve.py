@@ -345,7 +345,13 @@ def test_glsl_dialect_compiles(harness, kind):
 @pytest.mark.gpu
 @pytest.mark.parametrize("pid", [p["id"] for p in presets.BUILTIN])
 def test_cor_node_matches_the_app_for_every_preset(harness, gl_engine, pid):
-    assert _cor_diff(harness, gl_engine, presets.builtin_values(pid)) < 2e-3
+    v = presets.builtin_values(pid)
+    if v.get("lab_on") and (v.get("lab_vencida") or v.get("lab_pre_exposicao")):
+        # película vencida e pré-exposição só existem no nó Laboratório (test_cor_node_has_none_of_the_16_lab_controls);
+        # esses presets são conferidos por test_laboratorio_node_matches_the_app
+        assert pid in LAB_PRESET_IDS
+        pytest.skip("controles da 1.6 só no nó Laboratório")
+    assert _cor_diff(harness, gl_engine, v) < 2e-3
 
 
 @pytest.mark.gpu
@@ -372,6 +378,61 @@ def test_video_range_control_matches_the_app(harness, gl_engine, kind, entrada):
     assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=False), 0, 1) - got_full).max() < 2e-3
     assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1) - got_video).max() < 2e-3
     assert (np.abs(got_full - got_video).max() > 0.01) == look.code_value_curve(entrada)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("kind", resolve.COLOR_KINDS)
+@pytest.mark.parametrize("ei", ["160", "1600"])
+def test_logc3_ei_control_matches_the_app(harness, gl_engine, kind, ei):
+    """EI do LogC3 (1.6): o nó usa a curva do EI escolhido, como o app (look.LOGC3_EI); 800 é a de sempre."""
+    v = dict(presets.builtin_values("vision3_500t"), entrada="logc3", logc3_ei=ei, proj_on=False, lut_on=False)
+    if kind == "laboratorio":
+        v = dict(_lab_app_values(v), proj_on=False, lut_on=False)
+    n = 13
+    got = harness.run(kind, v, _grid(n)).reshape(-1, 3)
+    assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1) - got).max() < 2e-3
+    std = harness.run(kind, dict(v, logc3_ei="800"), _grid(n)).reshape(-1, 3)
+    assert np.abs(got - std).max() > 0.01
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("kind", resolve.COLOR_KINDS)
+@pytest.mark.parametrize("entrada, amt", [("slog3", 1.0), ("logc4", 0.6), ("dwg", 1.0), ("rec709", 1.0)])
+def test_proteger_cores_control_matches_the_app(harness, gl_engine, kind, entrada, amt):
+    """Proteger cores saturadas (1.6): a mesma compressão do app (look.gamut_limits por perfil); 0 = a de sempre."""
+    v = dict(presets.builtin_values("vision3_500t"), entrada=entrada, proteger_cores=amt, proj_on=False,
+             lut_on=False)
+    if kind == "laboratorio":
+        v = dict(_lab_app_values(v), proj_on=False, lut_on=False)
+    n = 13
+    got = harness.run(kind, v, _grid(n)).reshape(-1, 3)
+    assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1) - got).max() < 2e-3
+    off = harness.run(kind, dict(v, proteger_cores=0.0), _grid(n)).reshape(-1, 3)
+    assert np.abs(got - off).max() > 0.01
+
+
+def test_proteger_cores_is_in_the_plugin():
+    src = SOURCES["cor"]
+    assert "pc_gamut_compress" in src and "Proteger cores saturadas" in src
+    m = re.search(r"PC_GCL\[(\d+)\] = \{", src)
+    assert int(m.group(1)) == 3 * len(params.PARAMS["entrada"].choices)
+    for kind in resolve.COLOR_KINDS:
+        names = [c.name for c in resolve.spec(kind).controls]
+        assert names[names.index("ui_tint") + 1] == "ui_proteger_cores"
+
+
+def test_profiles_of_16_are_in_the_plugin():
+    src = SOURCES["cor"]
+    for fn in ("pc_clog2_dec", "pc_clog3_dec", "pc_flog_dec", "pc_flog2_dec", "pc_dlog_dec", "pc_slog2_dec",
+               "pc_llog_dec", "pc_logc3e_dec"):
+        assert fn in src
+    for label in ("Canon Log 2 Cinema Gamut", "Fujifilm F-Log2 C F-Gamut C", "DJI D-Log D-Gamut", "Leica L-Log"):
+        assert label in src
+    for kind in resolve.COLOR_KINDS:
+        names = [c.name for c in resolve.spec(kind).controls]
+        assert names[names.index("ui_faixa_video") + 1] == "ui_logc3_ei"
+    m = re.search(r"PC_LC3\[(\d+)\] = \{([^}]*)\}", src)
+    assert int(m.group(1)) == 6 * len(look.LOGC3_EI)
 
 
 def _lab_app_values(values: dict) -> dict:
@@ -497,6 +558,12 @@ EXACT = [
     ("luz", "projetor", _neutral(desg_on=True, poeira_on=False, riscos_on=False, vazamento=0.7,
                                  cor_instavel_on=True, queima_on=True, queima=1.0)),
     ("moldura", "projetor", _neutral(mold_on=True, proporcao="2.39", cantos=0.05, borda_irregular=0.5)),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("maciez_grao_s8", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
+                                           grao_maciez=0.6, grao_tamanho=1.8, iso="800")),
+    ("camadas", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_maciez", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=0.7, mtf="medio")),
 ]
 
 
@@ -515,7 +582,11 @@ def test_texture_and_projector_match_the_app(harness, gl_engine, test_rgb, name,
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("vals", [_neutral(hal_on=True, hal_forca=1.0, hal_limiar=1.0),
-                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0)], ids=["hal", "bloom"])
+                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica"),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica", bitola="super8",
+                                           bitola_desfoque_on=False, bitola_vinheta=0.0, hal_raio=6.0)],
+                         ids=["hal", "bloom", "hal_fisica", "hal_fisica_super8"])
 def test_glows_are_a_close_single_pass_approximation(harness, gl_engine, test_rgb, vals):
     """Halação e bloom numa passada: sem viés (média em blocos) e ruído pequeno."""
     want = _app(gl_engine, test_rgb, vals, 0)
@@ -583,3 +654,204 @@ app.exit(0)
     res = subprocess.run([sys.executable, "-c", code, str(tmp_path / "lut")], cwd=str(ROOT), env=env,
                          capture_output=True, timeout=120)
     assert res.returncode == 0 and b"OK" in res.stdout, res.stderr.decode("utf-8", "replace")[-2000:]
+
+
+@pytest.mark.gpu
+def test_layer_softness_with_a_print_matches_the_app(harness, gl_engine, test_rgb, monkeypatch):
+    """1.6: "MTF - Camadas com copia" segue a cópia do app (DERIVED) e dá a maciez por canal da cópia.
+
+    A cor da cópia fica nos nós Cor/Laboratorio; para comparar só a textura, o teste finge a cópia escolhida.
+    """
+    from pelicula import grao
+    vals = _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)
+    assert resolve.ui_uniforms("textura", vals)["ui_mtf_copia"] == 0
+    assert resolve.ui_uniforms("textura", dict(vals, copia="k2383"))["ui_mtf_copia"] == 1
+    assert resolve.ui_uniforms("textura", dict(vals, lab_on=True, lab_copia="2383"))["ui_mtf_copia"] == 1
+    ctl = {c.name: c for c in resolve._with_defaults(resolve.spec("textura").controls, dict(vals, copia="k2383"))}
+    assert ctl["ui_mtf_copia"].default == 1
+    plain = harness.run("textura", vals, test_rgb, 0)
+    monkeypatch.setattr(grao, "print_chosen", lambda v: True)
+    want = _app(gl_engine, test_rgb, vals, 0)
+    got = harness.run("textura", vals, test_rgb, 0)
+    d = np.abs(want - got)
+    assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5
+    assert np.abs(got - plain)[..., 2].mean() > np.abs(got - plain)[..., 1].mean()  # a cópia amacia o azul
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [{}, dict(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0,
+                                            lab_processo="tech3", grao_cor=0.0, iso="500"),
+                                   dict(lab_copia="nenhuma", lab_revelacao=1.0, grao_aspereza=0.6)],
+                         ids=["2383", "tech3_s8", "scan"])
+def test_negative_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: o grão no negativo do nó Laboratório = o do app (a grade do grão, a densidade de cada camada).
+
+    No DCTL o grão do nó de cor fica parado (o nó também vale como LUT): igual ao app sem "muda a cada quadro".
+    """
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
+    plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.5  # o grão aparece
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [{}, dict(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0,
+                                            lab_processo="tech3", grao_cor=0.0, iso="500", lab_revelacao=1.0),
+                                   dict(lab_copia="nenhuma", grao_tamanho=2.5, grao_forca=2.0)],
+                         ids=["2383", "tech3_s8", "scan"])
+def test_physical_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: o grão físico (grao_fisico.py) do nó Laboratório = o do app: os mesmos discos, os mesmos pontos do spot e
+    a mesma densidade de cada camada. Parado no DCTL (o nó também vale como LUT), como o grão no negativo. Um disco
+    exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do float (cálculo em outra
+    ordem): só uma fração mínima dos pixels pode passar de 2,5 níveis de 8 bits."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico", **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got).max(axis=2) * 255
+        assert d.mean() < 0.5 and (d > 2.5).mean() < 2e-3, f"quadro {frame}: {d.max():.2f}"
+    noise = harness.run("laboratorio", dict(vals, lab_grao_modelo="ruido"), test_rgb, 0)
+    plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.5 and np.abs(got - noise).mean() * 255 > 0.5
+
+
+def test_physical_grain_constants_of_the_plugin_are_the_app_ones():
+    from pelicula import grao_fisico as gf
+    src = resolve.source("laboratorio", resolve.DCTL)
+    assert "ui_lab_grao_modelo" in src and "pc_pg_grain(dn, gq, ga, gs)" in src
+    assert f"#define PC_PG_N {gf.N_SAMPLES}" in src and f"#define PC_PG_RK {resolve.flt(gf.R_K)}" in src
+    # o nó Cor não tem o grão físico (nem o ruído dele)
+    cor = resolve.source("cor", resolve.DCTL)
+    assert "pc_pg_grain(" not in cor and "/*PGRAIN*/" not in cor
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_forca=0.0), dict(grao_semente=31, grao_respiracao=0.4)],
+                         ids=["so_respiracao", "com_grao"])
+def test_breathing_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: respiração por camada no nó Textura (depois da cor: igual ao app com a cor neutra)."""
+    vals = _neutral(**{"grao_on": True, "grao_respiracao": 1.0, **extra})
+    outs = []
+    for frame in (0, 7, 61):
+        want = _app(gl_engine, test_rgb, vals, frame)
+        got = harness.run("textura", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
+        outs.append(got)
+    assert np.abs(outs[0] - outs[1]).mean() * 255 > 0.5
+
+# ------------------------------------------------------------------ 1.6: laboratório (labx.py e processos novos)
+LABX_CASES = [
+    dict(lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_copia="nenhuma", lab_scanner="branca", lab_vencida=12.0, lab_revelacao=1.0, lab_luz_g=2.0),
+    dict(lab_vencida=25.0),
+    dict(lab_negativo="double_x", lab_copia="2302", lab_vencida=20.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=3.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=2.0, lab_pre_exposicao_cor="ambar", lab_vencida=8.0),
+    dict(lab_processo="reversivel"),
+    dict(lab_processo="reversivel", lab_vencida=10.0, lab_pre_exposicao=True, lab_pre_exposicao_cor="azul"),
+    dict(lab_processo="cruzado_e6c41", lab_processo_forca=0.7, lab_revelacao=1.0),
+    dict(lab_processo="cruzado_c41e6", lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_negativo="vision3_500t_v2", lab_copia="2383_v2", lab_luz_r=2.0),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", LABX_CASES, ids=[str(i) for i in range(len(LABX_CASES))])
+def test_laboratorio_node_matches_the_app_with_the_16_lab(harness, gl_engine, over):
+    """Scanner de luz branca, película vencida, pré-exposição, processos novos e filmes do datasheet: nó = app."""
+    assert _lab_diff(harness, gl_engine, params.sanitize(dict(params.defaults(), **over))) < 2e-3
+
+
+def test_cor_node_has_none_of_the_16_lab_controls():
+    """Os controles novos do laboratório ficam só no nó Laboratório (o nó Cor está perto do limite do DCTL)."""
+    names = {c.key for c in resolve.spec("cor").controls if c.key}
+    lab = {c.key for c in resolve.spec("laboratorio").controls if c.key}
+    for k in ("lab_scanner", "lab_vencida", "lab_pre_exposicao", "lab_pre_exposicao_stops", "lab_pre_exposicao_cor"):
+        assert k in lab and k not in names
+
+
+# ------------------------------------------------------------------ 1.6 (fase 3): estrutura pela densidade
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_estrutura=1.0), dict(grao_estrutura=0.6, grao_aglomeracao=0.8,
+                                                                  bitola="super8", bitola_desfoque_on=False,
+                                                                  bitola_vinheta=0.0, grao_cor=0.7)],
+                         ids=["cheia", "s8_aglomerada"])
+def test_grain_structure_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): a estrutura pela densidade no nó Textura (depois da cor: com a cor neutra, a exposição que
+    chega ao nó é a da cena, igual ao app)."""
+    vals = _neutral(grao_on=True, grao_forca=1.5, **extra)
+    for frame in (0, 7):
+        want = _app(gl_engine, test_rgb, vals, frame)
+        got = harness.run("textura", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
+    plain = harness.run("textura", dict(vals, grao_estrutura=0.0), test_rgb, 7)
+    assert np.abs(got - plain).mean() * 255 > 0.3  # a estrutura muda o grão
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_estrutura=1.0),
+                                   dict(grao_estrutura=0.7, grao_aglomeracao=1.0, lab_processo="tech3",
+                                        bitola="16mm", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_cor=0.0),
+                                   dict(grao_estrutura=1.0, lab_vencida=15.0, lab_copia="nenhuma")],
+                         ids=["2383", "tech3", "vencida_scan"])
+def test_grain_structure_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): a estrutura no grão no negativo do nó Laboratório = a do app (a densidade de cada camada)."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
+    plain = harness.run("laboratorio", dict(vals, grao_estrutura=0.0), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.1  # o grão no negativo é fino: a estrutura muda pouco a média
+
+
+def test_grain_structure_stays_out_of_the_cor_node():
+    """O nó Cor não tem a estrutura (nem os marcadores): o texto dele é o de antes."""
+    cor = resolve.source("cor", resolve.DCTL)
+    assert "pc_gs_" not in cor and "/*GS" not in cor and "grao_estrutura" not in cor
+    for kind in ("laboratorio", "textura"):
+        src = resolve.source(kind, resolve.DCTL)
+        assert "ui_grao_estrutura" in src and "ui_grao_aglomeracao" in src and "/*GS" not in src
+    assert "pc_gs_neg(dn, dmid, gf, gc, gw, gn)" in resolve.source("laboratorio", resolve.DCTL)
+
+
+# ------------------------------------------------------------------ 1.6 (fase 3): cristal e variação do grão físico
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(lab_grao_cristal=1.6), dict(lab_grao_variacao=1.0),
+                                   dict(lab_grao_cristal=0.7, lab_grao_variacao=0.45, lab_vencida=12.0,
+                                        bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0)],
+                         ids=["cristal", "variacao", "os_dois_vencida_s8"])
+def test_physical_grain_extras_of_the_laboratorio_node_match_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): Tamanho do cristal e Variação do tamanho no nó Laboratório = no app (os mesmos grãos, raios e
+    compensação). Como no grão físico, um disco na borda de um ponto do spot pode cair do outro lado pela última
+    casa do float: só uma fração mínima dos pixels pode passar de 2,5 níveis de 8 bits."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico", **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got).max(axis=2) * 255
+        assert d.mean() < 0.5 and (d > 2.5).mean() < 3e-3, f"quadro {frame}: {d.max():.2f}"
+    base = harness.run("laboratorio", dict(vals, lab_grao_cristal=1.0, lab_grao_variacao=0.0), test_rgb, 0)
+    assert np.abs(got - base).mean() * 255 > 0.3
+
+
+def test_physical_grain_extras_are_lab_node_controls_only():
+    lab = {c.key for c in resolve.spec("laboratorio").controls if c.key}
+    assert {"lab_grao_cristal", "lab_grao_variacao"} <= lab
+    for kind in ("cor", "textura"):
+        assert "lab_grao_cristal" not in {c.key for c in resolve.spec(kind).controls if c.key}
+    src = resolve.source("laboratorio", resolve.DCTL)
+    assert "pc_pg_grain_v(dn, gq, ga, gs, gw)" in src and "pc_pg_grain(dn, gq, ga, gs)" in src
+    counts = resolve.control_counts("laboratorio")
+    assert counts["float"] <= 64 and counts["combo"] <= 64

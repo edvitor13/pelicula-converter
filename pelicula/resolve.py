@@ -221,7 +221,7 @@ ENTRADA_TIP = ("Curva e gamut da camera ou HLG-PQ para video HDR. Se a linha do 
 def range_control() -> Ctl:
     """Faixa do vídeo (controle só do plugin; o app sabe a faixa pelo arquivo: `media.legal_range`)."""
     return Ctl("ui_faixa_video", "Faixa do video", "combo", "legal", choices=list(RANGE_CHOICES),
-               tip=ascii_tip("So muda S-Log3 V-Log e N-Log que usam o codigo de 10 bits. Video e o padrao para "
+               tip=ascii_tip("So muda S-Log3 V-Log N-Log F-Log F-Log2 e D-Log que usam o codigo de 10 bits. Video e o padrao para "
                              "clipes em Data Levels Auto ou Video. Cheia para clipes em Full ou log que a camera "
                              "mandou reescalado pela saida HDMI Limited."),
                section="entrada")
@@ -229,8 +229,8 @@ def range_control() -> Ctl:
 
 def input_controls() -> list[Ctl]:
     """Perfil do vídeo, faixa, exposição e balanço (o começo dos nós Cor e Laboratório)."""
-    return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(),
-            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
+    return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(), ctl("logc3_ei", "EI do LogC3"),
+            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade"), ctl("proteger_cores")]
 
 
 def cor_controls() -> list[Ctl]:
@@ -288,8 +288,28 @@ def curve_control() -> Ctl:
 
 def laboratorio_controls() -> list[Ctl]:
     """Nó Laboratório: entrada, exposição e o laboratório (sempre ligado), como um nó de emulação de filme."""
-    return (input_controls() + lab_controls(with_switch=False)
+    return (input_controls() + lab_controls(with_switch=False) + lab_grain_controls() + lab_extra_controls()
             + [ctl("mix_geral", "Forca geral do look"), curve_control()])
+
+
+def lab_extra_controls() -> list[Ctl]:
+    """1.6 (labx.py): tipo de scanner, película vencida e pré-exposição (só no nó Laboratório e no OFX)."""
+    from . import labx
+    return [ctl(k, label) for k, label in labx.CONTROLS]
+
+
+def lab_grain_controls() -> list[Ctl]:
+    """1.6: "Grão no negativo" do nó Laboratório e os ajustes do grão que ele usa (os mesmos rótulos do Textura)."""
+    return [
+        ctl("lab_grao", "Lab - Grao no negativo"),
+        ctl("grao_on", "Grao"), ctl("grao_forca", "Grao - Intensidade"), ctl("grao_tamanho", "Grao - Tamanho"),
+        ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
+        ctl("grao_semente", "Grao - Semente"), ctl("bitola"), ctl("iso", "Sensibilidade ISO"),
+        ctl("lab_grao_modelo", "Lab - Modelo do grao no negativo"),  # 1.6: grão físico (grao_fisico.py)
+        ctl("grao_estrutura", "Grao - Estrutura pela densidade"),  # 1.6 (fase 3): grao_estrutura.py
+        ctl("grao_aglomeracao", "Grao - Aglomeracao"),
+        ctl("lab_grao_cristal", "Lab - Tamanho do cristal"), ctl("lab_grao_variacao", "Lab - Variacao do tamanho"),
+    ]
 
 
 # ------------------------------------------------------------------ dialetos
@@ -377,12 +397,26 @@ def _ui_decl(c: Ctl, dialect: str) -> str:
     return out
 
 
+def _derived(name: str, values: dict) -> Any:
+    """Controles internos cujo valor sai dos ajustes do app (`DERIVED`, 1.6)."""
+    from . import grao
+    if name == "ui_mtf_copia":  # o nó Textura não vê a cópia dos nós Cor/Laboratorio
+        return 1 if grao.print_chosen(values) else 0
+    raise KeyError(name)
+
+
+DERIVED = ("ui_mtf_copia",)
+
+
 def _with_defaults(controls: list[Ctl], values: dict | None) -> list[Ctl]:
     """Copia dos controles com os padrões tirados de `values` (valores do app, já limpos)."""
     if not values:
         return controls
     out = []
     for c in controls:
+        if not c.key and c.name in DERIVED:  # 1.6: controle interno que segue os ajustes do app
+            c = Ctl(**{**c.__dict__})
+            c.default = _derived(c.name, values)
         if c.key and c.key in values:
             v = values[c.key]
             c = Ctl(**{**c.__dict__})
@@ -524,6 +558,55 @@ PC_DEVICE float3 pc_pq_dec(float3 c) {
     float y = _fmaxf(0.2627f * f.x + 0.6780f * f.y + 0.0593f * f.z, 1e-10f);
     return f * (_powf(y, -1.0f / 6.0f) * PC_HLG_K);
 }
+// Perfis da 1.6 (look.INPUT_IDS 14+; formulas e fontes em shaders.camDec)
+PC_DEVICE float pc_clog2_dec(float y) {
+    float r = (y < 0.035388128f) ? -(_powf(10.0f, (0.035388128f - y) / 0.281863093f) - 1.0f) / 87.09937546f
+                                 : (_powf(10.0f, (y - 0.035388128f) / 0.281863093f) - 1.0f) / 87.09937546f;
+    return r * 0.9f;
+}
+PC_DEVICE float pc_clog3_dec(float y) {
+    float r = (_powf(10.0f, (y - 0.069886632f) / 0.42889912f) - 1.0f) / 14.98325f;
+    if (y < 0.04076162f) r = -(_powf(10.0f, (0.07623209f - y) / 0.42889912f) - 1.0f) / 14.98325f;
+    else if (y <= 0.105357102f) r = (y - 0.073059361f) / 2.3069815f;
+    return r * 0.9f;
+}
+PC_DEVICE float pc_flog_dec(float y) {
+    return (y < 0.100537775223865f) ? (y - 0.092864f) / 8.735631f
+                                    : _powf(10.0f, (y - 0.790453f) / 0.344676f) / 0.555556f - 0.009468f / 0.555556f;
+}
+PC_DEVICE float pc_flog2_dec(float y) {
+    return (y < 0.100686685370811f) ? (y - 0.092864f) / 8.799461f
+                                    : _powf(10.0f, (y - 0.384316f) / 0.245281f) / 5.555556f - 0.064829f / 5.555556f;
+}
+PC_DEVICE float pc_dlog_dec(float y) {
+    return (y <= 0.14f) ? (y - 0.0929f) / 6.025f : (_powf(10.0f, 3.89616f * y - 2.27752f) - 0.0108f) / 0.9892f;
+}
+PC_DEVICE float pc_slog2_dec(float y) {
+    float r = (y >= 0.030001222851889303f) ? _powf(10.0f, (y - 0.646596f) / 0.432699f) - 0.037584f
+                                           : (y - 0.030001222851889303f) / 5.0f;
+    return r * 0.9f * 219.0f / 155.0f;
+}
+PC_DEVICE float pc_llog_dec(float y) {
+    return (y <= 0.138f) ? (y - 0.09f) / 8.0f : (_powf(10.0f, (y - 0.6f) / 0.27f) - 0.0115f) / 1.3f;
+}
+PC_DEVICE float3 pc_cam_dec(float3 c, int id) {
+    if (id == 14) return make_float3(pc_clog2_dec(c.x), pc_clog2_dec(c.y), pc_clog2_dec(c.z));
+    if (id == 15) return make_float3(pc_clog3_dec(c.x), pc_clog3_dec(c.y), pc_clog3_dec(c.z));
+    if (id == 16) return make_float3(pc_flog_dec(c.x), pc_flog_dec(c.y), pc_flog_dec(c.z));
+    if (id == 17 || id == 18) return make_float3(pc_flog2_dec(c.x), pc_flog2_dec(c.y), pc_flog2_dec(c.z));
+    if (id == 19) return make_float3(pc_dlog_dec(c.x), pc_dlog_dec(c.y), pc_dlog_dec(c.z));
+    if (id == 20) return make_float3(pc_slog2_dec(c.x), pc_slog2_dec(c.y), pc_slog2_dec(c.z));
+    return make_float3(pc_llog_dec(c.x), pc_llog_dec(c.y), pc_llog_dec(c.z));
+}
+// ARRI LogC3 com outro EI (tabela PC_LC3: corte, b, c, d, e, f por EI; a = 5,555556)
+PC_DEVICE float pc_logc3e_dec(float t, int ei) {
+    float cut = PC_LC3[ei * 6 + 0];
+    float e = PC_LC3[ei * 6 + 4];
+    float f = PC_LC3[ei * 6 + 5];
+    return (t > e * cut + f) ? (_powf(10.0f, (t - PC_LC3[ei * 6 + 3]) / PC_LC3[ei * 6 + 2]) - PC_LC3[ei * 6 + 1])
+                               / 5.555556f
+                             : (t - f) / e;
+}
 // cv = 1: a curva e escrita no codigo de 10 bits (codigo/1023) e o clipe chegou em faixa legal expandida
 // (v = (codigo - 64)/876): volta ao codigo antes da formula (look.INPUT_DOMAIN).
 PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
@@ -542,7 +625,23 @@ PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
     if (id == 11) return make_float3(pc_apple_dec(c.x), pc_apple_dec(c.y), pc_apple_dec(c.z));
     if (id == 12) return make_float3(pc_hlg_dec(c.x), pc_hlg_dec(c.y), pc_hlg_dec(c.z));
     if (id == 13) return pc_pq_dec(c);
+    if (id >= 14) return pc_cam_dec(c, id);
     return make_float3(pc_cineon_dec(c.x), pc_cineon_dec(c.y), pc_cineon_dec(c.z));
+}
+// Proteger cores saturadas (1.6; shaders.gamutCompress, ACES Reference Gamut Compression): limites em PC_GCL
+PC_DEVICE float pc_gc_compress(float d, float lim, float thr) {
+    if (d < thr) return d;
+    float s = (lim - thr) / _powf(_powf((1.0f - thr) / (lim - thr), -PC_GC_PWR) - 1.0f, 1.0f / PC_GC_PWR);
+    float nd = (d - thr) / s;
+    return thr + (d - thr) / _powf(1.0f + _powf(nd, PC_GC_PWR), 1.0f / PC_GC_PWR);
+}
+PC_DEVICE float3 pc_gamut_compress(float3 c, float3 lim) {
+    float a = _fmaxf(c.x, _fmaxf(c.y, c.z));
+    if (a == 0.0f) return c;
+    float aa = _fabs(a);
+    return make_float3(a - pc_gc_compress((a - c.x) / aa, lim.x, PC_GC_THR_R) * aa,
+                       a - pc_gc_compress((a - c.y) / aa, lim.y, PC_GC_THR_G) * aa,
+                       a - pc_gc_compress((a - c.z) / aa, lim.z, PC_GC_THR_B) * aa);
 }
 """
 
@@ -648,9 +747,15 @@ B_INPUT = r"""
     int ent = v_entrada;
     int in_cv = (PC_IN_CV[ent] == 1 && v_faixa_video == 0) ? 1 : 0;
     float3 lin_in = pc_to_linear(code, PC_IN_ID[ent], in_cv);
+    if (PC_IN_ID[ent] == 4 && v_logc3_ei != PC_LC3_STD)
+        lin_in = make_float3(pc_logc3e_dec(code.x, v_logc3_ei), pc_logc3e_dec(code.y, v_logc3_ei),
+                             pc_logc3e_dec(code.z, v_logc3_ei));
     lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
                      make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
                      make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
+    if (v_proteger_cores > 0.0f)
+        lin_in = pc_lerp3(lin_in, pc_gamut_compress(lin_in, make_float3(PC_GCL[ent * 3 + 0], PC_GCL[ent * 3 + 1],
+                                                                        PC_GCL[ent * 3 + 2])), v_proteger_cores);
 """
 
 # Exposição e balanço (u_gain do app) sobre `lin`; `gx` soma ganhos por canal (cintilação etc., no OFX).
@@ -738,6 +843,12 @@ def _cor_tables(dialect: str) -> str:
             + _define("PC_PQ_C2", look.PQ_C2) + _define("PC_PQ_C3", look.PQ_C3))
     out += _table(dialect, "PC_IN_ID", [look.INPUT_IDS[e] for e in entradas], "int")
     out += _table(dialect, "PC_IN_CV", [1 if look.code_value_curve(e) else 0 for e in entradas], "int")
+    eis = [c[0] for c in params.PARAMS["logc3_ei"].choices]
+    out += _table(dialect, "PC_LC3", [float(x) for ei in eis for i, x in enumerate(look.LOGC3_EI[ei]) if i != 1])
+    out += f"#define PC_LC3_STD ({eis.index('800')})\n"
+    out += _table(dialect, "PC_GCL", [x for e in entradas for x in look.gamut_limits(look.INPUT_GAMUT[e])])
+    out += (_define("PC_GC_THR_R", look.GC_THRESHOLDS[0]) + _define("PC_GC_THR_G", look.GC_THRESHOLDS[1])
+            + _define("PC_GC_THR_B", look.GC_THRESHOLDS[2]) + _define("PC_GC_PWR", look.GC_POWER))
     gam = []
     for e in entradas:
         m = look.gamut_to_709(look.INPUT_GAMUT[e])
@@ -787,14 +898,27 @@ def spec(kind: str, dialect: str = DCTL) -> Spec:
     if kind in COLOR_KINDS:
         lab_only = kind == "laboratorio"
         controls = laboratorio_controls() if lab_only else cor_controls()
-        body = B_COR.replace("/*LAB*/", B_LAB).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
+        from . import labx
+        b_lab = labx.body(B_LAB) if lab_only else B_LAB  # 1.6: véu, pré-exposição e scanner (labx.py)
+        body = B_COR.replace("/*LAB*/", b_lab).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
+        body = body.replace("/*NGRAIN*/", B_NGRAIN if lab_only else "")  # 1.6: grão no negativo
+        body = gstruct(body, lab_only)  # 1.6 (fase 3): estrutura pela densidade (só no nó Laboratório)
         if lab_only:
             body = "    int v_lab_on = 1;\n" + body  # o nó Laboratório é o laboratório sempre ligado
-        kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB + K_CURVE
-        return Spec(kind, controls, _cor_tables(dialect) + _lab_tables(dialect), kernel, body, False)
+        kernel = K_COMMON + K_DECODE + K_LOOK + gstruct(K_LAB.replace("/*PGRAIN*/", ""), False) + K_CURVE
+        tables = _cor_tables(dialect) + _lab_tables(dialect)
+        if lab_only:  # 1.6: o grão físico (K_PGRAIN, com o ruído de K_RAND) vem antes do laboratório que o usa;
+            # pc_lab_path_x (labx: véu, pré-exposição e scanner) é cópia do pc_lab_path já com o grão físico
+            k_lab = gstruct(K_LAB.replace("/*PGRAIN*/", B_PGRAIN_LAB), True)
+            kernel = (K_COMMON + K_DECODE + K_LOOK + K_RAND + K_PGRAIN + K_GSTRUCT + k_lab + K_CURVE + K_TEXTURA
+                      + K_NGRAIN + labx.kernel(k_lab))
+            tables += _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
+            tables += labx.tables(_define, _table, dialect)
+        return Spec(kind, controls, tables, kernel, body, False)
     if kind == "textura":
-        return Spec("textura", textura_controls(), _gauge_tables(dialect) + _mtf_table(dialect),
-                    K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
+        tables = _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
+        return Spec("textura", textura_controls(), tables,
+                    K_COMMON + K_RAND + K_TEXTURA + K_BREATH + K_GSTRUCT, _textura_body(), True)
     if kind == "projetor":
         return Spec("projetor", projetor_controls(), _gauge_tables(dialect) + _projetor_tables(dialect),
                     K_COMMON + K_RAND + K_PROJETOR, _projetor_body(), True)
@@ -910,14 +1034,15 @@ PC_DEVICE float pc_det3(float3 a, float3 b, float3 c) {
 PC_DEVICE float3 pc_lab_path(float3 lin, float3 s0, float3 s1, float3 s2, float3 ng0, float3 nt0, float3 ns,
                              float nw, float3 i0, float3 i1, float3 i2, int has_print, float3 pg, float3 dmax,
                              float pw, float3 d0, float3 d1, float3 d2, float3 key, float push, float xtalk,
-                             float3 lights) {
+                             float3 lights, float3 gn, float3 ga, float4 gq, int gs/*GSARGS*/) {
     float3 ng = ng0 * (1.0f + 0.12f * push);
     float3 nt = nt0 + pc_s3(0.08f * push);
     float3 dmid = pc_mat3(i0, i1, i2, pc_lab_curve(pc_s3(0.0f), ng, nt, ns, nw));
     float3 e = pc_max3(pc_mat3(s0, s1, s2, lin), 1e-7f);
     float3 le = make_float3(pc_log10(e.x / 0.18f), pc_log10(e.y / 0.18f), pc_log10(e.z / 0.18f));
     float3 dn = pc_mat3(i0, i1, i2, pc_lab_curve(le, ng, nt, ns, nw));
-    if (has_print == 0) {
+/*GSTRUCT*/    dn = dn + gn;  // 1.6: grao no negativo (grao.negative_grain); zero sem ele
+/*PGRAIN*/    if (has_print == 0) {
         // sem copia: inversao digital com o gama nominal do negativo
         float3 st = make_float3((dn.x - dmid.x) / (ng0.x * 0.30103f) - lights.x / 0.30103f,
                                 (dn.y - dmid.y) / (ng0.y * 0.30103f) - lights.y / 0.30103f,
@@ -994,7 +1119,11 @@ PC_DEVICE float3 pc_lab_post(float3 y, float hi, float lo, float sat, float3 den
 # Etapa do laboratório no corpo do nó Cor (antes do look; o resultado volta para luz linear).
 B_LAB = r"""
     if (v_lab_on == 1) {
-        int ni = v_lab_negativo * 20;
+        float3 gn = pc_s3(0.0f);
+        float3 ga = pc_s3(0.0f);  // 1.6: grao fisico (fracao por camada; zero = desligado), posicao e semente
+        float4 gq = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
+        int gs = 0;
+/*GSDECL*//*NGRAIN*/        int ni = v_lab_negativo * 20;
         int lp = v_lab_copia;
         int pk = v_lab_processo * 40;
         float kind = PC_PROC[pk];
@@ -1038,7 +1167,7 @@ B_LAB = r"""
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
-            key, v_lab_revelacao, v_lab_diafonia, lights);
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs/*GSCALL*/);
         if (kind == 2.0f) {
             int b = pk + 1;
             float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
@@ -1060,7 +1189,7 @@ B_LAB = r"""
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
                 make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
-                v_lab_revelacao, v_lab_diafonia, lights);
+                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs/*GSCALL*/);
             la = pc_lerp3(la, lb, forca);
         }
         la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
@@ -1162,6 +1291,8 @@ def ui_uniforms(kind: str, values: dict) -> dict[str, Any]:
     out = {}
     for c in spec(kind, GLSL).controls:
         v = values.get(c.key, c.default) if c.key else c.default
+        if not c.key and c.name in DERIVED:
+            v = _derived(c.name, values)
         out[c.name] = c.ui_value(v)
     return out
 
@@ -1315,6 +1446,404 @@ PC_DEVICE float3 pc_apply_grain(float3 y, float4 nf, float4 nc, float rough, flo
 """
 
 
+# 1.6: grão no negativo (grao.negative_grain). O campo do grão do Textura (mesma grade, sementes e mistura de
+# aspereza e cor), sem a resposta por tom, vira densidade de cada camada do negativo (PC_NG_AMP = sigma D por
+# pixel); quem molda o grão visível é a curva da cópia.
+# 1.6: respiração por camada (grao.breathing): o desvio de densidade de cada camada no quadro (o mesmo de
+# grao.breath_density, com pc_hash e pc_vnoise de K_RAND).
+K_BREATH = r"""
+PC_DEVICE float pc_breath1(int frame, int s) {
+    float fast = (pc_hash(frame, s) * 2.0f - 1.0f) * 1.7320508f;
+    float slow = pc_vnoise(PC_F(frame) / PC_BREATH_SLOW, s + 101) * PC_BREATH_SLOW_NORM;
+    return 0.8f * fast + 0.6f * slow;
+}
+PC_DEVICE float3 pc_breath(int frame, int seed, float amount) {
+    int s = seed * 3 + 7001;
+    float a = amount * PC_BREATH_SIGMA_D;
+    return make_float3(pc_breath1(frame, s) * a, pc_breath1(frame, s + 1) * a, pc_breath1(frame, s + 2) * a);
+}
+"""
+
+
+K_NGRAIN = r"""
+PC_DEVICE float3 pc_neg_grain(float4 nf, float4 nc, float rough, float chroma) {
+    float r = rough;
+    float4 n = (nf * (1.0f - r) + nc * r) * (1.0f / _sqrtf((1.0f - r) * (1.0f - r) + r * r));
+    float c = chroma;
+    return (pc_s3(n.w) * (1.0f - c) + make_float3(n.x, n.y, n.z) * c)
+           * (1.0f / _sqrtf((1.0f - c) * (1.0f - c) + c * c));
+}
+"""
+
+# 1.6: grão físico (grao_fisico.py, ARQUITETURA §30.7): o mesmo modelo booleano do FINAL_PG do app. Discos opacos
+# de raio r (px@1080) com centros de Poisson por célula (chegadas no eixo da intensidade, aninhadas), λ·πr² = D·ln 10,
+# testados nos PC_PG_N pontos fixos do spot do pixel; um processo comum às três camadas e um próprio de cada uma.
+K_PGRAIN = r"""
+// ---------------------------------------------------------------- grao fisico (modelo booleano no negativo)
+PC_DEVICE uint pc_pg_bits(uint m) {
+    m = m - ((m >> 1u) & 0x55555555u);
+    m = (m & 0x33333333u) + ((m >> 2u) & 0x33333333u);
+    m = (m + (m >> 4u)) & 0x0F0F0F0Fu;
+    return (m * 0x01010101u) >> 24u;
+}
+PC_DEVICE uint pc_pg_hits(float dx, float dy) {
+    uint m = 0u;
+    for (int k = 0; k < PC_PG_N; k++) {
+        float ex = dx - PC_PG_OFS[2 * k];
+        float ey = dy - PC_PG_OFS[2 * k + 1];
+        if (ex * ex + ey * ey < 1.0f) m = m | (1u << PC_U(k));
+    }
+    return m;
+}
+// cobertura de cada camada vista pelo spot do pixel em (px, py) px@1080; raio r, fracao propria chroma, semente
+PC_DEVICE float3 pc_pg_coverage(float3 D, float px, float py, float r, float chroma, uint seed) {
+    float mr_ = _clampf(D.x, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mg_ = _clampf(D.y, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mb_ = _clampf(D.z, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float sr = mr_ * (1.0f - chroma);
+    float sg = mg_ * (1.0f - chroma);
+    float sb = mb_ * (1.0f - chroma);
+    float smax = _fmaxf(sr, _fmaxf(sg, sb));
+    float qx = px / r;
+    float qy = py / r;
+    int c0x = PC_I(_floorf((qx - PC_PG_REACH) / PC_PG_CELL));
+    int c0y = PC_I(_floorf((qy - PC_PG_REACH) / PC_PG_CELL));
+    int c1x = PC_I(_floorf((qx + PC_PG_REACH) / PC_PG_CELL));
+    int c1y = PC_I(_floorf((qy + PC_PG_REACH) / PC_PG_CELL));
+    float rr = PC_PG_REACH * PC_PG_REACH;
+    uint mr = 0u;
+    uint mg = 0u;
+    uint mb = 0u;
+    for (int cy = c0y; cy <= c1y; cy++) {
+        for (int cx = c0x; cx <= c1x; cx++) {
+            float lox = PC_F(cx) * PC_PG_CELL;
+            float loy = PC_F(cy) * PC_PG_CELL;
+            float nx = _clampf(qx, lox, lox + PC_PG_CELL) - qx;
+            float ny = _clampf(qy, loy, loy + PC_PG_CELL) - qy;
+            if (nx * nx + ny * ny >= rr) continue;
+            uint bx = PC_U(cx + 65536);
+            uint by = PC_U(cy + 65536);
+            for (int proc = 0; proc < 4; proc++) {
+                float lim = (proc == 0) ? smax : ((proc == 1) ? mr_ * chroma : ((proc == 2) ? mg_ * chroma : mb_ * chroma));
+                if (lim <= 0.0f) continue;
+                uint base = pc_pcg(bx + pc_pcg(by + pc_pcg(seed * 4u + PC_U(proc))));
+                float t = 0.0f;
+                for (uint i = 0u; i < PC_PG_CAP; i++) {
+                    uint h = pc_pcg(base + i);
+                    uint h2 = pc_pcg(h ^ 0x9E3779B9u);
+                    t = t - _logf((PC_F(h2 >> 8u) + 0.5f) * (1.0f / 16777216.0f));
+                    if (t >= lim) break;
+                    float ccx = (PC_F(cx) + (PC_F(h & 0xFFFFu) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float ccy = (PC_F(cy) + (PC_F(h >> 16u) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float dx = ccx - qx;
+                    float dy = ccy - qy;
+                    if (dx * dx + dy * dy >= rr) continue;
+                    uint hm = pc_pg_hits(dx, dy);
+                    if (proc == 0) {
+                        if (t < sr) mr = mr | hm;
+                        if (t < sg) mg = mg | hm;
+                        if (t < sb) mb = mb | hm;
+                    } else if (proc == 1) {
+                        mr = mr | hm;
+                    } else if (proc == 2) {
+                        mg = mg | hm;
+                    } else {
+                        mb = mb | hm;
+                    }
+                }
+            }
+        }
+    }
+    float inv = 1.0f / PC_F(PC_PG_N);
+    return make_float3(PC_F(pc_pg_bits(mr)) * inv, PC_F(pc_pg_bits(mg)) * inv, PC_F(pc_pg_bits(mb)) * inv);
+}
+// desvio da densidade de cada camada: T' = (1 - a) T + a T^, dD = -log10(T'/T); gq = (x, y, raio, fracao propria)
+PC_DEVICE float3 pc_pg_grain(float3 D, float4 gq, float3 ga, int gs) {
+    float3 cov = pc_pg_coverage(D, gq.x, gq.y, gq.z, gq.w, PC_U(gs));
+    float tr = _exp2f(_clampf(D.x, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tg = _exp2f(_clampf(D.y, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tb = _exp2f(_clampf(D.z, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float ar = _fminf(ga.x, PC_PG_AMP_MAX);
+    float ag = _fminf(ga.y, PC_PG_AMP_MAX);
+    float ab = _fminf(ga.z, PC_PG_AMP_MAX);
+    return make_float3(_log2f(1.0f + ar * ((1.0f - cov.x) - tr) / tr) * -0.301029996f,
+                       _log2f(1.0f + ag * ((1.0f - cov.y) - tg) / tg) * -0.301029996f,
+                       _log2f(1.0f + ab * ((1.0f - cov.z) - tb) / tb) * -0.301029996f);
+}
+// 1.6 (fase 3): tamanho do cristal e variacao do tamanho (grao_fisico.extras): fator do KAPPA de cada camada
+PC_DEVICE float3 pc_pg_kfactor(float m, float var) {
+    float tc = (_log2f(_clampf(m, 0.5f, 2.0f)) + 1.0f) * 4.0f;
+    int ic = pc_clampi(PC_I(tc), 0, 7);
+    float fc = tc - PC_F(ic);
+    float tv = _clampf(var, 0.0f, 1.0f) * 4.0f;
+    int iv = pc_clampi(PC_I(tv), 0, 3);
+    float fv = tv - PC_F(iv);
+    return make_float3(pc_lerp(PC_PG_CRYS[ic], PC_PG_CRYS[ic + 1], fc) * pc_lerp(PC_PG_VARK[iv], PC_PG_VARK[iv + 1], fv),
+                       pc_lerp(PC_PG_CRYS[9 + ic], PC_PG_CRYS[10 + ic], fc)
+                           * pc_lerp(PC_PG_VARK[5 + iv], PC_PG_VARK[6 + iv], fv),
+                       pc_lerp(PC_PG_CRYS[18 + ic], PC_PG_CRYS[19 + ic], fc)
+                           * pc_lerp(PC_PG_VARK[10 + iv], PC_PG_VARK[11 + iv], fv));
+}
+// raios variaveis: (0, maior raio relativo, s, 1/raiz(c)) para gw
+PC_DEVICE float4 pc_pg_var(float var) {
+    float v = _clampf(var, 0.0f, 1.0f);
+    float s = PC_PG_VAR_SIGMA * v;
+    float t = v * 20.0f;
+    int i = pc_clampi(PC_I(t), 0, 19);
+    float inv = pc_lerp(PC_PG_VARINV[i], PC_PG_VARINV[i + 1], t - PC_F(i));
+    return make_float4(0.0f, _expf(s * PC_PG_ZCLIP - s * s) * inv, s, inv);
+}
+PC_DEVICE uint pc_pg_hits_r(float dx, float dy, float r2) {
+    uint m = 0u;
+    for (int k = 0; k < PC_PG_N; k++) {
+        float ex = dx - PC_PG_OFS[2 * k];
+        float ey = dy - PC_PG_OFS[2 * k + 1];
+        if (ex * ex + ey * ey < r2) m = m | (1u << PC_U(k));
+    }
+    return m;
+}
+// raio relativo de um grao (log-normal com z cortado em +-PC_PG_ZCLIP; E[rho^2] = 1), de um hash do proprio grao
+PC_DEVICE float pc_pg_radius(uint h2, float s, float inv) {
+    uint h3 = pc_pcg(h2 ^ 0x85EBCA6Bu);
+    uint h4 = pc_pcg(h3);
+    float u1 = (PC_F(h3 >> 8u) + 0.5f) * (1.0f / 16777216.0f);
+    float u2 = PC_F(h4 >> 8u) * (1.0f / 16777216.0f);
+    float z = _clampf(_sqrtf(-2.0f * _logf(u1)) * _cosf(6.2831853f * u2), -PC_PG_ZCLIP, PC_PG_ZCLIP);
+    return _expf(s * z - s * s) * inv;
+}
+// cobertura de cada camada vista pelo spot do pixel em (px, py) px@1080; raio r, fracao propria chroma, semente
+PC_DEVICE float3 pc_pg_coverage_v(float3 D, float px, float py, float r, float chroma, uint seed, float vs,
+                                  float vinv, float vmax) {
+    float mr_ = _clampf(D.x, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mg_ = _clampf(D.y, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mb_ = _clampf(D.z, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float sr = mr_ * (1.0f - chroma);
+    float sg = mg_ * (1.0f - chroma);
+    float sb = mb_ * (1.0f - chroma);
+    float smax = _fmaxf(sr, _fmaxf(sg, sb));
+    float qx = px / r;
+    float qy = py / r;
+    float rv = PC_PG_REACH - 1.0f + vmax;
+    int c0x = PC_I(_floorf((qx - rv) / PC_PG_CELL));
+    int c0y = PC_I(_floorf((qy - rv) / PC_PG_CELL));
+    int c1x = PC_I(_floorf((qx + rv) / PC_PG_CELL));
+    int c1y = PC_I(_floorf((qy + rv) / PC_PG_CELL));
+    float rr = rv * rv;
+    uint mr = 0u;
+    uint mg = 0u;
+    uint mb = 0u;
+    for (int cy = c0y; cy <= c1y; cy++) {
+        for (int cx = c0x; cx <= c1x; cx++) {
+            float lox = PC_F(cx) * PC_PG_CELL;
+            float loy = PC_F(cy) * PC_PG_CELL;
+            float nx = _clampf(qx, lox, lox + PC_PG_CELL) - qx;
+            float ny = _clampf(qy, loy, loy + PC_PG_CELL) - qy;
+            if (nx * nx + ny * ny >= rr) continue;
+            uint bx = PC_U(cx + 65536);
+            uint by = PC_U(cy + 65536);
+            for (int proc = 0; proc < 4; proc++) {
+                float lim = (proc == 0) ? smax : ((proc == 1) ? mr_ * chroma : ((proc == 2) ? mg_ * chroma : mb_ * chroma));
+                if (lim <= 0.0f) continue;
+                uint base = pc_pcg(bx + pc_pcg(by + pc_pcg(seed * 4u + PC_U(proc))));
+                float t = 0.0f;
+                for (uint i = 0u; i < PC_PG_CAP; i++) {
+                    uint h = pc_pcg(base + i);
+                    uint h2 = pc_pcg(h ^ 0x9E3779B9u);
+                    t = t - _logf((PC_F(h2 >> 8u) + 0.5f) * (1.0f / 16777216.0f));
+                    if (t >= lim) break;
+                    float ccx = (PC_F(cx) + (PC_F(h & 0xFFFFu) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float ccy = (PC_F(cy) + (PC_F(h >> 16u) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float dx = ccx - qx;
+                    float dy = ccy - qy;
+                    float rho = pc_pg_radius(h2, vs, vinv);
+                    float ri = PC_PG_REACH - 1.0f + rho;
+                    if (dx * dx + dy * dy >= ri * ri) continue;
+                    uint hm = pc_pg_hits_r(dx, dy, rho * rho);
+                    if (proc == 0) {
+                        if (t < sr) mr = mr | hm;
+                        if (t < sg) mg = mg | hm;
+                        if (t < sb) mb = mb | hm;
+                    } else if (proc == 1) {
+                        mr = mr | hm;
+                    } else if (proc == 2) {
+                        mg = mg | hm;
+                    } else {
+                        mb = mb | hm;
+                    }
+                }
+            }
+        }
+    }
+    float inv = 1.0f / PC_F(PC_PG_N);
+    return make_float3(PC_F(pc_pg_bits(mr)) * inv, PC_F(pc_pg_bits(mg)) * inv, PC_F(pc_pg_bits(mb)) * inv);
+}
+// o mesmo com raios variaveis: gw = (0, maior raio relativo, s, 1/raiz(c)) (pc_pg_var)
+PC_DEVICE float3 pc_pg_grain_v(float3 D, float4 gq, float3 ga, int gs, float4 gw) {
+    float3 cov = pc_pg_coverage_v(D, gq.x, gq.y, gq.z, gq.w, PC_U(gs), gw.z, gw.w, gw.y);
+    float tr = _exp2f(_clampf(D.x, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tg = _exp2f(_clampf(D.y, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tb = _exp2f(_clampf(D.z, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float ar = _fminf(ga.x, PC_PG_AMP_MAX);
+    float ag = _fminf(ga.y, PC_PG_AMP_MAX);
+    float ab = _fminf(ga.z, PC_PG_AMP_MAX);
+    return make_float3(_log2f(1.0f + ar * ((1.0f - cov.x) - tr) / tr) * -0.301029996f,
+                       _log2f(1.0f + ag * ((1.0f - cov.y) - tg) / tg) * -0.301029996f,
+                       _log2f(1.0f + ab * ((1.0f - cov.z) - tb) / tb) * -0.301029996f);
+}
+"""
+
+# Dentro de pc_lab_path (só no nó Laboratório e no OpenFX): o grão físico soma o desvio na densidade do negativo.
+B_PGRAIN_LAB = """    if (ga.x + ga.y + ga.z > 0.0f && gw.z > 0.0f) dn = dn + pc_pg_grain_v(dn, gq, ga, gs, gw);  // 1.6 (fase 3)
+    else if (ga.x + ga.y + ga.z > 0.0f) dn = dn + pc_pg_grain(dn, gq, ga, gs);  // 1.6: grao fisico
+"""
+
+# No nó Laboratório (dentro de B_LAB, na passada da imagem): `gn` = a densidade do grão deste pixel.
+B_NGRAIN = r"""        if (v_lab_grao == 1 && v_grao_on == 1 && v_grao_forca > 0.0f && pass == 0) {
+            float gW = PC_F(p_Width);
+            float gH = PC_F(p_Height);
+            float gu = (PC_F(p_X) + 0.5f) / gW;
+            float gv = (PC_F(p_Y) + 0.5f) / gH;
+            int ggi = v_bitola;
+            float giso = PC_ISO[v_iso];
+            float gsize = 0.8f * v_grao_tamanho * PC_GAUGE[ggi * 7 + 0] * _powf(giso / 250.0f, 0.18f)
+                          * (gH / 1080.0f);
+            float gsz = _fmaxf(gsize, 1.0f);
+            int gseed = v_grao_semente * 7919;  // parado: o no de cor tambem vale como LUT, sem o numero do quadro
+            int ggw = PC_I(_ceilf(gW / gsz));
+            int ggh = PC_I(_ceilf(gH / gsz));
+            ggw = ggw < 2 ? 2 : ggw;
+            ggh = ggh < 2 ? 2 : ggh;
+            float gamt = v_grao_forca * PC_GAUGE[ggi * 7 + 1] * _powf(giso / 250.0f, 0.35f)
+                         * _sqrtf(_fminf(1.0f, gsize)) * _powf(1.15f, v_lab_revelacao);
+            if (v_lab_grao_modelo == PC_GRAO_FISICO) {
+                // 1.6: grao fisico (grao_fisico.negative_grain): raio e posicao em px@1080, sem a compensacao da
+                // previa reduzida; a densidade de cada camada decide o resto dentro de pc_lab_path
+                float gk = 1080.0f / gH;
+                float gmul = v_grao_forca * PC_GAUGE[ggi * 7 + 1] * _powf(giso / 250.0f, 0.35f)
+                             * _powf(1.15f, v_lab_revelacao);
+                ga = make_float3(_fminf(PC_PG_KAPPA[0] * gmul, PC_PG_AMP_MAX),
+                                 _fminf(PC_PG_KAPPA[1] * gmul, PC_PG_AMP_MAX),
+                                 _fminf(PC_PG_KAPPA[2] * gmul, PC_PG_AMP_MAX));
+                float g1080 = 0.8f * v_grao_tamanho * PC_GAUGE[ggi * 7 + 0] * _powf(giso / 250.0f, 0.18f);
+                gq = make_float4((PC_F(p_X) + 0.5f) * gk, (PC_F(p_Y) + 0.5f) * gk, PC_PG_RK * g1080, v_grao_cor);
+                gs = gseed;
+                if (v_lab_grao_cristal != 1.0f || v_lab_grao_variacao > 0.0f) {
+                    // 1.6 (fase 3): tamanho do cristal e variacao do tamanho (grao_fisico.extras)
+                    float3 kf = pc_pg_kfactor(v_lab_grao_cristal, v_lab_grao_variacao);
+                    ga = make_float3(_fminf(PC_PG_KAPPA[0] * kf.x * gmul, PC_PG_AMP_MAX),
+                                     _fminf(PC_PG_KAPPA[1] * kf.y * gmul, PC_PG_AMP_MAX),
+                                     _fminf(PC_PG_KAPPA[2] * kf.z * gmul, PC_PG_AMP_MAX));
+                    gq = make_float4(gq.x, gq.y, gq.z * v_lab_grao_cristal, gq.w);
+                    if (v_lab_grao_variacao > 0.0f) gw = pc_pg_var(v_lab_grao_variacao);
+                }
+            } else {
+                uint gs8 = PC_U(gseed) * 8u;
+                float4 gnf = pc_noise(gu, gv, ggw, ggh, gs8) * 2.08f;
+                float4 gnc = pc_noise(gu * 0.4347f + 0.311f, gv * 0.4347f + 0.173f, ggw, ggh, gs8) * 2.08f;
+                float3 g3 = pc_neg_grain(gnf, gnc, v_grao_aspereza, v_grao_cor);
+                gn = make_float3(g3.x * PC_NG_AMP[0], g3.y * PC_NG_AMP[1], g3.z * PC_NG_AMP[2]) * gamt;
+                if (v_grao_estrutura > 0.0f) {  // 1.6 (fase 3): estrutura pela densidade (grao_estrutura.py)
+                    gf = gnf;
+                    gc = gnc;
+                    gw = make_float4(v_grao_estrutura, v_grao_aglomeracao, v_grao_aspereza, v_grao_cor);
+                    gn = make_float3(PC_NG_AMP[0], PC_NG_AMP[1], PC_NG_AMP[2]) * gamt;  // a amplitude
+                }
+            }
+        }
+"""
+
+# 1.6 (fase 3): estrutura pela densidade (grao_estrutura.py, ARQUITETURA §30.8): o mesmo campo do grão com a forma
+# (assimetria e tamanho) das três camadas do modelo booleano, misturadas pela densidade relativa ao cinza, e a força
+# pelo sigma D do datasheet. No Textura a exposição vem da imagem que chega ao nó; no Laboratório, da densidade de
+# cada camada dentro de pc_lab_path (gf, gc = amostras fina e grossa; gw = estrutura, aglomeração, aspereza, cor).
+K_GSTRUCT = r"""
+PC_DEVICE float pc_gs_c(float4 v, int ch) { return ch == 0 ? v.x : (ch == 1 ? v.y : v.z); }
+PC_DEVICE float pc_gs_sdq(int ch, float rho) {
+    float t = _clampf(_sqrtf(_fmaxf(rho, 0.0f)) * 10.0f, 0.0f, 16.0f);
+    int i = pc_clampi(PC_I(t), 0, 15);
+    return pc_lerp(PC_GS_SDQ[ch * 17 + i], PC_GS_SDQ[ch * 17 + i + 1], t - PC_F(i));
+}
+PC_DEVICE float pc_gs_rhox(int ch, float x) {
+    float t = _clampf(x + 8.0f, 0.0f, 16.0f);
+    int i = pc_clampi(PC_I(t), 0, 15);
+    return pc_lerp(PC_GS_RHOX[ch * 17 + i], PC_GS_RHOX[ch * 17 + i + 1], t - PC_F(i));
+}
+PC_DEVICE float pc_gs_expm1(float x) {
+    return _fabs(x) < 0.01f ? x * (1.0f + x * (0.5f + x * (0.16666667f + x * 0.041666668f))) : _expf(x) - 1.0f;
+}
+// T_s(g): media 0, variancia 1, assimetria com o sinal de s
+PC_DEVICE float pc_gs_skew(float g, float s) {
+    if (_fabs(s) < 1e-4f) return g;
+    float sg = s < 0.0f ? -1.0f : 1.0f;
+    return pc_gs_expm1(s * g - 0.5f * s * s) / (sg * _sqrtf(pc_gs_expm1(s * s)));
+}
+PC_DEVICE float pc_gs_channel(float4 nf, float4 nc, int ch, float rho, float rough, float chroma, int neg, float amt,
+                              float clump) {
+    float lD = _logf(_fmaxf(_fmaxf(rho, 0.0f) * PC_GS_DREF[ch], 1e-6f));
+    float s01 = pc_smooth(PC_GS_LLD[0], PC_GS_LLD[1], lD);
+    float s12 = pc_smooth(PC_GS_LLD[1], PC_GS_LLD[2], lD);
+    float sig = amt * (PC_GS_SIG[0] + (PC_GS_SIG[1] - PC_GS_SIG[0]) * s01 + (PC_GS_SIG[2] - PC_GS_SIG[1]) * s12);
+    float d2 = PC_GS_CRS[2] + clump * (1.0f - PC_GS_CRS[2]);
+    float dl = PC_GS_CRS[0] + (PC_GS_CRS[1] - PC_GS_CRS[0]) * s01 + (d2 - PC_GS_CRS[1]) * s12;
+    float c = rough + (1.0f - rough) * amt * dl;
+    float k = 1.0f / _sqrtf((1.0f - c) * (1.0f - c) + c * c);
+    float a = (nf.w * (1.0f - c) + nc.w * c) * k;
+    float b = (pc_gs_c(nf, ch) * (1.0f - c) + pc_gs_c(nc, ch) * c) * k;
+    float g = (a * (1.0f - chroma) + b * chroma) / _sqrtf((1.0f - chroma) * (1.0f - chroma) + chroma * chroma);
+    float sd = pc_gs_sdq(ch, rho);
+    float env = (neg == 1) ? sd / PC_GS_SDNEG[ch] : sd / PC_GS_SDGREY[ch] * PC_GS_RATIO[ch];
+    return pc_gs_skew(g, sig) * (1.0f + amt * (env - 1.0f));
+}
+// grao de sempre com a estrutura (lin = exposicao da cena de cada canal): o campo de cada canal em x, y, z (w = 0),
+// para o pc_apply_grain com aspereza 0 e colorido 1 (que o soma exatamente, com os pesos por tom de sempre)
+PC_DEVICE float4 pc_gs_field(float3 lin, float4 nf, float4 nc, float rough, float chroma, float gamt, float clump) {
+    float3 x = pc_lin_to_stops(lin);
+    return make_float4(pc_gs_channel(nf, nc, 0, pc_gs_rhox(0, x.x), rough, chroma, 0, gamt, clump),
+                       pc_gs_channel(nf, nc, 1, pc_gs_rhox(1, x.y), rough, chroma, 0, gamt, clump),
+                       pc_gs_channel(nf, nc, 2, pc_gs_rhox(2, x.z), rough, chroma, 0, gamt, clump), 0.0f);
+}
+// grao no negativo com a estrutura: densidade de cada camada (dn) relativa a do cinza (dmid); amp = sigma D por pixel
+PC_DEVICE float3 pc_gs_neg(float3 dn, float3 dmid, float4 gf, float4 gc, float4 gw, float3 amp) {
+    return make_float3(
+        pc_gs_channel(gf, gc, 0, dn.x / _fmaxf(dmid.x, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.x,
+        pc_gs_channel(gf, gc, 1, dn.y / _fmaxf(dmid.y, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.y,
+        pc_gs_channel(gf, gc, 2, dn.z / _fmaxf(dmid.z, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.z);
+}
+"""
+GS_ARGS = ", float4 gf, float4 gc, float4 gw"
+GS_CALL = ", gf, gc, gw"
+B_GS_DECL = ("        float4 gf = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): estrutura (gw.x = 0: desligada)\n"
+             "        float4 gc = make_float4(0.0f, 0.0f, 0.0f, 0.0f);\n"
+             "        float4 gw = make_float4(0.0f, 0.0f, 0.0f, 0.0f);\n")
+B_GSTRUCT_LAB = "    if (gw.x > 0.0f) gn = pc_gs_neg(dn, dmid, gf, gc, gw, gn);  // 1.6 (fase 3): estrutura pela densidade\n"
+
+
+def gstruct(text: str, on: bool) -> str:
+    """Marcadores da estrutura pela densidade em K_LAB e B_LAB: no nó Cor somem (o texto é o de antes); no
+    Laboratório e no OpenFX viram os argumentos gf, gc, gw de pc_lab_path, a declaração deles e a conta antes de
+    somar o grão na densidade."""
+    marks = {"/*GSARGS*/": GS_ARGS, "/*GSCALL*/": GS_CALL, "/*GSTRUCT*/": B_GSTRUCT_LAB, "/*GSDECL*/": B_GS_DECL}
+    for k, v in marks.items():
+        text = text.replace(k, v if on else "")
+    return text
+
+
+def _gstruct_tables(dialect: str) -> str:
+    """Constantes da estrutura pela densidade (`pelicula/grao_estrutura.py`)."""
+    from . import grao_estrutura as gs
+    out = _table(dialect, "PC_GS_SDQ", [v for row in gs.STRUCT_SIGMA_D_Q for v in row])
+    out += _table(dialect, "PC_GS_RHOX", [v for row in gs.STRUCT_RHO_X for v in row])
+    out += _table(dialect, "PC_GS_SDGREY", list(gs.STRUCT_SIGMA_D_GREY))
+    out += _table(dialect, "PC_GS_RATIO", list(gs.STRUCT_RATIO))
+    out += _table(dialect, "PC_GS_SDNEG", list(gs.neg_sigma_d()))
+    out += _table(dialect, "PC_GS_DREF", list(gs.dref()))
+    out += _table(dialect, "PC_GS_LLD", [math.log(d) for d in gs.STRUCT_LAYER_D])
+    out += _table(dialect, "PC_GS_SIG", list(gs.STRUCT_SIGMA))
+    out += _table(dialect, "PC_GS_CRS", list(gs.STRUCT_COARSE))
+    out += _define("PC_GS_RMIN", gs.RHO_MIN_MID)
+    return out
+
+
 def _indent(code: str, n: int) -> str:
     pad = " " * n
     return "\n".join((pad + ln) if ln.strip() else ln for ln in code.splitlines()) + "\n"
@@ -1370,6 +1899,12 @@ def _textura_body() -> str:
         _glow("gh", "hal", "v_hal_raio * PC_GAUGE[gi * 7 + 5] * scale", "0.18f * _exp2f(v_hal_limiar)", "8.0f", 1,
               41),
         "if (hal == 1) lin = lin + v_hal_cor * (gh.x * v_hal_forca * 0.32f);",
+        _glow("gp", "halp", "v_hal_raio * PC_HAL_PX[gi] * scale", "0.0f", "PC_HAL_PHYS_LIMIT", 0, 43),
+        "if (halp == 1) {",
+        "    float3 ap = v_hal_cor * (v_hal_forca * PC_HAL_PHYS_K);",
+        "    float dp = gp.x - pc_extract(pc_code_to_lin(PC_RGB(p_X, p_Y)), 0.0f, PC_HAL_PHYS_LIMIT, 0).x;",
+        "    lin = lin + make_float3(ap.x / (1.0f + ap.x) * dp, ap.y / (1.0f + ap.y) * dp, ap.z / (1.0f + ap.z) * dp);",
+        "}",
     ]), 8)
     return r"""
     float W = PC_F(p_Width);
@@ -1399,7 +1934,11 @@ def _textura_body() -> str:
     float sig_g = (v_bitola_desfoque_on == 1) ? PC_GAUGE[gi * 7 + 2] * v_bitola_resolucao : 0.0f;
     float sig_u = (v_lente_on == 1) ? v_raio_maciez * v_maciez * 2.0f : 0.0f;
     float sig_m = PC_MTF[v_mtf] * 2.0f * v_mtf_forca;  // MTF da pelicula (look.mtf_sigma)
-    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m) * scale;
+    float sig_r = 0.0f;  // 1.6: maciez pelo grao (grao.soft_sigma)
+    if (v_grao_maciez > 0.0f && v_grao_on == 1 && v_grao_forca > 0.0f)
+        sig_r = PC_GRAIN_SOFT_K * 0.8f * v_grao_tamanho * PC_GAUGE[gi * 7 + 0] * _powf(iso / 250.0f, 0.18f)
+                * v_grao_maciez;
+    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m + sig_r * sig_r) * scale;
     float sharp = (v_lente_on == 1) ? v_nitidez : 0.0f;
     float sigma = 0.0f;
     float soft_mix = 0.0f;
@@ -1409,14 +1948,46 @@ def _textura_body() -> str:
     } else if (sharp > 0.0f) {
         sigma = _fmaxf(v_raio_maciez * scale, 0.6f);
     }
+    // 1.6: diferenca de nitidez entre camadas (grao.layer_softness): um sigma por canal
+    int layers = 0;
+    float3 s3 = pc_s3(0.0f);
+    if (v_mtf_camadas > 0.0f) {
+        int lo = (v_mtf_copia == 1) ? 3 : 0;
+        float kl = 2.0f * v_mtf_camadas * PC_PX_MM[gi] * 0.001f * scale;
+        float dr = PC_MTF_LAYERS[lo] * kl;
+        float dg = PC_MTF_LAYERS[lo + 1] * kl;
+        float db = PC_MTF_LAYERS[lo + 2] * kl;
+        float3 t3 = make_float3(_sqrtf(soft * soft + dr * dr), _sqrtf(soft * soft + dg * dg),
+                                _sqrtf(soft * soft + db * db));
+        float tm = _fmaxf(t3.x, _fmaxf(t3.y, t3.z));
+        if (tm > 0.05f) {
+            layers = 1;
+            s3 = t3;
+            sigma = tm;
+            soft_mix = 1.0f;
+        }
+    }
     float vig_amt = _fminf(((v_lente_on == 1) ? v_vinheta : 0.0f) + PC_GAUGE[gi * 7 + 4] * v_bitola_vinheta, 1.5f);
     float vig = (vig_amt > 0.0f)
         ? pc_vignette(u, v, W, H, vig_amt, v_vinheta_raio, v_vinheta_suavidade, v_vinheta_redondeza) : 1.0f;
     int hal = (v_hal_on == 1 && v_hal_forca > 0.0f) ? 1 : 0;
+    int halp = 0;  // 1.6: halacao fisica (grao.physical_halation)
+    if (hal == 1 && v_hal_modelo == PC_HAL_FISICA) {
+        hal = 0;
+        halp = 1;
+    }
     int bloom = (v_bloom_on == 1 && v_bloom_forca > 0.0f) ? 1 : 0;
     int mist = (v_bloom_on == 1 && v_nevoa_forca > 0.0f) ? 1 : 0;
+    // 1.6: respiracao por camada (grao.breathing), depois da cor: o fator de exposicao de cada camada multiplica
+    // a luz da saida (igual ao app com a cor neutra; sem a curva da copia: aproximacao, como a halacao)
+    int brth = (v_grao_on == 1 && v_grao_respiracao > 0.0f) ? 1 : 0;
+    float3 bm = pc_s3(1.0f);
+    if (brth == 1) {
+        float3 bd = pc_breath(PC_FRAME, v_grao_semente, v_grao_respiracao) * (2.3025851f / PC_BREATH_NEG_GAMMA);
+        bm = make_float3(_expf(bd.x), _expf(bd.y), _expf(bd.z));
+    }
     float3 y = c0;
-    if (sigma > 0.0f || vig != 1.0f || hal == 1 || bloom == 1 || mist == 1) {
+    if (sigma > 0.0f || vig != 1.0f || hal == 1 || halp == 1 || bloom == 1 || mist == 1 || brth == 1) {
         float3 lin = pc_code_to_lin(c0) * vig;
         if (sigma > 0.0f) {
             int cx = pc_clampi(PC_I(_floorf(pg.x * W)), 0, p_Width - 1);
@@ -1427,25 +1998,53 @@ def _textura_body() -> str:
                 stp = PC_I(_ceilf(PC_F(rad) / 6.0f));
                 rad = 6 * stp;
             }
+            // 1.6: com a diferenca entre camadas, um sigma por canal no mesmo laco (sem ela, o calculo de antes)
+            float3 kk3 = pc_s3(-0.5f / (sigma * sigma));
+            if (layers == 1) {
+                float3 sc = pc_max3(s3, 1e-3f);
+                kk3 = make_float3(-0.5f / (sc.x * sc.x), -0.5f / (sc.y * sc.y), -0.5f / (sc.z * sc.z));
+            }
             float3 acc = pc_s3(0.0f);
-            float wsum = 0.0f;
-            float kk = -0.5f / (sigma * sigma);
+            float3 wsum = pc_s3(0.0f);
             for (int j = -rad; j <= rad; j += stp) {
                 for (int i = -rad; i <= rad; i += stp) {
-                    float w = _expf(PC_F(i * i + j * j) * kk);
+                    float d2 = PC_F(i * i + j * j);
+                    float w0 = _expf(d2 * kk3.x);
+                    float3 w = (layers == 1) ? make_float3(w0, _expf(d2 * kk3.y), _expf(d2 * kk3.z)) : pc_s3(w0);
                     int sx = pc_clampi(cx + i, 0, p_Width - 1);
                     int sy = pc_clampi(cy + j, 0, p_Height - 1);
                     acc = acc + pc_code_to_lin(PC_RGB(sx, sy)) * w;
                     wsum = wsum + w;
                 }
             }
-            float3 b = acc * (vig / wsum);
+            float3 b = make_float3(acc.x * (vig / wsum.x), acc.y * (vig / wsum.y), acc.z * (vig / wsum.z));
             float3 base = pc_lerp3(lin, b, soft_mix);
             lin = pc_max3(base + (lin - b) * sharp, 0.0f);
         }
-""" + glows + r"""        y = pc_lin_to_code(lin);
+""" + glows + r"""        if (brth == 1) lin = make_float3(lin.x * bm.x, lin.y * bm.y, lin.z * bm.z);
+        y = pc_lin_to_code(lin);
     }
-    if (v_grao_on == 1 && v_grao_forca > 0.0f) {
+    if (v_grao_on == 1 && v_grao_forca > 0.0f && v_grao_estrutura > 0.0f) {
+        // 1.6 (fase 3): estrutura pela densidade (grao_estrutura.py); a exposição vem da imagem que chega ao nó.
+        // Um bloco à parte (cópia do de baixo): o grão de sempre continua com as mesmas contas, bit a bit
+        float iso_amt = _powf(iso / 250.0f, 0.35f);
+        float iso_size = _powf(iso / 250.0f, 0.18f);
+        float size = 0.8f * v_grao_tamanho * PC_GAUGE[gi * 7 + 0] * iso_size * scale;
+        float gsz = _fmaxf(size, 1.0f);
+        int seed = v_grao_semente * 7919 + ((v_grao_animado == 1) ? PC_FRAME : 0);
+        int gw = PC_I(_ceilf(W / gsz));
+        int gh2 = PC_I(_ceilf(H / gsz));
+        gw = gw < 2 ? 2 : gw;
+        gh2 = gh2 < 2 ? 2 : gh2;
+        float amt = 0.011f * v_grao_forca * PC_GAUGE[gi * 7 + 1] * iso_amt * _sqrtf(_fminf(1.0f, size));
+        uint s8 = PC_U(seed) * 8u;
+        float4 nf = pc_noise(u, v, gw, gh2, s8) * 2.08f;
+        float4 nc = pc_noise(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f, gw, gh2, s8) * 2.08f;
+        float4 gsf = pc_gs_field(pc_code_to_lin(y), nf, nc, v_grao_aspereza, v_grao_cor, v_grao_estrutura,
+                                 v_grao_aglomeracao);
+        y = pc_apply_grain(y, gsf, gsf, 0.0f, 1.0f, make_float3(v_grao_sombras, v_grao_meios, v_grao_luzes), amt);
+    }
+    else if (v_grao_on == 1 && v_grao_forca > 0.0f) {
         float iso_amt = _powf(iso / 250.0f, 0.35f);
         float iso_size = _powf(iso / 250.0f, 0.18f);
         float size = 0.8f * v_grao_tamanho * PC_GAUGE[gi * 7 + 0] * iso_size * scale;
@@ -1474,14 +2073,20 @@ def textura_controls() -> list[Ctl]:
         ctl("bitola"), ctl("iso", "Sensibilidade ISO"),
         ctl("bitola_desfoque_on"), ctl("bitola_resolucao"), ctl("bitola_vinheta"),
         ctl("mtf", "MTF da pelicula"), ctl("mtf_forca", "MTF - Quantidade"),
+        ctl("mtf_camadas", "MTF - Diferenca entre camadas"),
+        Ctl("ui_mtf_copia", "MTF - Camadas com copia", "check", 0, section="pelicula",
+            tip="Ligue quando houver copia print no no Cor ou Laboratorio: na copia o azul fica mais macio "
+                "(Diferenca entre camadas)."),
         ctl("grao_on", "Grao"), ctl("grao_forca", "Grao - Intensidade"), ctl("grao_tamanho", "Grao - Tamanho"),
         ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
         ctl("grao_sombras", "Grao - Nas sombras"), ctl("grao_meios", "Grao - Nos tons medios"),
         ctl("grao_luzes", "Grao - Nas altas luzes"), ctl("grao_animado", "Grao - Muda a cada quadro"),
-        ctl("grao_semente", "Grao - Semente"),
+        ctl("grao_semente", "Grao - Semente"), ctl("grao_maciez", "Grao - Maciez pelo grao"),
+        ctl("grao_respiracao", "Grao - Respiracao por camada"),
+        ctl("grao_estrutura", "Grao - Estrutura pela densidade"), ctl("grao_aglomeracao", "Grao - Aglomeracao"),
         ctl("hal_on", "Halacao"), ctl("hal_forca", "Halacao - Intensidade"),
         ctl("hal_raio", "Halacao - Raio px em 1080p"), ctl("hal_limiar", "Halacao - Limiar EV"),
-        ctl("hal_cor", "Halacao - Cor"),
+        ctl("hal_cor", "Halacao - Cor"), ctl("hal_modelo", "Halacao - Modelo"),
         ctl("bloom_on", "Bloom e difusao"), ctl("bloom_forca", "Bloom - Intensidade"),
         ctl("bloom_raio", "Bloom - Raio px em 1080p"), ctl("bloom_limiar", "Bloom - Limiar EV"),
         ctl("nevoa_forca", "Nevoa - Filtro difusor"), ctl("nevoa_raio", "Nevoa - Raio px em 1080p"),
@@ -1498,6 +2103,49 @@ def textura_controls() -> list[Ctl]:
 
 def _mtf_table(dialect: str) -> str:
     return _table(dialect, "PC_MTF", [look.MTF_SIGMA[k] for k, _l in params.MTFS])
+
+
+def _grao_tables(dialect: str) -> str:
+    """Constantes do grão e da textura da 1.6 (`pelicula/grao.py`) para os nós e o OpenFX."""
+    from . import grao
+    out = _define("PC_GRAIN_SOFT_K", grao.GRAIN_SOFT_K)
+    # nitidez por camada: px@1080 por mm de cada bitola e as diferenças das camadas (sem cópia, com cópia), em µm
+    out += _table(dialect, "PC_PX_MM", [grao.REF_WIDTH_PX / grao.frame_width_mm(k) for k, _l in params.BITOLAS])
+    out += _table(dialect, "PC_MTF_LAYERS", list(grao.layer_dsigma_um(False)) + list(grao.layer_dsigma_um(True)))
+    copias = [k for k, _l in params.COPIAS]
+    lab_copias = [k for k, _l in params.COPIAS_LAB]
+    out += _table(dialect, "PC_NG_AMP", list(grao.NEG_GRAIN_AMP))  # grão no negativo: sigma D por pixel
+    # halação física: raio pelo quadro da bitola (35 mm = 1), fração refletida e limite da fonte
+    out += _table(dialect, "PC_HAL_PX", [grao.frame_width_mm("35mm") / grao.frame_width_mm(k)
+                                         for k, _l in params.BITOLAS])
+    out += _define("PC_HAL_PHYS_K", grao.HAL_PHYS_K) + _define("PC_HAL_PHYS_LIMIT", grao.HAL_PHYS_LIMIT)
+    out += f"#define PC_HAL_FISICA {[k for k, _l in params.HAL_MODELOS].index('fisica')}\n"
+    # respiração por camada
+    out += _define("PC_BREATH_SIGMA_D", grao.BREATH_SIGMA_D) + _define("PC_BREATH_NEG_GAMMA", grao.BREATH_NEG_GAMMA)
+    out += _define("PC_BREATH_SLOW", grao.BREATH_SLOW_FRAMES) + _define("PC_BREATH_SLOW_NORM", grao.BREATH_SLOW_NORM)
+    out += _pgrain_tables(dialect)  # 1.6: grão físico
+    out += _gstruct_tables(dialect)  # 1.6 (fase 3): estrutura pela densidade
+    out += f"#define PC_COPIA_NENHUMA {copias.index('nenhuma')}\n"
+    out += f"#define PC_LAB_COPIA_NENHUMA {lab_copias.index('nenhuma')}\n"
+    return out
+
+
+def _pgrain_tables(dialect: str) -> str:
+    """Constantes do grão físico (`pelicula/grao_fisico.py`): os pontos do spot, a grade e a calibração."""
+    from . import grao_fisico as gf
+    out = f"#define PC_PG_N {gf.N_SAMPLES}\n#define PC_PG_CAP {gf.CAP}u\n"
+    out += _table(dialect, "PC_PG_OFS", [float(x) for x in gf.offsets().ravel()])
+    out += _define("PC_PG_REACH", gf.REACH) + _define("PC_PG_CELL", gf.CELL) + _define("PC_PG_DMAX", gf.D_MAX)
+    out += _define("PC_PG_AMP_MAX", gf.AMP_MAX) + _define("PC_PG_RK", gf.R_K)
+    out += _define("PC_PG_MEAN_K", gf.LN10 * gf.CELL * gf.CELL / math.pi)
+    out += _table(dialect, "PC_PG_KAPPA", list(gf.KAPPA))
+    out += f"#define PC_GRAO_FISICO {[k for k, _l in params.GRAO_MODELOS].index('fisico')}\n"
+    # 1.6 (fase 3): tamanho do cristal e variação do tamanho (grao_fisico.extras)
+    out += _table(dialect, "PC_PG_CRYS", [x for row in gf.CRYSTAL_K for x in row])
+    out += _table(dialect, "PC_PG_VARK", [x for row in gf.VARIATION_K for x in row])
+    out += _table(dialect, "PC_PG_VARINV", [gf.radius_params(i / 20.0)[1] for i in range(21)])
+    out += _define("PC_PG_VAR_SIGMA", gf.VAR_SIGMA) + _define("PC_PG_ZCLIP", gf.Z_CLIP)
+    return out
 
 
 def _gauge_tables(dialect: str) -> str:
@@ -1918,7 +2566,8 @@ Como usar (pagina Color):
     Blackmagic Film Gen 5, Apple Log, DWG...) ou HLG / PQ para video HDR (celulares gravam em HLG). Se a
     linha do tempo ja estiver em Rec.709 (Gamma 2.4), deixe Rec.709. Outra opcao e colocar um Color Space
     Transform antes convertendo para Rec.709 / Gamma 2.4.
-  - "Faixa do video" so muda S-Log3, V-Log e N-Log (curvas no codigo de 10 bits): deixe "Video" com o
+  - "Faixa do video" so muda S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log (curvas no codigo de 10 bits):
+    deixe "Video" com o
     clipe em Data Levels Auto/Video (o padrao do Resolve) e use "Cheia" com o clipe em Full (Clip
     Attributes) ou com log que a camera mandou reescalado pela saida HDMI "Limited".
   - "Mostrar curva" e so para ver o ajuste: desligue antes de renderizar.

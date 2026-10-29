@@ -8,10 +8,11 @@ import re
 import numpy as np
 import pytest
 
-from pelicula import look, params, presets, shaders
+from pelicula import labx, look, params, presets, shaders
 
 # ------------------------------------------------------------------ contrato com os shaders
 _SHADER_SOURCES = {n: getattr(shaders, n) for n in ("BASE", "EXTRACT", "BLUR", "NOISE", "FINAL", "BAKE")}
+_SHADER_SOURCES["FINAL_LX"] = labx.program("final_lx")  # 1.6: variante do Laboratório (labx.py)
 _SIZES = {"int": 1, "float": 1, "vec2": 2, "vec3": 3, "vec4": 4, "mat3": 9}
 
 
@@ -51,7 +52,8 @@ def everything_on() -> dict:
         if p.kind == "bool":
             v[k] = True
     v.update(copia="k2383", vazamento=0.6, nevoa_forca=0.4, virada="sepia", maciez=0.5, nitidez=0.5, aberracao=2.0,
-             distorcao=0.1, cabelo=1.0, manchas=1.0, queima=1.0, emenda=1.0, cor_instavel=0.8, lut_arquivo="x.cube")
+             distorcao=0.1, cabelo=1.0, manchas=1.0, queima=1.0, emenda=1.0, cor_instavel=0.8, lut_arquivo="x.cube",
+             grao_respiracao=0.5, proteger_cores=0.5)
     return v
 
 
