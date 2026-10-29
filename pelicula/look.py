@@ -422,6 +422,15 @@ NEGATIVES: dict[str, dict[str, Any]] = {
                          shoulder=(1.95, 1.95, 1.90), width=0.32, interimage=0.30),
     "double_x": dict(sens=_SENS_PAN, gamma=(0.65, 0.65, 0.65), toe=(-1.40, -1.40, -1.40),
                      shoulder=(1.80, 1.80, 1.80), width=0.25, interimage=0.0),
+    # 1.6 (M8): curvas ajustadas às curvas sensitométricas dos datasheets públicos da Kodak por
+    # tools/ajustar_lab.py (pontos e fonte em pelicula/data/datasheets/). Só as curvas vêm dos dados; a matriz de
+    # sensibilidade e o efeito entre camadas são os do negativo feito à mão.
+    "vision3_250d_v2": dict(sens=_SENS_V3, gamma=(0.489, 0.549, 0.538), toe=(-1.491, -1.476, -1.474),
+                            shoulder=(2.028, 2.082, 2.04), width=0.25, interimage=0.38),
+    "vision3_500t_v2": dict(sens=_SENS_V3T, gamma=(0.488, 0.549, 0.54), toe=(-1.494, -1.491, -1.481),
+                            shoulder=(2.045, 2.079, 2.047), width=0.251, interimage=0.36),
+    "vision3_200t_v2": dict(sens=_SENS_V3T, gamma=(0.487, 0.547, 0.53), toe=(-1.421, -1.401, -1.404),
+                            shoulder=(2.014, 2.065, 2.055), width=0.189, interimage=0.37),
 }
 
 # Cópias: gama, densidade máxima (acima da base) e largura (o pé da cópia é a rolagem das altas luzes).
@@ -441,6 +450,10 @@ LAB_PRINTS: dict[str, dict[str, Any] | None] = {
     "2302": dict(gamma=(2.70, 2.70, 2.70), dmax=(3.8, 3.8, 3.8), width=0.22,
                  dye=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))),
     "nenhuma": None,
+    # 1.6 (M8): gama, densidade máxima e largura ajustados à curva sensitométrica do datasheet (H-1-2383) e diafonia
+    # tirada das curvas de densidade espectral dos corantes (tools/ajustar_lab.py).
+    "2383_v2": dict(gamma=(5.634, 4.24, 6.0), dmax=(3.806, 3.322, 3.41), width=0.155,
+                    dye=((1.0, 0.313, 0.065), (0.232, 1.0, 0.136), (0.089, 0.229, 1.0))),
 }
 
 # Processos especiais (caminho B). Os registros da câmera Technicolor são negativos preto e branco

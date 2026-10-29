@@ -188,6 +188,7 @@ plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): 
 tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated),
                              gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas),
                              ajustar_grao.py (constantes de grao.py a partir de data/datasheets, offline)
+                             ajustar_lab.py (filmes "(datasheet)" do Laboratório e matrizes de corante, offline)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
                              (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
                              <nome>_ui_cases.py de widgets num subprocesso offscreen)
@@ -391,6 +392,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_transitions.py` | transições de película: escolhas só no fim, JSON enxuto (projeto antigo grava o mesmo JSON), formato 3, camadas e andamentos de cada tipo, uniforms do `CLIP_TR`; na GPU: pontas iguais aos clipes puros (8 e 16 bits), determinismo, cinza neutro em rec709/S-Log3/LogC3, fusão e exposição pelas fórmulas da curva, prévia = exportação e transições antigas iguais à BASE (`transicoes_base.py` + `data/transicoes_base.json`) |
 | `tests/test_transicoes_ui.py` | casos de `transicoes_ui_cases.py`: inspetor (ícones, dicas, ajustes do tipo, módulo desligado), menu "Transição" do corte (alvo, desfazer num passo, última duração, faixa travada), desenho na linha do tempo e o módulo na janela |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
+| `tests/test_lab_lad.py` | Laboratório conferido pelo LAD da Kodak (M9): cinza de 16%, pontos da copiadora, escala de cinza |
+| `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
 | `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |

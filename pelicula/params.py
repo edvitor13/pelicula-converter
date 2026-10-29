@@ -118,7 +118,8 @@ LUT_ENTRADAS = [
     ("llog", "Leica L-Log"),
 ]
 
-# Laboratório: aproximações artísticas do comportamento de cada filme (as curvas não vêm de dados dos fabricantes).
+# Laboratório: aproximações artísticas do comportamento de cada filme, menos os marcados "(datasheet)": as curvas
+# desses foram ajustadas às curvas publicadas pela Kodak (tools/ajustar_lab.py; fonte em pelicula/data/datasheets/).
 # Película calibrada por datasheet público entra como id novo no fim, com a fonte registrada (regra 8 do AGENTS.md).
 NEGATIVOS = [
     ("vision3_50d", "Kodak Vision3 50D"),
@@ -135,6 +136,9 @@ NEGATIVOS = [
     ("vision_5263", "Kodak Vision 5263 500T"),
     ("vision2_5229", "Kodak Vision2 Expression 5229 500T"),
     ("double_x", "Kodak Double-X 5222 (P&B)"),
+    ("vision3_250d_v2", "Kodak Vision3 250D (datasheet)"),
+    ("vision3_500t_v2", "Kodak Vision3 500T (datasheet)"),
+    ("vision3_200t_v2", "Kodak Vision3 200T (datasheet)"),
 ]
 
 COPIAS_LAB = [
@@ -145,6 +149,7 @@ COPIAS_LAB = [
     ("e5385", "Eastman Color Print 5385"),
     ("2302", "Kodak 2302 (cópia preto e branco)"),
     ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
+    ("2383_v2", "Kodak 2383 (datasheet)"),
 ]
 
 HAL_MODELOS = [  # 1.6: halação física (grao.physical_halation)

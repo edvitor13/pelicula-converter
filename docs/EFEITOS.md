@@ -203,14 +203,18 @@ Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
 comportamento de cada um: as curvas dos negativos e das cópias não vêm de dados dos fabricantes (só o
-*Grão no negativo* usa a granularidade publicada, veja *Modelos calibrados por datasheets*).
+*Grão no negativo* usa a granularidade publicada, veja *Modelos calibrados por datasheets*). A exceção são os
+filmes marcados **(datasheet)**: as curvas deles foram ajustadas às curvas publicadas pela Kodak (veja *Modelos
+calibrados por datasheets*). Eles foram feitos para andar juntos: um negativo (datasheet) com a cópia 2383
+(datasheet) dá a escala de cinza quase neutra; misturados com os filmes feitos à mão, as sombras e as altas luzes
+ganham cor (o vermelho do negativo medido tem menos contraste que o verde e o azul, e a cópia medida compensa).
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
+| **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B), Kodak Vision3 250D (datasheet), Kodak Vision3 500T (datasheet), Kodak Vision3 200T (datasheet) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
 | **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
 | **Grão no negativo** | liga/desliga | desligado | Põe o grão da seção *Grão* (que precisa estar ligada) **dentro do negativo**: cada camada recebe o grão na sua densidade, antes da cópia, como na película de verdade. Quem molda o grão visível passa a ser a curva da cópia: ele some nos pretos profundos e nas altas luzes estouradas e aparece nos tons médios; o azul tem mais grão que o verde e o vermelho (a granularidade das camadas, veja *Modelos calibrados por datasheets*). *Intensidade*, *Tamanho*, *Aspereza*, *Grão colorido*, *Muda a cada quadro*, a bitola, o ISO e a revelação valem como sempre; a resposta por tom (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) deixa de valer. Não entra no LUT exportado. |
-| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
+| **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido), Kodak 2383 (datasheet) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
 | **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
 | **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
 | **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
@@ -544,7 +548,7 @@ tremor do projetor move a tira inteira.
 
 ## Modelos calibrados por datasheets
 
-Alguns modelos de grão e textura da 1.6 usam números lidos de datasheets **públicos** da Kodak. Os pontos
+Alguns modelos de grão, textura e laboratório da 1.6 usam números lidos de datasheets **públicos** da Kodak. Os pontos
 lidos ficam em `pelicula/data/datasheets/` com a fonte (publicação, revisão, página, figura e o SHA-256 do PDF
 lido); os gráficos e os PDFs não estão no app. A Kodak avisa que esses dados são representativos e não
 especificações, e o resultado continua sendo uma **aproximação**: o app não é um produto oficial e as marcas
@@ -555,6 +559,8 @@ são dos donos.
 | Nitidez por camada do negativo | **Diferença de nitidez entre camadas** | Curvas de MTF de cada camada: o vermelho cai mais cedo que o verde, e o verde mais cedo que o azul | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Modulation-Transfer Function Curves* |
 | Nitidez por camada da cópia | **Diferença de nitidez entre camadas** (com cópia) | Curvas de MTF da cópia: o azul é a camada mais macia, o verde a mais nítida | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC |
 | Grão de cada camada do negativo | **Grão no negativo** | Granularidade rms difusa (sigma D, abertura de 48 µm) de cada camada: azul 0,0126, verde 0,0071, vermelho 0,0061 (média pela exposição) | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Diffuse rms Granularity Curves* |
+| Negativos (datasheet) | **Laboratório › Negativo**: Vision3 250D, 500T e 200T (datasheet) | Curva característica de cada camada (Status M, −7,25 a +7,75 stops): gama, pé, ombro e largura | KODAK VISION3 250D 5207/7207 (H-1-5207), 500T 5219/7219 (H-1-5219) e 200T 5213/7213 (H-1-5213), revisão 3-26, p. 3, *Sensitometric Curves* |
+| Cópia (datasheet) | **Laboratório › Cópia**: Kodak 2383 (datasheet) | Curva característica de cada camada (Status A): gama, densidade máxima e largura; diafonia dos corantes pelas curvas de densidade espectral | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F002_1254AC, e p. 5, figura F010_0294AC |
 
 Como a conta é feita: cada camada ganha uma gaussiana (somada em quadratura) que leva a resposta da camada mais
 nítida à dela nas frequências do meio, de 20 a 62 ciclos/mm (`tools/ajustar_grao.py`). Ficam 4,3 µm no
@@ -569,7 +575,22 @@ abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e 
 grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
 sua imagem.
 
-A **respiração por camada** também não: 100% é um ponto de copiadora de desvio, escolhido a olho.
+No **Laboratório**, o que é calibrado nos filmes (datasheet) é exatamente isto (`tools/ajustar_lab.py`):
+
+- **negativo**: a curva de cada camada (gama, pé, ombro, uma largura comum), com o 0 stop do gráfico no cinza de
+  18%; o modelo passa a menos de 0,02 de densidade de todos os pontos lidos (rms 0,006). O vermelho tem gama 0,49
+  e o verde e o azul 0,53 a 0,55, como no gráfico. A **matriz de sensibilidade** (que faixa de cor cada camada
+  vê) e o **efeito entre camadas** continuam os do filme feito à mão: o datasheet não traz como medir isso sem
+  espectros de refletância de cenas;
+- **cópia 2383**: gama, densidade máxima e largura de cada camada, com o gráfico lido por bandas estreitas no
+  pico de cada corante (o Status A é um densitômetro de bandas estreitas); o modelo passa a menos de 0,09 dos
+  pontos (rms 0,02), errando mais no pé longo das altas luzes. A **diafonia** sai das curvas de densidade
+  espectral dos corantes vistas pelos canais da tela (observador CIE 1931 em Rec.709 sob luz branca de 5500 K):
+  o magenta absorve 31% no vermelho e o ciano 23% no verde, bem mais que na 2383 feita à mão;
+- a **posição** das curvas não importa (a calibração das luzes leva o cinza a 0,45 em qualquer combinação) e a
+  densidade mínima (base e máscara) fica fora, como em todo o Laboratório.
+
+A **respiração por camada** não é calibrada por datasheet: 100% é um ponto de copiadora de desvio, escolhido a olho.
 A **halação física** (*Halação › Modelo › Física*) não é calibrada por datasheet: o raio vem da geometria do
 reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (veja *Halação*).
 

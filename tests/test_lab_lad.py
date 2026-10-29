@@ -30,6 +30,8 @@ LAD_SCALE = (0.025, 0.031, 0.066, 0.10, 0.16, 0.20, 0.40, 0.79, 0.90)  # preto, 
 VISION3 = ("vision3_50d", "vision3_250d", "vision3_200t", "vision3_500t")
 COLOR_NEGS = [n for n in look.NEGATIVES if n != "double_x"]
 COLOR_PRINTS = [p for p, t in look.LAB_PRINTS.items() if t is not None and p != "2302"]
+# Filmes "(datasheet)" (M8): curvas medidas em Status M (negativo) e Status A (cópia), que só fecham o cinza entre si.
+DATASHEET = ("vision3_250d_v2", "vision3_500t_v2", "vision3_200t_v2", "2383_v2")
 
 
 def lab_values(**over) -> dict:
@@ -123,6 +125,10 @@ def test_tape_25_25_25_is_the_calibrated_neutral():
 @pytest.mark.parametrize("neg", COLOR_NEGS)
 def test_lad_grey_scale_has_no_strong_mismatched_contrast(neg, copia):
     """A escala de cinza do LAD (2,5% a 90%) sai quase neutra: o tom muda pouco do preto ao branco."""
+    if (neg in DATASHEET) != (copia in DATASHEET):
+        pytest.skip("filme do datasheet com filme feito à mão: o contraste descasado é medido em test_lab_datasheet")
+    if neg in DATASHEET:
+        pytest.skip("par do datasheet: conferido em test_lab_datasheet")
     v = lab_values(lab_negativo=neg, lab_copia=copia)
     d = density(look.lab_eval(v, np.stack([np.asarray(LAD_SCALE)] * 3, axis=-1)))
     spread = np.ptp(d, axis=1)

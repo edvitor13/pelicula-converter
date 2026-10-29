@@ -3267,3 +3267,35 @@ base** (projeção `10^(−d/2,6)`, base limpa = branco). Medido com a 2383, pro
 
 Os desvios não foram corrigidos (os filmes de sempre não mudam). Eles são metas das películas calibradas da M8
 (§32.2), que partem dos pontos dos datasheets e por isso não herdam os números à mão.
+
+### 32.2 Películas calibradas pelos datasheets (M8)
+
+`tools/ajustar_lab.py` (só numpy, offline) ajusta o modelo de §14 aos pontos lidos dos gráficos públicos da Kodak
+(`pelicula/data/datasheets/`: H-1-5207, H-1-5219, H-1-5213 e H-1-2383, com publicação, revisão, página, figura,
+SHA-256, método e erro da leitura e a tolerância do ajuste). As constantes viram ids **novos no fim** das listas:
+`vision3_250d_v2`, `vision3_500t_v2`, `vision3_200t_v2` (`NEGATIVES`) e `2383_v2` (`LAB_PRINTS`), rotulados
+"(datasheet)"; os filmes de sempre não mudam. `tests/test_lab_datasheet.py` confere que as constantes são as do
+ajuste, que o erro fica dentro da tolerância gravada no JSON e que os ids novos estão no fim.
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Unidades do negativo | Eixo "Camera Stops" (0 = cinza de 18%), log E relativo = stops · log10 2; densidade Status M com base | Mesma convenção de `le = log10(e/0,18)`; a densidade mínima fica fora (o modelo é acima da base) |
+| Curva do negativo | Levenberg–Marquardt: gama, pé e ombro por camada e uma largura comum, depois do efeito entre camadas do filme à mão | Erro ≤ 0,019 (rms 0,006); gama R 0,49, G 0,55, B 0,53–0,54 (o vermelho do Vision3 é mais suave no Status M) |
+| Curva da cópia | Mesma exposição nas três camadas; canais Status A lidos por bandas estreitas no pico de cada corante (`densitometer`); gama limitado a 6 (acima vira logística sem melhorar o ajuste) | Erro ≤ 0,083 (rms 0,021), o maior no pé longo; gama 5,6/4,2/6,0 e dmax 3,8/3,3/3,4 (camadas) |
+| Diafonia da cópia | Curvas de densidade espectral dos corantes (p. 5) vistas pelos canais da tela: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2013) em Rec.709, só a parte positiva, sob corpo negro de 5500 K; coluna dividida pela diagonal | Magenta no vermelho 0,31, ciano no verde 0,23, magenta no azul 0,23 (a 2383 à mão tem 0,06–0,14) |
+| Matriz de sensibilidade e efeito entre camadas | Não calibrados: precisariam de espectros de refletância de cenas com licença livre | Os do filme feito à mão (`_SENS_V3`/`_SENS_V3T`, 0,38/0,36/0,37) |
+| Posição das curvas e densidade mínima | Fora do modelo | A calibração das luzes leva o cinza a 0,45 em qualquer combinação |
+
+Conferências pelo LAD com o par do datasheet (negativo + `2383_v2`): o cinza de 16% sai com densidade visual
+1,008 (meta 1,0; os filmes à mão dão 0,97); 6,5 pontos por stop de câmera (meta ≈ 7); a mancha do LAD no negativo
+(modelo + densidade mínima) dá 0,86/1,37/1,61 contra 0,80/1,20/1,60. Desvio que fica: **0,10 de densidade por
+ponto** (meta ≈ 0,07), porque a diafonia larga da tela soma às camadas no cinza (as camadas sozinhas têm
+inclinação ≈ 2,9 no cinza, como o Status A lido; a soma vista pelo canal dá ≈ 3,9). Escala de cinza do LAD com o
+par: ≤ 0,012 entre 16% e 20% e até 0,125 no preto de 2,5% (azul mais denso: o pé longo do azul da 2383). Os
+negativos do datasheet com as cópias à mão (e o contrário) viram até 0,2 nas sombras: Status M (negativo) e
+Status A (cópia) só fecham o cinza entre si, e o vermelho mais suave do negativo medido é compensado pelo gama
+maior do vermelho na cópia medida. Esses pares ficam fora do teste da escala de cinza de §32.1.
+
+Ficaram de fora o 50D 5203 (a curva do vermelho é pontilhada no gráfico e o leitor de traço não a segue) e a 2393
+(não lida nesta versão). O selo "Desatualizada" nos filmes à mão **não** foi ligado (decisão do
+usuário).
