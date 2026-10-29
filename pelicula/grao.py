@@ -8,6 +8,8 @@ bit a bit o de antes (`tests/test_grao.py` confere com a referência gravada pel
   camada (MTF dos datasheets), com o mesmo desfoque da maciez (`shaders.BLUR3`, um sigma por canal).
 - **Grão no negativo** (`lab_grao`, M3): `negative_grain` leva o mesmo campo do grão para a densidade de cada
   camada do negativo dentro do Laboratório (`labPath` no shader), em unidades de sigma D por camada.
+- **Respiração por camada** (`grao_respiracao`): `breathing` dá a cada quadro um pequeno desvio de densidade por
+  camada (do número do quadro e da semente), aplicado como exposição antes da cor.
 - **Halação física** (`hal_modelo = "fisica"`): `physical_halation` troca a cadeia da halação por uma sem limiar,
   da exposição do vermelho, com o raio pelo tamanho do quadro da bitola; o FINAL soma só o desvio local do reflexo
   (o halo menos a exposição do próprio ponto), então áreas lisas não mudam.
@@ -177,3 +179,47 @@ def physical_halation(plan, U: dict, v: dict, scale: float) -> None:
     plan.chains = [phys if c.name == "hal" else c for c in plan.chains]
     U["u_hal_on"] = 2
     U["u_hal_amt"] = float(v["hal_forca"]) * HAL_PHYS_K
+
+
+# ------------------------------------------------------------------ respiração por camada
+# Cada quadro da fita tem a sua exposição efetiva por camada: a espessura da emulsão ao longo da fita, a revelação e
+# a luz da copiadora nunca são iguais de um quadro para outro, e cada camada varia por si. O modelo: um desvio de
+# densidade do negativo por camada, dD_c(quadro) = BREATH_SIGMA_D · Respiração · (0,8 · rápido + 0,6 · lento), com
+# "rápido" de quadro em quadro (look._hash) e "lento" ao longo da fita (look._vnoise a cada BREATH_SLOW_FRAMES
+# quadros), os dois com variância 1; vira exposição pelo gama do negativo (dlogE = dD / BREATH_NEG_GAMMA) e entra
+# antes da cor: a curva do negativo e a da cópia moldam a variação (some nos pretos e nas luzes estouradas). Está em
+# quadros, não em segundos: a fita é que varia. BREATH_SIGMA_D (100%) = 0,015 D ≈ 0,025 log E = um ponto de
+# copiadora (12 pontos = 0,3 log E), o desvio de uma cópia com revelação descuidada; não vem de datasheet.
+BREATH_SIGMA_D = 0.015
+BREATH_NEG_GAMMA = 0.6
+BREATH_SLOW_FRAMES = 24.0
+BREATH_SLOW_NORM = 2.0098  # 1 / desvio padrão da _vnoise (valores uniformes em [-1, 1] ligados por smoothstep)
+# No nó Textura do DaVinci, que vem depois da cor, o mesmo fator multiplica a luz da saída: igual ao app com a cor
+# neutra; com uma cópia ou o Laboratório, sem a curva deles (uma aproximação, como a halação do nó). O OpenFX faz
+# como o app.
+
+
+def breath_density(v: dict, frame: int) -> tuple[float, float, float]:
+    """O desvio de densidade de cada camada (R, G, B) no quadro `frame` (igual a `pc_breath` do plugin)."""
+    from .look import _hash, _vnoise
+    a = float(v["grao_respiracao"]) * BREATH_SIGMA_D
+    s = int(v["grao_semente"]) * 3 + 7001
+    out = []
+    for c in range(3):
+        fast = (_hash(int(frame), s + c) * 2.0 - 1.0) * 1.7320508
+        slow = _vnoise(int(frame) / BREATH_SLOW_FRAMES, s + c + 101) * BREATH_SLOW_NORM
+        out.append(a * (0.8 * fast + 0.6 * slow))
+    return out[0], out[1], out[2]
+
+
+def breathing_on(v: dict) -> bool:
+    return bool(v["grao_on"]) and float(v.get("grao_respiracao", 0.0)) > 0.0
+
+
+def breathing(U: dict, v: dict, frame: int) -> None:
+    """Gancho de `build_plan` (depois do grão): `u_breath` = o fator de exposição de cada camada neste quadro. Sem a
+    respiração o plano não grava `u_breath`, e o Engine usa o neutro (1, 1, 1) no FINAL (`Engine.FINAL_NEUTRAL`).
+    Só o FINAL o lê: o LUT exportado não muda."""
+    if not breathing_on(v):
+        return
+    U["u_breath"] = tuple(10.0 ** (d / BREATH_NEG_GAMMA) for d in breath_density(v, frame))

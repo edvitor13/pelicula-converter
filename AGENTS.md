@@ -43,7 +43,8 @@ pelicula/
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
                              Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
   grao.py                    grão e textura da 1.6 (ARQUITETURA §30): modelos chamados por ganchos de build_plan
-                             (maciez pelo grão, nitidez por camada…), constantes calibradas por datasheets
+                             (maciez pelo grão, nitidez por camada, grão no negativo, halação física,
+                             respiração por camada), constantes calibradas por datasheets
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
@@ -372,7 +373,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
-| `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, determinismo |
+| `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |
+| `tests/test_grao_ui.py` | os controles de grão e textura da 1.6 nos cartões das seções (casos em `grao_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
@@ -433,7 +435,9 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    `frame`/`t` + semente.
 3. **`shaders.py`**: declare o `uniform` no shader certo (`COMMON` para cor — vale também para o
    `BAKE` —, `BASE` para geometria/entrada, `FINAL` para efeitos sobre a imagem) e use-o. Mantenha
-   y para baixo.
+   y para baixo. Um uniform do FINAL que o plano só grava com o efeito ligado (para os planos de
+   sempre não mudarem) precisa do valor neutro em `Engine.FINAL_NEUTRAL`, senão o valor de um quadro
+   anterior fica no programa.
 4. Se o efeito é **só de cor**, coloque-o dentro de `colorPipe()` para que entre também nos LUTs
    exportados (`BAKE`). Efeitos espaciais ou temporais não cabem num LUT.
 5. Se um preset precisar dele, ajuste `presets.FILM_BASE` ou o preset.

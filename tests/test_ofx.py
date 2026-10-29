@@ -490,6 +490,8 @@ RENDER_CASES = [
     ("grao_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True)),
     ("grao_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
                                     grao_cor=0.8, lab_revelacao=1.0)),
+    ("respiracao", _neutral(grao_on=True, grao_forca=0.0, grao_respiracao=1.0)),
+    ("respiracao_lab", _neutral(lab_on=True, grao_on=True, grao_respiracao=1.0, lab_grao=True)),
 ]
 
 

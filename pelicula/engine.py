@@ -73,6 +73,10 @@ class Engine:
         self._clip_tex: dict[int, moderngl.Texture] = {}
 
     # ------------------------------------------------------------ recursos
+    # Uniforms do FINAL que o plano só grava com o efeito ligado (os planos de sempre não mudam): o valor neutro
+    # entra antes do plano, para que um quadro anterior com o efeito não deixe o valor no programa.
+    FINAL_NEUTRAL = {"u_breath": (1.0, 1.0, 1.0)}  # 1.6: respiração por camada (grao.breathing)
+
     def _target(self, name: str, size: tuple[int, int], dtype: str = "f2", mip: bool = False):
         cur = self._targets.get(name)
         if cur and cur[0].size == size and cur[0].dtype == dtype:
@@ -257,7 +261,7 @@ class Engine:
             "t_noise": noise[0] if noise else lin[0],
             "t_lut": self._lut_texture(plan.lut_path),
         }
-        self._run("final", out, textures, U)
+        self._run("final", out, textures, {**self.FINAL_NEUTRAL, **U})
         return out
 
     def _alpha_out(self, plan: look.Plan, depth: int, out) -> np.ndarray:

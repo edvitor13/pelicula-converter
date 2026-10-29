@@ -688,6 +688,13 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     const bool ngrain = grain && V.lab_on == 1 && V.lab_grao == 1;
     float3 ng_amp = make_float3(0.0f, 0.0f, 0.0f);
     if (ngrain) ng_amp = make_float3(PC_NG_AMP[0], PC_NG_AMP[1], PC_NG_AMP[2]) * ng_k;
+    // 1.6: respiração por camada (grao.breathing): a exposição de cada camada neste quadro, antes da cor
+    const bool breath = V.grao_on == 1 && V.grao_respiracao > 0.0f;
+    float3 breath_m = make_float3(1.0f, 1.0f, 1.0f);
+    if (breath) {
+        float3 bd = pc_breath(frame, V.grao_semente, V.grao_respiracao) * (2.3025851f / PC_BREATH_NEG_GAMMA);
+        breath_m = make_float3(std::exp(bd.x), std::exp(bd.y), std::exp(bd.z));
+    }
 
     PC_MARK("noise");
     // ---------------------------------------------------------------- curva sobreposta ("Mostrar curva")
@@ -735,6 +742,7 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                                         hal_a.z / (1.0f + hal_a.z) * dp);
                 }
                 if (F.leak_on > 0.0f) l = l + pc_leak(u, v, W / H, F.L0, F.L1, V.vazamento_cor, V.vazamento);
+                if (breath) l = make_float3(l.x * breath_m.x, l.y * breath_m.y, l.z * breath_m.z);
                 float3 yv;
                 if (ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;

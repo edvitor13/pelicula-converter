@@ -1030,6 +1030,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
         grao.negative_grain(U, v, v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net)
 
+    grao.breathing(U, v, frame)  # 1.6: respiração por camada (nada sem ela)
+
     # ---- Defeitos desenhados por cima
     dg = bool(v["desg_on"])
     sd = int(v["desgaste_semente"])

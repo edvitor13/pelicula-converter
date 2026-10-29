@@ -636,3 +636,19 @@ def test_negative_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engi
         assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
     plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
     assert np.abs(got - plain).mean() * 255 > 0.5  # o grão aparece
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_forca=0.0), dict(grao_semente=31, grao_respiracao=0.4)],
+                         ids=["so_respiracao", "com_grao"])
+def test_breathing_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: respiração por camada no nó Textura (depois da cor: igual ao app com a cor neutra)."""
+    vals = _neutral(**{"grao_on": True, "grao_respiracao": 1.0, **extra})
+    outs = []
+    for frame in (0, 7, 61):
+        want = _app(gl_engine, test_rgb, vals, frame)
+        got = harness.run("textura", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
+        outs.append(got)
+    assert np.abs(outs[0] - outs[1]).mean() * 255 > 0.5

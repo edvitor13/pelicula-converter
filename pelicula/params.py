@@ -362,6 +362,11 @@ SECTIONS: list[Section] = [
         F("grao_maciez", "Maciez pelo grão", 0.0, 0, 1, percent=True,
           tip="Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma "
               "imagem mais nítida que ele. 100% = a maciez do grão; 0% = como antes."),
+        F("grao_respiracao", "Respiração por camada", 0.0, 0, 1, percent=True,
+          tip="A cor e o brilho de cada quadro variam um pouco, de leve e cada camada por si (vermelho, verde e "
+              "azul), como na película: a emulsão, a revelação e a luz da copiadora nunca são iguais de um "
+              "quadro para outro. Muda a cada quadro e devagar ao longo da fita, sempre igual para o mesmo quadro "
+              "e a mesma semente. 100% = cerca de um ponto de copiadora; 0% = desligado."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [

@@ -435,3 +435,82 @@ def test_physical_halation_grows_with_smaller_gauges(gl_engine):
         return int(np.argmax(d < 0.25 * d[0]))
 
     assert reach("super8") > 2 * reach("35mm") > 0
+
+
+# ------------------------------------------------------------------ respiração por camada
+def breath(**kw) -> dict:
+    base = dict(grao_on=True, grao_forca=0.0, grao_respiracao=1.0)
+    base.update(kw)
+    return vals(**base)
+
+
+def test_breathing_is_off_by_default():
+    from pelicula.engine import Engine
+    assert params.PARAMS["grao_respiracao"].default == 0.0
+    assert "u_breath" not in plan(vals()).uniforms
+    assert "u_breath" not in plan(vals(grao_on=False, grao_respiracao=1.0)).uniforms
+    assert Engine.FINAL_NEUTRAL["u_breath"] == (1.0, 1.0, 1.0)
+    assert "u_breath" in plan(breath()).uniforms  # vale sem o grão (Intensidade 0), com a seção ligada
+
+
+def test_breathing_slow_part_has_unit_variance():
+    from pelicula.look import _vnoise
+    x = np.arange(200000) / 7.31
+    sd = np.std([_vnoise(float(t), 11) for t in x])
+    assert sd * grao.BREATH_SLOW_NORM == pytest.approx(1.0, abs=0.02)
+
+
+def test_breathing_statistics():
+    """Por camada, desvio = BREATH_SIGMA_D · Respiração; camadas independentes; parte de quadro em quadro e parte lenta."""
+    v = breath(grao_respiracao=0.5)
+    d = np.array([grao.breath_density(v, f) for f in range(20000)])
+    assert np.abs(d.mean(axis=0)).max() < 0.05 * grao.BREATH_SIGMA_D
+    np.testing.assert_allclose(d.std(axis=0), 0.5 * grao.BREATH_SIGMA_D, rtol=0.08)
+    c = np.corrcoef(d.T)
+    assert np.abs(c[np.triu_indices(3, 1)]).max() < 0.08
+    lag1 = [np.corrcoef(d[:-1, k], d[1:, k])[0, 1] for k in range(3)]
+    assert all(0.25 < r < 0.45 for r in lag1)  # 0,6² da parte lenta, que quase não muda de um quadro ao seguinte
+    lag48 = [np.corrcoef(d[:-48, k], d[48:, k])[0, 1] for k in range(3)]
+    assert all(abs(r) < 0.06 for r in lag48)
+    # determinístico, depende da semente, e o plano grava o fator de exposição
+    assert grao.breath_density(v, 17) == grao.breath_density(dict(v), 17)
+    assert grao.breath_density(v, 17) != grao.breath_density(dict(v, grao_semente=8), 17)
+    u = plan(v, frame=17).uniforms["u_breath"]
+    assert u == pytest.approx(tuple(10 ** (x / 0.6) for x in grao.breath_density(v, 17)))
+
+
+def test_breathing_is_the_same_at_any_resolution():
+    v = breath()
+    assert plan(v, 960, 540, frame=5).uniforms["u_breath"] == plan(v, 3840, 2160, frame=5).uniforms["u_breath"]
+
+
+@pytest.mark.gpu
+def test_breathing_frames_are_deterministic_and_differ(gl_engine):
+    img = code16(np.full((90, 160, 3), 0.18))
+    v = breath()
+    before = render(gl_engine, img, vals(), 3)
+    a, b = render(gl_engine, img, v, 3), render(gl_engine, img, v, 4)
+    assert np.abs(a - b).max() > 2 / 255
+    np.testing.assert_array_equal(a, render(gl_engine, img, v, 3))
+    # um quadro com respiração não deixa o fator no programa (Engine.FINAL_NEUTRAL)
+    np.testing.assert_array_equal(render(gl_engine, img, vals(), 3), before)
+
+
+@pytest.mark.gpu
+def test_breathing_goes_through_the_print(gl_engine):
+    """Entra antes da cor: com o Laboratório, a cópia esconde a variação nos pretos e nas luzes estouradas."""
+    stops = (-6, -4, -2, 0, 2, 4)
+    img, bw = steps_image(stops=stops)
+    v = breath(lab_on=True, bitola="35mm", bitola_desfoque_on=False)
+    means = np.array([[m for m, _s in band_stats(render(gl_engine, img, v, f), bw, len(stops))]
+                      for f in range(0, 60, 3)])
+    sd = means.std(axis=0)  # desvio entre quadros do brilho de cada faixa, por canal
+    mid = sd[stops.index(0)].mean()
+    assert mid > 2.5 * sd[stops.index(4)].mean() and mid > 2.5 * sd[stops.index(-6)].mean()
+    assert mid > 1.0 / 255
+
+
+@pytest.mark.gpu
+def test_breathing_is_not_in_the_exported_lut(gl_engine):
+    for v in (breath(), breath(lab_on=True)):
+        assert np.array_equal(gl_engine.bake_lut(v, 17), gl_engine.bake_lut(dict(v, grao_respiracao=0.0), 17))

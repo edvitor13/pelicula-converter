@@ -100,6 +100,10 @@ static const float PC_HAL_PX[8] = { 1.0f, 5.1055977f, 4.30051813f, 2.42690058f, 
 #define PC_HAL_PHYS_K 0.18f
 #define PC_HAL_PHYS_LIMIT 16.0f
 #define PC_HAL_FISICA 1
+#define PC_BREATH_SIGMA_D 0.015f
+#define PC_BREATH_NEG_GAMMA 0.6f
+#define PC_BREATH_SLOW 24.0f
+#define PC_BREATH_SLOW_NORM 2.0098f
 #define PC_COPIA_NENHUMA 0
 #define PC_LAB_COPIA_NENHUMA 6
 
@@ -828,6 +832,17 @@ static inline float3 pc_neg_grain(float4 nf, float4 nc, float rough, float chrom
            * (1.0f / _sqrtf((1.0f - c) * (1.0f - c) + c * c));
 }
 
+static inline float pc_breath1(int frame, int s) {
+    float fast = (pc_hash(frame, s) * 2.0f - 1.0f) * 1.7320508f;
+    float slow = pc_vnoise(PC_F(frame) / PC_BREATH_SLOW, s + 101) * PC_BREATH_SLOW_NORM;
+    return 0.8f * fast + 0.6f * slow;
+}
+static inline float3 pc_breath(int frame, int seed, float amount) {
+    int s = seed * 3 + 7001;
+    float a = amount * PC_BREATH_SIGMA_D;
+    return make_float3(pc_breath1(frame, s) * a, pc_breath1(frame, s + 1) * a, pc_breath1(frame, s + 2) * a);
+}
+
 // ---------------------------------------------------------------- valores (formato do app)
 struct pc_vals {
     int copia;
@@ -918,6 +933,7 @@ struct pc_vals {
     int grao_animado;
     int grao_semente;
     float grao_maciez;
+    float grao_respiracao;
     int hal_on;
     float hal_forca;
     float hal_raio;
@@ -980,7 +996,7 @@ struct pc_vals {
     float borda_irregular;
     float3 cor_barras;
 };
-#define PC_UI_SIZE 155
+#define PC_UI_SIZE 156
 static inline void pc_unpack(const float* ui, pc_vals* V) {
     float ui_copia = ui[0];
     V->copia = PC_I(ui_copia);
@@ -1158,127 +1174,129 @@ static inline void pc_unpack(const float* ui, pc_vals* V) {
     V->grao_semente = PC_I(ui_grao_semente);
     float ui_grao_maciez = ui[87];
     V->grao_maciez = (ui_grao_maciez * 0.01f);
-    float ui_hal_on = ui[88];
+    float ui_grao_respiracao = ui[88];
+    V->grao_respiracao = (ui_grao_respiracao * 0.01f);
+    float ui_hal_on = ui[89];
     V->hal_on = PC_I(ui_hal_on);
-    float ui_hal_forca = ui[89];
+    float ui_hal_forca = ui[90];
     V->hal_forca = ui_hal_forca;
-    float ui_hal_raio = ui[90];
+    float ui_hal_raio = ui[91];
     V->hal_raio = ui_hal_raio;
-    float ui_hal_limiar = ui[91];
+    float ui_hal_limiar = ui[92];
     V->hal_limiar = ui_hal_limiar;
-    pc_color3 ui_hal_cor = {ui[92], ui[93], ui[94]};
+    pc_color3 ui_hal_cor = {ui[93], ui[94], ui[95]};
     V->hal_cor = make_float3(ui_hal_cor.r, ui_hal_cor.g, ui_hal_cor.b);
-    float ui_hal_modelo = ui[95];
+    float ui_hal_modelo = ui[96];
     V->hal_modelo = PC_I(ui_hal_modelo);
-    float ui_bloom_on = ui[96];
+    float ui_bloom_on = ui[97];
     V->bloom_on = PC_I(ui_bloom_on);
-    float ui_bloom_forca = ui[97];
+    float ui_bloom_forca = ui[98];
     V->bloom_forca = ui_bloom_forca;
-    float ui_bloom_raio = ui[98];
+    float ui_bloom_raio = ui[99];
     V->bloom_raio = ui_bloom_raio;
-    float ui_bloom_limiar = ui[99];
+    float ui_bloom_limiar = ui[100];
     V->bloom_limiar = ui_bloom_limiar;
-    float ui_nevoa_forca = ui[100];
+    float ui_nevoa_forca = ui[101];
     V->nevoa_forca = (ui_nevoa_forca * 0.01f);
-    float ui_nevoa_raio = ui[101];
+    float ui_nevoa_raio = ui[102];
     V->nevoa_raio = ui_nevoa_raio;
-    float ui_lente_on = ui[102];
+    float ui_lente_on = ui[103];
     V->lente_on = PC_I(ui_lente_on);
-    float ui_maciez = ui[103];
+    float ui_maciez = ui[104];
     V->maciez = (ui_maciez * 0.01f);
-    float ui_raio_maciez = ui[104];
+    float ui_raio_maciez = ui[105];
     V->raio_maciez = ui_raio_maciez;
-    float ui_nitidez = ui[105];
+    float ui_nitidez = ui[106];
     V->nitidez = ui_nitidez;
-    float ui_aberracao = ui[106];
+    float ui_aberracao = ui[107];
     V->aberracao = ui_aberracao;
-    float ui_distorcao = ui[107];
+    float ui_distorcao = ui[108];
     V->distorcao = ui_distorcao;
-    float ui_vinheta = ui[108];
+    float ui_vinheta = ui[109];
     V->vinheta = (ui_vinheta * 0.01f);
-    float ui_vinheta_raio = ui[109];
+    float ui_vinheta_raio = ui[110];
     V->vinheta_raio = ui_vinheta_raio;
-    float ui_vinheta_suavidade = ui[110];
+    float ui_vinheta_suavidade = ui[111];
     V->vinheta_suavidade = ui_vinheta_suavidade;
-    float ui_vinheta_redondeza = ui[111];
+    float ui_vinheta_redondeza = ui[112];
     V->vinheta_redondeza = (ui_vinheta_redondeza * 0.01f);
-    float ui_proj_on = ui[112];
+    float ui_proj_on = ui[113];
     V->proj_on = PC_I(ui_proj_on);
-    float ui_tremor_x = ui[113];
+    float ui_tremor_x = ui[114];
     V->tremor_x = ui_tremor_x;
-    float ui_tremor_y = ui[114];
+    float ui_tremor_y = ui[115];
     V->tremor_y = ui_tremor_y;
-    float ui_tremor_rot = ui[115];
+    float ui_tremor_rot = ui[116];
     V->tremor_rot = ui_tremor_rot;
-    float ui_tremor_vel = ui[116];
+    float ui_tremor_vel = ui[117];
     V->tremor_vel = ui_tremor_vel;
-    float ui_cintilacao = ui[117];
+    float ui_cintilacao = ui[118];
     V->cintilacao = ui_cintilacao;
-    float ui_cintilacao_vel = ui[118];
+    float ui_cintilacao_vel = ui[119];
     V->cintilacao_vel = ui_cintilacao_vel;
-    float ui_desg_on = ui[119];
+    float ui_desg_on = ui[120];
     V->desg_on = PC_I(ui_desg_on);
-    float ui_poeira_on = ui[120];
+    float ui_poeira_on = ui[121];
     V->poeira_on = PC_I(ui_poeira_on);
-    float ui_poeira = ui[121];
+    float ui_poeira = ui[122];
     V->poeira = (ui_poeira * 0.01f);
-    float ui_poeira_tamanho = ui[122];
+    float ui_poeira_tamanho = ui[123];
     V->poeira_tamanho = ui_poeira_tamanho;
-    float ui_poeira_tipo = ui[123];
+    float ui_poeira_tipo = ui[124];
     V->poeira_tipo = PC_I(ui_poeira_tipo);
-    float ui_riscos_on = ui[124];
+    float ui_riscos_on = ui[125];
     V->riscos_on = PC_I(ui_riscos_on);
-    float ui_riscos = ui[125];
+    float ui_riscos = ui[126];
     V->riscos = (ui_riscos * 0.01f);
-    float ui_riscos_largura = ui[126];
+    float ui_riscos_largura = ui[127];
     V->riscos_largura = ui_riscos_largura;
-    float ui_cabelo_on = ui[127];
+    float ui_cabelo_on = ui[128];
     V->cabelo_on = PC_I(ui_cabelo_on);
-    float ui_cabelo = ui[128];
+    float ui_cabelo = ui[129];
     V->cabelo = (ui_cabelo * 0.01f);
-    float ui_cabelo_tamanho = ui[129];
+    float ui_cabelo_tamanho = ui[130];
     V->cabelo_tamanho = ui_cabelo_tamanho;
-    float ui_manchas_on = ui[130];
+    float ui_manchas_on = ui[131];
     V->manchas_on = PC_I(ui_manchas_on);
-    float ui_manchas = ui[131];
+    float ui_manchas = ui[132];
     V->manchas = (ui_manchas * 0.01f);
-    float ui_queima_on = ui[132];
+    float ui_queima_on = ui[133];
     V->queima_on = PC_I(ui_queima_on);
-    float ui_queima = ui[133];
+    float ui_queima = ui[134];
     V->queima = (ui_queima * 0.01f);
-    float ui_marcas_on = ui[134];
+    float ui_marcas_on = ui[135];
     V->marcas_on = PC_I(ui_marcas_on);
-    float ui_marcas_intervalo = ui[135];
+    float ui_marcas_intervalo = ui[136];
     V->marcas_intervalo = ui_marcas_intervalo;
-    float ui_cor_instavel_on = ui[136];
+    float ui_cor_instavel_on = ui[137];
     V->cor_instavel_on = PC_I(ui_cor_instavel_on);
-    float ui_cor_instavel = ui[137];
+    float ui_cor_instavel = ui[138];
     V->cor_instavel = (ui_cor_instavel * 0.01f);
-    float ui_emenda_on = ui[138];
+    float ui_emenda_on = ui[139];
     V->emenda_on = PC_I(ui_emenda_on);
-    float ui_emenda = ui[139];
+    float ui_emenda = ui[140];
     V->emenda = (ui_emenda * 0.01f);
-    float ui_vazamento_on = ui[140];
+    float ui_vazamento_on = ui[141];
     V->vazamento_on = PC_I(ui_vazamento_on);
-    float ui_vazamento = ui[141];
+    float ui_vazamento = ui[142];
     V->vazamento = (ui_vazamento * 0.01f);
-    pc_color3 ui_vazamento_cor = {ui[142], ui[143], ui[144]};
+    pc_color3 ui_vazamento_cor = {ui[143], ui[144], ui[145]};
     V->vazamento_cor = make_float3(ui_vazamento_cor.r, ui_vazamento_cor.g, ui_vazamento_cor.b);
-    float ui_vazamento_vel = ui[145];
+    float ui_vazamento_vel = ui[146];
     V->vazamento_vel = ui_vazamento_vel;
-    float ui_desgaste_semente = ui[146];
+    float ui_desgaste_semente = ui[147];
     V->desgaste_semente = PC_I(ui_desgaste_semente);
-    float ui_mold_on = ui[147];
+    float ui_mold_on = ui[148];
     V->mold_on = PC_I(ui_mold_on);
-    float ui_proporcao = ui[148];
+    float ui_proporcao = ui[149];
     V->proporcao = PC_I(ui_proporcao);
-    float ui_cantos = ui[149];
+    float ui_cantos = ui[150];
     V->cantos = ui_cantos;
-    float ui_borda_suave = ui[150];
+    float ui_borda_suave = ui[151];
     V->borda_suave = ui_borda_suave;
-    float ui_borda_irregular = ui[151];
+    float ui_borda_irregular = ui[152];
     V->borda_irregular = (ui_borda_irregular * 0.01f);
-    pc_color3 ui_cor_barras = {ui[152], ui[153], ui[154]};
+    pc_color3 ui_cor_barras = {ui[153], ui[154], ui[155]};
     V->cor_barras = make_float3(ui_cor_barras.r, ui_cor_barras.g, ui_cor_barras.b);
 }
 
@@ -1372,6 +1390,7 @@ static inline float3 pc_input(const pc_vals& V, float3 code) {
     int v_grao_animado = V.grao_animado;
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -1521,6 +1540,7 @@ static inline float3 pc_input(const pc_vals& V, float3 code) {
     (void)v_grao_animado;
     (void)v_grao_semente;
     (void)v_grao_maciez;
+    (void)v_grao_respiracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -1681,6 +1701,7 @@ static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {
     int v_grao_animado = V.grao_animado;
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -1830,6 +1851,7 @@ static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {
     (void)v_grao_animado;
     (void)v_grao_semente;
     (void)v_grao_maciez;
+    (void)v_grao_respiracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -1989,6 +2011,7 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
     int v_grao_animado = V.grao_animado;
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2138,6 +2161,7 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
     (void)v_grao_animado;
     (void)v_grao_semente;
     (void)v_grao_maciez;
+    (void)v_grao_respiracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -2397,6 +2421,7 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
     int v_grao_animado = V.grao_animado;
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2546,6 +2571,7 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
     (void)v_grao_animado;
     (void)v_grao_semente;
     (void)v_grao_maciez;
+    (void)v_grao_respiracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -2830,6 +2856,7 @@ static inline void pc_frame_params(const pc_vals& V, int p_Width, int p_Height, 
     int v_grao_animado = V.grao_animado;
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2979,6 +3006,7 @@ static inline void pc_frame_params(const pc_vals& V, int p_Width, int p_Height, 
     (void)v_grao_animado;
     (void)v_grao_semente;
     (void)v_grao_maciez;
+    (void)v_grao_respiracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;

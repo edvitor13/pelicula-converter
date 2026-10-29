@@ -791,6 +791,7 @@ vec3 applyGrain(vec3 y, vec2 uv) {
 
 // 1.6: o mesmo campo do grão, sem a resposta por tom, em sigma D por camada (grão no negativo)
 uniform vec3 u_ngrain;  // só com u_grain_on = 2
+uniform vec3 u_breath;  // 1.6: exposição de cada camada neste quadro (Engine.FINAL_NEUTRAL sem a respiração)
 vec3 negGrain(vec2 uv) {
     vec4 nf = texBicubic(t_noise, uv) * 2.08;
     vec4 nc = texBicubic(t_noise, uv * 0.4347 + vec2(0.311, 0.173)) * 2.08;
@@ -981,6 +982,7 @@ void main() {
         lin += a / (1.0 + a) * (texture(t_hal, uv).r - halSource(texture(t_lin, uv)));
     }
     if (u_leak_on == 1) lin += leak(uv);
+    lin *= u_breath;  // 1.6: respiração por camada (grao.breathing); (1, 1, 1) sem ela
     if (u_grain_on == 2) g_ng = negGrain(uv);
     vec3 y = colorPipe(lin);
     if (u_grain_on == 1) y = applyGrain(y, uv);

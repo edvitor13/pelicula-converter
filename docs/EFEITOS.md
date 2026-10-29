@@ -34,6 +34,7 @@ vídeo (no modo Película) ou o da montagem; a exportação usa as mesmas chaves
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
       → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
       → maciez (bitola, lente e MTF da película) / nitidez → névoa → bloom → halação → vazamento de luz
+      → respiração por camada
       → [laboratório: negativo (separação de cores, saturação do filme) → copiadora → cópia
          → rolagens, saturação final, densidade por cor, pele]
       → cor da película (ou LUT "no lugar do look") → cópia → envelhecimento → LUT "depois"
@@ -319,6 +320,7 @@ interpolação é trilinear na GPU.
 | **Grão muda a cada quadro** | liga/desliga | ligado | Desligado, o padrão do grão fica parado (útil para fotos ou efeitos especiais). |
 | Semente (**avançado**) | 0–9999 | 7 | Muda o padrão aleatório do grão. |
 | **Maciez pelo grão** | 0–100% | 0% | Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma imagem mais nítida que ele (na película, a imagem nunca é mais nítida que o grão). 100% dá à imagem a maciez do grão: cresce com o *Tamanho*, a bitola e o ISO. Soma-se às outras maciezes (bitola, lente, MTF) e só vale com o grão ligado. |
+| **Respiração por camada** | 0–100% | 0% | A cor e o brilho de cada quadro variam um pouco, cada camada por si (vermelho, verde e azul), como na película: a espessura da emulsão ao longo da fita, a revelação e a luz da copiadora nunca são iguais de um quadro para outro. Uma parte muda de quadro em quadro e outra devagar ao longo da fita (uns 24 quadros), sempre igual para o mesmo quadro e a mesma *Semente*. Entra como exposição **antes da cor**, então a cópia (ou o Laboratório) a esconde nos pretos e nas altas luzes estouradas. 100% ≈ um ponto de copiadora de desvio (0,015 de densidade do negativo), o de uma cópia revelada sem muito cuidado; vale com a seção *Grão* ligada, mesmo com a *Intensidade* em 0. Não entra no LUT exportado. Chave `grao_respiracao`. |
 
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
 bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é **procedural**: nasce dos ajustes
@@ -532,6 +534,7 @@ abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e 
 grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
 sua imagem.
 
+A **respiração por camada** também não: 100% é um ponto de copiadora de desvio, escolhido a olho.
 A **halação física** (*Halação › Modelo › Física*) não é calibrada por datasheet: o raio vem da geometria do
 reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (veja *Halação*).
 
@@ -542,7 +545,8 @@ reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (ve
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
 tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
 cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
-dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
+dependem da posição do pixel, dos vizinhos ou do tempo): grão (também o grão no negativo), respiração por
+camada, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura e scan.
 
 A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o

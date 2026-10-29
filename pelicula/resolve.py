@@ -823,7 +823,8 @@ def spec(kind: str, dialect: str = DCTL) -> Spec:
         return Spec(kind, controls, tables, kernel, body, False)
     if kind == "textura":
         tables = _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
-        return Spec("textura", textura_controls(), tables, K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
+        return Spec("textura", textura_controls(), tables, K_COMMON + K_RAND + K_TEXTURA + K_BREATH, _textura_body(),
+                    True)
     if kind == "projetor":
         return Spec("projetor", projetor_controls(), _gauge_tables(dialect) + _projetor_tables(dialect),
                     K_COMMON + K_RAND + K_PROJETOR, _projetor_body(), True)
@@ -1351,6 +1352,22 @@ PC_DEVICE float3 pc_apply_grain(float3 y, float4 nf, float4 nc, float rough, flo
 # 1.6: grão no negativo (grao.negative_grain). O campo do grão do Textura (mesma grade, sementes e mistura de
 # aspereza e cor), sem a resposta por tom, vira densidade de cada camada do negativo (PC_NG_AMP = sigma D por
 # pixel); quem molda o grão visível é a curva da cópia.
+# 1.6: respiração por camada (grao.breathing): o desvio de densidade de cada camada no quadro (o mesmo de
+# grao.breath_density, com pc_hash e pc_vnoise de K_RAND).
+K_BREATH = r"""
+PC_DEVICE float pc_breath1(int frame, int s) {
+    float fast = (pc_hash(frame, s) * 2.0f - 1.0f) * 1.7320508f;
+    float slow = pc_vnoise(PC_F(frame) / PC_BREATH_SLOW, s + 101) * PC_BREATH_SLOW_NORM;
+    return 0.8f * fast + 0.6f * slow;
+}
+PC_DEVICE float3 pc_breath(int frame, int seed, float amount) {
+    int s = seed * 3 + 7001;
+    float a = amount * PC_BREATH_SIGMA_D;
+    return make_float3(pc_breath1(frame, s) * a, pc_breath1(frame, s + 1) * a, pc_breath1(frame, s + 2) * a);
+}
+"""
+
+
 K_NGRAIN = r"""
 PC_DEVICE float3 pc_neg_grain(float4 nf, float4 nc, float rough, float chroma) {
     float r = rough;
@@ -1521,8 +1538,16 @@ def _textura_body() -> str:
     }
     int bloom = (v_bloom_on == 1 && v_bloom_forca > 0.0f) ? 1 : 0;
     int mist = (v_bloom_on == 1 && v_nevoa_forca > 0.0f) ? 1 : 0;
+    // 1.6: respiracao por camada (grao.breathing), depois da cor: o fator de exposicao de cada camada multiplica
+    // a luz da saida (igual ao app com a cor neutra; sem a curva da copia: aproximacao, como a halacao)
+    int brth = (v_grao_on == 1 && v_grao_respiracao > 0.0f) ? 1 : 0;
+    float3 bm = pc_s3(1.0f);
+    if (brth == 1) {
+        float3 bd = pc_breath(PC_FRAME, v_grao_semente, v_grao_respiracao) * (2.3025851f / PC_BREATH_NEG_GAMMA);
+        bm = make_float3(_expf(bd.x), _expf(bd.y), _expf(bd.z));
+    }
     float3 y = c0;
-    if (sigma > 0.0f || vig != 1.0f || hal == 1 || halp == 1 || bloom == 1 || mist == 1) {
+    if (sigma > 0.0f || vig != 1.0f || hal == 1 || halp == 1 || bloom == 1 || mist == 1 || brth == 1) {
         float3 lin = pc_code_to_lin(c0) * vig;
         if (sigma > 0.0f) {
             int cx = pc_clampi(PC_I(_floorf(pg.x * W)), 0, p_Width - 1);
@@ -1556,7 +1581,8 @@ def _textura_body() -> str:
             float3 base = pc_lerp3(lin, b, soft_mix);
             lin = pc_max3(base + (lin - b) * sharp, 0.0f);
         }
-""" + glows + r"""        y = pc_lin_to_code(lin);
+""" + glows + r"""        if (brth == 1) lin = make_float3(lin.x * bm.x, lin.y * bm.y, lin.z * bm.z);
+        y = pc_lin_to_code(lin);
     }
     if (v_grao_on == 1 && v_grao_forca > 0.0f) {
         float iso_amt = _powf(iso / 250.0f, 0.35f);
@@ -1596,6 +1622,7 @@ def textura_controls() -> list[Ctl]:
         ctl("grao_sombras", "Grao - Nas sombras"), ctl("grao_meios", "Grao - Nos tons medios"),
         ctl("grao_luzes", "Grao - Nas altas luzes"), ctl("grao_animado", "Grao - Muda a cada quadro"),
         ctl("grao_semente", "Grao - Semente"), ctl("grao_maciez", "Grao - Maciez pelo grao"),
+        ctl("grao_respiracao", "Grao - Respiracao por camada"),
         ctl("hal_on", "Halacao"), ctl("hal_forca", "Halacao - Intensidade"),
         ctl("hal_raio", "Halacao - Raio px em 1080p"), ctl("hal_limiar", "Halacao - Limiar EV"),
         ctl("hal_cor", "Halacao - Cor"), ctl("hal_modelo", "Halacao - Modelo"),
@@ -1632,6 +1659,9 @@ def _grao_tables(dialect: str) -> str:
                                          for k, _l in params.BITOLAS])
     out += _define("PC_HAL_PHYS_K", grao.HAL_PHYS_K) + _define("PC_HAL_PHYS_LIMIT", grao.HAL_PHYS_LIMIT)
     out += f"#define PC_HAL_FISICA {[k for k, _l in params.HAL_MODELOS].index('fisica')}\n"
+    # respiração por camada
+    out += _define("PC_BREATH_SIGMA_D", grao.BREATH_SIGMA_D) + _define("PC_BREATH_NEG_GAMMA", grao.BREATH_NEG_GAMMA)
+    out += _define("PC_BREATH_SLOW", grao.BREATH_SLOW_FRAMES) + _define("PC_BREATH_SLOW_NORM", grao.BREATH_SLOW_NORM)
     out += f"#define PC_COPIA_NENHUMA {copias.index('nenhuma')}\n"
     out += f"#define PC_LAB_COPIA_NENHUMA {lab_copias.index('nenhuma')}\n"
     return out
