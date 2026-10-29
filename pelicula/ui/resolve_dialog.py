@@ -161,7 +161,8 @@ class ResolveDialog(QDialog):
                         "acima ou os LUTs .cube da pasta LUTs (botão direito no nó › LUT): eles têm só a cor.")
             + "</p>"
             + "<p style='color:%s'>" % theme.FAINT
-            + _("Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes.") + "</p>"
+            + _("Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes.") + " "
+            + _("O grão no negativo e a diferença de nitidez entre camadas usam números de datasheets públicos da Kodak.") + "</p>"
         )
 
     def refresh(self) -> None:

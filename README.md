@@ -1126,7 +1126,9 @@ O **Scan da película** desenha a tira com as medidas reais em milímetros:
 
 **Os nomes "Kodak Vision3", "Portra", "Velvia"… são os filmes de verdade?**
 Não. São **aproximações artísticas** do estilo de cada filme, feitas com os controles do app, sem
-dados nem relação com os fabricantes. Veja o [aviso legal](#aviso-legal).
+relação com os fabricantes. Desde a 1.6, dois modelos de textura (o grão no negativo e a diferença de
+nitidez entre camadas) usam números de datasheets **públicos** da Kodak; isso não torna nenhum preset
+uma reprodução oficial. Veja o [aviso legal](#aviso-legal).
 
 **O grão muda a cada quadro?**
 Sim, por padrão (*Grão muda a cada quadro*). Desligue para um grão fixo. A *Semente* troca o padrão.
@@ -1415,8 +1417,12 @@ parte deste repositório com o programa compilado do código oficial, sem mudan�
   Tri-X, Portra, Ektar, Ektachrome, Kodachrome, Fujifilm, Eterna, Velvia, Superia, Ilford, HP5,
   CineStill, Technicolor e outros) **apenas descrevem o estilo** que cada preset tenta lembrar.
   São **aproximações artísticas**, feitas com os controles do app, **sem relação, parceria ou
-  endosso** dos fabricantes, e sem uso de dados, perfis ou LUTs deles. Todas as marcas pertencem
-  aos seus donos. O texto de borda do *Scan da película* é decorativo.
+  endosso** dos fabricantes. Nenhum perfil ou LUT deles é distribuído. Alguns modelos usam números
+  de publicações **públicas**: o grão no negativo e a diferença de nitidez entre camadas vêm dos
+  datasheets da Kodak (Vision3 250D H-1-5207 e cópia 2383 H-1-2383; os pontos lidos e a fonte ficam
+  em `pelicula/data/datasheets/`, sem copiar os PDFs nem os gráficos), e as curvas dos perfis de
+  câmera seguem as fórmulas que cada fabricante publica. Nada disso é apresentado como oficial.
+  Todas as marcas pertencem aos seus donos. O texto de borda do *Scan da película* é decorativo.
 - **LUTs da Adobe e da Blackmagic Design não são distribuídos.** O PeliculaConverter apenas
   **lê**, no próprio computador do usuário, os arquivos que o Premiere Pro e o DaVinci Resolve
   instalaram; nenhum desses arquivos é copiado para o repositório, para o executável ou para os

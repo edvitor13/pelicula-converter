@@ -7,6 +7,43 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Perfis de câmera novos**, pelas fórmulas que os fabricantes publicam: Canon Log 2 e Log 3, Fujifilm
+  F-Log, F-Log2 e F-Log2 C, DJI D-Log, Sony S-Log2 e Leica L-Log, e o **EI do ARRI LogC3** (avançado).
+  Também no plugin do DaVinci.
+- **Proteger cores saturadas** (seção *Entrada*): comprime com suavidade as cores fora do gamut (LED,
+  neon), a partir da ACES Reference Gamut Compression. Também no plugin.
+- **Perfil de câmera por clipe** no modo Edição (cartão *Câmera*): câmeras diferentes na mesma montagem;
+  cada clipe é convertido para a entrada do look, e a montagem leva ao look a luz acima do branco.
+- **Sugestão do perfil pelos metadados**: ao abrir um arquivo, uma faixa oferece *Usar este perfil* (o look
+  só muda com o clique); no modo Edição, clipes novos de outra câmera já entram com o perfil.
+- **Grão e textura**: *Maciez pelo grão* e *Respiração por camada* (seção *Grão*), *Diferença de nitidez
+  entre camadas* (seção *Película*, pelas curvas de MTF dos datasheets públicos da Kodak), **Grão no
+  negativo** (seção *Laboratório*: o grão na densidade de cada camada, moldado pela curva da cópia, com a
+  granularidade publicada; também no nó *Laboratorio* do plugin) e o modelo **Física** da halação (o
+  reflexo na base volta à camada do vermelho antes da cópia).
+- **Cor por planos** (Beta, desligado): frente, fundo e pele com ajustes próprios no look, separados por
+  degradê, com conta-gotas da pele e *Ver planos*. Não vai para o LUT exportado nem para o plugin.
+- **Cor simples** no modo Edição (módulo, ligado a partir do perfil *Criador*): conta-gotas do balanço de
+  branco, *Automático* analisando o clipe inteiro, igualar a outro clipe ou a uma imagem protegendo a pele,
+  clicar numa cor da prévia e mudar só ela, *Pele natural*, degradê e grupos de cor.
+- **Zebra, falsa cor e referência na prévia** (módulo *Scopes*): exposição em stops em relação ao cinza de
+  18% e um quadro fixado ou uma imagem para comparar (Dividido ou Lado a lado). Só na tela.
+
+### Corrigido
+- **Super-brancos em vídeo log de faixa legal**: o que passava do código 940 era cortado ao abrir o
+  arquivo (no S-Log3, a partir de uns 6,7 stops acima do cinza). Agora chega ao look na prévia, na
+  exportação, no *Salvar quadro* e no `pelicula-cli`. **Isso muda a saída desses arquivos**: as altas luzes
+  acima do branco legal deixam de estourar duro. Vídeo Rec.709/sRGB e os demais casos saem iguais.
+- **Saída de 16 bits de arquivo de faixa legal** ficava uns 0,4% escura (o branco saía 0,9962): o branco
+  agora é 65535 exato, na exportação e no *Salvar quadro*.
+
+### Alterado
+- Projeto `.plc` no **formato 4** (bloco da montagem 3) quando usa algo da 1.6: a 1.5 recusa o projeto com
+  aviso em vez de abri-lo sem os ajustes novos. Projetos sem nada da 1.6 continuam no formato de antes.
+- Dados de fabricantes: números de publicações públicas podem calibrar modelos, com a fonte registrada
+  (`pelicula/data/datasheets/`); o aviso legal do README explica o que é usado.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

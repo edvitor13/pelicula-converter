@@ -118,7 +118,8 @@ LUT_ENTRADAS = [
     ("llog", "Leica L-Log"),
 ]
 
-# Laboratório: aproximações artísticas do comportamento de cada filme (sem dados dos fabricantes).
+# Laboratório: aproximações artísticas do comportamento de cada filme (as curvas não vêm de dados dos fabricantes).
+# Película calibrada por datasheet público entra como id novo no fim, com a fonte registrada (regra 8 do AGENTS.md).
 NEGATIVOS = [
     ("vision3_50d", "Kodak Vision3 50D"),
     ("vision3_250d", "Kodak Vision3 250D"),

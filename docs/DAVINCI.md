@@ -315,4 +315,4 @@ plugins/ofx/
   `verificar_deb.sh` conferem o pacote instalado. O aviso da licença BSD do OpenFX vai junto
   (`Contents/Resources/OpenFX-LICENSE.txt`).
 
-Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes.
+Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes. O grão no negativo e a diferença de nitidez entre camadas usam números de datasheets públicos da Kodak.

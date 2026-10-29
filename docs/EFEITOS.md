@@ -199,7 +199,8 @@ de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe sã
 Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
-comportamento de cada um, sem dados nem curvas dos fabricantes.
+comportamento de cada um: as curvas dos negativos e das cópias não vêm de dados dos fabricantes (só o
+*Grão no negativo* usa a granularidade publicada, veja *Modelos calibrados por datasheets*).
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|

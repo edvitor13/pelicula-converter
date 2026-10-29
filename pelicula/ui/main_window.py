@@ -3356,7 +3356,7 @@ class MainWindow(QMainWindow):
                       "bloom, bitolas de 8 mm a IMAX, tremor de projetor, desgaste e moldura.") + "</p>"
             f"<p>GPU: {self.engine.renderer}<br>ffmpeg: {ff}</p>"
             "<p>" + _("Os presets com nomes de filmes são aproximações artísticas, sem relação com os fabricantes.")
-            + "</p>"
+            + " " + _("O grão no negativo e a diferença de nitidez entre camadas usam números de datasheets públicos da Kodak.") + "</p>"
             "<p>" + _("Fontes dos títulos e legendas ({licenca}): {fontes}.").format(
                 licenca="SIL Open Font License 1.1", fontes=", ".join(n for n, _l in textrender.credits())) + "</p>"))
 
