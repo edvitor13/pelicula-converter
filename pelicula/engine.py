@@ -287,7 +287,7 @@ class Engine:
         """(1.6) A luz da cena do passo BASE para a imagem de entrada atual: (h, w, 4) float32 com a entrada
         decodificada pelo perfil do look (`toLinear`), o gamut, a exposição, o balanço, a Cor por planos e a vinheta,
         no enquadramento da prévia (a quarta coluna é quanto do pixel é imagem). Zebra e falsa cor medem aqui
-        (`meter.py`); só para a tela, a exportação nunca chama isto."""
+        (`exposure.py`); só para a tela, a exportação nunca chama isto."""
         if self.input_tex is None:
             raise RuntimeError("Nenhuma imagem carregada no motor.")
         w, h = self.input_tex.size

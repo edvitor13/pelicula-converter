@@ -15,6 +15,8 @@ e compara com `tests/data/cor_base.json`, gravado pela BASE:
     python tests/cor_base.py        # regrava a referência (só faz sentido no código da BASE)
 
 Para regravar depois: uma cópia de `pelicula/` da BASE (575c6f5) com este arquivo em `tests/` ao lado.
+O texto do plugin (`plugin_sources`) é a exceção: as frentes de grão e de entrada mudam o plugin de propósito,
+então ele foi regravado na integração com o código já juntado.
 
 Os uniforms e os textos valem em qualquer computador; os hashes dos quadros e dos LUTs dependem da placa e do
 driver, então `tests/test_cor_base.py` só os confere quando o `GL_RENDERER` é o mesmo da gravação.

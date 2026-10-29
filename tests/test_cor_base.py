@@ -18,6 +18,9 @@ REF = json.loads(base.DATA.read_text(encoding="utf-8"))
 # que some deixaria o valor do quadro anterior), com o valor que desliga a ferramenta.
 NEW_LOOK_UNIFORMS: dict[str, object] = {}
 NEW_CLIP_UNIFORMS: dict[str, object] = {}
+# Campos novos do `look.Plan` vindos das outras frentes da 1.6, com o valor que não muda nada (grão: o
+# desfoque por camada da M7, `Plan.soft_sigma3`).
+NEW_PLAN_FIELDS: dict[str, object] = {"soft_sigma3": None}
 
 
 def _flat(u) -> dict:
@@ -61,6 +64,8 @@ def test_look_plans_are_the_ones_of_the_base():
     assert now.keys() == REF["planos"].keys()
     for name, old in REF["planos"].items():
         plan = dict(now[name])
+        for k, neutral in NEW_PLAN_FIELDS.items():
+            assert plan.pop(k, neutral) == neutral, (name, k)
         plan["uniforms"] = _without_new(plan["uniforms"], NEW_LOOK_UNIFORMS)
         _same(plan, old)
 
@@ -76,6 +81,9 @@ def test_clip_uniforms_are_the_ones_of_the_base():
 
 
 def test_plugin_sources_are_the_ones_of_the_base():
+    """O texto dos nós do plugin foi regravado na integração da 1.6, depois das frentes que mudam o plugin de
+    propósito (grão e entrada; a paridade delas com a BASE fica em `tests/test_grao.py` e nos testes da
+    entrada): aqui ele confere que a cor não mexe no plugin."""
     assert base.plugin_sources() == REF["plugin"]
 
 
