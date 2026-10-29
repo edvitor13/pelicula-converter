@@ -1252,8 +1252,7 @@ class MainWindow(QMainWindow):
             alpha = not full and seq is not None and seq.transparent
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
                                  size=size, keys=self._export_keys(), burn=self._subtitle_burn(full),
-                                 alpha=bool(alpha) and seq is not None,
-                                 look_input=self.store.values if values is None else None)  # 1.6: camera.py
+                                 alpha=bool(alpha) and seq is not None)
 
     def _subtitle_burn(self, full: bool = False):
         """Legendas gravadas da receita (`SubtitlesUI.burn`; nenhuma antes de a interface delas existir)."""

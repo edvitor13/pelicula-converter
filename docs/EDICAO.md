@@ -306,8 +306,9 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
 - Os clipes com perfil próprio em log são lidos com as luzes acima do branco do vídeo (os super-brancos), e a
   montagem passa ao look a luz inteira, sem cortar nem arredondar. Para isso valer também para um clipe da
   câmera principal, escolha o perfil dele no cartão (em vez de *Igual ao do look*).
-- Sem película na prévia (o botão do filme desligado), a montagem aparece no perfil do look: num look em log,
-  os clipes convertidos também aparecem em log, como os da câmera principal.
+- Sem película na prévia (o botão do filme desligado), os clipes com perfil próprio aparecem convertidos para
+  vídeo comum (Rec.709), como saem na exportação *Sem película (só a edição)*; os que seguem o look aparecem como
+  foram gravados (um log continua lavado).
 - **Proteger cores saturadas** (no look) vale para a montagem inteira, no espaço do look.
 - **Clipes novos já vêm com o perfil** quando os metadados do arquivo indicam um diferente do look (HDR marcado,
   o XML da Sony, Apple Log, etiquetas de curva; veja *Sugestão pelos metadados* no guia dos efeitos). O primeiro

@@ -58,9 +58,6 @@ class Recipe:
     src_fps: float = 0.0          # fps do arquivo/sequência, em que as chaves do look estão (0 = `fps`)
     burn: Any = None              # subtitles.Burn: legendas gravadas no vídeo (antes ou depois do look); None = sem
     alpha: bool = False           # saída RGBA (h × w × 4, cor direta): a transparência da montagem
-    # 1.6 (`camera.py`): os ajustes do look que dão o espaço da montagem quando `values` é None (prévia do modo
-    # Edição sem película): os clipes com perfil de câmera próprio vão para a entrada do look mesmo sem o look.
-    look_input: dict | None = None
 
     def __post_init__(self) -> None:
         if self.keys:  # JSON do projeto ou chaves já limpas: sempre `keyframes.Key` só de ajustes animáveis
@@ -71,10 +68,10 @@ class Recipe:
     @classmethod
     def for_source(cls, values: dict | None, fps: float, depth: int, *, legal: bool, seq=None, dither=False,
                    size: tuple[int, int] | None = None, keys: dict | None = None, burn=None,
-                   alpha: bool = False, look_input: dict | None = None) -> "Recipe":
+                   alpha: bool = False) -> "Recipe":
         """Receita sem encaixe (prévia, "Salvar quadro", `pelicula-cli quadro`), com o LUT dos ajustes."""
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
-                   None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha), look_input)
+                   None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha))
 
     @property
     def profile(self) -> str | None:
@@ -110,7 +107,9 @@ class Recipe:
         kw = {"alpha": True} if self.alpha else {}
         from . import camera
         if camera.uses_profiles(self.seq):  # 1.6: perfis de câmera por clipe (a tela vai ao look em float32)
-            kw.update(camera=camera.target_of(self.values or self.look_input, self.legal),
+            # sem look (prévia sem película) o espaço é o Rec.709, o mesmo da exportação "Sem película", que usa o
+            # preset "original" (entrada Rec.709)
+            kw.update(camera=camera.target_of(self.values, self.legal),
                       float_out=self.values is not None and not self.alpha)
         return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop,
                               light=light_of(self.values, self.legal), **kw)

@@ -2704,7 +2704,8 @@ dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
 ## 29. Entrada da câmera na 1.6
 
 O que a câmera gravou chega ao look sem perdas: a leitura guarda os super-brancos do log, os perfis de câmera
-ganham as curvas que faltavam e o modo Edição normaliza clipes de câmeras diferentes. Com os ajustes padrão
+ganham as curvas que faltavam, cores muito saturadas podem ser protegidas, o modo Edição normaliza clipes de
+câmeras diferentes e os metadados do arquivo sugerem o perfil. Com os ajustes padrão
 nada muda (referência da BASE em `tests/entrada_base.py`, conferida por `tests/test_entrada_base.py`: uniforms,
 quadros do look em 8 e 16 bits, LUTs exportados, montagem do modo Edição, nó Cor do plugin e leitura de 8 bits).
 
@@ -2870,8 +2871,9 @@ pede o formato 4.
 - **Tela em float** (`Engine.compose(camera=, float_out=)`, `editshaders.OUT_FLOAT`): com algum clipe de perfil
   próprio (`camera.uses_profiles`) e o look ligado, `Recipe.montage` devolve a tela f4 inteira em float32, sem
   cortar em 1,0 nem arredondar, e o look a recebe como a leitura em float da 29.1. Sem look (prévia do modo Edição
-  sem película) a saída é inteira, como antes, e o espaço vem de `Recipe.look_input` (os ajustes do look da
-  janela): a prévia mostra a montagem já no perfil do look. Com transparência (`alpha`) a saída continua inteira.
+  sem película) a saída é inteira, como antes, e o espaço é o Rec.709 (`Target()`): o mesmo da exportação "Sem
+  película", que desenha o preset "original" (entrada Rec.709) sobre a montagem, então prévia e exportação
+  continuam vendo a mesma montagem. Com transparência (`alpha`) a saída continua inteira.
 - **Sem perfil próprio nada muda**: `Recipe.montage` só passa `camera`/`float_out` se `uses_profiles`; os
   programas e alvos são outros (`clip_cam*`, `canvas_outf`). `Sequence.is_trivial()` dá None com um perfil de
   clipe (a montagem muda a imagem), então o modo Película deixa de ler o arquivo direto.

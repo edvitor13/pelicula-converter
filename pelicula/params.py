@@ -230,7 +230,8 @@ SECTIONS: list[Section] = [
           "Como o vídeo foi gravado. Use o perfil log da câmera se gravou em log, ou HLG/PQ para vídeo HDR "
           "(os celulares costumam gravar em HLG). Trocar de preset não muda este ajuste."),
         B("log_reescalado", "Log reescalado (HDMI “Limited”)", False,
-          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, que a câmera grava no código de 10 bits. Ligue em gravações externas em "
+          "Só para S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, que a câmera grava no código de 10 bits. "
+          "Ligue em gravações externas em "
           "que a câmera mandou o log já reescalado para a faixa legal (saída HDMI em “Limited”, comum na Nikon): "
           "o app deixa de converter de volta para o código da câmera. Trocar de preset não muda este ajuste.",
           advanced=True),

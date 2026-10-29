@@ -122,12 +122,9 @@ def test_plain_montage_recipe_does_not_ask_for_the_camera_path():
     assert Spy.kw["camera"] == camera.Target() and Spy.kw["float_out"] is True
     r = Recipe.for_source(None, 24.0, 8, legal=True, seq=seq, size=(W, H))      # sem look: a saída é a montagem
     r.montage(Spy(), fl)
+    # prévia sem película: Rec.709, o espaço da exportação "Sem película" (o preset "original" lê Rec.709)
     assert Spy.kw["float_out"] is False and Spy.kw["camera"] == camera.Target()
-    # prévia do modo Edição sem película: o espaço continua sendo o da entrada do look
-    r = Recipe.for_source(None, 24.0, 8, legal=True, seq=seq, size=(W, H),
-                          look_input=dict(params.defaults(), entrada="vlog"))
-    r.montage(Spy(), fl)
-    assert Spy.kw["float_out"] is False and Spy.kw["camera"].id == look.INPUT_IDS["vlog"]
+    assert camera.target_of(presets.builtin_values("original"), True) == camera.Target()
 
 
 # ------------------------------------------------------------------ na GPU, sem arquivos
