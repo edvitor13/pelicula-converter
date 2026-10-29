@@ -140,12 +140,15 @@ def _save(p, near):
 @pytest.mark.ffmpeg
 @pytest.mark.parametrize("name", ["prores.mov", "alfa.png", "vp9.webm"])
 @pytest.mark.parametrize("depth", [8, 16])
-def test_decode_is_premultiplied_rgba(alpha_files, name, depth):
+def test_decode_is_premultiplied_rgba(alpha_files, name, depth, monkeypatch):
     (path,) = need(alpha_files, name)
     if name.endswith(".webm"):
         need_libvpx()
     info = media.probe(path)
     rgba = media.grab_frame(info, 0, W, H, depth, alpha=True)
+    # A cor de referência vem do mesmo swscale do caminho com alfa: a leitura sem alfa de 16 bits da 1.6 expande a
+    # faixa legal exata pelo zscale (`media._exact_graph`), que o caminho com alfa ainda não usa.
+    monkeypatch.setattr(media, "_FILTERS", media.filters() - {"zscale"})
     rgb = media.grab_frame(info, 0, W, H, depth)
     mx = 255 if depth == 8 else 65535
     assert rgba.shape == (H, W, 4) and rgb.shape == (H, W, 3)

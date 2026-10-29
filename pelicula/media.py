@@ -566,12 +566,18 @@ def float_input(info, profile: str | None) -> bool:
     return legal_range(info) and has_zscale()
 
 
-def _zscale(info, width: int, height: int, hq: bool) -> str:
-    """zscale que redimensiona e converte YUV de faixa legal em RGB de faixa cheia, sem cortar (float) e exato
-    nos níveis (16 bits): o swscale corta em 0–1 e, em 16 bits, entrega o branco em 65280 (0,4% abaixo)."""
-    kernel = "lanczos" if hq else "bicubic"
-    return (f"zscale=w={width}:h={height}:filter={kernel}:matrixin={_ZSCALE_MATRIX[_in_matrix(info)]}"
-            f":rangein=limited:range=full")
+def _exact_graph(info, width: int, height: int, flags: str, threads: int, pix: str) -> str:
+    """Filtros da leitura exata de vídeo de faixa legal (`FrameReader.float` e `exact16`), saindo em `pix`
+    (`gbrpf32le` ou `gbrp16le`).
+
+    O swscale redimensiona como sempre, mas fica em YUV 4:4:4 de 16 bits sem mexer na faixa (o código de 10 bits
+    vira código·64, exato, inclusive acima do 940); o zscale só aplica a matriz do arquivo e expande a faixa —
+    sem cortar em 0–1 (float) e com o branco em 65535 (16 bits). O swscale direto para RGB corta em 0–1 e, em 16
+    bits, entrega o branco em 65280 (0,4% abaixo). Redimensionar no zscale mudaria a reconstrução do croma nas
+    bordas de cor (até 17% num padrão de teste): por isso ele não redimensiona."""
+    return (f"scale={width}:{height}:flags={flags}:in_range=limited:out_range=limited:threads={threads},"
+            f"format=yuv444p16le,zscale=matrixin={_ZSCALE_MATRIX[_in_matrix(info)]}:rangein=limited:range=full,"
+            f"format={pix}")
 
 
 # Transferências HDR do ffprobe (`color_transfer`) → perfil de entrada. O vídeo HDR do iPhone (Dolby
@@ -757,12 +763,11 @@ class FrameReader:
         if alpha:
             vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
         elif self.float:
-            vf.append(_zscale(info, width, height, hq))
-            vf.append(f"format={self.pix}")
+            vf.append(_exact_graph(info, width, height, flags, th, self.pix))
         elif self.exact16:
-            # gbrp16le primeiro: pedir rgb48le direto ao zscale faz o ffmpeg converter de 10 bits (perde precisão).
-            vf.append(_zscale(info, width, height, hq))
-            vf.append("format=gbrp16le")
+            # gbrp16le primeiro (reempacotar para rgb48le é sem perda): pedir rgb48le direto ao zscale faz o
+            # ffmpeg passar por 10 bits.
+            vf.append(_exact_graph(info, width, height, flags, th, "gbrp16le"))
             vf.append(f"format={self.pix}")
         else:
             vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
