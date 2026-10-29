@@ -7,6 +7,7 @@ consulta `modules`: um projeto que use um recurso desligado sai igual.
 - "camera_cinema" (Beta): o cartão "Obturador de película" do look e o cartão "Manivela" do inspetor.
 - "anamorfico" (Beta): o cartão "Lente anamórfica".
 - "data_impressa" (Beta): o cartão "Data impressa".
+- "maquina_tempo" (estável): o botão "Máquina do tempo…" do painel de looks (modo Película; `ui/maquina_ui.py`).
 """
 
 from __future__ import annotations
@@ -16,7 +17,17 @@ CLIP_CARDS = {"camera_cinema": ("manivela",)}
 
 
 def install(win) -> None:
-    """Nada a montar por enquanto além dos cartões do esquema."""
+    """O botão da máquina do tempo no painel de looks (logo abaixo da busca)."""
+    from PySide6.QtWidgets import QPushButton
+
+    from ..i18n import _
+    from . import maquina_ui
+    win.btn_time_machine = QPushButton(_("Máquina do tempo…"))
+    win.btn_time_machine.setToolTip(_("Um ano e onde o filme passava viram a bitola, o filme, a cor, o grão e o "
+                                      "desgaste da época (um passo só de desfazer)"))
+    win.btn_time_machine.clicked.connect(lambda: maquina_ui.open_dialog(win))
+    lay = win.looks.layout()
+    lay.insertWidget(lay.indexOf(win.looks.search) + 1, win.btn_time_machine)
 
 
 def module_tools(win) -> dict[str, list]:
@@ -24,6 +35,8 @@ def module_tools(win) -> dict[str, list]:
     insp = getattr(win, "inspector", None)
     vcards = {c.section.key: c for c in getattr(insp, "vcards", [])}
     out: dict[str, list] = {}
+    if getattr(win, "btn_time_machine", None) is not None:
+        out["maquina_tempo"] = [win.btn_time_machine]
     for module_id, keys in LOOK_CARDS.items():
         out.setdefault(module_id, []).extend(cards[k] for k in keys if k in cards)
     for module_id, keys in CLIP_CARDS.items():

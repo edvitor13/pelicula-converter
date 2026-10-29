@@ -109,13 +109,16 @@ MODULES: tuple[Module, ...] = (
     Module("data_impressa", N_("Data impressa"),
            N_("A data laranja de sete segmentos das câmeras dos anos 80 e 90, exposta no negativo."), "pelicula",
            BETA),
+    Module("maquina_tempo", N_("Máquina do tempo"),
+           N_("Escolha um ano (1920 a 2020) e onde o filme passava: um clique preenche a bitola, o filme, a cor, o "
+              "grão, a projeção, o desgaste e a moldura da época, com o motivo de cada escolha."), "pelicula"),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
 _CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios",
-                       "titulos_geradores", "cor_simples"}
+                       "titulos_geradores", "cor_simples", "maquina_tempo"}
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
