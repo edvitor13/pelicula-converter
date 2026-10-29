@@ -338,6 +338,9 @@ Os nomes de filmes são aproximações artísticas, sem relação com os fabrica
   - *Manivela* (velocidade e oscilação por clipe: no Resolve, Retime/Speed Change);
   - *A montagem na película* (emendas nos cortes e rolos de Super 8: o plugin vê um quadro de cada vez, sem os
     cortes da timeline);
+  - *Marcação de luz por plano* (os pontos da copiadora de cada clipe do modo Edição: é tempo da montagem do app;
+    no Resolve, o nó **Laboratorio** já tem as luzes da copiadora, então use um nó por plano ou mude as luzes no
+    nó de cada clipe);
   - *Lente anamórfica* (desespremer, barril, bordas e o risco horizontal longo: no Resolve, o desespremer fica
     nos atributos do clipe e o risco num efeito de brilho);
   - *Data impressa* (desenhada na luz da cena antes da película: use um texto no Fusion antes dos nós do

@@ -40,6 +40,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
+35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 
 ---
 
@@ -3594,3 +3595,53 @@ manivela, oscilação limitada e determinística), `tests/test_formato_camera.py
 de letra, círculo, barril, bordas, risco só horizontal, pixels da data em duas resoluções, etapa antes da
 película), `tests/test_scan_foto.py`, `tests/test_maquina.py`, `tests/test_montagem_filme.py` e os casos de janela
 em `tests/filme_ui_cases.py` (`test_filme_ui.py`).
+
+## 35. Luz por plano e fotômetro da película
+
+Frente I da 1.6 (#38, "Diferenciais de cor"): a marcação de luz por plano (os pontos da copiadora de cada clipe), o
+fotômetro da película (onde o negativo escolhido está no pé, na reta ou no ombro) e presets dos processos da 1.6.
+Nada muda no Laboratório (curvas, filmes, `labPath`, `labx`): a luz por plano só soma às luzes da copiadora que já
+existiam e o fotômetro só lê o mesmo modelo. Ponto único de ligação com a janela: `ui/luz_fotometro_ui.py`
+(`install`, `module_tools`, `apply_modules`).
+
+### 35.1 Marcação de luz por plano (`luz_plano.py`, `ui/luz_plano_ui.py`)
+
+**Ajustes do clipe.** Seção nova no fim de `editparams.VIDEO_SECTIONS`: `luz_r`, `luz_g`, `luz_b` e `luz_densidade`
+(pontos, −24 a +24, passo 1, padrão 0; em `SPARSE_KEYS`; fora de `COLOR_SECTIONS`, então não animam, não entram em
+"Restaurar cor", no copiar/colar da cor nem nos grupos de cor). Ajuste novo de clipe: sem registro no formato 4 (o
+retrato da 1.5 não tem as chaves, então `ajustes_clipe_1_6` pega). Um clipe com luz própria deixa de ser neutro
+(`editparams.is_neutral`), e um arquivo inteiro com luz passa pela montagem (`Sequence.is_trivial` = None).
+
+**Gancho da receita.** `frame.Recipe.plan`, com o Laboratório ligado e uma montagem (`self.seq`), troca os valores do
+look por `luz_plano.apply(valores, luz_plano.shot_lights(seq, índice, fps))` antes de `look.build_plan`: os pontos
+do plano somam a `lab_luz_r/g/b` (a densidade nas três), e `look.lab_lights` os leva a `u_la_off`/`u_lb_off` como
+sempre. Nenhum uniform, programa ou campo de `Plan` novo; sem nenhum clipe com luz (`luz_plano.uses` falso)
+`shot_lights` devolve None e o dicionário é o mesmo (plano bit a bit igual). Com o Laboratório desligado nada é
+somado (as luzes da copiadora não existem sem ele). Como a troca é na receita, a prévia, "Salvar quadro", a prévia
+da exportação, a exportação e a linha de comando dão o mesmo quadro (`tests/test_luz_plano.py`).
+
+**Qual plano.** O tempo é `índice / fps` da saída, levado ao quadro da sequência como o `SequenceReader`
+(`floor(i · fps_seq / fps_saída)`). O plano é a camada de `Sequence.layers_at(t)` da faixa 0 que não é extensão
+(faixa escondida: nenhum plano, luz 0). Clipes de V2+ nunca mudam o plano. Numa transição de dois clipes (a camada
+"extensão" da cauda do anterior: o `dissolver` de antes ou `editparams.EXTRA_TWO_CLIP`) a luz é
+`(1 − k)·anterior + k·atual`, com `k` o andamento da própria transição (`Transition.progress`; no `dissolver`,
+`(pos + 1)/(n + 1)`, o mesmo `alpha` de `layers_at`). Uma fusão ótica de verdade copia os dois negativos, cada um
+com a sua luz; aqui a montagem mistura as imagens antes do look, que tem uma luz por quadro, então a interpolação em
+pontos (log E, como a copiadora) é a escolha que deixa as pontas exatas e a passagem sem pulo. Transições de um
+clipe (surgir/sumir no preto ou branco, as da 1.5 sem cauda) trocam a luz no corte.
+
+**Interface.** O cartão do esquema (sliders) aparece depois de "Câmera" (`edit_panels.DISPLAY_AFTER`) e ganha no
+alto o `LightsPanel`: mostrador clássico `luz_plano.classic` = TAPE 25 + `lab_luz_*` + `lab_densidade` do look +
+pontos do clipe (H-61: TAPE 25-25-25 = luzes no alvo), aviso sem Laboratório ou sem película na prévia, ±1 ponto por
+canal, Zerar e "Copiar luzes para os clipes selecionados". Atalhos `QShortcut` na janela: Ctrl+Alt+R/G/B/D (+1) e
+Ctrl+Alt+Shift+R/G/B/D (−1), só no modo Edição, nos clipes de vídeo selecionados ou no plano da V1 sob o cursor
+(`luz_plano.shot_at`). Tudo por `TimelineModel.update_clip_values({id: {chave: valor}})` (novo: muda só as chaves
+dadas em vários clipes, um passo do desfazer; faixa travada fica de fora). O cartão e os atalhos são do módulo
+"laboratorio" (`luz_plano_ui.apply_modules`, fora de `_module_tools`, cuja chave "laboratorio" já é o cartão do
+look); `modules.used_by` aponta "laboratorio" quando um clipe tem luz própria.
+
+**Modo Película e plugin.** Com o arquivo direto não há planos (não há montagem); dividir o clipe no modo Edição é o
+caminho (a montagem vira a entrada do look). Luz por segmento entre marcadores não foi feita: precisaria de uma
+estrutura nova no JSON e de uma segunda fonte de verdade para o "plano"; a montagem já é essa fonte. O plugin do
+DaVinci não muda: a luz por plano é tempo da montagem do app, e o nó Laboratorio já tem as luzes da copiadora
+(docs/DAVINCI.md).

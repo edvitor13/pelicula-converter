@@ -777,5 +777,26 @@ class TimelineModel(QObject):
         self._done("subtitles")
         return True
 
+    # ------------------------------------------------------------ 1.6: mudar algumas chaves de vários clipes
+    def update_clip_values(self, changes: dict[str, dict[str, Any]]) -> int:
+        """Muda só as chaves dadas nos ajustes de cada clipe ({id: {chave: valor}}), num passo só do desfazer (as
+        luzes da copiadora por plano: `ui/luz_plano_ui.py`). Clipe que não existe ou em faixa travada fica de fora.
+        Devolve quantos clipes mudaram."""
+        self.commit()
+        n = 0
+        for cid, update in changes.items():
+            c = self.seq.find(cid)
+            if c is None or self.seq.locked(c):
+                continue
+            vals = dict(c.values)
+            vals.update(update)
+            old = copy.deepcopy(c.values)
+            self.seq.set_values(cid, vals)
+            if c.values != old:
+                n += 1
+        if n:
+            self._done("values")
+        return n
+
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

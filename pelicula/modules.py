@@ -274,6 +274,9 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
             used.add("cor_simples")
         if any(c.values.get("manivela", "nenhuma") != "nenhuma" for c in clips if c.kind == "video"):
             used.add("camera_cinema")  # 1.6: manivela
+        from . import luz_plano
+        if luz_plano.uses(sequence):  # 1.6: luz da copiadora por plano (o cartão é do Laboratório)
+            used.add("laboratorio")
     for subs in (subtitles, getattr(sequence, "subtitles", None)):
         if subs is not None and not subs.is_empty():
             used.add("legendas")

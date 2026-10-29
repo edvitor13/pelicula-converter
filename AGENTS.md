@@ -146,6 +146,9 @@ pelicula/
   maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
   montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
                              (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
+  luz_plano.py               1.6, marcação de luz por plano: pontos da copiadora por clipe (luz_r/g/b, luz_densidade)
+                             somados a lab_luz_* no plano da V1 (shot_lights, via frame.Recipe.plan; transição de dois
+                             clipes interpolada), mostrador TAPE 25-25-25 (classic); ARQUITETURA §35
   transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
                              (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
   camera.py                  perfil de câmera por clipe (1.6, sem GPU nem Qt): FOLLOW ("Igual ao do look"), Target
@@ -198,6 +201,8 @@ pelicula/
                              1.6, grao_fisico_ui (a linha "Modelo do grão no negativo" sob o módulo grao_fisico);
                              1.6, câmera e formato: filme_ui (ponto único de ligação: cartões dos módulos novos e o
                              botão da máquina do tempo), maquina_ui (janela da máquina do tempo)
+                             1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
+                             "Luz da copiadora" do inspetor e os atalhos Ctrl+Alt+R/G/B/D)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -415,6 +420,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab_processos.py` | Laboratório da 1.6 (`labx.py`): scanner de luz branca, película vencida (véu sobe com os anos), pré-exposição, reversível e revelação cruzada; desligados não mudam nada; GPU (prévia e LUT) = numpy |
 | `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
+| `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
+| `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Ctrl+Alt+R/G/B/D, módulo "laboratorio" |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
 | `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |
