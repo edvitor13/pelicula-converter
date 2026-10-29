@@ -116,7 +116,16 @@ pelicula/
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
-                             pré-multiplicada, alfa na cobertura) e a saída da tela
+                             pré-multiplicada, alfa na cobertura) e a saída da tela; CLIP_CS/CLIP_TR_CS (1.6: o
+                             CLIP/CLIP_TR com a cor simples, só quando a camada traz u_cs_on)
+  masks.py                   1.6, máscaras sem Qt nem GPU: pele em OkLab/OkLCh (skin_mask, conta-gotas skin_hue_of,
+                             skin_even) e degradê linear/radial em px@1080 (gradient_mask); GLSL + referência numpy
+  planes.py                  1.6, "Cor por planos" do look (módulo Beta cor_planos): uniforms u_cp_*, referência
+                             numpy (apply), PRONTOS e BASE_CP (o BASE com imageLin passando por planes())
+  colorsimple.py             1.6, cor simples do modo Edição (módulo cor_simples): uniforms u_cs_* e GLSL (cor
+                             escolhida, degradê, pele natural), conta-gotas do balanço, "Automático" do clipe
+                             inteiro, igualar a outro clipe/imagem, clicar numa cor (sem Qt)
+  exposure.py                1.6, zebra e falsa cor da prévia em stops em relação ao cinza de 18% (sem Qt)
   transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
                              (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
   alphashaders.py            GLSL da saída com transparência: PREMUL/CANVAS_OUT (tela RGBA de cor direta) e ALPHA
@@ -158,7 +167,10 @@ pelicula/
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
-                             recurso desligado em uso)
+                             recurso desligado em uso);
+                             1.6, cor: cor_ui (ponto único de ligação com a janela), planes_ui (cartão da Cor
+                             por planos), color_tools (barra "Cor simples" do inspetor), preview_tools (camadas
+                             da tela: Context, PreviewTools), preview_bar (zebra, falsa cor, referência)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao

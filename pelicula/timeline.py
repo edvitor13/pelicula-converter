@@ -269,6 +269,9 @@ class Clip:
     # imagem) e reverso (o arquivo toca para trás a partir de `src_in`, que aí é a ponta mais alta do trecho).
     ramp: list = field(default_factory=list)
     reverse: bool = False
+    # 1.6: grupo de cor (`ui/color_tools.py`): clipes com o mesmo id mudam a cor juntos (`TimelineModel`). Vazio =
+    # sozinho; no JSON ("grupo") só quando usado.
+    color_group: str = ""
 
     def __post_init__(self) -> None:
         schema = editparams.SCHEMAS[self.kind]
@@ -277,6 +280,7 @@ class Clip:
         self.key_off = int(self.key_off)
         self.ramp = timemap.clean_ramp(self.ramp)
         self.reverse = bool(self.reverse)
+        self.color_group = str(self.color_group or "")
 
     @property
     def retimed(self) -> bool:
@@ -320,6 +324,8 @@ class Clip:
             out["rampa"] = timemap.ramp_json(self.ramp)
         if self.reverse:
             out["reverso"] = True
+        if self.color_group:  # 1.6: só com grupo de cor
+            out["grupo"] = self.color_group
         return out
 
     @classmethod
@@ -336,7 +342,8 @@ class Clip:
                        keys=d.get("chaves") if isinstance(d.get("chaves"), dict) else {},
                        key_off=int(d.get("chaves_ref", 0) or 0),
                        ramp=d.get("rampa") if isinstance(d.get("rampa"), list) else [],
-                       reverse=d.get("reverso") is True)
+                       reverse=d.get("reverso") is True,
+                       color_group=d.get("grupo") if isinstance(d.get("grupo"), str) else "")
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -2053,6 +2060,7 @@ def _clips_beyond_1_5(seq: Sequence) -> bool:
 # que a 1.5 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_6" pega tudo o que a 1.5 não lê.
 FEATURES_V4: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_6": _clips_beyond_1_5,
+    "grupos_cor": lambda seq: any(c.color_group for c in seq.clips),  # grupo de cor dos clipes (`Clip.color_group`)
 }
 
 

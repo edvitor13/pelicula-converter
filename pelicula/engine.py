@@ -211,7 +211,7 @@ class Engine:
         lin = self._target("lin", (w, h))
         if U.get("u_scan_on"):
             U["u_text_aspect"] = self._edge_text(plan.edge_text)
-        self._run("base", lin, {"t_in": self.input_tex, "t_text": self._text_tex}, U)
+        self._run(self._base_program(U), lin, {"t_in": self.input_tex, "t_text": self._text_tex}, U)
 
         soft = lin
         if plan.soft_sigma > 0:
@@ -263,6 +263,51 @@ class Engine:
         }
         self._run("final", out, textures, {**self.FINAL_NEUTRAL, **U})
         return out
+
+    def _base_program(self, U: dict) -> str:
+        """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela."""
+        if "u_cp_on" not in U:
+            return "base"
+        from . import planes
+        self._lazy_program("base_cp", planes.BASE_CP)
+        return "base_cp"
+
+    def plane_view(self, plan: look.Plan, values: dict) -> np.ndarray:
+        """"Ver planos" (1.6): (h, w, 4) float32 com frente, fundo e pele da imagem de entrada atual, no mesmo
+        enquadramento da prévia (a quarta coluna é quanto do pixel é imagem: o scan da película tem bordas). As
+        máscaras aparecem mesmo com os ajustes da seção em zero. Só para a tela: a exportação nunca chama isto."""
+        if self.input_tex is None:
+            raise RuntimeError("Nenhuma imagem carregada no motor.")
+        from . import planes
+        w, h = self.input_tex.size
+        U = {**plan.uniforms, **planes.uniforms(values, view=True)}
+        return self._plane_view(U, w, h)
+
+    def scene_light(self, plan: look.Plan) -> np.ndarray:
+        """(1.6) A luz da cena do passo BASE para a imagem de entrada atual: (h, w, 4) float32 com a entrada
+        decodificada pelo perfil do look (`toLinear`), o gamut, a exposição, o balanço, a Cor por planos e a vinheta,
+        no enquadramento da prévia (a quarta coluna é quanto do pixel é imagem). Zebra e falsa cor medem aqui
+        (`meter.py`); só para a tela, a exportação nunca chama isto."""
+        if self.input_tex is None:
+            raise RuntimeError("Nenhuma imagem carregada no motor.")
+        w, h = self.input_tex.size
+        U = dict(plan.uniforms)
+        if U.get("u_scan_on"):
+            U["u_text_aspect"] = self._edge_text(plan.edge_text)
+        light = self._target("scene_light", (w, h), dtype="f4")
+        self._run(self._base_program(U), light, {"t_in": self.input_tex, "t_text": self._text_tex}, U)
+        data = light[1].read(components=4, alignment=1, dtype="f4")
+        return np.frombuffer(data, dtype=np.float32).reshape(h, w, 4).copy()
+
+    def _plane_view(self, U: dict, w: int, h: int) -> np.ndarray:
+        vig = U.get("u_vig", (0.0, 0.5, 0.5, 0.0))
+        U["u_vig"] = (0.0,) + tuple(vig[1:])
+        if U.get("u_scan_on"):
+            U["u_text_aspect"] = 0.0
+        view = self._target("cp_view", (w, h), dtype="f4")
+        self._run(self._base_program(U), view, {"t_in": self.input_tex, "t_text": self._text_tex}, U)
+        data = view[1].read(components=4, alignment=1, dtype="f4")
+        return np.frombuffer(data, dtype=np.float32).reshape(h, w, 4).copy()
 
     def _alpha_out(self, plan: look.Plan, depth: int, out) -> np.ndarray:
         """O quadro do look (`out`, já desenhado) com o alfa: o BASE desenha a transparência da entrada com a
@@ -414,6 +459,9 @@ class Engine:
             if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
                 program = "clip_tr"
                 self._lazy_program(program, editshaders.CLIP_TR)
+            if "u_cs_on" in U:  # 1.6: cor simples do clipe (`colorsimple.py`)
+                program += "_cs"
+                self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
             self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         out_dtype = "u1" if depth == 8 else "u2"

@@ -35,6 +35,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
+31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 
 ---
 
@@ -2863,3 +2864,142 @@ Plugin: `K_BREATH` (`pc_breath`, a mesma conta com `pc_hash`/`pc_vnoise`) no nó
 *Textura* vem depois da cor e usa `TIMELINE_FRAME_INDEX` (os nós de cor não podem): multiplica a luz da saída
 (`pc_code_to_lin`) pelo mesmo fator, o que é igual ao app com a cor neutra (teste de paridade) e uma aproximação com
 uma cópia ou o Laboratório. O OpenFX multiplica a luz antes da cor, como o app.
+
+## 31. Cor simples e cor por planos
+
+Frente de cor da 1.6 (#38): máscaras de pele e de posição, "Cor por planos" no look (Beta), cor simples nos
+clipes do modo Edição, grupos de clipes e ferramentas da prévia (zebra, falsa cor e referência). Com os padrões
+nada muda: `tests/cor_base.py` grava na BASE (575c6f5) os planos do look de todos os presets, os uniforms dos
+clipes, o texto do plugin e os hashes dos quadros (8 e 16 bits), dos LUTs exportados e da montagem;
+`tests/test_cor_base.py` confere tudo (os hashes só na placa da gravação).
+
+### 31.1 Máscaras (`masks.py`)
+
+Funções em GLSL (`masks.GLSL`, incluído nos programas que usam) com a referência em numpy; `tests/test_masks.py`
+compara os dois na GPU.
+
+- **Pele** (`skin_mask` / `skinMask(code, vec2(centro, meia largura))`): a cor como vídeo (0 a 1) vai à luz com
+  gama 2,2 e ao OkLab (Ottosson 2020). Três janelas suaves: matiz OkLCh (centro `SKIN_HUE` = 64,5°, meia largura
+  21°, borda 7°), `C/L` entre 0,004–0,014 (tira cinzas) e 0,17–0,21 (tira laranja forte, madeira avermelhada,
+  tijolo) e claridade acima de 0,10–0,20. `C/L` e o matiz não mudam com a exposição (o OkLab é a raiz cúbica da
+  luz). No look a luz da cena passa antes pela curva neutra de exibição (`stopsToDisp(linToStops(lin))`): a
+  máscara vê a pele como ela aparece. Acertada com a escala Monk Skin Tone (Ellis Monk/Google, CC BY 4.0): os 10
+  tons entram no quadro e 1 stop abaixo; laranjas, madeiras escuras/avermelhadas, areia amarelada e cinzas
+  ficam de fora. Limite conhecido: nenhuma máscara só de cor separa a pele de madeira clara ou areia da mesma
+  cor; o conta-gotas (`skin_hue_of`, o matiz da média da luz de uma área) recentra a janela e a largura a estreita.
+- **Degradê** (`gradient_mask` / `gradMask(p, g, k)`, uniforms de `gradient_uniform`): `p` em px@1080 do centro
+  do quadro, y para baixo (`frame_points` / `framePoint(uv, aspecto)`). Linear: linha pelo centro escolhido, valor
+  1 do lado da direção (0° = para cima, 90° = para a direita); radial: 1 dentro do raio. Suavidade em px@1080
+  (0 = borda seca); "Inverter" troca os lados. Por ser em px@1080, a máscara cai no mesmo lugar em qualquer
+  resolução.
+- **Uniformizar a pele** (`skin_even` / `skinEven(lab, centro, k)`): no OkLab, o matiz se aproxima do centro
+  (70% com k = 1) e o `C/L` acima de 0,12 cai pela metade; a claridade não muda. `lch_adjust` / `lchAdjust` gira o
+  matiz e multiplica o croma.
+
+### 31.2 Cor por planos no look (`planes.py`, módulo Beta "cor_planos")
+
+- **Seção** `params.SECTIONS[-1]` ("planos", chave `planos_on`, acrescentada no fim): geometria do degradê
+  (`planos_tipo`, `_angulo`, `_pos_x`, `_pos_y`, `_raio`, `_suavidade`, `_inverter`, em px@1080), cinco ajustes
+  por plano (`planos_{frente,fundo}_{exposicao,temperatura,tonalidade,saturacao,contraste}`), pele
+  (`planos_proteger_pele` = True, `planos_pele_{matiz,saturacao,luz,uniformizar}`) e a janela da máscara
+  (`planos_pele_centro`, `planos_pele_largura`, avançados). Todos os efeitos com padrão 0.
+- **Onde**: `look.build_plan` chama `planes.uniforms(v)` (um gancho depois de `u_vig`). Sem nada a fazer (seção
+  desligada ou ajustes em zero) devolve `{}` e o plano é o de sempre; com ajuste, os uniforms `u_cp_*` fazem o
+  `Engine._base_program` usar `planes.BASE_CP` — o `shaders.BASE` letra por letra, com `imageLin` renomeada para
+  `imageLinRaw` e uma `imageLin` nova que passa por `planes(lin, uv)` (compilado só na primeira vez). Assim a
+  mudança das outras frentes dentro de `imageLin` (entrada) vem junto sem conflito, e um look sem a seção usa o
+  mesmo programa da BASE. `tests/test_planes.py` confere que tirar o gancho devolve `shaders.BASE`.
+- **Matemática** (`planes.apply` em numpy = `planes()` no GLSL): frente = degradê (linear com o lado invertido:
+  a direção aponta para o fundo; radial: miolo); cada plano = ganho por canal (`2^(EV + mistura de
+  temperatura/tonalidade)`), contraste na luminância em stops em torno de 0,18 e saturação em torno da luminância;
+  os dois planos saem da mesma luz e se misturam pelo degradê; com "Proteger a pele", o resultado volta à luz
+  original na medida da máscara da pele. A pele é ajustada na cor exibida (curva neutra → vídeo → OkLab:
+  `skinEven` e `lchAdjust`), volta à luz pela curva inversa e recebe a luz (ganho). A máscara da pele lê a luz
+  pela curva neutra (`stopsToDisp(linToStops(lin))`).
+- **Fora do `colorPipe`**: o `BAKE` (LUT exportado) e o plugin do DaVinci não mudam (`tests/test_cor_base.py`,
+  `tests/test_planes.py`); `docs/DAVINCI.md` diz que o plugin não tem a seção e a mensagem do LUT exportado avisa.
+- **"Ver planos"** (`Engine.plane_view(plano, valores)`): o `BASE_CP` com `u_cp_view = 1` e a vinheta zerada
+  devolve (frente·(1 − proteção·pele), fundo·(1 − proteção·pele), pele, cobertura) num alvo f4; `ui/planes_ui`
+  pinta (laranja, azul, contorno da pele em 0,5) e a camada vai ao `Viewer` por `ui/preview_tools`. O conta-gotas
+  lê a luz da cena (`Engine.scene_light`) em volta do clique, passa pela curva neutra e usa `masks.skin_hue_of`.
+- **Interface** (`ui/planes_ui.py`): o `SectionCard` gerado é reagrupado (barra com Prontos, conta-gotas da pele e
+  "Ver planos"; geometria; blocos Frente, Fundo e Pele). Prontos (`planes.PRONTOS`) só preenchem os controles, um
+  passo do desfazer. A janela liga tudo por `ui/cor_ui.py` (`install`, `after_render`, `module_tools`,
+  `apply_modules`, Esc cancela o conta-gotas).
+
+### 31.3 Cor simples no modo Edição (`colorsimple.py`, módulo "cor_simples")
+
+- **Ajustes de clipe**: três seções de cor acrescentadas no fim de `editparams.VIDEO_SECTIONS` e de
+  `COLOR_SECTIONS` — "pele" (`pele_natural`, `pele_centro`), "alvo" (`alvo_matiz`, `_largura`, `_desvio`,
+  `_sat`, `_luz`) e "degrade" (`degrade_tipo`, `_angulo`, `_x`, `_y`, `_raio`, `_suavidade`, `_inverter`,
+  `_exposicao`, `_temperatura`, `_tonalidade`, `_saturacao`). Seções à parte porque o cartão HSL só mostra as
+  linhas de uma faixa; o inspetor as põe perto das parecidas (`ui/edit_panels.DISPLAY_AFTER`). Todas em
+  `SPARSE_KEYS` (JSON só fora do padrão) e, por serem de cor, entram em `color_active`, nos ajustes rápidos,
+  no "Restaurar cor", no copiar/colar e nas chaves de animação. Fora do padrão o projeto vai para o formato 4
+  ("ajustes_clipe_1_6").
+- **Shader**: `compositor.clip_uniforms` acrescenta `colorsimple.uniforms(v)` quando a cor do clipe está ligada;
+  sem nenhum dos três ajustes devolve `{}`. Com `u_cs_on`, o `Engine.compose` usa `editshaders.CLIP_CS` (ou
+  `CLIP_TR_CS` com transição): o `CLIP`/`CLIP_TR` letra por letra mais `colorsimple.GLSL` (as funções de
+  `masks.GLSL` e `colorSimple`) e, em volta do `colorCorrect`, `vec3 c_in = c;` e `c = colorSimple(c_in, c, uv);`
+  (`tests/test_colorsimple.py` confere a reconstrução). O `CLIP` não muda (o hash dele está em
+  `tests/test_transitions.py`).
+- **`colorSimple(cin, c, uv)`**, na ordem: cor escolhida (peso pelo matiz HSV da cor do arquivo `cin`, cheio até
+  metade da largura e zero na largura, vezes `smoothstep(0,02; 0,2; saturação)`; muda matiz, saturação e valor
+  de `c`); degradê (`gradMask(framePoint(uv, aspecto do clipe))`: ganho por canal na luz, `exp2((EV + mistura
+  do balanço)·g)`, e saturação em volta da luminância); pele natural (máscara `skinMask(cin)` × força; no OkLab,
+  a claridade de `c` com o `a, b` de `cin` na mesma proporção `C/L`, depois `skinEven`). `colorsimple.apply` é a
+  mesma conta em numpy (`tests/test_colorsimple.py` compara com a GPU).
+- **Ferramentas** (funções puras em `colorsimple`, interface em `ui/color_tools.py`):
+  `white_balance_from(rgb)` resolve exatamente `want = média(log2) − log2(luz)` = EV + mistura da temperatura e da
+  tonalidade (a mesma de `compositor.wb_gains_ev`); `sample_frames(clip)` dá 9 quadros no meio de partes iguais
+  do clipe e `auto_adjust_frames` passa os quadros empilhados ao `compositor.auto_adjust` (o clique do
+  "Automático"; "Só o quadro atual" no menu do botão chama o de antes); `match_adjust(src, ref, protect_skin)`
+  mede a mediana da luz, a média dos canais nos tons médios, a cor média e o desvio da luminância (as duas
+  últimas relativas à luminância média), sem os pixels de pele, e `match_values` soma a diferença aos ajustes
+  da referência (outro clipe) ou a zero (uma imagem); `pick_target`/`nearest_band` dão o matiz HSV e a faixa do
+  HSL. O ponto clicado vira uv do clipe por `compositor.transform` (`clip_point`) e a cor vem da imagem
+  decodificada da camada (antes dos ajustes).
+- **Grupos de cor**: `Clip.color_group` (JSON "grupo" só quando usado; `timeline.FEATURES_V4["grupos_cor"]`).
+  `TimelineModel.set_clip_values` passa as chaves de cor que mudaram para os outros clipes de vídeo do grupo
+  (`_group_follow`, no mesmo passo do desfazer); `set_color_group`, `group_selected`, `ungroup_selected`,
+  `select_color_group`. As chaves de animação continuam de cada clipe.
+
+### 31.4 Ferramentas da prévia (`exposure.py`, `ui/preview_tools.py`, `ui/preview_bar.py`, módulo "scopes")
+
+- **Camadas da tela**: `PreviewTools` chama, depois de cada `render_now` (`cor_ui.after_render`), os provedores
+  registrados — "planos" (`planes_ui`), "falsa_cor" e "zebra" (`preview_bar`), nessa ordem — e junta o RGBA deles
+  (`over`) numa imagem que o `Viewer` desenha só sobre o lado processado (`set_overlay`). A receita do quadro
+  (`frame.Recipe`, a mesma da exportação e do "Salvar quadro") não sabe dessas camadas; um provedor que falha só
+  grava `last_error`.
+- **Luz medida** (`Context.light`): `Engine.scene_light(plano)` roda o `BASE` do look num alvo f4 (RGB = luz da
+  cena, A = quanto do pixel é imagem). No modo Película e na Edição com película, o plano é o do look da prévia
+  (entrada `toLinear` pelo perfil e pela faixa do arquivo, gamut, exposição, balanço, lente, vinheta e a geometria
+  do scan, então a camada cai no lugar certo); na Edição sem película, `exposure.decode_values` — o padrão com só a
+  seção "Entrada e exposição" do look (qualquer ajuste novo dela vem junto) e sem a vinheta da bitola. A leitura é
+  sempre a do shader do look (nenhuma cópia das curvas), então os perfis novos da entrada valem aqui sem mudança.
+- **`exposure`**: `stops = log2(Y/0,18)` (Y Rec.709 da luz); `false_color` (faixas `BANDS`, o resto em cinza de
+  −6 a +6); `zebra` (listras diagonais de período `altura/90` px, determinísticas, alfa 0,85 a partir do limite
+  `ZEBRA_LEVELS`).
+- **Referência**: `Viewer.set_reference(QImage)` e `set_compare_reference(True)`: em Dividido, Lado a lado,
+  Original e no botão direito, `_other()` devolve a referência (rótulo "REFERÊNCIA") no lugar do original; uma
+  referência de outra proporção fica inteira e centralizada (`_fit_in`).
+- **Conta-gotas** (`Viewer.start_pick`/`pick_at`/`cancel_pick`, sinais `picked(fx, fy)` e `pickCanceled`): o
+  próximo clique esquerdo na imagem processada dá a fração do ponto; botão direito ou Esc cancelam. Usado pela pele
+  da Cor por planos e pelo neutro e pela cor da cor simples.
+
+### 31.5 Módulos da cor
+
+- **"cor_planos"** (Beta, começa desligado, fora dos perfis): esconde o cartão "Cor por planos" do look. A máscara
+  da pele só por cor ainda erra em madeira clara e areia, e a separação frente/fundo é só um degradê (a
+  profundidade fica para a 1.8), por isso Beta.
+- **"cor_simples"** (estável, grupo "cor", nos perfis Criador, Cinema e Tudo; fora do Simples): esconde a barra
+  "Cor simples" do inspetor e os cartões "Pele natural", "Cor escolhida" e "Degradê". Estável porque cada
+  ferramenta só preenche ajustes comuns do clipe (temperatura, HSL, exposição…), que o usuário vê e desfaz, e os
+  três cartões novos começam neutros. Quem já tinha escolhido o perfil Simples não ganha a ferramenta ao atualizar
+  (`modules.is_enabled` segue o perfil). `used_by` só o aponta quando um clipe tem grupo de cor ou um dos ajustes
+  novos muda a imagem (`colorsimple.active`).
+- **Zebra, falsa cor e referência** entram no módulo **"scopes"** que já existia (a mesma família: medir a
+  imagem), só com a descrição nova; por ficarem na barra da prévia, `cor_ui.apply_modules` os esconde, fora de
+  `_module_tools` (que já usa a chave "scopes" para o painel).
+- Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
+  projeto salvo sai igual.
