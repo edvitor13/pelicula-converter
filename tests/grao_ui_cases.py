@@ -27,6 +27,8 @@ NEW = {
     "lab_grao": ("lab", "BoolRow", False),
     "hal_modelo": ("halacao", "ChoiceRow", "brilho"),
     "lab_grao_modelo": ("lab", "ChoiceRow", "ruido"),  # 1.6: grão físico (módulo Beta "grao_fisico")
+    "grao_estrutura": ("grao", "NumberRow", 0.0),     # 1.6 (fase 3): estrutura pela densidade
+    "grao_aglomeracao": ("grao", "NumberRow", 0.0),
 }
 
 
@@ -134,3 +136,22 @@ def test_new_labels_are_translated():
         assert _row(cards, "grao_respiracao").toolTip().startswith("The color and brightness of each frame")
     finally:
         i18n.set_language("pt_BR")
+
+
+def test_structure_by_density_sliders():
+    """1.6 (fase 3): Estrutura pela densidade (comum) e Aglomeração (avançado) chegam ao plano só acima de 0%."""
+    st, cards = _look()
+    st.set("grao_on", True)
+    plan = lambda: look.build_plan(dict(st.values), 320, 180, 0, 24.0, None, dither=False).uniforms  # noqa: E731
+    assert "u_gs_amt" not in plan()
+    row = _row(cards, "grao_estrutura")
+    row.edit.setText("60%")
+    row.edit.editingFinished.emit()
+    assert st.get("grao_estrutura") == pytest.approx(0.6) and plan()["u_gs_amt"] == pytest.approx(0.6)
+    agl = _row(cards, "grao_aglomeracao")
+    assert agl.param.advanced and not row.param.advanced
+    agl.slider.valueChanged.emit(1.0)
+    assert st.get("grao_aglomeracao") == pytest.approx(1.0) and plan()["u_gs_clump"] == pytest.approx(1.0)
+    row.edit.setText("0%")
+    row.edit.editingFinished.emit()
+    assert not any(k.startswith("u_gs_") for k in plan())

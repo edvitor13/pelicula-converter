@@ -454,6 +454,15 @@ SECTIONS: list[Section] = [
               "azul), como na película: a emulsão, a revelação e a luz da copiadora nunca são iguais de um "
               "quadro para outro. Muda a cada quadro e devagar ao longo da fita, sempre igual para o mesmo quadro "
               "e a mesma semente. 100% = cerca de um ponto de copiadora; 0% = desligado."),
+        F("grao_estrutura", "Estrutura pela densidade", 0.0, 0, 1, percent=True,
+          tip="A forma do grão muda com a densidade do negativo, como na película: nas partes finas (sombras) "
+              "aparecem grãos soltos, um pouco maiores; nas densas (tons médios e altas luzes), buracos soltos. A "
+              "força em cada densidade e em cada camada segue o datasheet da Kodak (o azul tem mais grão). Os "
+              "ajustes Nas sombras, Nos tons médios e Nas altas luzes continuam valendo por cima. 0% = o grão de "
+              "sempre."),
+        F("grao_aglomeracao", "Aglomeração nas altas densidades", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Com a Estrutura pela densidade, junta o grão das partes densas do negativo em aglomerados maiores "
+              "(até 2,3 vezes). 0% = o tamanho calibrado."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [
