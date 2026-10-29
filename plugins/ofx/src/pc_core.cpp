@@ -767,15 +767,27 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                 } else if (ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
-                    yv = pc_colorpipe_ng(V, l, pc_neg_grain(nf, nc, V.grao_aspereza, V.grao_cor) * ng_amp);
+                    if (V.grao_estrutura > 0.0f)  // 1.6 (fase 3): estrutura pela densidade (grao_estrutura.py)
+                        yv = pc_colorpipe_gs(V, l, ng_amp, nf, nc,
+                                             make_float4(V.grao_estrutura, V.grao_aglomeracao, V.grao_aspereza,
+                                                         V.grao_cor));
+                    else
+                        yv = pc_colorpipe_ng(V, l, pc_neg_grain(nf, nc, V.grao_aspereza, V.grao_cor) * ng_amp);
                 } else {
                     yv = lut ? lut_color(lut->data, lut->exact, V, l) : pc_colorpipe(V, l);
                 }
                 if (grain && !ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
-                    yv = pc_apply_grain(yv, nf, nc, V.grao_aspereza, V.grao_cor,
-                                        make_float3(V.grao_sombras, V.grao_meios, V.grao_luzes), grain_amt);
+                    float grr = V.grao_aspereza, grc = V.grao_cor;
+                    if (V.grao_estrutura > 0.0f) {  // 1.6 (fase 3): a exposição da cena (l) decide a forma do grão
+                        nf = pc_gs_field(l, nf, nc, grr, grc, V.grao_estrutura, V.grao_aglomeracao);
+                        nc = nf;
+                        grr = 0.0f;
+                        grc = 1.0f;
+                    }
+                    yv = pc_apply_grain(yv, nf, nc, grr, grc, make_float3(V.grao_sombras, V.grao_meios, V.grao_luzes),
+                                        grain_amt);
                 }
                 if (damage) {
                     yv = pc_damage(yv, u, v, W, H, frame, F.sd, F.stain_amt, F.stain_seed, F.hair_on, F.hair_seed,

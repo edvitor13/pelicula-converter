@@ -257,9 +257,10 @@ def kernels_source() -> str:
               + labx.tables(resolve._define, resolve._table, CPP))
     # 1.6: K_RAND e o grão físico (K_PGRAIN) antes do laboratório, que soma o grão físico na densidade; o
     # pc_lab_path_x (labx) é cópia do pc_lab_path já com o grão físico
-    k_lab = resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB)
+    # 1.6 (fase 3): a estrutura pela densidade (K_GSTRUCT) também entra no pc_lab_path (argumentos gf, gc, gw)
+    k_lab = resolve.gstruct(resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB), True)
     kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_RAND + resolve.K_PGRAIN
-              + k_lab + resolve.K_CURVE
+              + resolve.K_GSTRUCT + k_lab + resolve.K_CURVE
               + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
               + labx.kernel(k_lab)
               ).replace("PC_DEVICE ", "static inline ")
@@ -286,19 +287,28 @@ def kernels_source() -> str:
                 "    return lin;\n}\n")
     body.append("// colorPipe do app: laboratorio + look + copia + envelhecimento (B_LAB + B_LOOK)\n")
     lab = labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "")  # 1.6: com véu, pré-exposição e scanner (labx.py)
+    lab = resolve.gstruct(lab, True)
     body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{lab}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
     # 1.6: a mesma conta com o grão no negativo (`gn_in` = densidade do grão de cada camada neste pixel)
-    lab_ng = labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "        gn = gn_in;\n")
+    lab_ng = resolve.gstruct(labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "        gn = gn_in;\n"), True)
     body.append("// colorPipe com o grao no negativo (grao.negative_grain)\n")
     body.append(f"static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in) {{\n{loc}{lab_ng}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
     # 1.6: a mesma conta com o grão físico (`ga_in` = fração por camada, `gq_in` = posição px@1080, raio e fração
     # própria, `gs_in` = semente do quadro); a densidade de cada camada decide o resto dentro de pc_lab_path
     lab_pg = resolve.B_LAB.replace("/*NGRAIN*/", "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n")
+    lab_pg = resolve.gstruct(lab_pg, True)
     body.append("// colorPipe com o grao fisico no negativo (grao_fisico.negative_grain)\n")
     body.append("static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
                 f"int gs_in) {{\n{loc}{lab_pg}{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6 (fase 3): a mesma conta com a estrutura pela densidade no grão no negativo (`gn_in` = amplitude de cada
+    # camada, `gf_in`/`gc_in` = amostras fina e grossa do ruído, `gw_in` = estrutura, aglomeração, aspereza, cor)
+    lab_gs = resolve.gstruct(labx.body(resolve.B_LAB).replace(
+        "/*NGRAIN*/", "        gn = gn_in;\n        gf = gf_in;\n        gc = gc_in;\n        gw = gw_in;\n"), True)
+    body.append("// colorPipe com o grao no negativo e a estrutura pela densidade (grao_estrutura.py)\n")
+    body.append("static inline float3 pc_colorpipe_gs(const pc_vals& V, float3 lin, float3 gn_in, float4 gf_in, "
+                f"float4 gc_in, float4 gw_in) {{\n{loc}{lab_gs}{resolve.B_LOOK}    return y;\n}}\n")
     frame_body = resolve.B_FRAME
     for a, b in _FRAME_FIX:
         assert a in frame_body, a

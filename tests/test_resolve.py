@@ -769,3 +769,51 @@ def test_cor_node_has_none_of_the_16_lab_controls():
     lab = {c.key for c in resolve.spec("laboratorio").controls if c.key}
     for k in ("lab_scanner", "lab_vencida", "lab_pre_exposicao", "lab_pre_exposicao_stops", "lab_pre_exposicao_cor"):
         assert k in lab and k not in names
+
+
+# ------------------------------------------------------------------ 1.6 (fase 3): estrutura pela densidade
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_estrutura=1.0), dict(grao_estrutura=0.6, grao_aglomeracao=0.8,
+                                                                  bitola="super8", bitola_desfoque_on=False,
+                                                                  bitola_vinheta=0.0, grao_cor=0.7)],
+                         ids=["cheia", "s8_aglomerada"])
+def test_grain_structure_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): a estrutura pela densidade no nó Textura (depois da cor: com a cor neutra, a exposição que
+    chega ao nó é a da cena, igual ao app)."""
+    vals = _neutral(grao_on=True, grao_forca=1.5, **extra)
+    for frame in (0, 7):
+        want = _app(gl_engine, test_rgb, vals, frame)
+        got = harness.run("textura", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
+    plain = harness.run("textura", dict(vals, grao_estrutura=0.0), test_rgb, 7)
+    assert np.abs(got - plain).mean() * 255 > 0.3  # a estrutura muda o grão
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_estrutura=1.0),
+                                   dict(grao_estrutura=0.7, grao_aglomeracao=1.0, lab_processo="tech3",
+                                        bitola="16mm", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_cor=0.0),
+                                   dict(grao_estrutura=1.0, lab_vencida=15.0, lab_copia="nenhuma")],
+                         ids=["2383", "tech3", "vencida_scan"])
+def test_grain_structure_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): a estrutura no grão no negativo do nó Laboratório = a do app (a densidade de cada camada)."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
+    plain = harness.run("laboratorio", dict(vals, grao_estrutura=0.0), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.1  # o grão no negativo é fino: a estrutura muda pouco a média
+
+
+def test_grain_structure_stays_out_of_the_cor_node():
+    """O nó Cor não tem a estrutura (nem os marcadores): o texto dele é o de antes."""
+    cor = resolve.source("cor", resolve.DCTL)
+    assert "pc_gs_" not in cor and "/*GS" not in cor and "grao_estrutura" not in cor
+    for kind in ("laboratorio", "textura"):
+        src = resolve.source(kind, resolve.DCTL)
+        assert "ui_grao_estrutura" in src and "ui_grao_aglomeracao" in src and "/*GS" not in src
+    assert "pc_gs_neg(dn, dmid, gf, gc, gw, gn)" in resolve.source("laboratorio", resolve.DCTL)

@@ -122,6 +122,16 @@ static const float PC_PG_OFS[32] = { 0.188990176f, 0.0f, -0.24538444f, 0.2247922
 #define PC_PG_MEAN_K 6.48509191f
 static const float PC_PG_KAPPA[3] = { 0.02564f, 0.02975f, 0.05393f };
 #define PC_GRAO_FISICO 1
+static const float PC_GS_SDQ[51] = { 0.0061f, 0.0061f, 0.00677f, 0.00833f, 0.00967f, 0.00989f, 0.00926f, 0.00849f, 0.00771f, 0.00694f, 0.00625f, 0.00589f, 0.0055f, 0.00533f, 0.0049f, 0.0048f, 0.0045f, 0.0067f, 0.0067f, 0.00728f, 0.00883f, 0.01028f, 0.01056f, 0.00981f, 0.00876f, 0.00776f, 0.00699f, 0.00625f, 0.0063f, 0.0066f, 0.00688f, 0.00636f, 0.00601f, 0.00513f, 0.0147f, 0.0147f, 0.0147f, 0.01499f, 0.01555f, 0.0158f, 0.01524f, 0.01395f, 0.01279f, 0.01255f, 0.01275f, 0.01335f, 0.01367f, 0.01275f, 0.01149f, 0.00951f, 0.0079f };
+static const float PC_GS_RHOX[51] = { 0.0f, 0.0f, 0.0f, 0.0219f, 0.0988f, 0.2696f, 0.507f, 0.7554f, 1.0f, 1.2132f, 1.436f, 1.6706f, 1.9047f, 2.121f, 2.3124f, 2.4574f, 2.5181f, 0.0f, 0.0f, 0.0037f, 0.0247f, 0.1033f, 0.2814f, 0.5243f, 0.7683f, 1.0f, 1.2202f, 1.4641f, 1.7015f, 1.939f, 2.1737f, 2.3717f, 2.5159f, 2.5675f, 0.0102f, 0.0168f, 0.0198f, 0.0592f, 0.16f, 0.319f, 0.5363f, 0.7764f, 1.0f, 1.2191f, 1.4409f, 1.6754f, 1.89f, 2.0873f, 2.2535f, 2.3867f, 2.4462f };
+static const float PC_GS_SDGREY[3] = { 0.00625f, 0.00625f, 0.01275f };
+static const float PC_GS_RATIO[3] = { 0.93016f, 0.93016f, 1.89752f };
+static const float PC_GS_SDNEG[3] = { 0.00611f, 0.00709f, 0.01262f };
+static const float PC_GS_DREF[3] = { 0.96198f, 0.96198f, 0.94202f };
+static const float PC_GS_LLD[3] = { -2.99573227f, -1.2039728f, 0.0f };
+static const float PC_GS_SIG[3] = { 0.4976f, -0.0486f, -0.5304f };
+static const float PC_GS_CRS[3] = { 0.3183f, 0.2916f, 0.0f };
+#define PC_GS_RMIN 0.001f
 #define PC_COPIA_NENHUMA 0
 #define PC_LAB_COPIA_NENHUMA 6
 static const float PC_LX_SCAN[9] = { 0.644f, 0.294f, 0.062f, 0.115f, 0.765f, 0.12f, 0.066f, 0.07f, 0.864f };
@@ -576,6 +586,59 @@ static inline float3 pc_pg_grain(float3 D, float4 gq, float3 ga, int gs) {
                        _log2f(1.0f + ab * ((1.0f - cov.z) - tb) / tb) * -0.301029996f);
 }
 
+static inline float pc_gs_c(float4 v, int ch) { return ch == 0 ? v.x : (ch == 1 ? v.y : v.z); }
+static inline float pc_gs_sdq(int ch, float rho) {
+    float t = _clampf(_sqrtf(_fmaxf(rho, 0.0f)) * 10.0f, 0.0f, 16.0f);
+    int i = pc_clampi(PC_I(t), 0, 15);
+    return pc_lerp(PC_GS_SDQ[ch * 17 + i], PC_GS_SDQ[ch * 17 + i + 1], t - PC_F(i));
+}
+static inline float pc_gs_rhox(int ch, float x) {
+    float t = _clampf(x + 8.0f, 0.0f, 16.0f);
+    int i = pc_clampi(PC_I(t), 0, 15);
+    return pc_lerp(PC_GS_RHOX[ch * 17 + i], PC_GS_RHOX[ch * 17 + i + 1], t - PC_F(i));
+}
+static inline float pc_gs_expm1(float x) {
+    return _fabs(x) < 0.01f ? x * (1.0f + x * (0.5f + x * (0.16666667f + x * 0.041666668f))) : _expf(x) - 1.0f;
+}
+// T_s(g): media 0, variancia 1, assimetria com o sinal de s
+static inline float pc_gs_skew(float g, float s) {
+    if (_fabs(s) < 1e-4f) return g;
+    float sg = s < 0.0f ? -1.0f : 1.0f;
+    return pc_gs_expm1(s * g - 0.5f * s * s) / (sg * _sqrtf(pc_gs_expm1(s * s)));
+}
+static inline float pc_gs_channel(float4 nf, float4 nc, int ch, float rho, float rough, float chroma, int neg, float amt,
+                              float clump) {
+    float lD = _logf(_fmaxf(_fmaxf(rho, 0.0f) * PC_GS_DREF[ch], 1e-6f));
+    float s01 = pc_smooth(PC_GS_LLD[0], PC_GS_LLD[1], lD);
+    float s12 = pc_smooth(PC_GS_LLD[1], PC_GS_LLD[2], lD);
+    float sig = amt * (PC_GS_SIG[0] + (PC_GS_SIG[1] - PC_GS_SIG[0]) * s01 + (PC_GS_SIG[2] - PC_GS_SIG[1]) * s12);
+    float d2 = PC_GS_CRS[2] + clump * (1.0f - PC_GS_CRS[2]);
+    float dl = PC_GS_CRS[0] + (PC_GS_CRS[1] - PC_GS_CRS[0]) * s01 + (d2 - PC_GS_CRS[1]) * s12;
+    float c = rough + (1.0f - rough) * amt * dl;
+    float k = 1.0f / _sqrtf((1.0f - c) * (1.0f - c) + c * c);
+    float a = (nf.w * (1.0f - c) + nc.w * c) * k;
+    float b = (pc_gs_c(nf, ch) * (1.0f - c) + pc_gs_c(nc, ch) * c) * k;
+    float g = (a * (1.0f - chroma) + b * chroma) / _sqrtf((1.0f - chroma) * (1.0f - chroma) + chroma * chroma);
+    float sd = pc_gs_sdq(ch, rho);
+    float env = (neg == 1) ? sd / PC_GS_SDNEG[ch] : sd / PC_GS_SDGREY[ch] * PC_GS_RATIO[ch];
+    return pc_gs_skew(g, sig) * (1.0f + amt * (env - 1.0f));
+}
+// grao de sempre com a estrutura (lin = exposicao da cena de cada canal): o campo de cada canal em x, y, z (w = 0),
+// para o pc_apply_grain com aspereza 0 e colorido 1 (que o soma exatamente, com os pesos por tom de sempre)
+static inline float4 pc_gs_field(float3 lin, float4 nf, float4 nc, float rough, float chroma, float gamt, float clump) {
+    float3 x = pc_lin_to_stops(lin);
+    return make_float4(pc_gs_channel(nf, nc, 0, pc_gs_rhox(0, x.x), rough, chroma, 0, gamt, clump),
+                       pc_gs_channel(nf, nc, 1, pc_gs_rhox(1, x.y), rough, chroma, 0, gamt, clump),
+                       pc_gs_channel(nf, nc, 2, pc_gs_rhox(2, x.z), rough, chroma, 0, gamt, clump), 0.0f);
+}
+// grao no negativo com a estrutura: densidade de cada camada (dn) relativa a do cinza (dmid); amp = sigma D por pixel
+static inline float3 pc_gs_neg(float3 dn, float3 dmid, float4 gf, float4 gc, float4 gw, float3 amp) {
+    return make_float3(
+        pc_gs_channel(gf, gc, 0, dn.x / _fmaxf(dmid.x, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.x,
+        pc_gs_channel(gf, gc, 1, dn.y / _fmaxf(dmid.y, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.y,
+        pc_gs_channel(gf, gc, 2, dn.z / _fmaxf(dmid.z, PC_GS_RMIN), gw.z, gw.w, 1, gw.x, gw.y) * amp.z);
+}
+
 // ---------------------------------------------------------------- laboratorio (look.LabPath)
 static inline float pc_softplus(float z) { return _fmaxf(z, 0.0f) + _logf(1.0f + _expf(-_fabs(z))); }
 static inline float3 pc_lab_curve(float3 x, float3 g, float3 xt, float3 xs, float w) {
@@ -637,13 +700,14 @@ static inline float pc_det3(float3 a, float3 b, float3 c) {
 static inline float3 pc_lab_path(float3 lin, float3 s0, float3 s1, float3 s2, float3 ng0, float3 nt0, float3 ns,
                              float nw, float3 i0, float3 i1, float3 i2, int has_print, float3 pg, float3 dmax,
                              float pw, float3 d0, float3 d1, float3 d2, float3 key, float push, float xtalk,
-                             float3 lights, float3 gn, float3 ga, float4 gq, int gs) {
+                             float3 lights, float3 gn, float3 ga, float4 gq, int gs, float4 gf, float4 gc, float4 gw) {
     float3 ng = ng0 * (1.0f + 0.12f * push);
     float3 nt = nt0 + pc_s3(0.08f * push);
     float3 dmid = pc_mat3(i0, i1, i2, pc_lab_curve(pc_s3(0.0f), ng, nt, ns, nw));
     float3 e = pc_max3(pc_mat3(s0, s1, s2, lin), 1e-7f);
     float3 le = make_float3(pc_log10(e.x / 0.18f), pc_log10(e.y / 0.18f), pc_log10(e.z / 0.18f));
     float3 dn = pc_mat3(i0, i1, i2, pc_lab_curve(le, ng, nt, ns, nw));
+    if (gw.x > 0.0f) gn = pc_gs_neg(dn, dmid, gf, gc, gw, gn);  // 1.6 (fase 3): estrutura pela densidade
     dn = dn + gn;  // 1.6: grao no negativo (grao.negative_grain); zero sem ele
     if (ga.x + ga.y + ga.z > 0.0f) dn = dn + pc_pg_grain(dn, gq, ga, gs);  // 1.6: grao fisico
     if (has_print == 0) {
@@ -1047,7 +1111,7 @@ static inline float3 pc_lx_white(float3 dn, float3 dmid, float3 g, float3 lights
 static inline float3 pc_lab_path_x(float age, float3 fl, int scm, float3 lin, float3 s0, float3 s1, float3 s2, float3 ng0, float3 nt0, float3 ns,
                              float nw, float3 i0, float3 i1, float3 i2, int has_print, float3 pg, float3 dmax,
                              float pw, float3 d0, float3 d1, float3 d2, float3 key, float push, float xtalk,
-                             float3 lights, float3 gn, float3 ga, float4 gq, int gs) {
+                             float3 lights, float3 gn, float3 ga, float4 gq, int gs, float4 gf, float4 gc, float4 gw) {
     // 1.6 (labx): pelicula vencida = menos contraste e menos sensibilidade (mais na camada do azul) + veu;
     // pre-exposicao vista pela sensibilidade. Desligados, nada abaixo muda um bit.
     float3 add = pc_mat3(s0, s1, s2, fl);
@@ -1076,6 +1140,7 @@ static inline float3 pc_lab_path_x(float age, float3 fl, int scm, float3 lin, fl
     if (lx_add == 1) e = pc_max3(pc_mat3(s0, s1, s2, lin) + add, 1e-7f);
     float3 le = make_float3(pc_log10(e.x / 0.18f), pc_log10(e.y / 0.18f), pc_log10(e.z / 0.18f));
     float3 dn = pc_mat3(i0, i1, i2, pc_lab_curve(le, ng, nt, ns, nw));
+    if (gw.x > 0.0f) gn = pc_gs_neg(dn, dmid, gf, gc, gw, gn);  // 1.6 (fase 3): estrutura pela densidade
     dn = dn + gn;  // 1.6: grao no negativo (grao.negative_grain); zero sem ele
     if (ga.x + ga.y + ga.z > 0.0f) dn = dn + pc_pg_grain(dn, gq, ga, gs);  // 1.6: grao fisico
     if (has_print == 0) {
@@ -1228,6 +1293,8 @@ struct pc_vals {
     int grao_semente;
     float grao_maciez;
     float grao_respiracao;
+    float grao_estrutura;
+    float grao_aglomeracao;
     int hal_on;
     float hal_forca;
     float hal_raio;
@@ -1290,7 +1357,7 @@ struct pc_vals {
     float borda_irregular;
     float3 cor_barras;
 };
-#define PC_UI_SIZE 164
+#define PC_UI_SIZE 166
 static inline void pc_unpack(const float* ui, pc_vals* V) {
     float ui_copia = ui[0];
     V->copia = PC_I(ui_copia);
@@ -1486,127 +1553,131 @@ static inline void pc_unpack(const float* ui, pc_vals* V) {
     V->grao_maciez = (ui_grao_maciez * 0.01f);
     float ui_grao_respiracao = ui[96];
     V->grao_respiracao = (ui_grao_respiracao * 0.01f);
-    float ui_hal_on = ui[97];
+    float ui_grao_estrutura = ui[97];
+    V->grao_estrutura = (ui_grao_estrutura * 0.01f);
+    float ui_grao_aglomeracao = ui[98];
+    V->grao_aglomeracao = (ui_grao_aglomeracao * 0.01f);
+    float ui_hal_on = ui[99];
     V->hal_on = PC_I(ui_hal_on);
-    float ui_hal_forca = ui[98];
+    float ui_hal_forca = ui[100];
     V->hal_forca = ui_hal_forca;
-    float ui_hal_raio = ui[99];
+    float ui_hal_raio = ui[101];
     V->hal_raio = ui_hal_raio;
-    float ui_hal_limiar = ui[100];
+    float ui_hal_limiar = ui[102];
     V->hal_limiar = ui_hal_limiar;
-    pc_color3 ui_hal_cor = {ui[101], ui[102], ui[103]};
+    pc_color3 ui_hal_cor = {ui[103], ui[104], ui[105]};
     V->hal_cor = make_float3(ui_hal_cor.r, ui_hal_cor.g, ui_hal_cor.b);
-    float ui_hal_modelo = ui[104];
+    float ui_hal_modelo = ui[106];
     V->hal_modelo = PC_I(ui_hal_modelo);
-    float ui_bloom_on = ui[105];
+    float ui_bloom_on = ui[107];
     V->bloom_on = PC_I(ui_bloom_on);
-    float ui_bloom_forca = ui[106];
+    float ui_bloom_forca = ui[108];
     V->bloom_forca = ui_bloom_forca;
-    float ui_bloom_raio = ui[107];
+    float ui_bloom_raio = ui[109];
     V->bloom_raio = ui_bloom_raio;
-    float ui_bloom_limiar = ui[108];
+    float ui_bloom_limiar = ui[110];
     V->bloom_limiar = ui_bloom_limiar;
-    float ui_nevoa_forca = ui[109];
+    float ui_nevoa_forca = ui[111];
     V->nevoa_forca = (ui_nevoa_forca * 0.01f);
-    float ui_nevoa_raio = ui[110];
+    float ui_nevoa_raio = ui[112];
     V->nevoa_raio = ui_nevoa_raio;
-    float ui_lente_on = ui[111];
+    float ui_lente_on = ui[113];
     V->lente_on = PC_I(ui_lente_on);
-    float ui_maciez = ui[112];
+    float ui_maciez = ui[114];
     V->maciez = (ui_maciez * 0.01f);
-    float ui_raio_maciez = ui[113];
+    float ui_raio_maciez = ui[115];
     V->raio_maciez = ui_raio_maciez;
-    float ui_nitidez = ui[114];
+    float ui_nitidez = ui[116];
     V->nitidez = ui_nitidez;
-    float ui_aberracao = ui[115];
+    float ui_aberracao = ui[117];
     V->aberracao = ui_aberracao;
-    float ui_distorcao = ui[116];
+    float ui_distorcao = ui[118];
     V->distorcao = ui_distorcao;
-    float ui_vinheta = ui[117];
+    float ui_vinheta = ui[119];
     V->vinheta = (ui_vinheta * 0.01f);
-    float ui_vinheta_raio = ui[118];
+    float ui_vinheta_raio = ui[120];
     V->vinheta_raio = ui_vinheta_raio;
-    float ui_vinheta_suavidade = ui[119];
+    float ui_vinheta_suavidade = ui[121];
     V->vinheta_suavidade = ui_vinheta_suavidade;
-    float ui_vinheta_redondeza = ui[120];
+    float ui_vinheta_redondeza = ui[122];
     V->vinheta_redondeza = (ui_vinheta_redondeza * 0.01f);
-    float ui_proj_on = ui[121];
+    float ui_proj_on = ui[123];
     V->proj_on = PC_I(ui_proj_on);
-    float ui_tremor_x = ui[122];
+    float ui_tremor_x = ui[124];
     V->tremor_x = ui_tremor_x;
-    float ui_tremor_y = ui[123];
+    float ui_tremor_y = ui[125];
     V->tremor_y = ui_tremor_y;
-    float ui_tremor_rot = ui[124];
+    float ui_tremor_rot = ui[126];
     V->tremor_rot = ui_tremor_rot;
-    float ui_tremor_vel = ui[125];
+    float ui_tremor_vel = ui[127];
     V->tremor_vel = ui_tremor_vel;
-    float ui_cintilacao = ui[126];
+    float ui_cintilacao = ui[128];
     V->cintilacao = ui_cintilacao;
-    float ui_cintilacao_vel = ui[127];
+    float ui_cintilacao_vel = ui[129];
     V->cintilacao_vel = ui_cintilacao_vel;
-    float ui_desg_on = ui[128];
+    float ui_desg_on = ui[130];
     V->desg_on = PC_I(ui_desg_on);
-    float ui_poeira_on = ui[129];
+    float ui_poeira_on = ui[131];
     V->poeira_on = PC_I(ui_poeira_on);
-    float ui_poeira = ui[130];
+    float ui_poeira = ui[132];
     V->poeira = (ui_poeira * 0.01f);
-    float ui_poeira_tamanho = ui[131];
+    float ui_poeira_tamanho = ui[133];
     V->poeira_tamanho = ui_poeira_tamanho;
-    float ui_poeira_tipo = ui[132];
+    float ui_poeira_tipo = ui[134];
     V->poeira_tipo = PC_I(ui_poeira_tipo);
-    float ui_riscos_on = ui[133];
+    float ui_riscos_on = ui[135];
     V->riscos_on = PC_I(ui_riscos_on);
-    float ui_riscos = ui[134];
+    float ui_riscos = ui[136];
     V->riscos = (ui_riscos * 0.01f);
-    float ui_riscos_largura = ui[135];
+    float ui_riscos_largura = ui[137];
     V->riscos_largura = ui_riscos_largura;
-    float ui_cabelo_on = ui[136];
+    float ui_cabelo_on = ui[138];
     V->cabelo_on = PC_I(ui_cabelo_on);
-    float ui_cabelo = ui[137];
+    float ui_cabelo = ui[139];
     V->cabelo = (ui_cabelo * 0.01f);
-    float ui_cabelo_tamanho = ui[138];
+    float ui_cabelo_tamanho = ui[140];
     V->cabelo_tamanho = ui_cabelo_tamanho;
-    float ui_manchas_on = ui[139];
+    float ui_manchas_on = ui[141];
     V->manchas_on = PC_I(ui_manchas_on);
-    float ui_manchas = ui[140];
+    float ui_manchas = ui[142];
     V->manchas = (ui_manchas * 0.01f);
-    float ui_queima_on = ui[141];
+    float ui_queima_on = ui[143];
     V->queima_on = PC_I(ui_queima_on);
-    float ui_queima = ui[142];
+    float ui_queima = ui[144];
     V->queima = (ui_queima * 0.01f);
-    float ui_marcas_on = ui[143];
+    float ui_marcas_on = ui[145];
     V->marcas_on = PC_I(ui_marcas_on);
-    float ui_marcas_intervalo = ui[144];
+    float ui_marcas_intervalo = ui[146];
     V->marcas_intervalo = ui_marcas_intervalo;
-    float ui_cor_instavel_on = ui[145];
+    float ui_cor_instavel_on = ui[147];
     V->cor_instavel_on = PC_I(ui_cor_instavel_on);
-    float ui_cor_instavel = ui[146];
+    float ui_cor_instavel = ui[148];
     V->cor_instavel = (ui_cor_instavel * 0.01f);
-    float ui_emenda_on = ui[147];
+    float ui_emenda_on = ui[149];
     V->emenda_on = PC_I(ui_emenda_on);
-    float ui_emenda = ui[148];
+    float ui_emenda = ui[150];
     V->emenda = (ui_emenda * 0.01f);
-    float ui_vazamento_on = ui[149];
+    float ui_vazamento_on = ui[151];
     V->vazamento_on = PC_I(ui_vazamento_on);
-    float ui_vazamento = ui[150];
+    float ui_vazamento = ui[152];
     V->vazamento = (ui_vazamento * 0.01f);
-    pc_color3 ui_vazamento_cor = {ui[151], ui[152], ui[153]};
+    pc_color3 ui_vazamento_cor = {ui[153], ui[154], ui[155]};
     V->vazamento_cor = make_float3(ui_vazamento_cor.r, ui_vazamento_cor.g, ui_vazamento_cor.b);
-    float ui_vazamento_vel = ui[154];
+    float ui_vazamento_vel = ui[156];
     V->vazamento_vel = ui_vazamento_vel;
-    float ui_desgaste_semente = ui[155];
+    float ui_desgaste_semente = ui[157];
     V->desgaste_semente = PC_I(ui_desgaste_semente);
-    float ui_mold_on = ui[156];
+    float ui_mold_on = ui[158];
     V->mold_on = PC_I(ui_mold_on);
-    float ui_proporcao = ui[157];
+    float ui_proporcao = ui[159];
     V->proporcao = PC_I(ui_proporcao);
-    float ui_cantos = ui[158];
+    float ui_cantos = ui[160];
     V->cantos = ui_cantos;
-    float ui_borda_suave = ui[159];
+    float ui_borda_suave = ui[161];
     V->borda_suave = ui_borda_suave;
-    float ui_borda_irregular = ui[160];
+    float ui_borda_irregular = ui[162];
     V->borda_irregular = (ui_borda_irregular * 0.01f);
-    pc_color3 ui_cor_barras = {ui[161], ui[162], ui[163]};
+    pc_color3 ui_cor_barras = {ui[163], ui[164], ui[165]};
     V->cor_barras = make_float3(ui_cor_barras.r, ui_cor_barras.g, ui_cor_barras.b);
 }
 
@@ -1709,6 +1780,8 @@ static inline float3 pc_input(const pc_vals& V, float3 code) {
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -1867,6 +1940,8 @@ static inline float3 pc_input(const pc_vals& V, float3 code) {
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -2042,6 +2117,8 @@ static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2200,6 +2277,8 @@ static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -2368,6 +2447,8 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2526,6 +2607,8 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -2602,6 +2685,9 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
         float3 ga = pc_s3(0.0f);  // 1.6: grao fisico (fracao por camada; zero = desligado), posicao e semente
         float4 gq = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
         int gs = 0;
+        float4 gf = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): estrutura (gw.x = 0: desligada)
+        float4 gc = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 gw = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
         int ni = v_lab_negativo * 20;
         int lp = v_lab_copia;
         int pk = v_lab_processo * 40;
@@ -2646,7 +2732,7 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
-            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
         if (kind == 2.0f) {
             int b = pk + 1;
             float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
@@ -2668,7 +2754,7 @@ static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
                 make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
-                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
             la = pc_lerp3(la, lb, forca);
         }
         la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
@@ -2806,6 +2892,8 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -2964,6 +3052,8 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -3040,6 +3130,9 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
         float3 ga = pc_s3(0.0f);  // 1.6: grao fisico (fracao por camada; zero = desligado), posicao e semente
         float4 gq = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
         int gs = 0;
+        float4 gf = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): estrutura (gw.x = 0: desligada)
+        float4 gc = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 gw = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
         gn = gn_in;
         int ni = v_lab_negativo * 20;
         int lp = v_lab_copia;
@@ -3085,7 +3178,7 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
-            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
         if (kind == 2.0f) {
             int b = pk + 1;
             float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
@@ -3107,7 +3200,7 @@ static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in)
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
                 make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
-                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
             la = pc_lerp3(la, lb, forca);
         }
         la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
@@ -3245,6 +3338,8 @@ static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in,
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -3403,6 +3498,8 @@ static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in,
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;
@@ -3470,6 +3567,9 @@ static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in,
         float3 ga = pc_s3(0.0f);  // 1.6: grao fisico (fracao por camada; zero = desligado), posicao e semente
         float4 gq = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
         int gs = 0;
+        float4 gf = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): estrutura (gw.x = 0: desligada)
+        float4 gc = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 gw = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
         ga = ga_in;
         gq = gq_in;
         gs = gs_in;
@@ -3517,7 +3617,7 @@ static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in,
             make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
             make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
             make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
-            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
         if (kind == 2.0f) {
             int b = pk + 1;
             float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
@@ -3539,7 +3639,456 @@ static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in,
                 make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
                 make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
                 make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
-                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs);
+                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
+            la = pc_lerp3(la, lb, forca);
+        }
+        la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
+                         make_float3(v_lab_dens_r - 1.0f, v_lab_dens_g - 1.0f, v_lab_dens_b - 1.0f),
+                         v_lab_pele_matiz * 0.0174532925f, v_lab_pele_sat);
+        lin = pc_code_to_lin(la);
+    }
+
+    float3 neutral = pc_lin_to_code(lin);
+    float3 y = neutral;
+    if (v_cor_on == 1) {
+        int fi = v_pb_filtro;
+        int vi = v_virada;
+        float tone_amt = (PC_TONE_ON[vi] == 1 && v_pb == 1) ? v_virada_forca : 0.0f;
+        float3 film = pc_film_look(lin, v_pb, make_float3(PC_BWW[fi * 3], PC_BWW[fi * 3 + 1], PC_BWW[fi * 3 + 2]),
+            v_saturacao, make_float3(v_contraste_r, v_contraste_g, v_contraste_b),
+            make_float3(v_offset_r, v_offset_g, v_offset_b), PC_DSLOPE * v_contraste, v_meio_tom, v_preto,
+            _fmaxf(v_branco, v_meio_tom + 0.05f), pc_soft_p(v_rolagem_luzes), pc_soft_p(v_rolagem_sombras),
+            v_densidade, v_verdes_matiz * 0.0174532925f, v_azuis_matiz * 0.0174532925f, v_pele_sat,
+            v_pele_matiz * 0.0174532925f, v_pele_luz,
+            pc_hsv_tint(v_sombras_matiz, v_sombras_forca), pc_hsv_tint(v_luzes_matiz, v_luzes_forca), v_equilibrio,
+            tone_amt, make_float3(PC_TONE[vi * 6], PC_TONE[vi * 6 + 1], PC_TONE[vi * 6 + 2]),
+            make_float3(PC_TONE[vi * 6 + 3], PC_TONE[vi * 6 + 4], PC_TONE[vi * 6 + 5]));
+        y = pc_lerp3(neutral, film, v_cor_forca);
+    }
+    int pi = v_copia;
+    if (PC_PR_ON[pi] == 1) {
+        float3 pr = pc_print_stage(y, PC_PR[pi * 12 + 0],
+            make_float3(PC_PR[pi * 12 + 1], PC_PR[pi * 12 + 2], PC_PR[pi * 12 + 3]),
+            make_float3(PC_PR[pi * 12 + 4], PC_PR[pi * 12 + 5], PC_PR[pi * 12 + 6]),
+            PC_PR[pi * 12 + 7], PC_PR[pi * 12 + 8], PC_PR[pi * 12 + 9], PC_PR[pi * 12 + 10],
+            pc_soft_p(PC_PR_SOFT[pi * 2]), pc_soft_p(PC_PR_SOFT[pi * 2 + 1]));
+        y = pc_lerp3(y, pr, v_copia_forca);
+    }
+    float age = (v_cor_on == 1) ? v_envelhecimento : 0.0f;
+    if (age > 0.0f) y = pc_lerp3(y, pc_aged(y), age);
+    return y;
+}
+// colorPipe com o grao no negativo e a estrutura pela densidade (grao_estrutura.py)
+static inline float3 pc_colorpipe_gs(const pc_vals& V, float3 lin, float3 gn_in, float4 gf_in, float4 gc_in, float4 gw_in) {
+    int v_copia = V.copia;
+    float v_copia_forca = V.copia_forca;
+    float v_mix_geral = V.mix_geral;
+    int v_mostrar_curva = V.mostrar_curva;
+    int v_bitola = V.bitola;
+    int v_iso = V.iso;
+    int v_bitola_desfoque_on = V.bitola_desfoque_on;
+    float v_bitola_resolucao = V.bitola_resolucao;
+    float v_bitola_vinheta = V.bitola_vinheta;
+    int v_mtf = V.mtf;
+    float v_mtf_forca = V.mtf_forca;
+    float v_mtf_camadas = V.mtf_camadas;
+    int v_entrada = V.entrada;
+    int v_faixa_video = V.faixa_video;
+    int v_logc3_ei = V.logc3_ei;
+    float v_exposicao = V.exposicao;
+    float v_temperatura = V.temperatura;
+    float v_tint = V.tint;
+    float v_proteger_cores = V.proteger_cores;
+    int v_lab_on = V.lab_on;
+    int v_lab_negativo = V.lab_negativo;
+    int v_lab_copia = V.lab_copia;
+    float v_lab_revelacao = V.lab_revelacao;
+    float v_lab_separacao = V.lab_separacao;
+    float v_lab_separacao_eixo = V.lab_separacao_eixo;
+    float v_lab_luz_r = V.lab_luz_r;
+    float v_lab_luz_g = V.lab_luz_g;
+    float v_lab_luz_b = V.lab_luz_b;
+    float v_lab_densidade = V.lab_densidade;
+    float v_lab_dens_r = V.lab_dens_r;
+    float v_lab_dens_g = V.lab_dens_g;
+    float v_lab_dens_b = V.lab_dens_b;
+    float v_lab_pe = V.lab_pe;
+    float v_lab_sombras_rolagem = V.lab_sombras_rolagem;
+    float v_lab_luzes_rolagem = V.lab_luzes_rolagem;
+    float v_lab_saturacao_filme = V.lab_saturacao_filme;
+    float v_lab_saturacao = V.lab_saturacao;
+    float v_lab_pele_matiz = V.lab_pele_matiz;
+    float v_lab_pele_sat = V.lab_pele_sat;
+    float v_lab_bypass_negativo = V.lab_bypass_negativo;
+    float v_lab_bypass_copia = V.lab_bypass_copia;
+    float v_lab_neutro_negativo = V.lab_neutro_negativo;
+    float v_lab_neutro_copia = V.lab_neutro_copia;
+    int v_lab_processo = V.lab_processo;
+    float v_lab_processo_forca = V.lab_processo_forca;
+    float v_lab_chave = V.lab_chave;
+    float v_lab_diafonia = V.lab_diafonia;
+    int v_lab_grao = V.lab_grao;
+    int v_lab_grao_modelo = V.lab_grao_modelo;
+    int v_lab_scanner = V.lab_scanner;
+    float v_lab_vencida = V.lab_vencida;
+    int v_lab_pre_exposicao = V.lab_pre_exposicao;
+    float v_lab_pre_exposicao_stops = V.lab_pre_exposicao_stops;
+    int v_lab_pre_exposicao_cor = V.lab_pre_exposicao_cor;
+    int v_cor_on = V.cor_on;
+    float v_cor_forca = V.cor_forca;
+    float v_contraste = V.contraste;
+    float v_meio_tom = V.meio_tom;
+    float v_preto = V.preto;
+    float v_branco = V.branco;
+    float v_rolagem_luzes = V.rolagem_luzes;
+    float v_rolagem_sombras = V.rolagem_sombras;
+    float v_saturacao = V.saturacao;
+    float v_densidade = V.densidade;
+    float v_sombras_matiz = V.sombras_matiz;
+    float v_sombras_forca = V.sombras_forca;
+    float v_luzes_matiz = V.luzes_matiz;
+    float v_luzes_forca = V.luzes_forca;
+    float v_equilibrio = V.equilibrio;
+    float v_contraste_r = V.contraste_r;
+    float v_contraste_g = V.contraste_g;
+    float v_contraste_b = V.contraste_b;
+    float v_offset_r = V.offset_r;
+    float v_offset_g = V.offset_g;
+    float v_offset_b = V.offset_b;
+    float v_verdes_matiz = V.verdes_matiz;
+    float v_azuis_matiz = V.azuis_matiz;
+    float v_pele_sat = V.pele_sat;
+    float v_pele_matiz = V.pele_matiz;
+    float v_pele_luz = V.pele_luz;
+    int v_pb = V.pb;
+    int v_pb_filtro = V.pb_filtro;
+    int v_virada = V.virada;
+    float v_virada_forca = V.virada_forca;
+    float v_envelhecimento = V.envelhecimento;
+    int v_grao_on = V.grao_on;
+    float v_grao_forca = V.grao_forca;
+    float v_grao_tamanho = V.grao_tamanho;
+    float v_grao_aspereza = V.grao_aspereza;
+    float v_grao_cor = V.grao_cor;
+    float v_grao_sombras = V.grao_sombras;
+    float v_grao_meios = V.grao_meios;
+    float v_grao_luzes = V.grao_luzes;
+    int v_grao_animado = V.grao_animado;
+    int v_grao_semente = V.grao_semente;
+    float v_grao_maciez = V.grao_maciez;
+    float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
+    int v_hal_on = V.hal_on;
+    float v_hal_forca = V.hal_forca;
+    float v_hal_raio = V.hal_raio;
+    float v_hal_limiar = V.hal_limiar;
+    float3 v_hal_cor = V.hal_cor;
+    int v_hal_modelo = V.hal_modelo;
+    int v_bloom_on = V.bloom_on;
+    float v_bloom_forca = V.bloom_forca;
+    float v_bloom_raio = V.bloom_raio;
+    float v_bloom_limiar = V.bloom_limiar;
+    float v_nevoa_forca = V.nevoa_forca;
+    float v_nevoa_raio = V.nevoa_raio;
+    int v_lente_on = V.lente_on;
+    float v_maciez = V.maciez;
+    float v_raio_maciez = V.raio_maciez;
+    float v_nitidez = V.nitidez;
+    float v_aberracao = V.aberracao;
+    float v_distorcao = V.distorcao;
+    float v_vinheta = V.vinheta;
+    float v_vinheta_raio = V.vinheta_raio;
+    float v_vinheta_suavidade = V.vinheta_suavidade;
+    float v_vinheta_redondeza = V.vinheta_redondeza;
+    int v_proj_on = V.proj_on;
+    float v_tremor_x = V.tremor_x;
+    float v_tremor_y = V.tremor_y;
+    float v_tremor_rot = V.tremor_rot;
+    float v_tremor_vel = V.tremor_vel;
+    float v_cintilacao = V.cintilacao;
+    float v_cintilacao_vel = V.cintilacao_vel;
+    int v_desg_on = V.desg_on;
+    int v_poeira_on = V.poeira_on;
+    float v_poeira = V.poeira;
+    float v_poeira_tamanho = V.poeira_tamanho;
+    int v_poeira_tipo = V.poeira_tipo;
+    int v_riscos_on = V.riscos_on;
+    float v_riscos = V.riscos;
+    float v_riscos_largura = V.riscos_largura;
+    int v_cabelo_on = V.cabelo_on;
+    float v_cabelo = V.cabelo;
+    float v_cabelo_tamanho = V.cabelo_tamanho;
+    int v_manchas_on = V.manchas_on;
+    float v_manchas = V.manchas;
+    int v_queima_on = V.queima_on;
+    float v_queima = V.queima;
+    int v_marcas_on = V.marcas_on;
+    float v_marcas_intervalo = V.marcas_intervalo;
+    int v_cor_instavel_on = V.cor_instavel_on;
+    float v_cor_instavel = V.cor_instavel;
+    int v_emenda_on = V.emenda_on;
+    float v_emenda = V.emenda;
+    int v_vazamento_on = V.vazamento_on;
+    float v_vazamento = V.vazamento;
+    float3 v_vazamento_cor = V.vazamento_cor;
+    float v_vazamento_vel = V.vazamento_vel;
+    int v_desgaste_semente = V.desgaste_semente;
+    int v_mold_on = V.mold_on;
+    int v_proporcao = V.proporcao;
+    float v_cantos = V.cantos;
+    float v_borda_suave = V.borda_suave;
+    float v_borda_irregular = V.borda_irregular;
+    float3 v_cor_barras = V.cor_barras;
+    (void)v_copia;
+    (void)v_copia_forca;
+    (void)v_mix_geral;
+    (void)v_mostrar_curva;
+    (void)v_bitola;
+    (void)v_iso;
+    (void)v_bitola_desfoque_on;
+    (void)v_bitola_resolucao;
+    (void)v_bitola_vinheta;
+    (void)v_mtf;
+    (void)v_mtf_forca;
+    (void)v_mtf_camadas;
+    (void)v_entrada;
+    (void)v_faixa_video;
+    (void)v_logc3_ei;
+    (void)v_exposicao;
+    (void)v_temperatura;
+    (void)v_tint;
+    (void)v_proteger_cores;
+    (void)v_lab_on;
+    (void)v_lab_negativo;
+    (void)v_lab_copia;
+    (void)v_lab_revelacao;
+    (void)v_lab_separacao;
+    (void)v_lab_separacao_eixo;
+    (void)v_lab_luz_r;
+    (void)v_lab_luz_g;
+    (void)v_lab_luz_b;
+    (void)v_lab_densidade;
+    (void)v_lab_dens_r;
+    (void)v_lab_dens_g;
+    (void)v_lab_dens_b;
+    (void)v_lab_pe;
+    (void)v_lab_sombras_rolagem;
+    (void)v_lab_luzes_rolagem;
+    (void)v_lab_saturacao_filme;
+    (void)v_lab_saturacao;
+    (void)v_lab_pele_matiz;
+    (void)v_lab_pele_sat;
+    (void)v_lab_bypass_negativo;
+    (void)v_lab_bypass_copia;
+    (void)v_lab_neutro_negativo;
+    (void)v_lab_neutro_copia;
+    (void)v_lab_processo;
+    (void)v_lab_processo_forca;
+    (void)v_lab_chave;
+    (void)v_lab_diafonia;
+    (void)v_lab_grao;
+    (void)v_lab_grao_modelo;
+    (void)v_lab_scanner;
+    (void)v_lab_vencida;
+    (void)v_lab_pre_exposicao;
+    (void)v_lab_pre_exposicao_stops;
+    (void)v_lab_pre_exposicao_cor;
+    (void)v_cor_on;
+    (void)v_cor_forca;
+    (void)v_contraste;
+    (void)v_meio_tom;
+    (void)v_preto;
+    (void)v_branco;
+    (void)v_rolagem_luzes;
+    (void)v_rolagem_sombras;
+    (void)v_saturacao;
+    (void)v_densidade;
+    (void)v_sombras_matiz;
+    (void)v_sombras_forca;
+    (void)v_luzes_matiz;
+    (void)v_luzes_forca;
+    (void)v_equilibrio;
+    (void)v_contraste_r;
+    (void)v_contraste_g;
+    (void)v_contraste_b;
+    (void)v_offset_r;
+    (void)v_offset_g;
+    (void)v_offset_b;
+    (void)v_verdes_matiz;
+    (void)v_azuis_matiz;
+    (void)v_pele_sat;
+    (void)v_pele_matiz;
+    (void)v_pele_luz;
+    (void)v_pb;
+    (void)v_pb_filtro;
+    (void)v_virada;
+    (void)v_virada_forca;
+    (void)v_envelhecimento;
+    (void)v_grao_on;
+    (void)v_grao_forca;
+    (void)v_grao_tamanho;
+    (void)v_grao_aspereza;
+    (void)v_grao_cor;
+    (void)v_grao_sombras;
+    (void)v_grao_meios;
+    (void)v_grao_luzes;
+    (void)v_grao_animado;
+    (void)v_grao_semente;
+    (void)v_grao_maciez;
+    (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
+    (void)v_hal_on;
+    (void)v_hal_forca;
+    (void)v_hal_raio;
+    (void)v_hal_limiar;
+    (void)v_hal_cor;
+    (void)v_hal_modelo;
+    (void)v_bloom_on;
+    (void)v_bloom_forca;
+    (void)v_bloom_raio;
+    (void)v_bloom_limiar;
+    (void)v_nevoa_forca;
+    (void)v_nevoa_raio;
+    (void)v_lente_on;
+    (void)v_maciez;
+    (void)v_raio_maciez;
+    (void)v_nitidez;
+    (void)v_aberracao;
+    (void)v_distorcao;
+    (void)v_vinheta;
+    (void)v_vinheta_raio;
+    (void)v_vinheta_suavidade;
+    (void)v_vinheta_redondeza;
+    (void)v_proj_on;
+    (void)v_tremor_x;
+    (void)v_tremor_y;
+    (void)v_tremor_rot;
+    (void)v_tremor_vel;
+    (void)v_cintilacao;
+    (void)v_cintilacao_vel;
+    (void)v_desg_on;
+    (void)v_poeira_on;
+    (void)v_poeira;
+    (void)v_poeira_tamanho;
+    (void)v_poeira_tipo;
+    (void)v_riscos_on;
+    (void)v_riscos;
+    (void)v_riscos_largura;
+    (void)v_cabelo_on;
+    (void)v_cabelo;
+    (void)v_cabelo_tamanho;
+    (void)v_manchas_on;
+    (void)v_manchas;
+    (void)v_queima_on;
+    (void)v_queima;
+    (void)v_marcas_on;
+    (void)v_marcas_intervalo;
+    (void)v_cor_instavel_on;
+    (void)v_cor_instavel;
+    (void)v_emenda_on;
+    (void)v_emenda;
+    (void)v_vazamento_on;
+    (void)v_vazamento;
+    (void)v_vazamento_cor;
+    (void)v_vazamento_vel;
+    (void)v_desgaste_semente;
+    (void)v_mold_on;
+    (void)v_proporcao;
+    (void)v_cantos;
+    (void)v_borda_suave;
+    (void)v_borda_irregular;
+    (void)v_cor_barras;
+
+    if (v_lab_on == 1) {
+        float3 gn = pc_s3(0.0f);
+        // 1.6 (labx): pelicula vencida, pre-exposicao e scanner de luz branca
+        float lx_age = v_lab_vencida;
+        float3 lx_fl = pc_s3(0.0f);
+        if (v_lab_pre_exposicao == 1) {
+            int fc = v_lab_pre_exposicao_cor * 3;
+            lx_fl = make_float3(PC_LX_FLASH[fc], PC_LX_FLASH[fc + 1], PC_LX_FLASH[fc + 2])
+                    * (0.18f * _exp2f(-v_lab_pre_exposicao_stops));
+        }
+        int lx_sc = v_lab_scanner;
+        float3 ga = pc_s3(0.0f);  // 1.6: grao fisico (fracao por camada; zero = desligado), posicao e semente
+        float4 gq = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
+        int gs = 0;
+        float4 gf = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): estrutura (gw.x = 0: desligada)
+        float4 gc = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 gw = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        gn = gn_in;
+        gf = gf_in;
+        gc = gc_in;
+        gw = gw_in;
+        int ni = v_lab_negativo * 20;
+        int lp = v_lab_copia;
+        int pk = v_lab_processo * 40;
+        float kind = PC_PROC[pk];
+        float forca = v_lab_processo_forca;
+        float3 lights = make_float3(PC_LAB_POINT * (v_lab_luz_r + v_lab_densidade),
+                                    PC_LAB_POINT * (v_lab_luz_g + v_lab_densidade),
+                                    PC_LAB_POINT * (v_lab_luz_b + v_lab_densidade));
+        float3 key = pc_s3(0.0f);
+        if (kind == 1.0f) {
+            key = pc_s3(0.8f * forca / 3.0f);
+            if (PC_LPR[lp * 17] == 0.0f) lp = PC_LAB_2383;
+        }
+        if (v_lab_bypass_copia > 0.0f && PC_LPR[lp * 17] > 0.5f) key = key + pc_s3(0.8f * v_lab_bypass_copia / 3.0f);
+        // separacao de cores (Hue Split) na densidade: eixos u (polo quente) e v (perpendicular)
+        int split_on = (v_lab_separacao > 0.0f) ? 1 : 0;
+        float3 hu = pc_hue_rgb(v_lab_separacao_eixo);
+        hu = hu - pc_s3((hu.x + hu.y + hu.z) / 3.0f);
+        hu = hu * (1.0f / _sqrtf(pc_dot3(hu, hu)));
+        float3 hv = make_float3(hu.z - hu.y, hu.x - hu.z, hu.y - hu.x) * 0.57735027f;
+        hv = hv * (1.0f / _sqrtf(pc_dot3(hv, hv)));
+        float sa = PC_SPLIT_A * v_lab_separacao;
+        float sb = PC_SPLIT_B * v_lab_separacao;
+        float toe = _exp2f(-0.6f * v_lab_pe);
+        float nn = v_lab_neutro_negativo;
+        float np = v_lab_neutro_copia;
+        int lq = lp * 17;
+        float2 ab = pc_ii_coefs(PC_NEG[ni + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
+        float3 la = pc_lab_path_x(lx_age, lx_fl, lx_sc, lin,
+            make_float3(PC_NEG[ni + 0], PC_NEG[ni + 1], PC_NEG[ni + 2]),
+            make_float3(PC_NEG[ni + 3], PC_NEG[ni + 4], PC_NEG[ni + 5]),
+            make_float3(PC_NEG[ni + 6], PC_NEG[ni + 7], PC_NEG[ni + 8]),
+            pc_neutral3(make_float3(PC_NEG[ni + 9], PC_NEG[ni + 10], PC_NEG[ni + 11]), nn),
+            pc_neutral3(make_float3(PC_NEG[ni + 12], PC_NEG[ni + 13], PC_NEG[ni + 14]), nn),
+            pc_neutral3(make_float3(PC_NEG[ni + 15], PC_NEG[ni + 16], PC_NEG[ni + 17]), nn), PC_NEG[ni + 18],
+            pc_ii_row(make_float3(1.0f, 0.0f, 0.0f), hu.x, hv.x, hu, hv, sa, sb, ab.x, ab.y, split_on),
+            pc_ii_row(make_float3(0.0f, 1.0f, 0.0f), hu.y, hv.y, hu, hv, sa, sb, ab.x, ab.y, split_on),
+            pc_ii_row(make_float3(0.0f, 0.0f, 1.0f), hu.z, hv.z, hu, hv, sa, sb, ab.x, ab.y, split_on),
+            (PC_LPR[lq] > 0.5f) ? 1 : 0,
+            pc_neutral3(make_float3(PC_LPR[lq + 1], PC_LPR[lq + 2], PC_LPR[lq + 3]), np),
+            pc_neutral3(make_float3(PC_LPR[lq + 4], PC_LPR[lq + 5], PC_LPR[lq + 6]), np) * toe, PC_LPR[lq + 7],
+            make_float3(PC_LPR[lq + 8], PC_LPR[lq + 9], PC_LPR[lq + 10]),
+            make_float3(PC_LPR[lq + 11], PC_LPR[lq + 12], PC_LPR[lq + 13]),
+            make_float3(PC_LPR[lq + 14], PC_LPR[lq + 15], PC_LPR[lq + 16]),
+            key, v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
+        if (kind == 2.0f) {
+            int b = pk + 1;
+            float2 bb = pc_ii_coefs(PC_PROC[b + 19], v_lab_saturacao_filme, v_lab_bypass_negativo);
+            float3 lb = pc_lab_path_x(lx_age, lx_fl, 0, lin,
+                make_float3(PC_PROC[b + 0], PC_PROC[b + 1], PC_PROC[b + 2]),
+                make_float3(PC_PROC[b + 3], PC_PROC[b + 4], PC_PROC[b + 5]),
+                make_float3(PC_PROC[b + 6], PC_PROC[b + 7], PC_PROC[b + 8]),
+                pc_neutral3(make_float3(PC_PROC[b + 9], PC_PROC[b + 10], PC_PROC[b + 11]), nn),
+                pc_neutral3(make_float3(PC_PROC[b + 12], PC_PROC[b + 13], PC_PROC[b + 14]), nn),
+                pc_neutral3(make_float3(PC_PROC[b + 15], PC_PROC[b + 16], PC_PROC[b + 17]), nn), PC_PROC[b + 18],
+                pc_ii_row(make_float3(1.0f, 0.0f, 0.0f), hu.x, hv.x, hu, hv, sa, sb, bb.x, bb.y, split_on),
+                pc_ii_row(make_float3(0.0f, 1.0f, 0.0f), hu.y, hv.y, hu, hv, sa, sb, bb.x, bb.y, split_on),
+                pc_ii_row(make_float3(0.0f, 0.0f, 1.0f), hu.z, hv.z, hu, hv, sa, sb, bb.x, bb.y, split_on),
+                1,
+                pc_neutral3(make_float3(PC_PROC[b + 20], PC_PROC[b + 21], PC_PROC[b + 22]), np),
+                pc_neutral3(make_float3(PC_PROC[b + 23], PC_PROC[b + 24], PC_PROC[b + 25]), np) * toe,
+                PC_PROC[b + 26],
+                make_float3(PC_PROC[b + 27], PC_PROC[b + 28], PC_PROC[b + 29]),
+                make_float3(PC_PROC[b + 30], PC_PROC[b + 31], PC_PROC[b + 32]),
+                make_float3(PC_PROC[b + 33], PC_PROC[b + 34], PC_PROC[b + 35]),
+                make_float3(PC_PROC[b + 36], PC_PROC[b + 37], PC_PROC[b + 38]) * v_lab_chave,
+                v_lab_revelacao, v_lab_diafonia, lights, gn, ga, gq, gs, gf, gc, gw);
             la = pc_lerp3(la, lb, forca);
         }
         la = pc_lab_post(la, v_lab_luzes_rolagem, v_lab_sombras_rolagem, v_lab_saturacao,
@@ -3701,6 +4250,8 @@ static inline void pc_frame_params(const pc_vals& V, int p_Width, int p_Height, 
     int v_grao_semente = V.grao_semente;
     float v_grao_maciez = V.grao_maciez;
     float v_grao_respiracao = V.grao_respiracao;
+    float v_grao_estrutura = V.grao_estrutura;
+    float v_grao_aglomeracao = V.grao_aglomeracao;
     int v_hal_on = V.hal_on;
     float v_hal_forca = V.hal_forca;
     float v_hal_raio = V.hal_raio;
@@ -3859,6 +4410,8 @@ static inline void pc_frame_params(const pc_vals& V, int p_Width, int p_Height, 
     (void)v_grao_semente;
     (void)v_grao_maciez;
     (void)v_grao_respiracao;
+    (void)v_grao_estrutura;
+    (void)v_grao_aglomeracao;
     (void)v_hal_on;
     (void)v_hal_forca;
     (void)v_hal_raio;

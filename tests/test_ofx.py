@@ -497,6 +497,14 @@ RENDER_CASES = [
     ("grao_fisico", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico")),
     ("grao_fisico_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
                                   grao_cor=0.8, lab_revelacao=1.0, iso="500", lab_grao_modelo="fisico")),
+    # 1.6 (fase 3): estrutura pela densidade (pelicula/grao_estrutura.py)
+    ("grao_estrutura", _neutral(grao_on=True, grao_forca=1.5, grao_estrutura=1.0)),
+    ("grao_estrutura_s8", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
+                                   grao_estrutura=0.6, grao_aglomeracao=0.8, grao_cor=0.7, lab_on=True)),
+    ("grao_estrutura_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True, grao_estrutura=1.0)),
+    ("grao_estrutura_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True,
+                                              lab_processo="tech3", grao_estrutura=0.7, grao_aglomeracao=1.0,
+                                              lab_vencida=10.0)),
 ]
 
 
