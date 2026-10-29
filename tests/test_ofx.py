@@ -478,6 +478,8 @@ RENDER_CASES = [
     ("super8_kodachrome", _scene("super8_kodachrome")),
     ("vision3_500t", _scene("vision3_500t")),
     ("lab_teal_orange", _scene("lab_teal_orange_5201")),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
 ]
 
 

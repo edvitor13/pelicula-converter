@@ -497,6 +497,10 @@ EXACT = [
     ("luz", "projetor", _neutral(desg_on=True, poeira_on=False, riscos_on=False, vazamento=0.7,
                                  cor_instavel_on=True, queima_on=True, queima=1.0)),
     ("moldura", "projetor", _neutral(mold_on=True, proporcao="2.39", cantos=0.05, borda_irregular=0.5)),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("maciez_grao_s8", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
+                                           grao_maciez=0.6, grao_tamanho=1.8, iso="800")),
 ]
 
 

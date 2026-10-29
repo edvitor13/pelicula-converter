@@ -34,6 +34,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
+30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
 
 ---
 
@@ -2690,3 +2691,52 @@ dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
   (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
   `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
 
+## 30. Grão e textura na 1.6
+
+Os modelos novos de grão e textura ficam em `pelicula/grao.py`; `look.build_plan`, os shaders, o `Engine` e o
+plugin só ganham ganchos pequenos. Todo ajuste novo começa num padrão neutro e, nele, o plano, os quadros, o LUT
+exportado e o plugin saem bit a bit os da BASE: `tests/grao_base.py` gravou a referência no código da BASE
+(`tests/data/grao_base.json`: planos de todos os presets e de looks com grão, halação, maciez e Laboratório;
+quadros do modo Película e do modo Edição em 8 e 16 bits; LUTs; nós do plugin em GLSL; o OpenFX compilado) e
+`tests/test_grao.py` confere (os hashes da GPU e do OpenFX só na mesma placa e no mesmo compilador da gravação).
+O comportamento de cada ajuste ligado fica em `tests/test_grao_efeitos.py`.
+
+### 30.1 Patentes conferidas antes da estrutura pela densidade (M1)
+
+Lidas em 29/10/2026, nas reivindicações publicadas (Google Patents):
+
+- **US 12,705,810 B2** (Northwestern University, "Real time film grain rendering and parameter estimation";
+  provisório 63/490,545 de 16/03/2023, pedido 18/608,381, concedida em 11/08/2026). As reivindicações
+  independentes (1, método; 12, sistema) recebem uma imagem, acham regiões de valor constante, tiram delas
+  estatísticas de segunda ordem (variância e correlação) e sintetizam um ruído correlacionado dependente do
+  sinal a partir dessas estatísticas; as dependentes cobrem o modelo booleano filtrado (centros de Poisson com
+  um parâmetro de densidade, raios i.i.d.). **Não conflita** com o grão do app enquanto ele não for estimado de
+  um quadro ou de um scan: os parâmetros vêm dos ajustes e das constantes σD dos datasheets.
+- **US 9,438,821 B1** (Suny Behar Parker, o Livegrain; prioridade 11/04/2014, concedida em 06/09/2016, em vigor
+  até cerca de 10/04/2035). Reivindicações 1, 12 e 20: receber "assets" de grão ligados a níveis de exposição,
+  dividir a imagem em mattes delimitados pela luminância, somar a cada matte um asset diferente e combinar
+  (2 a 5: três ou cinco mattes no pé, na reta e no ombro da curva D log E). A descrição usa placas de grão
+  escaneadas de um cartão cinza de −6 a +6 stops.
+- **US 9,692,987 B2** (continuação da anterior; concedida em 27/06/2017, em vigor até cerca de 10/04/2035).
+  Reivindicações 1 e 9: somar "um tratamento de grão diferente" a cada um de dois ou mais mattes delimitados
+  pela luminância e combinar. Reivindicação 16: aplicar um primeiro tratamento de grão a uma primeira faixa de
+  luminância e um segundo tratamento, diferente, a uma segunda faixa (sem mattes). Não exige grão escaneado.
+
+**Decisão: a M1 ficou de fora.** A proposta do plano (algumas camadas de ruído, cada uma com tamanho,
+aglomeração e assimetria próprios, misturadas por pesos suaves da densidade local) lê quase ao pé da letra as
+reivindicações 1 e 16 da US 9,692,987, e mesmo uma estrutura que muda de forma contínua com a densidade pode ser
+lida como "tratamentos de grão diferentes por faixa de luminância". Fica como pergunta para o usuário (e, se for
+o caso, para um advogado). O que a 1.6 faz com o grão continua sendo **um** campo procedural por quadro: a M3
+soma esse campo na densidade de cada camada do negativo e quem molda o grão visível é a curva da cópia (a
+transferência física do modelo), sem mattes nem tratamentos por faixa (§30.3).
+
+### 30.2 Maciez pelo grão (M2)
+
+`grao_maciez` (seção Grão, 0–100%, padrão 0%) soma `sig_grao = k · s · quantidade` na mesma raiz quadrada da
+maciez (`soft = √(sig_g² + sig_u² + sig_m² + sig_grao²) · scale`), só com o grão ligado. `s` é o tamanho
+natural do grão em px@1080 (`grao.grain_size_1080`: `0,8 · Tamanho · bitola · ISO`, sem o mínimo de 1 px da
+grade, para valer igual em qualquer resolução) e `k = 1/√3` (`grao.GRAIN_SOFT_K`): a grade de gaussianas do
+ruído é interpolada por B-spline cúbica, a convolução de quatro caixas de uma célula, com variância `4·s²/12`
+por eixo; com 100% a imagem recebe a gaussiana desse mesmo envelope e deixa de ser mais nítida que o grão. Em 0%
+`sig_grao = 0` e a soma é exatamente a de antes. O nó *Textura* e o OpenFX fazem a mesma conta
+(`PC_GRAIN_SOFT_K`, de `resolve._grao_tables`).

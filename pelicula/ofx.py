@@ -249,7 +249,7 @@ def kernels_source() -> str:
     head.append(resolve._define("PC_DSLOPE", look.D_SLOPE) + resolve._define("PC_DMID", look.D_MID)
                 + resolve._define("PC_DP", look.D_P))
     tables = (resolve._cor_tables(CPP) + resolve._lab_tables(CPP) + resolve._gauge_tables(CPP)
-              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP))
+              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP))
     kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_LAB + resolve.K_CURVE
               + resolve.K_RAND + resolve.K_TEXTURA + resolve.K_PROJETOR).replace("PC_DEVICE ", "static inline ")
     body = []

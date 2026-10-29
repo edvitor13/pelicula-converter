@@ -793,8 +793,8 @@ def spec(kind: str, dialect: str = DCTL) -> Spec:
         kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB + K_CURVE
         return Spec(kind, controls, _cor_tables(dialect) + _lab_tables(dialect), kernel, body, False)
     if kind == "textura":
-        return Spec("textura", textura_controls(), _gauge_tables(dialect) + _mtf_table(dialect),
-                    K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
+        tables = _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
+        return Spec("textura", textura_controls(), tables, K_COMMON + K_RAND + K_TEXTURA, _textura_body(), True)
     if kind == "projetor":
         return Spec("projetor", projetor_controls(), _gauge_tables(dialect) + _projetor_tables(dialect),
                     K_COMMON + K_RAND + K_PROJETOR, _projetor_body(), True)
@@ -1399,7 +1399,11 @@ def _textura_body() -> str:
     float sig_g = (v_bitola_desfoque_on == 1) ? PC_GAUGE[gi * 7 + 2] * v_bitola_resolucao : 0.0f;
     float sig_u = (v_lente_on == 1) ? v_raio_maciez * v_maciez * 2.0f : 0.0f;
     float sig_m = PC_MTF[v_mtf] * 2.0f * v_mtf_forca;  // MTF da pelicula (look.mtf_sigma)
-    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m) * scale;
+    float sig_r = 0.0f;  // 1.6: maciez pelo grao (grao.soft_sigma)
+    if (v_grao_maciez > 0.0f && v_grao_on == 1 && v_grao_forca > 0.0f)
+        sig_r = PC_GRAIN_SOFT_K * 0.8f * v_grao_tamanho * PC_GAUGE[gi * 7 + 0] * _powf(iso / 250.0f, 0.18f)
+                * v_grao_maciez;
+    float soft = _sqrtf(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m + sig_r * sig_r) * scale;
     float sharp = (v_lente_on == 1) ? v_nitidez : 0.0f;
     float sigma = 0.0f;
     float soft_mix = 0.0f;
@@ -1478,7 +1482,7 @@ def textura_controls() -> list[Ctl]:
         ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
         ctl("grao_sombras", "Grao - Nas sombras"), ctl("grao_meios", "Grao - Nos tons medios"),
         ctl("grao_luzes", "Grao - Nas altas luzes"), ctl("grao_animado", "Grao - Muda a cada quadro"),
-        ctl("grao_semente", "Grao - Semente"),
+        ctl("grao_semente", "Grao - Semente"), ctl("grao_maciez", "Grao - Maciez pelo grao"),
         ctl("hal_on", "Halacao"), ctl("hal_forca", "Halacao - Intensidade"),
         ctl("hal_raio", "Halacao - Raio px em 1080p"), ctl("hal_limiar", "Halacao - Limiar EV"),
         ctl("hal_cor", "Halacao - Cor"),
@@ -1498,6 +1502,12 @@ def textura_controls() -> list[Ctl]:
 
 def _mtf_table(dialect: str) -> str:
     return _table(dialect, "PC_MTF", [look.MTF_SIGMA[k] for k, _l in params.MTFS])
+
+
+def _grao_tables(dialect: str) -> str:
+    """Constantes do grão e da textura da 1.6 (`pelicula/grao.py`) para os nós e o OpenFX."""
+    from . import grao
+    return _define("PC_GRAIN_SOFT_K", grao.GRAIN_SOFT_K)
 
 
 def _gauge_tables(dialect: str) -> str:

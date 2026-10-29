@@ -553,7 +553,11 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     float sig_g = V.bitola_desfoque_on == 1 ? gauge(gi, 2) * V.bitola_resolucao : 0.0f;
     float sig_u = V.lente_on == 1 ? V.raio_maciez * V.maciez * 2.0f : 0.0f;
     float sig_m = PC_MTF[V.mtf] * 2.0f * V.mtf_forca;
-    float soft = std::sqrt(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m) * scale;
+    float sig_r = 0.0f;  // 1.6: maciez pelo grão (grao.soft_sigma)
+    if (V.grao_maciez > 0.0f && V.grao_on == 1 && V.grao_forca > 0.0f)
+        sig_r = PC_GRAIN_SOFT_K * 0.8f * V.grao_tamanho * gauge(gi, 0) * std::pow(PC_ISO[V.iso] / 250.0f, 0.18f) *
+                V.grao_maciez;
+    float soft = std::sqrt(sig_g * sig_g + sig_u * sig_u + sig_m * sig_m + sig_r * sig_r) * scale;
     float sharp = V.lente_on == 1 ? V.nitidez : 0.0f;
     float soft_sigma = 0.0f, soft_mix = 0.0f;
     if (soft > 0.05f) {

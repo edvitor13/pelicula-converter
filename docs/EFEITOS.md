@@ -316,6 +316,7 @@ interpolação é trilinear na GPU.
 | **Nas altas luzes** | 0,00–2,00 | 0,45 | Quanto grão aparece nas altas luzes. |
 | **Grão muda a cada quadro** | liga/desliga | ligado | Desligado, o padrão do grão fica parado (útil para fotos ou efeitos especiais). |
 | Semente (**avançado**) | 0–9999 | 7 | Muda o padrão aleatório do grão. |
+| **Maciez pelo grão** | 0–100% | 0% | Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma imagem mais nítida que ele (na película, a imagem nunca é mais nítida que o grão). 100% dá à imagem a maciez do grão: cresce com o *Tamanho*, a bitola e o ISO. Soma-se às outras maciezes (bitola, lente, MTF) e só vale com o grão ligado. |
 
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
 bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é aplicado depois da curva de

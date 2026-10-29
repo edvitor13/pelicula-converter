@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from . import grao
+
 # Curva neutra usada para levar vídeo Rec.709 até a luz da cena e de volta.
 D_SLOPE = 0.155
 D_MID = 0.45
@@ -887,7 +889,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     sig_g = gauge["blur"] * v["bitola_resolucao"] if v["bitola_desfoque_on"] else 0.0
     sig_u = (v["raio_maciez"] * v["maciez"] * 2.0) if lente else 0.0
     sig_m = mtf_sigma(v)  # MTF da película: gaussiana fina somada em quadratura
-    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2) * scale
+    sig_r = grao.soft_sigma(v, gauge)  # 1.6: maciez pelo grão (0 = desligada)
+    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2 + sig_r ** 2) * scale
     sharp = v["nitidez"] if lente else 0.0
     if soft > 0.05:
         plan.soft_sigma = soft

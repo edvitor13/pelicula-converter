@@ -344,6 +344,9 @@ SECTIONS: list[Section] = [
         F("grao_luzes", "Nas altas luzes", 0.45, 0, 2, 0.01, 2),
         B("grao_animado", "Grão muda a cada quadro", True),
         I("grao_semente", "Semente", 7, 0, 9999, "Muda o padrão aleatório do grão.", advanced=True),
+        F("grao_maciez", "Maciez pelo grão", 0.0, 0, 1, percent=True,
+          tip="Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma "
+              "imagem mais nítida que ele. 100% = a maciez do grão; 0% = como antes."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [
