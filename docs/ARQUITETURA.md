@@ -34,6 +34,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
+31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 
 ---
 
@@ -2690,3 +2691,30 @@ dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
   (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
   `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
 
+## 31. Cor simples e cor por planos
+
+Frente de cor da 1.6 (#38): máscaras de pele e de posição, "Cor por planos" no look (Beta), cor simples nos
+clipes do modo Edição, grupos de clipes e ferramentas da prévia (zebra, falsa cor e referência). Com os padrões
+nada muda: `tests/cor_base.py` grava na BASE (575c6f5) os planos do look de todos os presets, os uniforms dos
+clipes, o texto do plugin e os hashes dos quadros (8 e 16 bits), dos LUTs exportados e da montagem;
+`tests/test_cor_base.py` confere tudo (os hashes só na placa da gravação).
+
+### 31.1 Máscaras (`masks.py`)
+
+Funções em GLSL (`masks.GLSL`, incluído nos programas que usam) com a referência em numpy; `tests/test_masks.py`
+compara os dois na GPU.
+
+- **Pele** (`skin_mask` / `skinMask(code, vec2(centro, meia largura))`): a cor como vídeo (0 a 1) vai à luz com
+  gama 2,2 e ao OkLab (Ottosson 2020). Três janelas suaves: matiz OkLCh (centro `SKIN_HUE` = 64,5°, meia largura
+  21°, borda 7°), `C/L` entre 0,004–0,014 (tira cinzas) e 0,17–0,21 (tira laranja forte, madeira avermelhada,
+  tijolo) e claridade acima de 0,10–0,20. `C/L` e o matiz não mudam com a exposição (o OkLab é a raiz cúbica da
+  luz). No look a luz da cena passa antes pela curva neutra de exibição (`stopsToDisp(linToStops(lin))`): a
+  máscara vê a pele como ela aparece. Acertada com a escala Monk Skin Tone (Ellis Monk/Google, CC BY 4.0): os 10
+  tons entram no quadro e 1 stop abaixo; laranjas, madeiras escuras/avermelhadas, areia amarelada e cinzas
+  ficam de fora. Limite conhecido: nenhuma máscara só de cor separa a pele de madeira clara ou areia da mesma
+  cor; o conta-gotas (`skin_hue_of`, o matiz da média da luz de uma área) recentra a janela e a largura a estreita.
+- **Degradê** (`gradient_mask` / `gradMask(p, g, k)`, uniforms de `gradient_uniform`): `p` em px@1080 do centro
+  do quadro, y para baixo (`frame_points` / `framePoint(uv, aspecto)`). Linear: linha pelo centro escolhido, valor
+  1 do lado da direção (0° = para cima, 90° = para a direita); radial: 1 dentro do raio. Suavidade em px@1080
+  (0 = borda seca); "Inverter" troca os lados. Por ser em px@1080, a máscara cai no mesmo lugar em qualquer
+  resolução.
