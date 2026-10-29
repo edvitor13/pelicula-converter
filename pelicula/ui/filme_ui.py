@@ -5,11 +5,13 @@ quando o módulo é desligado (`module_tools`) e o que precisa de código de jan
 consulta `modules`: um projeto que use um recurso desligado sai igual.
 
 - "camera_cinema" (Beta): o cartão "Obturador de película" do look e o cartão "Manivela" do inspetor.
+- "anamorfico" (Beta): o cartão "Lente anamórfica".
+- "data_impressa" (Beta): o cartão "Data impressa".
 """
 
 from __future__ import annotations
 
-LOOK_CARDS = {"camera_cinema": ("obturador",)}
+LOOK_CARDS = {"camera_cinema": ("obturador",), "anamorfico": ("anamorfico",), "data_impressa": ("data",)}
 CLIP_CARDS = {"camera_cinema": ("manivela",)}
 
 

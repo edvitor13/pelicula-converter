@@ -565,6 +565,45 @@ SECTIONS: list[Section] = [
           "No modo Película, a exportação com outra taxa (a prévia da exportação mostra); no modo Edição, cada "
           "clipe rápido numa sequência mais lenta."),
     ], "Rastro de movimento de uma câmera de cinema"),
+
+    # 1.6 (`anamorfico.py`, módulo Beta "anamorfico"): lente anamórfica.
+    Section("anamorfico", "Lente anamórfica", "anam_on", [
+        B("anam_on", "Ativo", False),
+        C("anam_compressao", "Desespremer", "nenhuma", [
+            ("nenhuma", "Não (o vídeo já está na proporção certa)"), ("1.33", "1,33× (adaptador em 16:9 → 2,37:1)"),
+            ("1.5", "1,5×"), ("1.8", "1,8×"), ("2.0", "2× (cinema em 4:3 → 2,66:1)")],
+          "Para vídeo filmado com lente ou adaptador anamórfico, que chega espremido na horizontal: a imagem é "
+          "esticada na largura e fica numa caixa de letra (faixas pretas em cima e embaixo)."),
+        F("anam_flare", "Risco de luz", 0.5, 0, 1, percent=True,
+          tip="A linha horizontal comprida que as luzes fortes fazem numa lente anamórfica."),
+        F("anam_flare_limiar", "Limiar do risco", 2.0, 0, 5, 0.1, 1, " stops",
+          "Quanto acima do cinza médio a luz precisa estar para riscar."),
+        F("anam_flare_comprimento", "Comprimento do risco", 420.0, 40, 1200, 10, 0, " px"),
+        COR("anam_flare_cor", "Cor do risco", (0.35, 0.6, 1.0)),
+        F("anam_barril", "Barril horizontal", 0.3, 0, 1, percent=True,
+          tip="O centro estica um pouco na horizontal, mais na linha do meio (o \"mumps\" das anamórficas)."),
+        F("anam_bordas", "Bordas macias", 0.4, 0, 1, percent=True,
+          tip="As laterais ficam mais macias que o centro."),
+    ], "Desespremer, risco de luz e bordas"),
+
+    # 1.6 (`data_impressa.py`, módulo Beta "data_impressa"): a data laranja das câmeras com data.
+    Section("data", "Data impressa", "data_on", [
+        B("data_on", "Ativo", False),
+        I("data_ano", "Ano", 1998, 1970, 2099),
+        I("data_mes", "Mês", 10, 1, 12),
+        I("data_dia", "Dia", 29, 1, 31),
+        C("data_formato", "Formato", "aa_mm_dd", [
+            ("aa_mm_dd", "'98 10 29 (ano, mês, dia)"), ("mm_dd_aa", "10 29 '98 (mês, dia, ano)"),
+            ("dd_mm_aa", "29 10 '98 (dia, mês, ano)"), ("aaaa_mm_dd", "1998 10 29")]),
+        C("data_canto", "Canto", "inf_dir", [
+            ("inf_dir", "Embaixo à direita"), ("inf_esq", "Embaixo à esquerda"),
+            ("sup_dir", "Em cima à direita"), ("sup_esq", "Em cima à esquerda")]),
+        COR("data_cor", "Cor", (1.0, 0.45, 0.08)),
+        F("data_intensidade", "Intensidade", 0.6, 0, 1, percent=True,
+          tip="Quanto o mostrador expõe o negativo: forte, ele estoura e brilha em volta (com a halação)."),
+        F("data_tamanho", "Tamanho", 34.0, 12, 120, 1, 0, " px", "Altura dos números (num quadro de 1080 linhas)."),
+        F("data_margem", "Distância do canto", 60.0, 0, 300, 1, 0, " px", advanced=True),
+    ], "A data laranja das câmeras dos anos 80 e 90"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])

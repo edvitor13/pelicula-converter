@@ -103,6 +103,12 @@ MODULES: tuple[Module, ...] = (
     Module("camera_cinema", N_("Câmera de cinema"),
            N_("Obturador de película (o rastro de movimento de 180° a partir de vídeo de 50, 60 ou 120 qps) e "
               "manivela por clipe no modo Edição (16 ou 18 qps, com a oscilação da mão)."), "pelicula", BETA),
+    Module("anamorfico", N_("Lente anamórfica"),
+           N_("Desespremer vídeo filmado com adaptador anamórfico, risco de luz horizontal, barril e bordas macias. "
+              "Não vai para o plugin do DaVinci."), "pelicula", BETA),
+    Module("data_impressa", N_("Data impressa"),
+           N_("A data laranja de sete segmentos das câmeras dos anos 80 e 90, exposta no negativo."), "pelicula",
+           BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -228,6 +234,10 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         used.add("luts")
     if v.get("obturador_on"):  # 1.6: câmera de cinema
         used.add("camera_cinema")
+    if v.get("anam_on"):  # 1.6: lente anamórfica
+        used.add("anamorfico")
+    if v.get("data_on"):  # 1.6: data impressa
+        used.add("data_impressa")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):

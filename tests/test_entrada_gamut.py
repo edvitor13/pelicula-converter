@@ -95,7 +95,7 @@ def test_param_is_neutral_and_kept_by_presets():
     v = dict(params.defaults(), entrada="slog3")
     U = look.build_plan(v, 64, 36, 0, 24.0).uniforms
     assert "u_gc_amt" not in U and "u_gc_lim" not in U       # desligado: o plano de sempre
-    assert look.SPARSE_UNIFORMS == {"u_gc_amt": 0.0}         # e o Engine manda o 0 antes dele
+    assert look.SPARSE_UNIFORMS["u_gc_amt"] == 0.0          # e o Engine manda o 0 antes dele
     U = look.build_plan(dict(v, proteger_cores=0.4), 64, 36, 0, 24.0).uniforms
     assert U["u_gc_amt"] == pytest.approx(0.4) and U["u_gc_lim"] == look.gamut_limits("sgamut3cine")
     # a 1.5 não conhece o ajuste: fora do padrão o projeto vai para o formato 4

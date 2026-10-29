@@ -300,7 +300,8 @@ GC_POWER = 1.2
 # Uniforms da 1.6 que só vão no plano com o efeito ligado (o plano de um projeto antigo continua o mesmo,
 # `tests/test_project_migration.py`). Um programa guarda o último valor de cada uniform: o Engine manda estes
 # valores neutros antes do plano (passos "base" e "bake"), então desligar o efeito volta à cor de sempre.
-SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0}
+SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0,
+                                   "u_anam": (1.0, 0.0, 0.0, 0.0), "u_date_on": 0}  # 1.6: anamórfico e data
 
 
 @lru_cache(maxsize=None)
@@ -976,6 +977,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     if v.get("planos_on"):  # 1.6: Cor por planos no passo base (programa `planes.BASE_CP`; {} = nada a fazer)
         from . import planes
         U.update(planes.uniforms(v))
+    from . import anamorfico, data_impressa  # 1.6: só com o efeito ligado (SPARSE_UNIFORMS desliga)
+    anamorfico.base_uniforms(U, v)
+    data_impressa.uniforms(U, v, width, height)
 
     plan = Plan(U)
 
@@ -1019,6 +1023,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.chains.append(Chain("mist", 0.0, v["nevoa_raio"] * scale, 3.0, False))
         U["u_mist_on"] = 1
         U["u_mist_amt"] = v["nevoa_forca"]
+    anamorfico.streak(plan, U, v, scale)  # 1.6: risco horizontal (nada desligado)
 
     # ---- Vazamento de luz
     U["u_leak_on"] = 0
