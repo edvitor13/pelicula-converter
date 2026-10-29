@@ -1,13 +1,14 @@
 """Ferramentas da prévia da 1.6: o que é desenhado por cima do quadro na tela (nunca na exportação).
 
-`PreviewTools` junta as camadas de cima da prévia — "Ver planos" (`planes_ui`), zebra e falsa cor (`meter.py`) —
+`PreviewTools` junta as camadas de cima da prévia — "Ver planos" (`planes_ui`), zebra e falsa cor (`exposure.py`,
+botões em `preview_bar.py`) —
 numa imagem RGBA que o `Viewer` desenha sobre o quadro processado (`Viewer.set_overlay`). Cada ferramenta é um
 "provedor": uma função que recebe o `Context` do quadro atual e devolve (h × w × 4, float 0 a 1, alfa direto) ou
 None. A janela chama `refresh()` depois de cada `render_now`.
 
 O `Context` dá a luz da cena do quadro (`Engine.scene_light`): no modo Película e no modo Edição com película, o
 plano do look da prévia (a entrada decodificada pelo perfil do look, exposição, balanço, Cor por planos); no modo
-Edição sem película, a montagem lida pelo perfil escolhido no look, sem os efeitos (`meter.decode_values`). Nada
+Edição sem película, a montagem lida pelo perfil escolhido no look, sem os efeitos (`exposure.decode_values`). Nada
 disso entra na receita do quadro: `frame.Recipe` e a exportação não sabem que estas ferramentas existem.
 """
 
@@ -45,8 +46,8 @@ class Context:
             if self.recipe.values is not None:
                 self._plan = self.recipe.plan(w, h, self.frame)
             else:
-                from .. import look, meter
-                v = meter.decode_values(self.win.store.values)
+                from .. import exposure, look
+                v = exposure.decode_values(self.win.store.values)
                 self._plan = look.build_plan(v, w, h, self.frame, self.recipe.fps or 24.0, dither=False,
                                              legal=self.recipe.legal)
         return self._plan

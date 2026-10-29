@@ -61,7 +61,8 @@ MODULES: tuple[Module, ...] = (
     Module("exportar_lut", N_("Exportar LUT"),
            N_("Gerar LUTs .cube do look para usar em outros programas."), "cor"),
     Module("scopes", N_("Scopes"),
-           N_("Histograma, forma de onda, parada RGB e vetorscópio."), "cor"),
+           N_("Histograma, forma de onda, parada RGB e vetorscópio; na prévia, zebra, falsa cor em stops e quadro "
+              "de referência."), "cor"),
     Module("curva", N_("Gráfico da curva"),
            N_("Curva de entrada e saída do look em vermelho, verde e azul."), "cor"),
     Module("recorte_ia", N_("Recorte por IA (CorridorKey)"),

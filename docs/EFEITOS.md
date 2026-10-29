@@ -541,6 +541,18 @@ de uma areia da mesma cor: use o conta-gotas e a largura.
 
 ---
 
+## Zebra, falsa cor e referência (na prévia)
+
+Para acertar a exposição antes da película, a barra da prévia tem **Falsa cor** e **Zebra**, medidas em *stops*
+em relação ao cinza médio de 18% da **luz da cena** — o vídeo lido pelo *Perfil do vídeo*, com a exposição, o
+balanço, a lente e a vinheta (antes da Cor por planos, do negativo e da cor da película). Faixas da falsa cor:
+roxo < −6, azul −6 a −4,5, verde ±0,25 (cinza médio), rosa +0,75 a +1,25 (pele clara), amarelo +4,5 a +6 e
+vermelho > +6; o resto em cinza. A zebra marca o que passa de +2,5, +4,5 (padrão) ou +6 stops. A **Referência**
+fixa um quadro ou abre uma imagem para comparar em Dividido ou Lado a lado. Só na tela; detalhes em
+[EDICAO.md](EDICAO.md#zebra-falsa-cor-e-referência).
+
+---
+
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,

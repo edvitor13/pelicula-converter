@@ -449,6 +449,24 @@ Acima dos ajustes há um monitor com quatro vistas:
 - **Vetor** (vetorscópio): o ângulo é a cor e a distância do centro é a saturação. A linha tracejada é o
   **tom de pele**: rostos bem corrigidos ficam perto dela.
 
+### Zebra, falsa cor e referência
+
+Na barra da prévia (nos dois modos, com o módulo **Scopes**):
+
+- **Falsa cor**: pinta a prévia pela exposição, em *stops* em relação ao cinza médio de 18% da luz da cena (a
+  mesma luz que o look lê do vídeo, pelo *Perfil do vídeo*, com a exposição e o balanço): **roxo** abaixo de −6
+  (preto), **azul** de −6 a −4,5 (sombra profunda), **verde** ±0,25 (cinza médio), **rosa** de +0,75 a +1,25
+  (pele clara, um stop acima do cinza), **amarelo** de +4,5 a +6 (quase estourado) e **vermelho** acima de +6
+  (estourado). O resto fica em cinza, mais claro quanto mais luz.
+- **Zebra**: listras pretas e brancas onde a exposição passa do limite; a setinha do botão escolhe +2,5, +4,5
+  (padrão) ou +6 stops.
+- **Referência**: **Fixar este quadro** guarda a prévia atual; **Abrir imagem…** usa uma foto ou um quadro de
+  outro filme. Com a referência, **Dividido** e **Lado a lado** mostram a referência no lugar do original
+  (**Comparar com a referência** liga e desliga; **Tirar a referência** volta ao original).
+
+Tudo isso é só na tela: nada vai para a exportação nem para o "Salvar quadro". No modo Edição sem película, a luz
+medida é a da montagem lida pelo *Perfil do vídeo* do look.
+
 ### Medidor de som
 
 Ao lado da prévia (nos dois modos) fica o medidor do som que está tocando:

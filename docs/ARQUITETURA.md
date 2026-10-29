@@ -2789,3 +2789,26 @@ compara os dois na GPU.
   `TimelineModel.set_clip_values` passa as chaves de cor que mudaram para os outros clipes de vídeo do grupo
   (`_group_follow`, no mesmo passo do desfazer); `set_color_group`, `group_selected`, `ungroup_selected`,
   `select_color_group`. As chaves de animação continuam de cada clipe.
+
+### 31.4 Ferramentas da prévia (`exposure.py`, `ui/preview_tools.py`, `ui/preview_bar.py`, módulo "scopes")
+
+- **Camadas da tela**: `PreviewTools` chama, depois de cada `render_now` (`cor_ui.after_render`), os provedores
+  registrados — "planos" (`planes_ui`), "falsa_cor" e "zebra" (`preview_bar`), nessa ordem — e junta o RGBA deles
+  (`over`) numa imagem que o `Viewer` desenha só sobre o lado processado (`set_overlay`). A receita do quadro
+  (`frame.Recipe`, a mesma da exportação e do "Salvar quadro") não sabe dessas camadas; um provedor que falha só
+  grava `last_error`.
+- **Luz medida** (`Context.light`): `Engine.scene_light(plano)` roda o `BASE` do look num alvo f4 (RGB = luz da
+  cena, A = quanto do pixel é imagem). No modo Película e na Edição com película, o plano é o do look da prévia
+  (entrada `toLinear` pelo perfil e pela faixa do arquivo, gamut, exposição, balanço, lente, vinheta e a geometria
+  do scan, então a camada cai no lugar certo); na Edição sem película, `exposure.decode_values` — o padrão com só a
+  seção "Entrada e exposição" do look (qualquer ajuste novo dela vem junto) e sem a vinheta da bitola. A leitura é
+  sempre a do shader do look (nenhuma cópia das curvas), então os perfis novos da entrada valem aqui sem mudança.
+- **`exposure`**: `stops = log2(Y/0,18)` (Y Rec.709 da luz); `false_color` (faixas `BANDS`, o resto em cinza de
+  −6 a +6); `zebra` (listras diagonais de período `altura/90` px, determinísticas, alfa 0,85 a partir do limite
+  `ZEBRA_LEVELS`).
+- **Referência**: `Viewer.set_reference(QImage)` e `set_compare_reference(True)`: em Dividido, Lado a lado,
+  Original e no botão direito, `_other()` devolve a referência (rótulo "REFERÊNCIA") no lugar do original; uma
+  referência de outra proporção fica inteira e centralizada (`_fit_in`).
+- **Conta-gotas** (`Viewer.start_pick`/`pick_at`/`cancel_pick`, sinais `picked(fx, fy)` e `pickCanceled`): o
+  próximo clique esquerdo na imagem processada dá a fração do ponto; botão direito ou Esc cancelam. Usado pela pele
+  da Cor por planos e pelo neutro e pela cor da cor simples.
