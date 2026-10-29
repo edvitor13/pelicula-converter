@@ -2812,3 +2812,20 @@ compara os dois na GPU.
 - **Conta-gotas** (`Viewer.start_pick`/`pick_at`/`cancel_pick`, sinais `picked(fx, fy)` e `pickCanceled`): o
   próximo clique esquerdo na imagem processada dá a fração do ponto; botão direito ou Esc cancelam. Usado pela pele
   da Cor por planos e pelo neutro e pela cor da cor simples.
+
+### 31.5 Módulos da cor
+
+- **"cor_planos"** (Beta, começa desligado, fora dos perfis): esconde o cartão "Cor por planos" do look. A máscara
+  da pele só por cor ainda erra em madeira clara e areia, e a separação frente/fundo é só um degradê (a
+  profundidade fica para a 1.8), por isso Beta.
+- **"cor_simples"** (estável, grupo "cor", nos perfis Criador, Cinema e Tudo; fora do Simples): esconde a barra
+  "Cor simples" do inspetor e os cartões "Pele natural", "Cor escolhida" e "Degradê". Estável porque cada
+  ferramenta só preenche ajustes comuns do clipe (temperatura, HSL, exposição…), que o usuário vê e desfaz, e os
+  três cartões novos começam neutros. Quem já tinha escolhido o perfil Simples não ganha a ferramenta ao atualizar
+  (`modules.is_enabled` segue o perfil). `used_by` só o aponta quando um clipe tem grupo de cor ou um dos ajustes
+  novos muda a imagem (`colorsimple.active`).
+- **Zebra, falsa cor e referência** entram no módulo **"scopes"** que já existia (a mesma família: medir a
+  imagem), só com a descrição nova; por ficarem na barra da prévia, `cor_ui.apply_modules` os esconde, fora de
+  `_module_tools` (que já usa a chave "scopes" para o painel).
+- Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
+  projeto salvo sai igual.
