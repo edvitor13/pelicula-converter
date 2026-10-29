@@ -246,6 +246,32 @@ BUILTIN: list[dict[str, Any]] = [
          desc="Desliga todos os efeitos.", valores=None),
 ]
 
+# 1.6: processos do Laboratório (reversível, revelação cruzada, película vencida, pré-exposição). Ficam no fim da
+# lista para não mudar a posição dos presets anteriores (o índice do Preset no plugin do DaVinci).
+BUILTIN += [
+    dict(id="lab_slide_reversivel", nome="Slide reversível (laboratório)", grupo="Laboratório",
+         desc="Cromo projetado como saiu da revelação, sem cópia: cor saturada, contraste alto, pouca latitude "
+              "e altas luzes que estouram cedo.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_processo="reversivel", iso="100",
+                      grao_forca=0.8, hal_forca=0.4)),
+    dict(id="lab_cruzado_slide_c41", nome="Revelação cruzada: slide no C-41 (laboratório)", grupo="Laboratório",
+         desc="Cromo revelado como negativo e copiado: contraste alto, cores viradas entre sombras e luzes e "
+              "pele saturada.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_processo="cruzado_e6c41", lab_copia="2383",
+                      iso="100", grao_forca=1.1)),
+    dict(id="lab_vencida_18_anos", nome="Película vencida (18 anos)", grupo="Laboratório",
+         desc="Negativo esquecido fora da geladeira por quase duas décadas: véu nas sombras, menos sensibilidade "
+              "e contraste, azul mais fraco e grão mais forte.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_250d", lab_copia="2383",
+                      lab_vencida=18.0, exposicao=0.5, iso="250", grao_forca=1.35, grao_aspereza=0.32)),
+    dict(id="lab_flashing_suave", nome="Pré-exposição (baixo contraste)", grupo="Laboratório",
+         desc="Negativo velado de leve antes da cena e revelação puxada: sombras abertas e lisas, contraste baixo "
+              "e cor contida, como nos filmes dos anos 70.",
+         valores=dict(cor_on=False, copia="nenhuma", lab_on=True, lab_negativo="vision3_250d", lab_copia="2383",
+                      lab_pre_exposicao=True, lab_pre_exposicao_stops=3.0, lab_pre_exposicao_cor="ambar",
+                      lab_revelacao=-0.5, lab_saturacao=0.9, iso="250")),
+]
+
 BY_ID = {p["id"]: p for p in BUILTIN}
 DEFAULT_ID = "vision3_250d"
 

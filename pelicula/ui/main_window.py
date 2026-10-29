@@ -48,6 +48,7 @@ from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
+from . import luz_fotometro_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -374,6 +375,7 @@ class MainWindow(QMainWindow):
         self.subs_ui = SubtitlesUI(self)  # legendas: painel, faixa e menu (antes de ligar o model: limpa o cache)
         cor_ui.install(self)  # 1.6: ferramentas de cor (planos, cor simples, zebra, falsa cor e referência)
         filme_ui.install(self)  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
+        luz_fotometro_ui.install(self)  # 1.6: luz por plano e fotômetro da película (`ui/luz_fotometro_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -3267,6 +3269,7 @@ class MainWindow(QMainWindow):
             **cor_ui.module_tools(self),  # 1.6: "cor_planos" e "cor_simples" (`ui/cor_ui.py`)
             **grao_fisico_ui.module_tools(self),  # 1.6: "grao_fisico" (`ui/grao_fisico_ui.py`)
             **filme_ui.module_tools(self),  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
+            **luz_fotometro_ui.module_tools(self),  # 1.6: fotômetro da película (`ui/luz_fotometro_ui.py`)
         }
 
     def apply_modules(self) -> None:
@@ -3294,6 +3297,7 @@ class MainWindow(QMainWindow):
         transitions_ui.apply_module(self, "transicoes" in on)
         cor_ui.apply_modules(self, on)
         filme_ui.apply_modules(self, on)
+        luz_fotometro_ui.apply_modules(self, on)
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
         self.subs_ui.apply_modules(on)
@@ -3361,7 +3365,9 @@ class MainWindow(QMainWindow):
             "Losango ao lado de um ajuste — chave no cursor (botão direito: curva, apagar) • setas — chave anterior "
             "/ próxima\nLosangos na linha do tempo: clique vai até a chave, arrastar move, Delete apaga") + "\n\n" + _(
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
-            "Ctrl+Shift+Enter legenda nova)"))
+            "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
+            "Edição: Ctrl+Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
+            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
 
     def about(self) -> None:
         try:

@@ -40,6 +40,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
+35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 
 ---
 
@@ -110,7 +111,7 @@ Três ideias guiam o projeto:
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
 | `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
 | `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
-| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
+| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (48 presets; os 4 da 1.6 no fim), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels; transparência (`has_alpha`, `decodes_alpha`, leitura RGBA pré-multiplicada, seção 22.4). |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `frame_pipeline()`/`preview_frame()` (a receita de `frame.py` com os ajustes da exportação), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
@@ -3594,3 +3595,108 @@ manivela, oscilação limitada e determinística), `tests/test_formato_camera.py
 de letra, círculo, barril, bordas, risco só horizontal, pixels da data em duas resoluções, etapa antes da
 película), `tests/test_scan_foto.py`, `tests/test_maquina.py`, `tests/test_montagem_filme.py` e os casos de janela
 em `tests/filme_ui_cases.py` (`test_filme_ui.py`).
+
+## 35. Luz por plano e fotômetro da película
+
+Frente I da 1.6 (#38, "Diferenciais de cor"): a marcação de luz por plano (os pontos da copiadora de cada clipe), o
+fotômetro da película (onde o negativo escolhido está no pé, na reta ou no ombro) e presets dos processos da 1.6.
+Nada muda no Laboratório (curvas, filmes, `labPath`, `labx`): a luz por plano só soma às luzes da copiadora que já
+existiam e o fotômetro só lê o mesmo modelo. Ponto único de ligação com a janela: `ui/luz_fotometro_ui.py`
+(`install`, `module_tools`, `apply_modules`).
+
+### 35.1 Marcação de luz por plano (`luz_plano.py`, `ui/luz_plano_ui.py`)
+
+**Ajustes do clipe.** Seção nova no fim de `editparams.VIDEO_SECTIONS`: `luz_r`, `luz_g`, `luz_b` e `luz_densidade`
+(pontos, −24 a +24, passo 1, padrão 0; em `SPARSE_KEYS`; fora de `COLOR_SECTIONS`, então não animam, não entram em
+"Restaurar cor", no copiar/colar da cor nem nos grupos de cor). Ajuste novo de clipe: sem registro no formato 4 (o
+retrato da 1.5 não tem as chaves, então `ajustes_clipe_1_6` pega). Um clipe com luz própria deixa de ser neutro
+(`editparams.is_neutral`), e um arquivo inteiro com luz passa pela montagem (`Sequence.is_trivial` = None).
+
+**Gancho da receita.** `frame.Recipe.plan`, com o Laboratório ligado e uma montagem (`self.seq`), troca os valores do
+look por `luz_plano.apply(valores, luz_plano.shot_lights(seq, índice, fps))` antes de `look.build_plan`: os pontos
+do plano somam a `lab_luz_r/g/b` (a densidade nas três), e `look.lab_lights` os leva a `u_la_off`/`u_lb_off` como
+sempre. Nenhum uniform, programa ou campo de `Plan` novo; sem nenhum clipe com luz (`luz_plano.uses` falso)
+`shot_lights` devolve None e o dicionário é o mesmo (plano bit a bit igual). Com o Laboratório desligado nada é
+somado (as luzes da copiadora não existem sem ele). Como a troca é na receita, a prévia, "Salvar quadro", a prévia
+da exportação, a exportação e a linha de comando dão o mesmo quadro (`tests/test_luz_plano.py`).
+
+**Qual plano.** O tempo é `índice / fps` da saída, levado ao quadro da sequência como o `SequenceReader`
+(`floor(i · fps_seq / fps_saída)`). O plano é a camada de `Sequence.layers_at(t)` da faixa 0 que não é extensão
+(faixa escondida: nenhum plano, luz 0). Clipes de V2+ nunca mudam o plano. Numa transição de dois clipes (a camada
+"extensão" da cauda do anterior: o `dissolver` de antes ou `editparams.EXTRA_TWO_CLIP`) a luz é
+`(1 − k)·anterior + k·atual`, com `k` o andamento da própria transição (`Transition.progress`; no `dissolver`,
+`(pos + 1)/(n + 1)`, o mesmo `alpha` de `layers_at`). Uma fusão ótica de verdade copia os dois negativos, cada um
+com a sua luz; aqui a montagem mistura as imagens antes do look, que tem uma luz por quadro, então a interpolação em
+pontos (log E, como a copiadora) é a escolha que deixa as pontas exatas e a passagem sem pulo. Transições de um
+clipe (surgir/sumir no preto ou branco, as da 1.5 sem cauda) trocam a luz no corte.
+
+**Interface.** O cartão do esquema (sliders) aparece depois de "Câmera" (`edit_panels.DISPLAY_AFTER`) e ganha no
+alto o `LightsPanel`: mostrador clássico `luz_plano.classic` = TAPE 25 + `lab_luz_*` + `lab_densidade` do look +
+pontos do clipe (H-61: TAPE 25-25-25 = luzes no alvo), aviso sem Laboratório ou sem película na prévia, ±1 ponto por
+canal, Zerar e "Copiar luzes para os clipes selecionados". Atalhos `QShortcut` na janela: Ctrl+Alt+R/G/B/D (+1) e
+Ctrl+Alt+Shift+R/G/B/D (−1), só no modo Edição, nos clipes de vídeo selecionados ou no plano da V1 sob o cursor
+(`luz_plano.shot_at`). Tudo por `TimelineModel.update_clip_values({id: {chave: valor}})` (novo: muda só as chaves
+dadas em vários clipes, um passo do desfazer; faixa travada fica de fora). O cartão e os atalhos são do módulo
+"laboratorio" (`luz_plano_ui.apply_modules`, fora de `_module_tools`, cuja chave "laboratorio" já é o cartão do
+look); `modules.used_by` aponta "laboratorio" quando um clipe tem luz própria.
+
+**Modo Película e plugin.** Com o arquivo direto não há planos (não há montagem); dividir o clipe no modo Edição é o
+caminho (a montagem vira a entrada do look). Luz por segmento entre marcadores não foi feita: precisaria de uma
+estrutura nova no JSON e de uma segunda fonte de verdade para o "plano"; a montagem já é essa fonte. O plugin do
+DaVinci não muda: a luz por plano é tempo da montagem do app, e o nó Laboratorio já tem as luzes da copiadora
+(docs/DAVINCI.md).
+
+### 35.2 Fotômetro da película (`fotometro.py`, `ui/fotometro_ui.py`)
+
+Módulo Beta "fotometro" (grupo "pelicula", começa desligado; nenhum perfil o liga). Só tela, como a zebra e a falsa
+cor do §31: nenhum arquivo do caminho de render (`frame`, `export`, `look`, `engine`, `shaders`, `cli`, `sequence`,
+`compositor`) cita o módulo (`tests/test_fotometro.py` confere), e `exposure.py` não mudou.
+
+**O negativo.** `fotometro.negative_path(v)` = `look.lab_paths_for(v)[0]`, o caminho A do Laboratório: as curvas do
+negativo escolhido já com a revelação (`ng·(1 + 0,12·push)`, `nt + 0,08·push`), a idade (`labx.aged`) e a exposição
+somada `add` (pré-exposição e véu, `labx.added_exposure`). Sem `lab_on`, os valores de `params.defaults()` (Vision3
+250D), marcados `Latitude.default`. Nada do modelo muda; o fotômetro só lê.
+
+**A conta.** Para a exposição da cena `E = 0,18·2^s` no eixo do cinza (as linhas de `sens` somam 1), cada camada tem
+`x = log10((E + add)/0,18)` e o contraste relativo `ρ(s) = [σ((x − pé)/w) − σ((x − ombro)/w)] · E/(E + add)` —
+a derivada de `D` em relação a `log E` da cena dividida pela gama da camada (1 no trecho reto). O fator
+`E/(E + add)` é a pré-exposição e o véu comprimindo as sombras. `latitude` varre `s` de −16 a +16 stops (passo
+0,005, `lru_cache` por `LabPath`) e acha, por camada, onde `ρ ≥ 0,5` (trecho reto: `lo`, `hi`) e `ρ ≥ 0,1` (com
+detalhe: `lo_detail`, `hi_detail`); o resultado é a camada mais estreita em cada ponta. Num negativo sem forçar e sem
+`add`, `ρ = ½` no pé e no ombro exatos (`σ(0) = ½`), então a latitude é `pé/log10 2` a `ombro/log10 2`.
+
+**Camada e leitura.** `ui/fotometro_ui.FilmMeter` registra a camada "fotometro" em `preview_tools.PreviewTools`: os
+stops por pixel são `exposure.stops` da `Context.light()` (a mesma `Engine.scene_light` da falsa cor) e
+`fotometro.false_color` pinta as cinco zonas (`ZONES`; o trecho reto em cinza pela exposição e ±0,25 stop do cinza
+em verde), com o alfa da cobertura. O texto ao lado do botão é o negativo + `latitude_text` ("−5,1 a +6,5 stops").
+"Ler um ponto" (menu do botão) usa o conta-gotas do `Viewer` (`start_pick`/`picked`, como `color_tools` e
+`planes_ui`, cada um com o seu estado `_picking`): média ponderada pela cobertura de 5 × 5 pixels da luz da cena e
+`fotometro.spot` — stops, zona, distância ao pé e ao ombro e a zona de cada camada vista pela matriz `sens` do
+negativo. Os valores do look são os do quadro (`Context.values`, com as chaves) ou os do painel.
+
+**O que fica de fora.** É o eixo do cinza: uma cor saturada pode cair noutra zona numa camada (a leitura de um ponto
+mostra; a camada pinta pela luminância, como a falsa cor). O caminho B (o processo: cruzado, reversível) e a cópia
+não entram: o fotômetro mede o negativo, que é onde a latitude da câmera mora.
+
+### 35.3 Presets dos processos da 1.6
+
+Quatro ids novos no fim de `presets.BUILTIN` (um `BUILTIN += [...]` depois de "original", para que nenhum preset
+antigo mude de índice: o *Preset* do OpenFX é um índice): `lab_slide_reversivel` (`lab_processo="reversivel"`),
+`lab_cruzado_slide_c41` (`"cruzado_e6c41"`), `lab_vencida_18_anos` (`lab_vencida=18`, +0,5 EV) e
+`lab_flashing_suave` (pré-exposição âmbar a 3 stops, revelação −0,5, saturação final 0,9), todos no grupo
+"Laboratório" com `cor_on=False` e a cópia antiga desligada, como os outros do grupo. `tools/gerar_ofx.py` regenera
+`pc_params.h` (`PC_PRESET_COUNT` 48).
+
+As bases douradas (`tests/cor_base.py`, `tests/entrada_base.py`) iteram só `BUILTIN[:BASE_PRESETS]` (44, os da
+gravação): nenhuma referência foi regravada, e os presets novos são conferidos por `tests/test_presets_16.py` (fim da
+lista, processo certo, e no eixo do cinza: slide com mais contraste, pré-exposição com menos e sombras mais altas,
+véu da vencida, virada de cor da cruzada) e pelos testes que percorrem todos os presets (`test_presets`,
+`test_engine`, `test_look`, `test_ofx`, `test_resolve`). No DCTL, película vencida e pré-exposição só existem no
+nó Laboratorio, então `test_cor_node_matches_the_app_for_every_preset` pula os dois presets que as usam (o nó
+Laboratorio deles é conferido em `test_laboratorio_node_matches_the_app`).
+
+### 35.4 Testes
+
+`tests/test_luz_plano.py` (luz por plano: neutra no padrão, quadros certos, transições, V2, 12 pontos = 1 stop da
+cópia, JSON e formato 4, desfazer, prévia = exportação, GPU), `tests/test_fotometro.py` (latitude e zonas),
+`tests/test_presets_16.py` e os casos de janela em `tests/luz_fotometro_ui_cases.py` (`test_luz_fotometro_ui.py`).

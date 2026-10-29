@@ -120,6 +120,11 @@ MODULES: tuple[Module, ...] = (
     Module("maquina_tempo", N_("Máquina do tempo"),
            N_("Escolha um ano (1920 a 2020) e onde o filme passava: um clique preenche a bitola, o filme, a cor, o "
               "grão, a projeção, o desgaste e a moldura da época, com o motivo de cada escolha."), "pelicula"),
+    Module("fotometro", N_("Fotômetro da película"),
+           N_("Na prévia, mostra onde cada parte da imagem cai na curva do negativo escolhido no Laboratório (com a "
+              "revelação, a película vencida e a pré-exposição): sem detalhe, pé, trecho reto, ombro ou estourado, "
+              "a latitude em stops e a leitura de um ponto. Só na tela: nunca vai para a exportação."),
+           "pelicula", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -274,6 +279,9 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
             used.add("cor_simples")
         if any(c.values.get("manivela", "nenhuma") != "nenhuma" for c in clips if c.kind == "video"):
             used.add("camera_cinema")  # 1.6: manivela
+        from . import luz_plano
+        if luz_plano.uses(sequence):  # 1.6: luz da copiadora por plano (o cartão é do Laboratório)
+            used.add("laboratorio")
     for subs in (subtitles, getattr(sequence, "subtitles", None)):
         if subs is not None and not subs.is_empty():
             used.add("legendas")

@@ -345,7 +345,13 @@ def test_glsl_dialect_compiles(harness, kind):
 @pytest.mark.gpu
 @pytest.mark.parametrize("pid", [p["id"] for p in presets.BUILTIN])
 def test_cor_node_matches_the_app_for_every_preset(harness, gl_engine, pid):
-    assert _cor_diff(harness, gl_engine, presets.builtin_values(pid)) < 2e-3
+    v = presets.builtin_values(pid)
+    if v.get("lab_on") and (v.get("lab_vencida") or v.get("lab_pre_exposicao")):
+        # película vencida e pré-exposição só existem no nó Laboratório (test_cor_node_has_none_of_the_16_lab_controls);
+        # esses presets são conferidos por test_laboratorio_node_matches_the_app
+        assert pid in LAB_PRESET_IDS
+        pytest.skip("controles da 1.6 só no nó Laboratório")
+    assert _cor_diff(harness, gl_engine, v) < 2e-3
 
 
 @pytest.mark.gpu

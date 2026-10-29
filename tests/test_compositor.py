@@ -192,6 +192,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
             continue
         if key.startswith("manivela"):  # 1.6: tempo do clipe (`Sequence.src_frame`), tests/test_camera_tempo.py
             continue
+        if key.startswith("luz_"):  # 1.6: luz da copiadora por plano, no look (`luz_plano.py`, tests/test_luz_plano.py)
+            continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)

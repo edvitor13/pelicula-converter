@@ -558,6 +558,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Esc | Tirar a seleção e voltar para Selecionar |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
+| Ctrl+Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |
 | Ctrl+Shift+L | Painel de legendas (também no modo Película) |
 | Delete / Enter / Esc na faixa Legendas | Apagar / editar / tirar a seleção da legenda escolhida |
 
@@ -671,3 +672,36 @@ aparece no primeiro quadro do clipe novo, a junta deixa passar um clarão e o qu
 Cortes com transição (dissolver, queima, emenda com clarão…) não contam. **Rolos de Super 8** dividem o vídeo em
 rolos de 50 pés (3 min 20 s a 18 qps, 2 min 30 s a 24): o fim de cada rolo vela e a troca dá um pulo. Tudo é igual
 a cada reprodução (mesma semente, mesmos quadros).
+
+## 10. Marcação de luz por plano (1.6)
+
+No laboratório, o marcador de luz assiste ao filme montado e escolhe, **plano a plano**, as luzes vermelha, verde e
+azul da copiadora: um plano mais escuro ganha menos pontos, uma cena com dominante verde ganha um pouco mais de
+verde. O cartão **Luz da copiadora** do inspetor (logo depois de *Câmera*) faz isso com o **Laboratório** do look:
+os pontos de cada clipe **somam** às luzes da copiadora do Laboratório (Película › *Laboratório*) nos quadros em que
+o clipe é o plano da **V1**.
+
+- **Só com o Laboratório ligado** (e com a película na prévia, o botão do filme, para ver na tela; a exportação com
+  o look sempre usa). Sem ele o cartão avisa e as luzes não mudam nada.
+- O **mostrador** mostra as luzes do plano como numa folha de marcação: o TAPE padrão **25-25-25** (as luzes no
+  alvo do LAD da Kodak) mais as do look e as do clipe — por exemplo *27 · 24 · 25*. Embaixo, só o que é deste
+  plano (*R +2 · G −1 · B 0*).
+- **1 ponto = 0,025 log E**: 12 pontos = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera. Mais vermelho deixa a
+  cópia mais **ciano**, mais verde mais **magenta**, mais azul mais **amarela** (como no laboratório: a luz é
+  subtraída na cópia). **Densidade** soma nas três: mais pontos = plano mais escuro, sem mudar a cor.
+- **+1 / −1** em cada cor e na densidade, **Zerar** (volta às luzes do look) e **Copiar luzes para os clipes
+  selecionados** (selecione os outros clipes com Ctrl ou Shift na linha do tempo). Cada clique é um passo do
+  desfazer.
+- **Atalhos** (modo Edição): **Ctrl+Alt+R / G / B / D** somam 1 ponto de luz vermelha / verde / azul / densidade;
+  com **Shift**, tiram 1 ponto. Valem para os clipes de vídeo selecionados ou, sem seleção, para o plano da V1 sob
+  o cursor; a barra de status mostra as luzes do plano.
+- **Clipes nas faixas de cima** (V2, V3… — títulos, sobreposições) não mudam o plano: vale a luz do clipe da V1.
+- **Transições**: num *dissolver* ou numa transição de dois clipes (fusão ótica, queima, íris, empurrar, cortina,
+  zoom) a luz vai de um plano ao outro junto com a mistura. No laboratório, uma fusão ótica copia os dois
+  negativos, cada um com a sua luz; aqui o look tem uma luz por quadro, então ela caminha sem pulo e cada plano
+  tem a luz dele nas pontas. Surgir do preto ou do branco troca a luz no corte.
+- **Modo Película** com um arquivo só: não há planos. Para marcar a luz por plano, divida o vídeo nos cortes no
+  modo Edição (S) e dê a luz a cada pedaço; a montagem passa a ser a entrada do look.
+- O cartão some com o recurso **Laboratório** desligado (*Configurações › Recursos*). Um projeto com luz por plano
+  pede a 1.6 ou mais nova para abrir. O plugin do DaVinci não tem a montagem: lá a luz da copiadora fica no nó
+  Laboratorio (uma por nó; use um nó por plano).

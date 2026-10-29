@@ -392,7 +392,7 @@ def test_new_lab_controls_are_neutral_by_default():
     U = look.build_plan(lab_values(), 320, 180, 0, 24.0).uniforms
     assert U["u_lab_ops"] == 0
     for pid in [p["id"] for p in presets.BUILTIN if p["valores"] and p["valores"].get("lab_on")]:
-        if pid in ("lab_technicolor_hue_split", "lab_teal_orange_5201"):
+        if pid in ("lab_technicolor_hue_split", "lab_teal_orange_5201", "lab_flashing_suave"):  # usam de propósito
             continue
         v = presets.builtin_values(pid)
         assert look.build_plan(v, 64, 36, 0, 24.0).uniforms["u_lab_ops"] == 0, pid

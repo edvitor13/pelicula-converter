@@ -247,6 +247,21 @@ VIDEO_SECTIONS += [
     ], "Cadência de câmera de manivela (16 ou 18 qps)"),
 ]
 
+# 1.6, marcação de luz por plano (`luz_plano.py`): os pontos da copiadora deste plano, somados às luzes do
+# Laboratório do look nos quadros em que o clipe é o plano da V1. Só valem com o Laboratório ligado. Padrão: 0 (a
+# luz do look, como antes); as chaves vão para o JSON só fora do padrão (`SPARSE_KEYS`).
+VIDEO_SECTIONS += [
+    Section("luz_copiadora", "Luz da copiadora", None, [
+        F("luz_r", "Luz vermelha", 0.0, -24, 24, 1, 0, " pt",
+          "Pontos de luz vermelha da copiadora só neste plano, somados aos do Laboratório do look (12 pontos = 1 "
+          "stop da cópia; cerca de 7 pontos = 1 stop da câmera). Mais vermelho deixa a cópia mais ciano."),
+        F("luz_g", "Luz verde", 0.0, -24, 24, 1, 0, " pt", "Mais verde deixa a cópia mais magenta."),
+        F("luz_b", "Luz azul", 0.0, -24, 24, 1, 0, " pt", "Mais azul deixa a cópia mais amarela (quente)."),
+        F("luz_densidade", "Densidade (as três)", 0.0, -24, 24, 1, 0, " pt",
+          "Pontos nas três luzes juntas: mais pontos = plano mais escuro na cópia, sem mudar a cor."),
+    ], "Marcação de luz deste plano (pontos da copiadora do Laboratório)"),
+]
+
 AUDIO_SECTIONS: list[Section] = [
     Section("som", "Som", None, [
         F("volume", "Volume", 0.0, -60, 12, 0.5, 1, " dB"),
@@ -343,6 +358,7 @@ SPARSE_KEYS: set[str] = {
     "manivela", "manivela_oscila", "manivela_semente",  # 1.6: manivela (`tempo_camera.py`)
 }
 SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
+SPARSE_KEYS |= {"luz_r", "luz_g", "luz_b", "luz_densidade"}  # 1.6: marcação de luz por plano (`luz_plano.py`)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

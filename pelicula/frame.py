@@ -168,6 +168,9 @@ class Recipe:
         if values is not None and values.get("mfilme_on") and self.seq is not None:  # 1.6: os cortes da montagem
             from . import montagem_filme
             kw["edit"] = montagem_filme.edit_info(self.seq, index, self.fps)
+        if values is not None and values.get("lab_on") and self.seq is not None:  # 1.6: luz da copiadora por plano
+            from . import luz_plano
+            values = luz_plano.apply(values, luz_plano.shot_lights(self.seq, index, self.fps))
         return look.build_plan(values, w, h, index, self.fps, self.lut, dither=self.dither,
                                legal=self.legal, net_grain=self.net_grain, **kw)
 
