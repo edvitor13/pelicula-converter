@@ -567,14 +567,13 @@ def float_input(info, profile: str | None) -> bool:
 
 
 def _exact_graph(info, width: int, height: int, flags: str, threads: int, pix: str) -> str:
-    """Filtros da leitura exata de vídeo de faixa legal (`FrameReader.float` e `exact16`), saindo em `pix`
-    (`gbrpf32le` ou `gbrp16le`).
+    """Filtros da leitura em float de log num vídeo de faixa legal (`FrameReader.float`), saindo em `pix`
+    (`gbrpf32le`).
 
     O swscale redimensiona como sempre, mas fica em YUV 4:4:4 de 16 bits sem mexer na faixa (o código de 10 bits
-    vira código·64, exato, inclusive acima do 940); o zscale só aplica a matriz do arquivo e expande a faixa —
-    sem cortar em 0–1 (float) e com o branco em 65535 (16 bits). O swscale direto para RGB corta em 0–1 e, em 16
-    bits, entrega o branco em 65280 (0,4% abaixo). Redimensionar no zscale mudaria a reconstrução do croma nas
-    bordas de cor (até 17% num padrão de teste): por isso ele não redimensiona."""
+    vira código·64, exato, inclusive acima do 940); o zscale só aplica a matriz do arquivo e expande a faixa, sem
+    cortar em 0–1. O swscale direto para RGB corta em 0–1. Redimensionar no zscale mudaria a reconstrução do croma
+    nas bordas de cor (até 17% num padrão de teste): por isso ele não redimensiona."""
     return (f"scale={width}:{height}:flags={flags}:in_range=limited:out_range=limited:threads={threads},"
             f"format=yuv444p16le,zscale=matrixin={_ZSCALE_MATRIX[_in_matrix(info)]}:rangein=limited:range=full,"
             f"format={pix}")
@@ -705,8 +704,9 @@ class FrameReader:
     `profile` (o perfil de entrada do look, `params` "entrada"): log de câmera num vídeo de faixa legal sai em
     float32 (h × w × 3) com o que passa do branco e do preto nominais (`float_input`), em qualquer `depth`.
 
-    16 bits de um vídeo de faixa legal (sem transparência) vão pelo zscale (`exact16`): o swscale expande a faixa
-    para 0–65280 (o branco 0,4% abaixo); o zscale entrega o branco em 65535 e cada código no valor exato.
+    16 bits de um vídeo de faixa legal (`exact16`): o swscale expande a faixa para 0–65280 (o branco 0,4% abaixo,
+    o branco de 8 bits · 256); `read` leva a cor a 0–65535 (`_legal16`). Vale também para a transparência de mais de
+    8 bits (o alfa já sai em 0–65535).
 
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
@@ -729,8 +729,7 @@ class FrameReader:
         # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
         self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
         self.float = not alpha and float_input(info, profile)
-        self.exact16 = (not alpha and not self.float and depth != 8 and _in_range(info) == "limited"
-                        and has_zscale())
+        self.exact16 = not self.float and depth != 8 and not self._widen and _in_range(info) == "limited"
         if alpha:
             self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
         elif self.float:
@@ -764,11 +763,6 @@ class FrameReader:
             vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
         elif self.float:
             vf.append(_exact_graph(info, width, height, flags, th, self.pix))
-        elif self.exact16:
-            # gbrp16le primeiro (reempacotar para rgb48le é sem perda): pedir rgb48le direto ao zscale faz o
-            # ffmpeg passar por 10 bits.
-            vf.append(_exact_graph(info, width, height, flags, th, "gbrp16le"))
-            vf.append(f"format={self.pix}")
         else:
             vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
                       f":in_range={_in_range(info)}:threads={th}")
@@ -828,6 +822,8 @@ class FrameReader:
             g, b, r = np.frombuffer(buf, dtype="<f4").reshape(3, self.h, self.w)
             return np.dstack([r, g, b])
         img = np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, self.channels)
+        if self.exact16:
+            return _legal16(img)
         return img.astype(np.uint16) * np.uint16(257) if self._widen else img
 
     def close(self) -> None:
@@ -845,6 +841,17 @@ class FrameReader:
                     st.close()
             except Exception:  # noqa: BLE001
                 pass
+
+
+def _legal16(img: np.ndarray) -> np.ndarray:
+    """Cor de 16 bits do swscale para um vídeo de faixa legal (o branco em 65280 = 255·256, o que passa dele até
+    65535) → branco em 65535: c·257/256 (o mesmo passo de 8 para 16 bits), com o que passa de 65280 no branco.
+    Cada código sai a até 2 de 65535 do valor exato; preto 0 e branco 65535 exatos. O alfa não muda."""
+    out = img if img.flags.writeable else img.copy()
+    c = out[..., :3]
+    np.minimum(c, 65280, out=c)
+    c += c >> 8
+    return out
 
 
 def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: int, pix: str) -> str:
@@ -904,7 +911,7 @@ def filters() -> set[str]:
 
 
 def has_zscale() -> bool:
-    """O ffmpeg tem o zscale (zimg)? É ele que lê log com super-brancos e 16 bits exatos (veja `_zscale`)."""
+    """O ffmpeg tem o zscale (zimg)? É ele que lê log com super-brancos (veja `_exact_graph`)."""
     return "zscale" in filters()
 
 

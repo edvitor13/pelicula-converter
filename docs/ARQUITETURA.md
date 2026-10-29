@@ -492,10 +492,10 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
 - Log de câmera num vídeo de faixa legal (`profile=` o perfil do look; `media.float_input`), em qualquer
-  profundidade, e 16 bits de vídeo de faixa legal (`FrameReader.exact16`): `media._exact_graph` =
-  `scale=L:A:flags=…:in_range=limited:out_range=limited,format=yuv444p16le,zscale=matrixin=M:rangein=limited:
-  range=full,format=gbrpf32le|gbrp16le` (+ `format=rgb48le`) → float32 (textura `f4`) sem cortar em 0–1, ou 16
-  bits com o branco em 65535 (seções 29.1 e 29.2).
+  profundidade: `media._exact_graph` = `scale=L:A:flags=…:in_range=limited:out_range=limited,format=yuv444p16le,
+  zscale=matrixin=M:rangein=limited:range=full,format=gbrpf32le` → float32 (textura `f4`) sem cortar em 0–1
+  (seção 29.1). 16 bits de vídeo de faixa legal (`FrameReader.exact16`): o `rgb48le` de sempre, com a cor levada
+  de 0–65280 para 0–65535 em `read` (`media._legal16`, seção 29.2).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
   nele como se fosse um arquivo. A conexão espera o ffmpeg abrir o pipe e destrava sozinha se ele
   morrer antes (timeout de 60 s). Isso é bem mais rápido que `stdout` para quadros 4K.
@@ -2739,22 +2739,24 @@ acima do código 940 virava 1,0 e tudo abaixo do 64 virava 0. As câmeras gravam
 
 ### 29.2 16 bits exatos na faixa legal
 
-O swscale expande a faixa legal para RGB de 16 bits multiplicando por 65280/65535 (`rgb48le`: o branco 940 sai em
-65280–65283, 0,4% abaixo; acima do 940, 65535 — o super-branco fica *acima* do branco). Isso pegava a exportação
-em 16 bits (ProRes, FFV1, DNxHR 444…) e o "Salvar quadro", sempre em 16 bits. Na 1.6, 16 bits de um vídeo de
-faixa legal sem transparência vão pelos mesmos filtros (`FrameReader.exact16`, `media._exact_graph`):
-`format=gbrp16le` e só então `format=rgb48le` (reempacotar sem perda; pedir `rgb48le` direto ao zscale faz o
-ffmpeg passar por 10 bits). Com o redimensionamento do swscale de sempre, a diferença para a 1.5 é só o nível
-(p99 de 256 em 65535 num padrão de teste, a correção de 0,4%). Cada
-código sai em round((código − 64)/876 · 65535) — preto 0, branco 65535 — em 4:4:4, 4:2:2 e 4:2:0, 8 e 10 bits,
-com ou sem redimensionamento (`tests/test_entrada_leitura.py`).
+O swscale expande a faixa legal para RGB de 16 bits como se fosse 8 bits · 256 (`rgb48le`/`gbrap16le`: o branco
+940 sai em 65280–65283, 0,4% abaixo; acima do 940, até 65535 — o super-branco fica *acima* do branco). Isso pegava
+a exportação em 16 bits (ProRes, FFV1, DNxHR 444…) e o "Salvar quadro", sempre em 16 bits. Na 1.6, 16 bits de
+um vídeo de faixa legal (`FrameReader.exact16`, com ou sem transparência de mais de 8 bits) saem do swscale como
+sempre e `read` leva a cor para 0–65535 (`media._legal16`): c = mín(c, 65280); c += c >> 8 — o mesmo c·257/256 do
+passo de 8 para 16 bits, sem cópia (o buffer é nosso) e sem depender do zscale. O alfa não muda (já vai a 65535).
+Preto 0 e branco 65535 exatos; cada cinza a até 2 de 65535 de round((código − 64)/876 · 65535) em 4:4:4, 4:2:2 e
+4:2:0 de 10 bits e no 8 bits com `hq` (3), com ou sem redimensionamento (`tests/test_entrada_leitura.py`). A
+reconstrução do croma nas bordas de cor é a do swscale de sempre: o 16 bits continua igual ao 8 bits a menos de
+1/255 (`test_16bit_matches_8bit_and_keeps_the_chroma_of_swscale`).
 
-- **Sem mudança**: 8 bits (`rgb24` do swscale já arredonda certo), faixa cheia, imagens RGB, o caminho com
-  transparência (`_alpha_graph`, `gbrap16le` pelo swscale: ainda 0,4% abaixo em 16 bits; o zscale com alfa zera
-  a cor nas áreas transparentes, então ficou para depois) e ffmpeg sem zscale (leitura de antes).
-  `tests/test_alpha.py` compara o caminho com alfa com a leitura do swscale.
+- **Por que não o zscale aqui**: a primeira versão levava os 16 bits pelo `_exact_graph` (o mesmo da leitura em
+  float); a matriz do zscale sobre o YUV 4:4:4 redimensionado pelo swscale muda o croma nas bordas de cor (até
+  7/255 do 8 bits com `lanczos`), e o 16 bits deixava de bater com a prévia. O float do log (29.1) fica no
+  zscale porque precisa passar de 1,0; ele é o mesmo na prévia e na exportação.
+- **Sem mudança**: 8 bits (`rgb24` do swscale já arredonda certo), faixa cheia, imagens RGB e alfa de 8 bits (já
+  ampliado ×257, exato). O 8 bits sem `hq` (prévia) segue arredondado a 8 bits pelo swscale também em 16 bits.
 - **Versões**: conferido com o ffmpeg 9.0.2 (gyan.dev, o que o app baixa) e com uma compilação de dezembro de
-  2023 (entre a 6.1 e a 7.0); a CI roda o 6.1 do Ubuntu 24.04 (com `--enable-libzimg`). O zscale só existe com o
-  zimg: sem ele `has_zscale()` é falso e tudo segue como na 1.5.
+  2023 (entre a 6.1 e a 7.0): o branco 940 sai em 65283 nas duas. A CI roda o 6.1 do Ubuntu 24.04.
 - **Para as notas da versão**: a exportação em 16 bits e o "Salvar quadro" de vídeo em faixa legal ficam até
   0,4% mais claros nas luzes (o branco volta a 100%); o log de câmera ganha as luzes acima do código 940.

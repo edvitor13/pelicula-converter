@@ -100,16 +100,27 @@ def plans() -> dict:
 
 
 def renders(engine) -> dict:
-    """sha256 do quadro do look (o caminho de `frame.Recipe`) de cada caso, em 8 e 16 bits."""
+    """sha256 do quadro do look (o caminho de `frame.Recipe`) de cada caso, em 8 e 16 bits.
+
+    O texto da borda do scan depende de haver um QGuiApplication no processo (`edgetext.render`): a referência é
+    sem ele, como num processo sem interface, qualquer que seja o estado dos outros testes."""
+    from pelicula import edgetext
     from pelicula.frame import Recipe
     out = {}
     imgs = {8: image(8), 16: image(16)}
-    for name, v in value_sets().items():
-        legals = (True, False) if name.startswith(("perfil:", "reescalado:")) else (True,)
-        for legal in legals:
-            for depth in (8, 16):
-                r = Recipe.for_source(v, 24.0, depth, legal=legal, dither=depth == 8)
-                out[f"{name}|{int(legal)}|{depth}"] = _sha(r.render(engine, imgs[depth], 7))
+    saved = edgetext.render
+    edgetext.render = lambda text, height=64: None
+    engine._text_key = object()  # refaz a textura do texto (a de um teste anterior pode estar guardada)
+    try:
+        for name, v in value_sets().items():
+            legals = (True, False) if name.startswith(("perfil:", "reescalado:")) else (True,)
+            for legal in legals:
+                for depth in (8, 16):
+                    r = Recipe.for_source(v, 24.0, depth, legal=legal, dither=depth == 8)
+                    out[f"{name}|{int(legal)}|{depth}"] = _sha(r.render(engine, imgs[depth], 7))
+    finally:
+        edgetext.render = saved
+        engine._text_key = object()
     return out
 
 

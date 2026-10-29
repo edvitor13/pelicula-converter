@@ -191,12 +191,19 @@ def _expect16(codes, bits):
     return np.clip(np.round((codes - lo) / span * 65535.0), 0, 65535)
 
 
+def _assert_levels(got, want, tol=2):
+    """Preto e branco exatos; cada cinza a até `tol` de 65535 do valor exato (o swscale arredonda a 16 bits)."""
+    got = np.asarray(got, np.int64)
+    assert np.array_equal(got[want == 0], want[want == 0]) and np.array_equal(got[want == 65535], want[want == 65535])
+    assert np.abs(got - want).max() <= tol, (got, want)
+
+
 @pytest.mark.ffmpeg
-@pytest.mark.parametrize("pix", ["yuv444p10le", "yuv422p10le", "yuv420p10le", "yuv420p"])
-@pytest.mark.parametrize("hq", [False, True])
-def test_16bit_reading_expands_legal_range_exactly(zscale, tmp_path, pix, hq):
-    """Branco (940/235) = 65535, preto (64/16) = 0 e cada cinza no valor exato; antes o branco ficava em
-    65280–65283 (0,4% abaixo) no swscale."""
+@pytest.mark.parametrize("pix,hq", [("yuv444p10le", False), ("yuv444p10le", True), ("yuv422p10le", True),
+                                    ("yuv420p10le", False), ("yuv420p10le", True), ("yuv420p", True)])
+def test_16bit_reading_expands_legal_range_exactly(ffmpeg_ok, tmp_path, pix, hq):
+    """Branco (940/235) = 65535, preto (64/16) = 0 e cada cinza no valor certo; antes o branco ficava em
+    65280–65283 (0,4% abaixo). O 8 bits sem `hq` (prévia) continua arredondado a 8 bits pelo swscale."""
     if pix == "yuv420p":
         codes = np.zeros((H, W, 3), np.uint16)
         codes8 = np.array([0, 8, 16, 30, 60, 100, 126, 128, 150, 180, 200, 220, 230, 235, 240, 255])
@@ -209,21 +216,28 @@ def test_16bit_reading_expands_legal_range_exactly(zscale, tmp_path, pix, hq):
     img = media.grab_frame(info, 0, W, H, 16, hq=hq)
     assert img.dtype == np.uint16
     for c in range(3):
-        assert np.array_equal(img[0, :, c], want), (pix, img[0, :, c], want)
+        _assert_levels(img[0, :, c], want, tol=3 if pix == "yuv420p" else 2)
 
 
 @pytest.mark.ffmpeg
-def test_16bit_reading_is_exact_after_resizing(zscale, tmp_path):
-    """Faixas largas reduzidas à metade: o centro de cada faixa continua no valor exato."""
+def test_16bit_reading_is_exact_after_resizing(ffmpeg_ok, tmp_path):
+    """Faixas largas reduzidas à metade: o centro de cada faixa continua no valor certo."""
     info = media.probe(_video(tmp_path, "yuv420p10le", patch=32, h=8))
     for hq in (False, True):
         img = media.grab_frame(info, 0, W * 16, 4, 16, hq=hq)
-        got = img[2, 8::16, 1]
-        assert np.array_equal(got, _expect16(CODES, 10)), (hq, got)
+        _assert_levels(img[2, 8::16, 1], _expect16(CODES, 10))
 
 
 @pytest.mark.ffmpeg
-def test_16bit_export_reader_uses_the_exact_expansion(zscale, tmp_path):
+def test_16bit_matches_8bit_and_keeps_the_chroma_of_swscale(sample_info):
+    """O 16 bits é o 8 bits de sempre com mais precisão (mesma reconstrução do croma nas bordas de cor)."""
+    f16 = media.grab_frame(sample_info, 0, 320, 180, 16, hq=True).astype(np.float64) / 257.0
+    f8 = media.grab_frame(sample_info, 0, 320, 180, 8, hq=True).astype(np.float64)
+    assert np.abs(f16 - f8).max() <= 1.0
+
+
+@pytest.mark.ffmpeg
+def test_16bit_export_reader_uses_the_exact_expansion(ffmpeg_ok, tmp_path):
     info = media.probe(_video(tmp_path))
     s = export.ExportSettings(codec="prores")
     frames = export.frame_pipeline(info, dict(presets.builtin_values("vision3_500t")), s)
@@ -238,16 +252,24 @@ def test_16bit_export_reader_uses_the_exact_expansion(zscale, tmp_path):
 
 
 @pytest.mark.ffmpeg
-def test_16bit_without_zscale_keeps_the_old_reading(ffmpeg_ok, tmp_path, monkeypatch):
+def test_16bit_exact_levels_do_not_need_zscale(ffmpeg_ok, tmp_path, monkeypatch):
     info = media.probe(_video(tmp_path))
     monkeypatch.setattr(media, "_FILTERS", {"scale"})
     r = media.FrameReader(info, W, H, 16, 0, 1)
     try:
-        assert not r.exact16
+        assert r.exact16 and not r.float
         img = r.read()
     finally:
         r.close()
-    assert img.dtype == np.uint16 and 65000 < int(img[0, 9, 1]) <= 65535
+    assert img.dtype == np.uint16 and int(img[0, 9, 1]) == 65535 and int(img[0, 2, 1]) == 0
+
+
+def test_legal16_maps_the_swscale_white_to_65535():
+    img = np.array([[[0, 255, 26530], [65280, 65283, 65535]]], np.uint16)
+    out = media._legal16(img.copy())
+    assert out.tolist() == [[[0, 255, 26633], [65535, 65535, 65535]]]
+    rgba = np.array([[[65280, 0, 32640, 40000]]], np.uint16)
+    assert media._legal16(rgba).tolist() == [[[65535, 0, 32767, 40000]]]   # o alfa não muda
 
 
 @pytest.mark.ffmpeg
