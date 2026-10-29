@@ -5,7 +5,8 @@ de um ponto. A receita do quadro e a exportação não sabem que isto existe.
 
 **O negativo.** O mesmo modelo do Laboratório (`look.lab_paths_for` → `LabPath` do caminho A: o negativo escolhido com
 a revelação forçada/puxada, a película vencida e a pré-exposição já aplicadas às curvas e à exposição somada
-`add`). Sem o Laboratório ligado, o negativo padrão (`params.defaults()`: Vision3 250D, revelação normal) — a
+`add`). Com um processo especial (reversível, cruzado, Technicolor) de força ≥ 50%, mede o filme do processo
+(caminho B), que é quem decide a latitude da imagem; no reversível, sem negativo, a imagem final do caminho. Sem o Laboratório ligado, o negativo padrão (`params.defaults()`: Vision3 250D, revelação normal) — a
 interface diz isso. Nada aqui muda o Laboratório.
 
 **Contraste da cena no negativo.** Cada camada `k` tem a curva `D(x) = g·w·[sp((x − pé)/w) − sp((x − ombro)/w)]` com
@@ -102,15 +103,38 @@ def negative_values(v: dict | None) -> tuple[dict, bool]:
     return base, True
 
 
+def uses_process(v: dict) -> bool:
+    """True quando um processo especial (reversível, cruzado, Technicolor) domina a mistura (força ≥ 50%): aí quem
+    decide a latitude é o filme do processo (caminho B), não o negativo escolhido."""
+    from . import look
+    return look.lab_paths_for(v)[1] is not None and float(v.get("lab_processo_forca", 0.0)) >= 0.5
+
+
 def negative_path(v: dict | None):
-    """O caminho A do Laboratório (o negativo escolhido, já com revelação, idade e pré-exposição)."""
+    """O filme medido: o caminho A do Laboratório (o negativo escolhido, já com revelação, idade e pré-exposição)
+    ou, com um processo especial dominante (`uses_process`), o caminho B (o filme do processo)."""
     from . import look
     vals, _default = negative_values(v)
-    return look.lab_paths_for(vals)[0]
+    a, b = look.lab_paths_for(vals)
+    return b if uses_process(vals) else a
+
+
+def _whole_path(path) -> bool:
+    """Caminho sem negativo de verdade (o estágio do negativo é linear, como no reversível): o filme é a imagem final."""
+    return float(np.min(path.nt)) <= -5.0 and float(np.max(path.ns)) >= 5.0
 
 
 def relative_slope(path, stops) -> np.ndarray:
-    """Contraste relativo de cada camada (… × 3) para exposições da cena em stops, no eixo do cinza."""
+    """Contraste relativo de cada camada (… × 3) para exposições da cena em stops, no eixo do cinza.
+
+    No reversível (`_whole_path`) não há negativo: mede a imagem final do caminho (`path.eval`, sem luzes), a
+    inclinação do valor de exibição por stop dividida pela maior inclinação da própria camada."""
+    if _whole_path(path):
+        s = np.asarray(stops, dtype=np.float64)
+        E = GRAY * 2.0 ** s
+        y = np.asarray(path.eval(np.repeat(E[:, None], 3, axis=1), (0.0, 0.0, 0.0)), dtype=np.float64)
+        d = np.gradient(y, s, axis=0)
+        return np.clip(d / np.maximum(d.max(axis=0, keepdims=True), 1e-12), 0.0, None)
     s = np.asarray(stops, dtype=np.float64)[..., None]
     E = GRAY * 2.0 ** s
     add = np.asarray(path.add, dtype=np.float64)
@@ -146,8 +170,9 @@ def latitude(v: dict | None) -> Latitude:
     """A latitude do negativo dos ajustes `v` (a camada mais estreita em cada ponta)."""
     vals, default = negative_values(v)
     layers = _latitude_of(negative_path(vals))
+    film = ("processo:" + str(vals.get("lab_processo", ""))) if uses_process(vals) else str(vals.get("lab_negativo", ""))
     return Latitude(max(x[0] for x in layers), min(x[1] for x in layers), max(x[2] for x in layers),
-                    min(x[3] for x in layers), layers, str(vals.get("lab_negativo", "")), default)
+                    min(x[3] for x in layers), layers, film, default)
 
 
 def stops(lin) -> np.ndarray:
@@ -217,8 +242,12 @@ def signed(x: float, decimals: int = 1) -> str:
 
 
 def negative_name(neg: str) -> str:
+    """Nome do filme medido: o negativo (`Latitude.negative`) ou, com o prefixo "processo:", o processo."""
     from . import params
     from .i18n import _
+    if neg.startswith("processo:"):
+        neg = neg[len("processo:"):]
+        return _(dict(params.PARAMS["lab_processo"].choices).get(neg, neg))
     labels = dict(params.PARAMS["lab_negativo"].choices)
     return _(labels.get(neg, neg))
 

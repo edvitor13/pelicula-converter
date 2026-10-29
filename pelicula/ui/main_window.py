@@ -3366,7 +3366,7 @@ class MainWindow(QMainWindow):
             "/ próxima\nLosangos na linha do tempo: clique vai até a chave, arrastar move, Delete apaga") + "\n\n" + _(
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
-            "Edição: Ctrl+Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
+            "Edição: Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
             "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
 
     def about(self) -> None:

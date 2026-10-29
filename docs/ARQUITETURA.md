@@ -3633,8 +3633,8 @@ clipe (surgir/sumir no preto ou branco, as da 1.5 sem cauda) trocam a luz no cor
 **Interface.** O cartão do esquema (sliders) aparece depois de "Câmera" (`edit_panels.DISPLAY_AFTER`) e ganha no
 alto o `LightsPanel`: mostrador clássico `luz_plano.classic` = TAPE 25 + `lab_luz_*` + `lab_densidade` do look +
 pontos do clipe (H-61: TAPE 25-25-25 = luzes no alvo), aviso sem Laboratório ou sem película na prévia, ±1 ponto por
-canal, Zerar e "Copiar luzes para os clipes selecionados". Atalhos `QShortcut` na janela: Ctrl+Alt+R/G/B/D (+1) e
-Ctrl+Alt+Shift+R/G/B/D (−1), só no modo Edição, nos clipes de vídeo selecionados ou no plano da V1 sob o cursor
+canal, Zerar e "Copiar luzes para os clipes selecionados". Atalhos `QShortcut` na janela: Alt+R/G/B/D (+1) e
+Alt+Shift+R/G/B/D (−1), só no modo Edição, nos clipes de vídeo selecionados ou no plano da V1 sob o cursor
 (`luz_plano.shot_at`). Tudo por `TimelineModel.update_clip_values({id: {chave: valor}})` (novo: muda só as chaves
 dadas em vários clipes, um passo do desfazer; faixa travada fica de fora). O cartão e os atalhos são do módulo
 "laboratorio" (`luz_plano_ui.apply_modules`, fora de `_module_tools`, cuja chave "laboratorio" já é o cartão do
@@ -3675,8 +3675,13 @@ em verde), com o alfa da cobertura. O texto ao lado do botão é o negativo + `l
 negativo. Os valores do look são os do quadro (`Context.values`, com as chaves) ou os do painel.
 
 **O que fica de fora.** É o eixo do cinza: uma cor saturada pode cair noutra zona numa camada (a leitura de um ponto
-mostra; a camada pinta pela luminância, como a falsa cor). O caminho B (o processo: cruzado, reversível) e a cópia
-não entram: o fotômetro mede o negativo, que é onde a latitude da câmera mora.
+mostra; a camada pinta pela luminância, como a falsa cor). A cópia não entra: o fotômetro mede o negativo, que é
+onde a latitude da câmera mora. **Processos especiais** (decisão do usuário, 29/10): com um processo de força ≥ 50%
+(`fotometro.uses_process`: reversível, cruzados, Technicolor) mede o caminho B, o filme do processo, e o nome
+mostrado é o do processo (`Latitude.negative = "processo:<id>"`). No reversível o estágio do negativo é linear (não há
+negativo): `relative_slope` mede a imagem final do caminho (`LabPath.eval` numa rampa de cinza, inclinação do
+valor de exibição por stop dividida pela maior da camada), o que dá cerca de −1,1 a +1,8 stops de reta e −3,3 a
++2,9 de detalhe, a latitude curta de um slide.
 
 ### 35.3 Presets dos processos da 1.6
 

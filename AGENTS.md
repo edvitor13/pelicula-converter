@@ -205,7 +205,7 @@ pelicula/
                              1.6, câmera e formato: filme_ui (ponto único de ligação: cartões dos módulos novos e o
                              botão da máquina do tempo), maquina_ui (janela da máquina do tempo)
                              1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
-                             "Luz da copiadora" do inspetor e os atalhos Ctrl+Alt+R/G/B/D), fotometro_ui (botão
+                             "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D), fotometro_ui (botão
                              Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
@@ -427,7 +427,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
 | `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): no fim da lista, processo certo, efeito no eixo do cinza |
 | `tests/test_fotometro.py` | fotômetro: latitude por negativo (Vision3 × Double-X), revelação, vencida e pré-exposição movem os limites como documentado, zonas da camada em stops conhecidos, leitura de um ponto, nada no caminho de render |
-| `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Ctrl+Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
+| `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
 | `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |

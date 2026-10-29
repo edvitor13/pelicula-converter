@@ -8,7 +8,7 @@ alto dele, o `LightsPanel`:
 - o aviso quando as luzes não valem (Laboratório do look desligado, ou a prévia da Edição sem película);
 - botões de ±1 ponto por cor e na densidade, "Zerar" e "Copiar luzes para os clipes selecionados".
 
-Atalhos (modo Edição; nos clipes de vídeo selecionados ou, sem seleção, no plano da V1 sob o cursor): Ctrl+Alt+R /
+Atalhos (modo Edição; nos clipes de vídeo selecionados ou, sem seleção, no plano da V1 sob o cursor): Alt+R /
 G / B / D somam 1 ponto de luz vermelha / verde / azul / densidade; com Shift, tiram 1 ponto.
 
 Toda mudança passa pelo `TimelineModel` (`update_clip_values`: um passo do desfazer). O cartão e os atalhos somem
@@ -102,7 +102,7 @@ class LightsPanel(QWidget):
                 b = QPushButton(("+1" if delta > 0 else "−1"))
                 b.setObjectName(f"trim_{key}_{'mais' if delta > 0 else 'menos'}")
                 b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-                sc = ("Ctrl+Alt+Shift+" if delta < 0 else "Ctrl+Alt+") + SHORTCUTS[key]
+                sc = ("Alt+Shift+" if delta < 0 else "Alt+") + SHORTCUTS[key]
                 b.setToolTip(_("{cor}: {sinal}1 ponto neste plano ({atalho})").format(
                     cor=names[key], sinal="+" if delta > 0 else "−", atalho=sc))
                 b.clicked.connect(lambda _c=False, k=key, d=delta: self.trim(k, d))
@@ -205,7 +205,7 @@ def trim_targets(win, key: str, delta: float) -> int:
 
 
 def install(win) -> None:
-    """O painel no cartão "Luz da copiadora" do inspetor e os atalhos Ctrl+Alt+R/G/B/D (Shift: menos)."""
+    """O painel no cartão "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D (Shift: menos)."""
     insp = getattr(win, "inspector", None)
     card = next((c for c in getattr(insp, "vcards", []) if c.section.key == "luz_copiadora"), None)
     win.lights_panel = None
@@ -221,7 +221,7 @@ def install(win) -> None:
         win.lights_card = card
     win.lights_shortcuts = []
     for key, letter in SHORTCUTS.items():
-        for prefix, delta in (("Ctrl+Alt+", 1.0), ("Ctrl+Alt+Shift+", -1.0)):
+        for prefix, delta in (("Alt+", 1.0), ("Alt+Shift+", -1.0)):
             s = QShortcut(QKeySequence(prefix + letter), win)
             s.activated.connect(lambda k=key, d=delta: trim_targets(win, k, d))
             win.lights_shortcuts.append(s)

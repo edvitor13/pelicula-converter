@@ -558,7 +558,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Esc | Tirar a seleção e voltar para Selecionar |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
-| Ctrl+Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |
+| Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |
 | Ctrl+Shift+L | Painel de legendas (também no modo Película) |
 | Delete / Enter / Esc na faixa Legendas | Apagar / editar / tirar a seleção da legenda escolhida |
 
@@ -692,7 +692,7 @@ o clipe é o plano da **V1**.
 - **+1 / −1** em cada cor e na densidade, **Zerar** (volta às luzes do look) e **Copiar luzes para os clipes
   selecionados** (selecione os outros clipes com Ctrl ou Shift na linha do tempo). Cada clique é um passo do
   desfazer.
-- **Atalhos** (modo Edição): **Ctrl+Alt+R / G / B / D** somam 1 ponto de luz vermelha / verde / azul / densidade;
+- **Atalhos** (modo Edição): **Alt+R / G / B / D** somam 1 ponto de luz vermelha / verde / azul / densidade;
   com **Shift**, tiram 1 ponto. Valem para os clipes de vídeo selecionados ou, sem seleção, para o plano da V1 sob
   o cursor; a barra de status mostra as luzes do plano.
 - **Clipes nas faixas de cima** (V2, V3… — títulos, sobreposições) não mudam o plano: vale a luz do clipe da V1.

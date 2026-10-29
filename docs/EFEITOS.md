@@ -790,7 +790,7 @@ quadro (maior quadro, grão menor: 120 < 135 < 35 mm de cinema < meio quadro).
 *O marcador de luz do laboratório acertava cada plano na copiadora.* No modo Edição, o inspetor de um clipe de vídeo
 tem o cartão **Luz da copiadora** (logo depois de *Câmera*): o mostrador clássico **25 · 25 · 25** (o TAPE padrão:
 as luzes no alvo, mais as do Laboratório do look e as deste clipe), botões −/+ de 1 ponto para vermelha, verde,
-azul e densidade (as três), **Zerar** e **Copiar luzes para os clipes selecionados**. Atalhos: **Ctrl+Alt+R / G /
+azul e densidade (as três), **Zerar** e **Copiar luzes para os clipes selecionados**. Atalhos: **Alt+R / G /
 B / D** (+1 ponto) e com **Shift** (−1), nos clipes selecionados ou no plano da V1 sob o cursor.
 
 | Ajuste | Faixa | Padrão | O que faz |
@@ -810,7 +810,9 @@ arquivo inteiro, sem montagem) não há planos: divida o clipe no modo Edição.
 *Onde cada parte da imagem cai na curva do negativo.* Ligue o recurso em *Configurações › Recursos*; o botão
 **Fotômetro** aparece na barra da prévia. Ligado, a prévia é pintada pela zona do negativo escolhido no
 Laboratório — com a revelação, a película vencida e a pré-exposição —, medida em stops da luz da cena em relação
-ao cinza de 18% (a mesma luz da falsa cor):
+ao cinza de 18% (a mesma luz da falsa cor). Com um processo especial (*Reversível*, as *Revelações cruzadas*,
+*Technicolor*) com força de 50% ou mais, mede o filme do processo, que é quem decide a latitude: um slide
+reversível tem só uns −1 a +2 stops de trecho reto.
 
 | Cor | Zona | O que quer dizer |
 |---|---|---|

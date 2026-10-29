@@ -145,3 +145,23 @@ def test_module_is_beta_and_off_by_default():
     m = modules.get("fotometro")
     assert m.status == modules.BETA and m.group == "pelicula"
     assert not any("fotometro" in p[3] for p in modules.PROFILES)
+
+
+# ------------------------------------------------------------------ processos especiais (decisão de 29/10)
+def test_special_process_measures_the_process_film():
+    base = _lat()
+    cross = _lat(lab_processo="cruzado_e6c41")
+    assert cross.negative == "processo:cruzado_e6c41"
+    assert fm.negative_name(cross.negative) == "Revelação cruzada: slide no C-41"
+    assert cross.hi - cross.lo < base.hi - base.lo, "o slide no C-41 tem menos latitude que o negativo"
+    weak = _lat(lab_processo="cruzado_e6c41", lab_processo_forca=0.3)
+    assert weak == base, "processo abaixo de 50% da mistura: vale o negativo escolhido"
+
+
+def test_reversal_measures_the_final_image():
+    rev = _lat(lab_processo="reversivel")
+    assert rev.negative == "processo:reversivel"
+    assert -1.5 < rev.lo < -0.7 and 1.4 < rev.hi < 2.2, "latitude curta de um slide"
+    assert rev.lo_detail < rev.lo < 0.0 < rev.hi < rev.hi_detail
+    r = fm.spot([0.18, 0.18, 0.18], _v(lab_processo="reversivel"))
+    assert r.zone == "reta"

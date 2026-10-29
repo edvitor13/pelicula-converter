@@ -1,7 +1,7 @@
 """Luz por plano e fotômetro da película (1.6) na janela: um ponto só de ligação com a `MainWindow`.
 
 - Marcação de luz por plano (`ui/luz_plano_ui.py`): o painel do cartão "Luz da copiadora" do inspetor e os atalhos
-  Ctrl+Alt+R/G/B/D (com Shift: menos). Faz parte do módulo "laboratorio" (some com ele).
+  Alt+R/G/B/D (com Shift: menos). Faz parte do módulo "laboratorio" (some com ele).
 - Fotômetro da película (`ui/fotometro_ui.py`, módulo Beta "fotometro"): o botão da barra da prévia, a latitude e a
   camada (`preview_tools`), só na tela.
 

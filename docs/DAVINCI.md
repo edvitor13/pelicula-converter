@@ -223,7 +223,8 @@ Dicas:
   perda de contraste da película vencida e o *flashing*, iguais ao app (diferença < 0,000003 nos testes). O nó
   *Cor* não tem esses controles (fica perto do limite de controles do DCTL): use o *Laboratorio*. Os processos
   novos (*Reversível* e as duas *Revelações cruzadas*) e os filmes "(datasheet)" aparecem nas listas dos dois
-  nós; como as listas ganham itens no fim, nós salvos com versões antigas continuam com os mesmos filmes.
+  nós. Os presets *Película vencida (18 anos)* e *Pré-exposição (baixo contraste)* existem nos dois pacotes, mas
+  no nó *Cor* saem sem a vencida e sem a pré-exposição: para o efeito completo, use o nó *Laboratorio*; como as listas ganham itens no fim, nós salvos com versões antigas continuam com os mesmos filmes.
 - **MTF - Camadas com copia** (nó *Textura*): o nó não vê a cópia escolhida nos nós *Cor* ou *Laboratorio*;
   ligue-o quando houver uma cópia (print) na sua árvore, para a *Diferença entre camadas* amaciar também o
   azul, como no app. Os nós gerados pelo app já vêm com ele certo; o plugin OpenFX vê a cópia sozinho.

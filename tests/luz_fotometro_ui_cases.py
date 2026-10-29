@@ -2,7 +2,7 @@
 offscreen).
 
 O cartão "Luz da copiadora" do inspetor (mostrador 25-25-25, aviso sem Laboratório, ±1 ponto, zerar, copiar para
-os selecionados, tudo com desfazer), os atalhos Ctrl+Alt+R/G/B/D e o módulo "laboratorio". Preferências num .ini só
+os selecionados, tudo com desfazer), os atalhos Alt+R/G/B/D e o módulo "laboratorio". Preferências num .ini só
 deste arquivo; sem OpenGL 3.3 ou sem ffmpeg os casos da janela se pulam.
 """
 
@@ -175,23 +175,23 @@ def test_copy_lights_to_the_selected_clips(win, png):
 def test_shortcuts_trim_the_selection_or_the_shot_under_the_playhead(win, png):
     vids = open_two_shots(win, png)
     shortcuts = {s.key().toString(): s for s in win.lights_shortcuts}
-    for k in ("Ctrl+Alt+R", "Ctrl+Alt+G", "Ctrl+Alt+B", "Ctrl+Alt+D", "Ctrl+Alt+Shift+R", "Ctrl+Alt+Shift+D"):
+    for k in ("Alt+R", "Alt+G", "Alt+B", "Alt+D", "Alt+Shift+R", "Alt+Shift+D"):
         assert k in shortcuts, k
-    shortcuts["Ctrl+Alt+R"].activated.emit()
-    shortcuts["Ctrl+Alt+R"].activated.emit()
-    shortcuts["Ctrl+Alt+Shift+B"].activated.emit()
+    shortcuts["Alt+R"].activated.emit()
+    shortcuts["Alt+R"].activated.emit()
+    shortcuts["Alt+Shift+B"].activated.emit()
     assert values(win, vids[0].id)["luz_r"] == 2.0 and values(win, vids[0].id)["luz_b"] == -1.0
     assert "Luzes do plano" in win.statusBar().currentMessage()
     win.model.select([])
     win.seek(vids[1].start + 2)
     APP.processEvents()
-    shortcuts["Ctrl+Alt+D"].activated.emit()
+    shortcuts["Alt+D"].activated.emit()
     assert values(win, vids[1].id)["luz_densidade"] == 1.0, "sem seleção: o plano da V1 sob o cursor"
     win.set_mode("pelicula")
-    shortcuts["Ctrl+Alt+D"].activated.emit()
+    shortcuts["Alt+D"].activated.emit()
     assert values(win, vids[1].id)["luz_densidade"] == 1.0, "só no modo Edição"
     win.set_mode("edicao")
-    assert "Ctrl+Alt+R" in "".join(str(x) for x in [win.show_shortcuts.__code__.co_consts])
+    assert "Alt+R" in "".join(str(x) for x in [win.show_shortcuts.__code__.co_consts])
 
 
 def test_card_and_shortcuts_belong_to_the_laboratory_module(win, png):
