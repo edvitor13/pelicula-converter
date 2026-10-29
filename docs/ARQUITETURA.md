@@ -38,6 +38,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
     - [30.7 Grão físico: o modelo booleano no negativo](#307-grão-físico-o-modelo-booleano-no-negativo)
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
+32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 
 ---
@@ -3360,6 +3361,117 @@ compara os dois na GPU.
   `_module_tools` (que já usa a chave "scopes" para o painel).
 - Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
   projeto salvo sai igual.
+
+## 32. Laboratório na 1.6
+
+O Laboratório (§14) ganhou na 1.6 conferências pelo LAD da Kodak (M9), películas calibradas pelos datasheets
+públicos (M8), o tipo de scanner do "Sem cópia" (M6) e processos novos (reversível, película vencida, pré-exposição e
+revelação cruzada). Regra de sempre: **os filmes e processos que já existiam não mudam um bit**; o que é novo entra
+como id novo no fim das listas (o plugin do DaVinci grava a posição) ou como ajuste com padrão neutro.
+
+### 32.1 Conferências pelo LAD (M9)
+
+`tests/test_lab_lad.py` mede o modelo de sempre contra o LAD (*Laboratory Aim Density*: Pytlak e Fleischer,
+SMPTE Journal 85, out/1976, p. 781–786; Kodak H-61, H-61A e H-61B, 1992). As densidades do app são **acima da
+base** (projeção `10^(−d/2,6)`, base limpa = branco). Medido com a 2383, processo normal e sem forçar:
+
+| Conferência | LAD | App | Situação |
+|---|---|---|---|
+| Cinza de 16% na cópia (densidade visual) | 1,0 com a base (Status A R 1,09, G 1,06, B 1,03) | 0,971–0,976 acima da base nos Vision3 (2393: 0,976–0,984); a base da cópia soma ~0,05 | Bate (teste: 0,95–1,05) |
+| Cinza de 18% (o alvo do app) | — | 0,9017 = −2,6 · log10(0,45), 0,07 menos denso que o de 16% | Bate com a conta da M9 |
+| 1 ponto da copiadora | 0,025 log E | 0,025 log E (`LAB_POINT`) | Igual |
+| Densidade por ponto perto do alvo | ≈ 0,07 | 0,059–0,060 (2383), 0,064 (2393) | **Desvia ~15%**: a reta da 2383 do app tem gama 2,85–3,00, mas no cinza a cópia ainda está na curva do pé (inclinação efetiva ≈ 2,4) |
+| Pontos para 1 stop de câmera | ≈ 7 | 7,2 (250D), 7,0 (500T), 7,5 (50D), com 2383 e 2393 | Bate (teste: 6,5–8) |
+| 12 pontos | 0,30 log E = 1 stop da cópia | 0,300 log E = 0,997 stop | Igual |
+| TAPE 25-25-25 | Luzes do analisador no alvo | 0 pontos = cinza calibrado neutro; ±7 pontos juntos dão no máximo 0,006 de cor | Bate |
+| Escala de cinza 2,5–90% sem "contraste descasado" | Neutra | 16–20%: ≤ 0,0072 entre canais; preto de 2,5%: até 0,073 nos Vision3/Eterna (sombras um pouco quentes, altas luzes um pouco frias) e até 0,14 no 5247 dos anos 70 com a 2393 (virada de propósito dos filmes antigos) | Bate nos modernos (teste < 0,08); antigos < 0,15 |
+| Mancha do LAD no negativo | Status M R 0,80, G 1,20, B 1,60 (com a máscara); menos a densidade mínima do 250D no datasheet (R 0,18, G 0,58, B 0,85): ≈ 0,62/0,62/0,75 | 0,931/0,931/0,911 acima da base + véu (250D) | **Desvia**: o pé do negativo do app fica mais longe do cinza. Não muda a cópia (as luzes calibradas absorvem); fica só medido |
+
+Os desvios não foram corrigidos (os filmes de sempre não mudam). Eles são metas das películas calibradas da M8
+(§32.2), que partem dos pontos dos datasheets e por isso não herdam os números à mão.
+
+### 32.2 Películas calibradas pelos datasheets (M8)
+
+`tools/ajustar_lab.py` (só numpy, offline) ajusta o modelo de §14 aos pontos lidos dos gráficos públicos da Kodak
+(`pelicula/data/datasheets/`: H-1-5207, H-1-5219, H-1-5213 e H-1-2383, com publicação, revisão, página, figura,
+SHA-256, método e erro da leitura e a tolerância do ajuste). As constantes viram ids **novos no fim** das listas:
+`vision3_250d_v2`, `vision3_500t_v2`, `vision3_200t_v2` (`NEGATIVES`) e `2383_v2` (`LAB_PRINTS`), rotulados
+"(datasheet)"; os filmes de sempre não mudam. `tests/test_lab_datasheet.py` confere que as constantes são as do
+ajuste, que o erro fica dentro da tolerância gravada no JSON e que os ids novos estão no fim.
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Unidades do negativo | Eixo "Camera Stops" (0 = cinza de 18%), log E relativo = stops · log10 2; densidade Status M com base | Mesma convenção de `le = log10(e/0,18)`; a densidade mínima fica fora (o modelo é acima da base) |
+| Curva do negativo | Levenberg–Marquardt: gama, pé e ombro por camada e uma largura comum, depois do efeito entre camadas do filme à mão | Erro ≤ 0,019 (rms 0,006); gama R 0,49, G 0,55, B 0,53–0,54 (o vermelho do Vision3 é mais suave no Status M) |
+| Curva da cópia | Mesma exposição nas três camadas; canais Status A lidos por bandas estreitas no pico de cada corante (`densitometer`); gama limitado a 6 (acima vira logística sem melhorar o ajuste) | Erro ≤ 0,083 (rms 0,021), o maior no pé longo; gama 5,6/4,2/6,0 e dmax 3,8/3,3/3,4 (camadas) |
+| Diafonia da cópia | Curvas de densidade espectral dos corantes (p. 5) vistas pelos canais da tela: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2013) em Rec.709, só a parte positiva, sob corpo negro de 5500 K; coluna dividida pela diagonal | Magenta no vermelho 0,31, ciano no verde 0,23, magenta no azul 0,23 (a 2383 à mão tem 0,06–0,14) |
+| Matriz de sensibilidade e efeito entre camadas | Não calibrados: precisariam de espectros de refletância de cenas com licença livre | Os do filme feito à mão (`_SENS_V3`/`_SENS_V3T`, 0,38/0,36/0,37) |
+| Posição das curvas e densidade mínima | Fora do modelo | A calibração das luzes leva o cinza a 0,45 em qualquer combinação |
+
+Conferências pelo LAD com o par do datasheet (negativo + `2383_v2`): o cinza de 16% sai com densidade visual
+1,008 (meta 1,0; os filmes à mão dão 0,97); 6,5 pontos por stop de câmera (meta ≈ 7); a mancha do LAD no negativo
+(modelo + densidade mínima) dá 0,86/1,37/1,61 contra 0,80/1,20/1,60. Desvio que fica: **0,10 de densidade por
+ponto** (meta ≈ 0,07), porque a diafonia larga da tela soma às camadas no cinza (as camadas sozinhas têm
+inclinação ≈ 2,9 no cinza, como o Status A lido; a soma vista pelo canal dá ≈ 3,9). Escala de cinza do LAD com o
+par: ≤ 0,012 entre 16% e 20% e até 0,125 no preto de 2,5% (azul mais denso: o pé longo do azul da 2383). Os
+negativos do datasheet com as cópias à mão (e o contrário) viram até 0,2 nas sombras: Status M (negativo) e
+Status A (cópia) só fecham o cinza entre si, e o vermelho mais suave do negativo medido é compensado pelo gama
+maior do vermelho na cópia medida. Esses pares ficam fora do teste da escala de cinza de §32.1.
+
+Ficaram de fora o 50D 5203 (a curva do vermelho é pontilhada no gráfico e o leitor de traço não a segue) e a 2393
+(não lida nesta versão). O selo "Desatualizada" nos filmes à mão **não** foi ligado (decisão do
+usuário).
+
+### 32.3 Tipo de scanner no Sem cópia (M6)
+
+`lab_scanner` (escolha no fim do Laboratório; padrão `rgb`, igual bit a bit ao de antes). Com `branca` e a cópia
+*Sem cópia*, a inversão do caminho A troca a densidade de cada camada pela de cada canal visto em luz branca:
+
+```
+T_c = Σ_k M_ck · 10^(−(d_k + Dmin_k))        d_c = −log10 T_c        (o mesmo no cinza: dm_c)
+st_c = (d_c − dm_c) / (γef_c · log10 2) − luz_c / log10 2,   γef_c = Σ_k J_ck · γ_k,   J_ck = M_ck · 10^(−(dm_k + Dmin_k)) / Tm_c
+```
+
+`M` (linhas somam 1) é a absorção de cada corante do 250D (H-1-5207, p. 4, *Spectral Dye Density Curves*) vista
+por cada canal: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2(2), 2013) levado ao
+Rec.709, só a parte positiva, sob corpo negro de 5500 K (`tools/ajustar_lab.py`, `scan_mix`):
+R = 0,644 C + 0,294 M + 0,062 Y, G = 0,115/0,765/0,120, B = 0,066/0,070/0,864. `Dmin` = base + máscara do 250D
+(0,175/0,574/0,834, do ajuste da §32.2). Como `γef` é o gama efetivo no cinza, o cinza sai igual ao do RGB
+estreito; as cores perdem saturação (cerca de 40% na média de cores ao acaso nos testes). A câmera "típica" é o observador padrão
+(nenhuma curva de sensor de fabricante): é a escolha conservadora com fonte pública.
+
+### 32.4 Película vencida, pré-exposição e processos novos
+
+**Módulo `labx.py`** (ganchos pequenos em `look._make_path`, `look.build_plan`, `Engine`, `resolve.spec` e
+`ofx`). Véu e pré-exposição são **exposição somada** a cada camada antes da curva do negativo
+(`e = sens · luz + soma`; `soma = sens · flash + véu`); a calibração do cinza recebe a mesma soma, então o cinza
+continua em 0,45. `LabPath` ganhou `add` e `white` e `LabMods` ganhou `age`, `flash` e `white`, todos com
+padrão neutro no fim (o cache e os planos de sempre não mudam).
+
+| Recurso | Modelo | Conferido em `tests/test_lab_processos.py` |
+|---|---|---|
+| Película vencida (`lab_vencida`, 0–30 anos) | Por década (`a` = anos/10, peso `w` da camada = `grao.NEG_SIGMA_D` normalizado: R 0,484, G 0,562, B 1): gama ÷ (1 + 0,10·a·w), pé e ombro + 0,15·a·w log E, véu = 0,18 · 0,02 · a·w · 10^(0,15·a·w) (o véu medido na sensibilidade da película vencida). Preto e branco: o peso médio nas três | Dmin do negativo sobe a cada ano em todas as camadas (azul > verde > vermelho; P&B cinza); cinza calibrado; preto lavado, sombras azuladas, altas luzes amareladas, menos contraste no cinza |
+| Pré-exposição (`lab_pre_exposicao`, stops, cor) | Luz `0,18 · 2^(−stops)` na cor escolhida (normalizada na luminância Rec.709), somada à cena antes da sensibilidade | Sombras sobem a cada stop a menos; com ≥ 4 stops, +3 e +4 stops mudam < 0,012; cor tinge as sombras |
+| Reversível | Caminho B (`LAB_PROCESSES`): estágio "negativo" linear (gama 1, pé −6, ombro +6: densidade = log E na faixa da cena) e a curva positiva do slide como "cópia" (gama 2,2, dmax 3,5, largura 0,18), sensibilidade `_SENS_VIVID` | A cópia escolhida não muda nada; contraste no cinza > 1,3 × o do caminho normal; preto mais denso |
+| Slide no C-41 | Negativo de emulsão de slide (gama 1,10/1,00/0,92, pé −1,05, ombro 1,25, "interimage" 0,55) copiado numa 2383 | Contraste > 1,3 × o normal; sombras azuladas, altas luzes amareladas |
+| Negativo no E-6 | Estágio linear e positivo de pouco contraste (gama 1,25/1,12/0,98, dmax 2,5/2,4/2,3) | Contraste < o normal; preto > 0,08; altas luzes quentes, sombras azuladas |
+
+As constantes da película vencida são **regra prática** (decisão conservadora; a calibração por dados de
+filmes vencidos fica em aberto). Tudo é determinístico (só ajustes; nada de sorteio).
+
+**Uniforms e programas.** Nada novo entra nos planos padrão. Com algum recurso de `labx` ligado o plano traz
+`u_lx_on`, `u_lx_add_a`, `u_lx_add_b` e `u_lx_white` (sempre os quatro) e o `Engine` usa `final_lx`/`bake_lx`
+(`Engine._lab_program`), compilados na primeira vez: o texto do FINAL/BAKE com `labPathX` (uma cópia de
+`labPath` com `+ add` na exposição e o scanner de luz branca) no lugar de `labPath` nas duas chamadas do
+`labPipe`. Os processos novos não precisam da variante (são caminhos B com tabelas novas).
+
+**Plugin.** Os controles novos (`labx.CONTROLS`) ficam só no nó **Laboratorio** e no OpenFX (o nó Cor está perto
+do limite de controles do DCTL). No nó Laboratorio, `labx.body` troca `pc_lab_path` por `pc_lab_path_x` (cópia
+de `pc_lab_path` com idade, pré-exposição e scanner em blocos com guarda, depois das expressões originais) e
+`labx.tables` acrescenta `PC_LX_*`. O nó Cor continua com o texto de antes, a menos das tabelas
+(`PC_NEG`, `PC_LPR`, `PC_PROC` com as linhas novas no fim). Paridade na GPU (`tests/test_resolve.py`,
+`tests/test_ofx.py`, casos `LABX_CASES`): diferença ≤ 0,000002. Com os ajustes novos no padrão, LUT, quadros, nós
+do plugin e OpenFX ficam iguais à BASE bit a bit (suítes douradas de §30/§31).
 
 ## 33. Câmera, formato e montagem na 1.6
 

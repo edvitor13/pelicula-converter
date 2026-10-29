@@ -28,7 +28,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import APP_NAME, __version__, look, params, presets, resolve
+from . import APP_NAME, __version__, labx, look, params, presets, resolve
 from .i18n import _
 from .resolve import CPP, Ctl
 
@@ -87,6 +87,7 @@ def controls() -> list[Ctl]:
     """Todos os controles do plugin: os do nó Cor + Textura + Projetor, sem repetir."""
     out, seen = [], set()
     extra = resolve.lab_grain_controls()  # 1.6: "Grão no negativo" (o resto já vem do Textura)
+    extra += resolve.lab_extra_controls()  # 1.6 (labx.py): scanner, película vencida e pré-exposição
     for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls() + extra:
         if c.name in SKIP or c.name in seen:
             continue
@@ -252,11 +253,15 @@ def kernels_source() -> str:
     head.append(resolve._define("PC_DSLOPE", look.D_SLOPE) + resolve._define("PC_DMID", look.D_MID)
                 + resolve._define("PC_DP", look.D_P))
     tables = (resolve._cor_tables(CPP) + resolve._lab_tables(CPP) + resolve._gauge_tables(CPP)
-              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP))
-    # 1.6: K_RAND e o grão físico (K_PGRAIN) antes do laboratório, que soma o grão físico na densidade
+              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP)
+              + labx.tables(resolve._define, resolve._table, CPP))
+    # 1.6: K_RAND e o grão físico (K_PGRAIN) antes do laboratório, que soma o grão físico na densidade; o
+    # pc_lab_path_x (labx) é cópia do pc_lab_path já com o grão físico
+    k_lab = resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB)
     kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_RAND + resolve.K_PGRAIN
-              + resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB) + resolve.K_CURVE
+              + k_lab + resolve.K_CURVE
               + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
+              + labx.kernel(k_lab)
               ).replace("PC_DEVICE ", "static inline ")
     body = []
     body.append("\n// ---------------------------------------------------------------- valores (formato do app)\n")
@@ -280,11 +285,11 @@ def kernels_source() -> str:
     body.append(f"static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {{\n{loc}{resolve.B_GAIN}"
                 "    return lin;\n}\n")
     body.append("// colorPipe do app: laboratorio + look + copia + envelhecimento (B_LAB + B_LOOK)\n")
-    lab = resolve.B_LAB.replace("/*NGRAIN*/", "")
+    lab = labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "")  # 1.6: com véu, pré-exposição e scanner (labx.py)
     body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{lab}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
     # 1.6: a mesma conta com o grão no negativo (`gn_in` = densidade do grão de cada camada neste pixel)
-    lab_ng = resolve.B_LAB.replace("/*NGRAIN*/", "        gn = gn_in;\n")
+    lab_ng = labx.body(resolve.B_LAB).replace("/*NGRAIN*/", "        gn = gn_in;\n")
     body.append("// colorPipe com o grao no negativo (grao.negative_grain)\n")
     body.append(f"static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in) {{\n{loc}{lab_ng}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")

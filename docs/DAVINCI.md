@@ -218,6 +218,12 @@ Dicas:
   ou *Fisico* (os grãos de prata do app, veja [EFEITOS.md](EFEITOS.md#laboratório-negativo-e-cópia)). Como o
   outro, parado no DCTL e animado no OpenFX. É mais pesado: no nó DCTL, uns 2× o tempo do nó com o *Ruido* em
   1080p e 4K; no OpenFX (CPU), uns 3×. O nó *Cor* não tem esse modo.
+- **Lab - Tipo de scanner**, **Lab - Pelicula vencida anos** e **Lab - Pre-exposicao** (com os stops abaixo do
+  cinza e a cor) (nó *Laboratorio* e plugin OpenFX, 1.6): o scanner de luz branca do *Sem cópia*, o véu e a
+  perda de contraste da película vencida e o *flashing*, iguais ao app (diferença < 0,000003 nos testes). O nó
+  *Cor* não tem esses controles (fica perto do limite de controles do DCTL): use o *Laboratorio*. Os processos
+  novos (*Reversível* e as duas *Revelações cruzadas*) e os filmes "(datasheet)" aparecem nas listas dos dois
+  nós; como as listas ganham itens no fim, nós salvos com versões antigas continuam com os mesmos filmes.
 - **MTF - Camadas com copia** (nó *Textura*): o nó não vê a cópia escolhida nos nós *Cor* ou *Laboratorio*;
   ligue-o quando houver uma cópia (print) na sua árvore, para a *Diferença entre camadas* amaciar também o
   azul, como no app. Os nós gerados pelo app já vêm com ele certo; o plugin OpenFX vê a cópia sozinho.

@@ -274,12 +274,24 @@ class Engine:
         return out
 
     def _final_program(self, U: dict) -> str:
-        """O FINAL de sempre, ou (1.6) o FINAL com o grão físico no negativo (`u_grain_on = 3`, `grao_fisico`)."""
+        """O FINAL de sempre, ou (1.6) o FINAL com o grão físico no negativo (`u_grain_on = 3`, `grao_fisico`), com
+        véu, pré-exposição e scanner de luz branca (`labx`) ou com os dois (a `labPathX` copia a `labPath` já com o
+        grão físico)."""
         if U.get("u_grain_on") != 3:
-            return "final"
+            return self._lab_program("final", U)
         from . import grao_fisico
-        self._lazy_program("final_pg", grao_fisico.FINAL_PG)
-        return "final_pg"
+        if "u_lx_on" not in U:
+            self._lazy_program("final_pg", grao_fisico.FINAL_PG)
+            return "final_pg"
+        return self._lab_program("final_pg", U)
+
+    def _lab_program(self, name: str, U: dict) -> str:
+        """O FINAL/BAKE de sempre, ou (1.6) a variante com véu, pré-exposição e scanner de luz branca (labx.py)."""
+        if "u_lx_on" not in U:
+            return name
+        from . import labx
+        self._lazy_program(name + "_lx", labx.program(name + "_lx"))
+        return name + "_lx"
 
     def _streak(self, src, w: int, h: int, sigma: float):
         """(1.6) Desfoque só na horizontal, longo (`sigma` px): reduz a largura pela metade a cada passo (altura
@@ -435,7 +447,8 @@ class Engine:
         info = lut_info(vals.get("lut_arquivo", "")) if vals.get("lut_on") else None
         plan = look.build_plan(vals, n * n, n, 0, 24.0, info, dither=False, legal=legal)
         out = self._target("bake", (n * n, n), dtype="f4")
-        self._run("bake", out, {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)},
+        self._run(self._lab_program("bake", plan.uniforms), out,
+                  {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)},
                   {**look.SPARSE_UNIFORMS, **plan.uniforms})
         data = out[1].read(components=3, alignment=1, dtype="f4")
         grid.release()

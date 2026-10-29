@@ -416,3 +416,19 @@ def test_statistics_do_not_depend_on_resolution(gl_engine):
         stats.append((out.mean(axis=(0, 1)), out.std(axis=(0, 1))))
     np.testing.assert_allclose(stats[0][0], stats[1][0], atol=1e-3)
     np.testing.assert_allclose(stats[0][1], stats[1][1], rtol=0.05)
+
+
+# ------------------------------------------------------------------ com o laboratório da 1.6 (labx)
+@pytest.mark.gpu
+def test_physical_grain_with_the_expired_film(gl_engine):
+    """Grão físico e película vencida juntos (`final_pg_lx`): a `labPathX` copia a `labPath` já com o grão físico,
+    então o resultado tem o véu da vencida e o mesmo grão do modelo físico sozinho."""
+    img = np.full((96, 128, 3), code16(0.18), dtype=np.uint16)
+    v_pg, v_lx = vals(), vals(lab_vencida=20)
+    v_ruido = vals(lab_vencida=20, lab_grao_modelo="ruido")
+    assert {"u_lx_on", "u_pg_amp"} <= set(plan(v_lx, 128, 96).uniforms)
+    pg, both, lx_only = (render(gl_engine, img, v) for v in (v_pg, v_lx, v_ruido))
+    assert gl_engine.progs.get("final_pg_lx") is not None
+    assert abs(both.mean() - lx_only.mean()) < 0.02  # o véu da vencida vale com o grão físico
+    assert abs(both.mean() - pg.mean()) > 0.005
+    assert both.std() > 0.5 * pg.std()  # e o grão físico continua lá

@@ -8,10 +8,11 @@ import re
 import numpy as np
 import pytest
 
-from pelicula import look, params, presets, shaders
+from pelicula import labx, look, params, presets, shaders
 
 # ------------------------------------------------------------------ contrato com os shaders
 _SHADER_SOURCES = {n: getattr(shaders, n) for n in ("BASE", "EXTRACT", "BLUR", "NOISE", "FINAL", "BAKE")}
+_SHADER_SOURCES["FINAL_LX"] = labx.program("final_lx")  # 1.6: variante do Laboratório (labx.py)
 _SIZES = {"int": 1, "float": 1, "vec2": 2, "vec3": 3, "vec4": 4, "mat3": 9}
 
 

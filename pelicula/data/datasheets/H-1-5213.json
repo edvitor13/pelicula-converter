@@ -1,0 +1,24 @@
+{
+  "documento": "KODAK VISION3 200T Color Negative Film 5213 / 7213 - Technical Data",
+  "publicacao": "H-1-5213",
+  "revisao": "Revised 3-26 (março de 2026)",
+  "endereco": "https://www.kodak.com/content/products-brochures/motion-picture/KODAK-VISION3-200T-5213-7213-technical-information.pdf",
+  "sha256": "6208b3938416434bb74fc628d102b59cd60cb1704510202496b46197796ec624",
+  "aviso": "Pontos lidos dos gráficos do datasheet só para calibrar modelos do app (nenhum gráfico nem PDF no repositório). A Kodak avisa que os dados são representativos e não especificações; Kodak e Vision são marcas da Eastman Kodak Company. O app não é um produto oficial.",
+  "sensitometria": {
+    "tolerancia_ajuste": 0.03,
+    "pagina": 3,
+    "figura": "Sensitometric Curves",
+    "condicoes": "Exposure: 3200K 1/50 sec; Process: ECN-2; Densitometry: Status M",
+    "unidade": "densidade (com base e véu) por stop de câmera; 0 = exposição normal do cartão cinza de 18%, 1 stop = 0,301 log E",
+    "leitura": {
+      "data": "2026-10-29",
+      "metodo": "Imagem raster do PDF na resolução original; as bordas do gráfico são −8 e +8 stops e as 15 marcas internas do eixo de baixo conferem a escala. O centro de cada traço foi lido coluna a coluna e interpolado a cada 1/4 de stop.",
+      "erro": "±1 px da imagem: ±0.03 stop (35.4 px por stop) e ±0.005 de densidade (189 px por unidade)."
+    },
+    "stops": [-7.25, -7.0, -6.75, -6.5, -6.25, -6.0, -5.75, -5.5, -5.25, -5.0, -4.75, -4.5, -4.25, -4.0, -3.75, -3.5, -3.25, -3.0, -2.75, -2.5, -2.25, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0, 6.25, 6.5, 6.75, 7.0, 7.25, 7.5, 7.75, 8.0],
+    "R": [0.18, 0.183, 0.185, 0.186, 0.19, 0.193, 0.197, 0.202, 0.208, 0.222, 0.233, 0.254, 0.275, 0.299, 0.328, 0.359, 0.391, 0.426, 0.462, 0.498, 0.534, 0.571, 0.607, 0.644, 0.68, 0.717, 0.753, 0.789, 0.824, 0.86, 0.897, 0.933, 0.967, 1.004, 1.038, 1.074, 1.11, 1.145, 1.181, 1.214, 1.25, 1.286, 1.322, 1.358, 1.391, 1.426, 1.462, 1.497, 1.529, 1.561, 1.591, 1.619, 1.647, 1.672, 1.696, 1.719, 1.74, 1.76, 1.777, 1.793, 1.808, null],
+    "G": [0.583, 0.584, 0.588, 0.589, 0.593, 0.596, 0.599, 0.604, 0.609, 0.621, 0.636, 0.657, 0.683, 0.711, 0.744, 0.778, 0.819, 0.858, 0.897, 0.939, 0.98, 1.024, 1.068, 1.11, 1.154, 1.198, 1.24, 1.281, 1.322, 1.364, 1.405, 1.448, 1.489, 1.531, 1.572, 1.614, 1.656, 1.697, 1.739, 1.78, 1.822, 1.863, 1.905, 1.947, 1.988, 2.03, 2.071, 2.11, 2.15, 2.19, 2.227, 2.263, 2.295, 2.329, 2.359, 2.389, 2.416, 2.442, 2.465, 2.487, 2.507, null],
+    "B": [0.848, 0.851, 0.853, 0.856, 0.859, 0.864, 0.869, 0.874, 0.88, 0.894, 0.907, 0.928, 0.952, 0.979, 1.009, 1.043, 1.079, 1.116, 1.156, 1.194, 1.235, 1.276, 1.318, 1.359, 1.4, 1.441, 1.48, 1.52, 1.561, 1.599, 1.64, 1.681, 1.721, 1.76, 1.801, 1.841, 1.879, 1.92, 1.96, 1.998, 2.04, 2.08, 2.118, 2.159, 2.2, 2.238, 2.278, 2.319, 2.356, 2.393, 2.428, 2.461, 2.495, 2.526, 2.553, 2.581, 2.606, 2.63, 2.651, 2.671, 2.688, null]
+  }
+}
