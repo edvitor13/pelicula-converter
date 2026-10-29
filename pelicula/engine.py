@@ -288,12 +288,18 @@ class Engine:
         return out[0]
 
     def _base_program(self, U: dict) -> str:
-        """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela."""
-        if "u_cp_on" not in U:
+        """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela e/ou com a tira
+        do scan deitada (`scanformatos.rotated`, o plano traz `u_scan_rot`)."""
+        cp = "u_cp_on" in U
+        rot = bool(U.get("u_scan_rot"))
+        if not cp and not rot:
             return "base"
-        from . import planes
-        self._lazy_program("base_cp", planes.BASE_CP)
-        return "base_cp"
+        from . import planes, scanformatos
+        name = ("base_cp" if cp else "base") + ("_rot" if rot else "")
+        if name not in self.progs:
+            src = planes.BASE_CP if cp else shaders.BASE
+            self._lazy_program(name, scanformatos.rotated(src) if rot else src)
+        return name
 
     def plane_view(self, plan: look.Plan, values: dict) -> np.ndarray:
         """"Ver planos" (1.6): (h, w, 4) float32 com frente, fundo e pele da imagem de entrada atual, no mesmo
@@ -340,7 +346,8 @@ class Engine:
         from . import alphashaders
         w, h = self.input_tex.size
         geo = self._target("alpha_geo", (w, h), dtype="f4")
-        self._run("base", geo, {"t_in": self.input_alpha, "t_text": self._text_tex},
+        self._run(self._base_program({"u_scan_rot": plan.uniforms.get("u_scan_rot", 0)}), geo,
+                  {"t_in": self.input_alpha, "t_text": self._text_tex},
                   {**look.SPARSE_UNIFORMS, **plan.uniforms, **alphashaders.ALPHA_GEOMETRY})
         out_dtype = "f1" if depth == 8 else "nu2"
         res = self._target("alpha_out8" if depth == 8 else "alpha_out16", (w, h), dtype=out_dtype)

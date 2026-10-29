@@ -52,6 +52,9 @@ BITOLAS = [
     ("35mm", "35 mm"),
     ("65mm", "65 mm"),
     ("imax", "IMAX 70 mm (15/70)"),
+    ("135", "Foto 35 mm (135, 36 × 24)"),  # 1.6: formatos de foto (`scanformatos.py`)
+    ("meio_quadro", "Foto meio quadro (18 × 24)"),
+    ("120", "Foto médio formato (120)"),
 ]
 
 ISOS = [(str(v), f"ISO {v}") for v in (50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200)]
@@ -495,7 +498,9 @@ SECTIONS: list[Section] = [
         B("scan_on", "Ativo", False),
         C("scan_formato", "Película", "bitola", [
             ("bitola", "Da bitola escolhida"), ("35mm", "35 mm (4 furos por quadro)"), ("16mm", "16 mm (1 furo)"),
-            ("super16", "Super 16"), ("super8", "Super 8")],
+            ("super16", "Super 16"), ("super8", "Super 8"),
+            ("135", "Foto 35 mm (135, 8 furos)"), ("meio_quadro", "Foto meio quadro (4 furos)"),
+            ("120_66", "Foto 120, 6 × 6 (sem furos)"), ("120_645", "Foto 120, 6 × 4,5 (sem furos)")],
           "Medidas reais de cada película: furos, linhas entre quadros e bordas."),
         C("scan_tipo", "Tipo de scan", "copia", [
             ("copia", "Cópia projetada (furos claros)"), ("negativo", "Negativo invertido (furos escuros)")]),
