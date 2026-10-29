@@ -365,7 +365,8 @@ build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → 
   exportação (`export._encode`, também na estimativa) e o terminal (`quadro`, `exportar`).
 - **Modo Edição**: cada clipe é decodificado com a sua faixa e a tela montada guarda esses valores; o look
   usa a faixa da maioria dos clipes de vídeo (empate: o primeiro; imagens só contam sem vídeo). Clipes log de
-  faixas diferentes na mesma montagem ficam com uma faixa só (perfil por clipe fica para depois).
+  faixas diferentes na mesma montagem ficam com uma faixa só, a não ser que tenham perfil de câmera próprio
+  (1.6, §29.5: cada um é convertido com a faixa do próprio arquivo).
 - **`log_reescalado`** (avançado, fora dos presets): gravação externa em que a câmera mandou o log já
   reescalado para 64–940 (saída HDMI *Limited*, comum na Nikon) — desliga a volta ao código.
 - **LUTs**: o LUT externo (`lutEncode`) e os `.cube` exportados (`Engine.bake_lut`, padrão `legal=False`)
@@ -2840,3 +2841,45 @@ um canal "sem exposição", plano M4). `shaders.protectGamut` comprime essas cor
   limite vai à borda, monótona, sem quina no limiar); a GPU contra ela; a fronteira de cada gamut sem canal
   negativo com 100%; manchas em S-Gamut3.Cine varrendo a saturação com saída contínua em três presets; 0% igual
   a não ter o ajuste, também no LUT. `tests/test_resolve.py` confere o plugin contra o app.
+
+### 29.5 Perfil de câmera por clipe (modo Edição)
+
+O look lê a montagem inteira com um perfil só (`entrada`, a faixa de `sequence.legal_range` e o EI). Para misturar
+câmeras, cada clipe de vídeo ganhou o cartão **Câmera** (`editparams` seção `"camera"`, a última de
+`VIDEO_SECTIONS`, fechada por padrão): `camera_entrada` (escolha, `"look"` = "Igual ao do look", o padrão, e depois
+as chaves de `params.ENTRADAS` na mesma ordem), `camera_reescalado` e `camera_ei` (avançados, como
+`log_reescalado` e `logc3_ei` do look). As três estão em `editparams.SPARSE_KEYS`: um clipe no padrão grava o JSON
+de sempre, não são cor ("Restaurar cor" não as toca) e não são animáveis. Com qualquer uma fora do padrão o
+retrato da 1.5 (`conhecidos_1_5.json`) não as conhece e `Sequence.features()` dá `"ajustes_clipe_1_6"`: o projeto
+pede o formato 4.
+
+- **Espaço comum = a entrada do look** (`camera.Target`: o `look.input_id`, o gamut de `look.INPUT_GAMUT` e se o
+  look volta ao código de 10 bits). Um clipe com perfil próprio passa, antes do `CLIP`, pelo `editshaders.CAMERA`
+  (`Engine._camera_pass`, textura f4 do mesmo tamanho): `toLinear` com a curva, a faixa (do arquivo do clipe,
+  `media.legal_range(source)`) e o gamut dele → Rec.709 linear → `lutEncode` com a curva e o gamut do look → a faixa
+  legal expandida, se o look lê o código de 10 bits. As mesmas funções do look (`shaders.COMMON`), sem uniforms
+  novos no `_CURVES` nem mudança no `CLIP`/`CLIP_TR` (os hashes de `test_transitions` ficam). Por que o espaço do
+  look e não um linear novo: os ajustes de cor do clipe, as transições da 1.5 (que já misturam na luz da entrada
+  do look, `transitions.light_of`) e o próprio look continuam vendo o que sempre viram; um clipe convertido fica
+  igual a um clipe da câmera do look.
+- **Leitura**: `camera.read_profile` dá o perfil para `media.FrameReader`/`grab_frame` (`sequence.grab`,
+  `_ClipStream`, `_ReverseStream`, cache com o perfil na chave): log de câmera em faixa legal vem em float32 com
+  os super-brancos (29.1); `Engine._clip_texture` aceita float32 (f4). Clipes que seguem o look são lidos como
+  sempre (inteiros: os super-brancos deles continuam cortados; para guardá-los, escolha o perfil do clipe).
+- **Tela em float** (`Engine.compose(camera=, float_out=)`, `editshaders.OUT_FLOAT`): com algum clipe de perfil
+  próprio (`camera.uses_profiles`) e o look ligado, `Recipe.montage` devolve a tela f4 inteira em float32, sem
+  cortar em 1,0 nem arredondar, e o look a recebe como a leitura em float da 29.1. Sem look (prévia do modo Edição
+  sem película) a saída é inteira, como antes, e o espaço vem de `Recipe.look_input` (os ajustes do look da
+  janela): a prévia mostra a montagem já no perfil do look. Com transparência (`alpha`) a saída continua inteira.
+- **Sem perfil próprio nada muda**: `Recipe.montage` só passa `camera`/`float_out` se `uses_profiles`; os
+  programas e alvos são outros (`clip_cam*`, `canvas_outf`). `Sequence.is_trivial()` dá None com um perfil de
+  clipe (a montagem muda a imagem), então o modo Película deixa de ler o arquivo direto.
+- **Sem compressão de gamut no passo** (a "Proteger cores saturadas", 29.4, vale para a montagem no look): um
+  clipe de gamut largo num look Rec.709 pode chegar com canais negativos, que a tela em float guarda e o
+  `max(…, 0)` do look zera, como num arquivo daquela câmera.
+- **Testes** (`tests/test_entrada_camera.py`): padrões, chaves esparsas, JSON de ida e volta e formato 4; a receita
+  só pede o passo com perfis; clipe Rec.709 num look em S-Log3, LogC4, LogC3, Canon Log 3, linear, HLG e PQ igual
+  ao look em Rec.709; clipes "Igual ao do look" intactos com `camera`; luz acima de 1,0 na tela; transparência; e
+  dois vídeos de verdade (S-Log3 e V-Log em 10 bits 4:4:4 de faixa legal, com super-brancos) numa montagem com o
+  look em S-Log3: cada um sai igual ao look lendo o arquivo dele com o próprio perfil, na prévia e na leitura
+  em sequência da exportação. `tests/entrada_ui_cases.py`: o cartão no inspetor e a escolha num clipe só.

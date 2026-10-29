@@ -255,6 +255,7 @@ Um clique resolve o mais comum:
 | **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
+| **Câmera** (1.6) | O **perfil do clipe**: como ele foi gravado (S-Log3, V-Log, Canon Log 3, HLG do celular, Rec.709…), para misturar câmeras diferentes numa montagem. O padrão, **Igual ao do look**, deixa o clipe como sempre. Avançado: *Log reescalado* e *EI do ARRI LogC3*, como no look (veja *Câmeras diferentes na mesma montagem*, abaixo) |
 
 > **Dissolver** mistura o começo deste clipe com o fim do clipe anterior da mesma faixa (encostado nele).
 > Para a mistura ficar bonita, o clipe anterior precisa ter um pouco de vídeo sobrando depois do corte.
@@ -292,6 +293,23 @@ cada clipe repete a mesma queima e a mesma poeira toda vez. O som não muda: par
 **Transição de som** abaixo. Desligar o recurso só esconde os tipos novos e o menu; um projeto que já os
 usa continua saindo igual (o app avisa e oferece religar). Projetos com transições de película pedem a 1.5
 ou mais nova para abrir.
+
+#### Câmeras diferentes na mesma montagem
+
+O look de película lê a montagem inteira com um perfil só (Película › *Entrada e exposição* › **Perfil do
+vídeo**). Se a montagem mistura câmeras — a principal em S-Log3, um drone em D-Log, o celular em HLG —, escolha
+no look o perfil da câmera principal e, no cartão **Câmera** de cada clipe de outra câmera, o perfil dele. O
+app converte esse clipe para o perfil do look antes dos ajustes de cor do clipe (curva e cores da câmera dele →
+luz → curva e cores da câmera do look): a cor, as transições e o look veem todos os clipes como se viessem da
+mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
+
+- Os clipes com perfil próprio em log são lidos com as luzes acima do branco do vídeo (os super-brancos), e a
+  montagem passa ao look a luz inteira, sem cortar nem arredondar. Para isso valer também para um clipe da
+  câmera principal, escolha o perfil dele no cartão (em vez de *Igual ao do look*).
+- Sem película na prévia (o botão do filme desligado), a montagem aparece no perfil do look: num look em log,
+  os clipes convertidos também aparecem em log, como os da câmera principal.
+- **Proteger cores saturadas** (no look) vale para a montagem inteira, no espaço do look.
+- Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
 ### Animar com chaves (losangos)
 

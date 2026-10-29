@@ -628,3 +628,49 @@ void main() {
 """
 
 CLIP_TR = CLIP.split("void main() {")[0] + _CURVES + _TR_FUNCS + _TR_MAIN
+
+
+# ------------------------------------------------------------------ 1.6: perfil de câmera por clipe
+# `CAMERA`: passo antes do `CLIP` para um clipe com perfil de câmera próprio (`camera.py`, "Normalizar"): a curva e o
+# gamut do clipe → luz linear Rec.709 → o gamut e a curva da entrada do look, com as mesmas `toLinear` e `lutEncode`
+# do look (`shaders.COMMON`). A saída (RGBA f4, pré-multiplicada se o clipe tem transparência) é a textura que o
+# `CLIP` (ou o `CLIP_TR`) amostra: o código de cor deles não muda.
+CAMERA = _COMMON + """
+uniform sampler2D t_clip;
+uniform int u_tex_alpha;     // 1 = textura RGBA pré-multiplicada
+uniform int u_cam_in;        // curva do clipe (look.input_id dos ajustes de entrada do clipe)
+uniform int u_cam_in_cv;     // 1 = curva em código de 10 bits e arquivo do clipe em faixa legal (shaders.toLinear)
+uniform mat3 u_cam_gamut;    // gamut do clipe → Rec.709
+uniform int u_cam_out;       // curva da entrada do look
+uniform int u_cam_out_cv;    // 1 = o look volta ao código de 10 bits: a saída vai para a faixa legal expandida
+// u_lut_gamut (shaders.COMMON, usado por lutEncode): Rec.709 → gamut da entrada do look
+
+vec3 cameraToLook(vec3 c) {
+    vec3 lin = u_cam_gamut * toLinear(c, u_cam_in, u_cam_in_cv == 1);
+    vec3 o = lutEncode(lin, u_cam_out);
+    return u_cam_out_cv == 1 ? (o * 1023.0 - 64.0) / 876.0 : o;
+}
+
+void main() {
+    vec4 s = texelFetch(t_clip, ivec2(gl_FragCoord.xy), 0);
+    if (u_tex_alpha == 1) {
+        vec3 c = s.a > 0.0 ? s.rgb / s.a : vec3(0.0);
+        f_out = vec4(cameraToLook(c) * s.a, s.a);
+    } else {
+        f_out = vec4(cameraToLook(s.rgb), 1.0);
+    }
+}
+"""
+
+# `OUT_FLOAT`: a tela da montagem em float32, sem cortar em 0–1 nem arredondar (com perfis de câmera por clipe a
+# montagem vai assim ao look: `Engine.compose(float_out=True)`); `u_offset` como no `OUT`.
+OUT_FLOAT = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_canvas;
+uniform ivec2 u_offset;
+void main() {
+    f_out = vec4(texelFetch(t_canvas, ivec2(gl_FragCoord.xy) + u_offset, 0).rgb, 1.0);
+}
+"""
