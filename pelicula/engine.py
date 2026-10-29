@@ -285,6 +285,10 @@ class Engine:
                 return name
             return self._lab_program("final", U)
         from . import grao_fisico
+        if "u_pg_var" in U:  # 1.6 (fase 3): variação do tamanho do grão físico (raios variáveis)
+            name = "final_pgv_lx" if "u_lx_on" in U else "final_pgv"
+            self._lazy_program(name, grao_fisico.program(name))
+            return name
         if "u_lx_on" not in U:
             self._lazy_program("final_pg", grao_fisico.FINAL_PG)
             return "final_pg"

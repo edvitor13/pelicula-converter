@@ -312,6 +312,14 @@ SECTIONS: list[Section] = [
           "finas do negativo aparecem grãos soltos, nas densas, buracos soltos, sem nenhum ajuste por faixa de "
           "brilho. A força segue os datasheets da Kodak e o tamanho segue a bitola, o ISO e o Tamanho do grão. "
           "Mais pesado para a placa de vídeo."),
+        F("lab_grao_cristal", "Tamanho do cristal", 1.0, 0.5, 2.0, 0.05, 2, "×",
+          "Só no modelo Físico: o tamanho dos grãos de prata. Maior = grãos maiores e mais raros, com a mesma "
+          "granularidade do datasheet (a força medida numa área de 48 µm não muda); muda a textura, não a "
+          "quantidade de grão. O Tamanho da seção Grão muda os dois.", advanced=True),
+        F("lab_grao_variacao", "Variação do tamanho", 0.0, 0, 1, percent=True, advanced=True,
+          tip="Só no modelo Físico: em vez de todos os grãos do mesmo tamanho, uma mistura de grãos pequenos e "
+              "grandes, como numa emulsão de verdade, com a mesma densidade média e a mesma granularidade do "
+              "datasheet. Um pouco mais pesado para a placa de vídeo. 0% = todos iguais."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,

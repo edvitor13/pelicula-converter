@@ -297,8 +297,13 @@ def kernels_source() -> str:
                 f"{resolve.B_LOOK}    return y;\n}}\n")
     # 1.6: a mesma conta com o grão físico (`ga_in` = fração por camada, `gq_in` = posição px@1080, raio e fração
     # própria, `gs_in` = semente do quadro); a densidade de cada camada decide o resto dentro de pc_lab_path
-    lab_pg = resolve.B_LAB.replace("/*NGRAIN*/", "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n")
+    # (fase 3: com labx.body, como as outras: véu, pré-exposição e scanner também valem com o grão físico)
+    lab_pg = labx.body(resolve.B_LAB).replace("/*NGRAIN*/",
+                                              "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n")
     lab_pg = resolve.gstruct(lab_pg, True)
+    # 1.6 (fase 3): o grão físico com a variação do tamanho (`gw_in` = 0, maior raio, s, 1/√c: pc_pg_var)
+    lab_pgv = resolve.gstruct(labx.body(resolve.B_LAB).replace(
+        "/*NGRAIN*/", "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n        gw = gw_in;\n"), True)
     body.append("// colorPipe com o grao fisico no negativo (grao_fisico.negative_grain)\n")
     body.append("static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
                 f"int gs_in) {{\n{loc}{lab_pg}{resolve.B_LOOK}    return y;\n}}\n")
@@ -306,6 +311,9 @@ def kernels_source() -> str:
     # camada, `gf_in`/`gc_in` = amostras fina e grossa do ruído, `gw_in` = estrutura, aglomeração, aspereza, cor)
     lab_gs = resolve.gstruct(labx.body(resolve.B_LAB).replace(
         "/*NGRAIN*/", "        gn = gn_in;\n        gf = gf_in;\n        gc = gc_in;\n        gw = gw_in;\n"), True)
+    body.append("// colorPipe com o grao fisico de raios variaveis (grao_fisico.extras)\n")
+    body.append("static inline float3 pc_colorpipe_pgv(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
+                f"int gs_in, float4 gw_in) {{\n{loc}{lab_pgv}{resolve.B_LOOK}    return y;\n}}\n")
     body.append("// colorPipe com o grao no negativo e a estrutura pela densidade (grao_estrutura.py)\n")
     body.append("static inline float3 pc_colorpipe_gs(const pc_vals& V, float3 lin, float3 gn_in, float4 gf_in, "
                 f"float4 gc_in, float4 gw_in) {{\n{loc}{lab_gs}{resolve.B_LOOK}    return y;\n}}\n")

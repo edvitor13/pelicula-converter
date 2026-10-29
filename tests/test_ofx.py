@@ -505,6 +505,14 @@ RENDER_CASES = [
     ("grao_estrutura_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True,
                                               lab_processo="tech3", grao_estrutura=0.7, grao_aglomeracao=1.0,
                                               lab_vencida=10.0)),
+    # (o grão físico com véu/pré-exposição no OpenFX passa pelo labx como as outras contas)
+    ("grao_fisico_vencida", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico",
+                                     lab_vencida=15.0, lab_pre_exposicao=True)),
+    ("grao_fisico_cristal_variacao", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico",
+                                              lab_grao_cristal=1.5, lab_grao_variacao=0.8)),
+    ("grao_fisico_variacao_vencida", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True,
+                                              lab_grao_modelo="fisico", lab_grao_cristal=0.6, lab_grao_variacao=0.4,
+                                              lab_vencida=10.0)),
 ]
 
 

@@ -817,3 +817,35 @@ def test_grain_structure_stays_out_of_the_cor_node():
         src = resolve.source(kind, resolve.DCTL)
         assert "ui_grao_estrutura" in src and "ui_grao_aglomeracao" in src and "/*GS" not in src
     assert "pc_gs_neg(dn, dmid, gf, gc, gw, gn)" in resolve.source("laboratorio", resolve.DCTL)
+
+
+# ------------------------------------------------------------------ 1.6 (fase 3): cristal e variação do grão físico
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(lab_grao_cristal=1.6), dict(lab_grao_variacao=1.0),
+                                   dict(lab_grao_cristal=0.7, lab_grao_variacao=0.45, lab_vencida=12.0,
+                                        bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0)],
+                         ids=["cristal", "variacao", "os_dois_vencida_s8"])
+def test_physical_grain_extras_of_the_laboratorio_node_match_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6 (fase 3): Tamanho do cristal e Variação do tamanho no nó Laboratório = no app (os mesmos grãos, raios e
+    compensação). Como no grão físico, um disco na borda de um ponto do spot pode cair do outro lado pela última
+    casa do float: só uma fração mínima dos pixels pode passar de 2,5 níveis de 8 bits."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico", **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got).max(axis=2) * 255
+        assert d.mean() < 0.5 and (d > 2.5).mean() < 3e-3, f"quadro {frame}: {d.max():.2f}"
+    base = harness.run("laboratorio", dict(vals, lab_grao_cristal=1.0, lab_grao_variacao=0.0), test_rgb, 0)
+    assert np.abs(got - base).mean() * 255 > 0.3
+
+
+def test_physical_grain_extras_are_lab_node_controls_only():
+    lab = {c.key for c in resolve.spec("laboratorio").controls if c.key}
+    assert {"lab_grao_cristal", "lab_grao_variacao"} <= lab
+    for kind in ("cor", "textura"):
+        assert "lab_grao_cristal" not in {c.key for c in resolve.spec(kind).controls if c.key}
+    src = resolve.source("laboratorio", resolve.DCTL)
+    assert "pc_pg_grain_v(dn, gq, ga, gs, gw)" in src and "pc_pg_grain(dn, gq, ga, gs)" in src
+    counts = resolve.control_counts("laboratorio")
+    assert counts["float"] <= 64 and counts["combo"] <= 64

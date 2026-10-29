@@ -379,10 +379,91 @@ def structure_constants() -> dict:
     return {**structure_tables(load("H-1-5207")), **structure_layers()}
 
 
+# ------------------------------------------------------------------ grão físico: cristal e variação (fase 3)
+CRYSTAL_KNOTS = tuple(round(2.0 ** (k / 4.0), 6) for k in range(-4, 5))  # 0,5 a 2 (em log2, de 1/4 em 1/4)
+VARIATION_KNOTS = (0.0, 0.25, 0.5, 0.75, 1.0)
+
+
+def _radius_quadrature(variation: float, n: int = 161) -> tuple[np.ndarray, np.ndarray]:
+    """(raios relativos, pesos) da distribuição dos raios do grão físico com a *Variação do tamanho* (log-normal com
+    z cortado em ±Z_CLIP, normalizada para E[ρ²] = 1: a mesma de `grao_fisico.radius_params`)."""
+    sys.path.insert(0, str(ROOT))
+    from pelicula import grao_fisico as gf
+    s, inv, _rmax = gf.radius_params(variation)
+    if s == 0.0:
+        return np.ones(1), np.ones(1)
+    a = gf.Z_CLIP
+    z = np.linspace(-a, a, n)
+    w = np.exp(-0.5 * z * z) / math.sqrt(2 * math.pi) * (z[1] - z[0])
+    w[0] *= 0.5
+    w[-1] *= 0.5
+    tail = 0.5 * math.erfc(a / math.sqrt(2.0))
+    w[0] += tail
+    w[-1] += tail
+    w /= w.sum()
+    rho = np.exp(s * z - s * s) * inv
+    return rho, w
+
+
+def _pair_kernel(aperture_r: float, x: np.ndarray) -> np.ndarray:
+    """Σ_kl K_A(h + o_k − o_l) / N² na grade (o par de aberturas com o spot do pixel nas duas pontas)."""
+    sys.path.insert(0, str(ROOT))
+    from pelicula import grao_fisico as gf
+    o = gf.offsets()
+    X, Y = np.meshgrid(x, x)
+    rad = aperture_r / 2.0
+    out = np.zeros_like(X)
+    for a in o:
+        for b in o:
+            dist = np.hypot(X + a[0] - b[0], Y + a[1] - b[1])
+            q = np.clip(dist / aperture_r, 0.0, 1.0)
+            out += np.where(dist < aperture_r, 2 * rad * rad * np.arccos(q)
+                            - (dist / 2) * np.sqrt(np.maximum(aperture_r ** 2 - dist ** 2, 0.0)), 0.0)
+    return out / (math.pi * rad * rad) ** 2 / len(o) ** 2
+
+
+def physical_rel_sigma_v(density: float, aperture_r: float, variation: float, step: float = 0.02) -> float:
+    """σ(T̂_A) / T numa abertura de `aperture_r` raios médios, com raios aleatórios: P(dois pontos descobertos) =
+    (1 − u)² · e^(λ·E[γ_ρ(h)]), γ_ρ(h) = ρ²·γ(h/ρ), λ·π·E[ρ²] = D·ln 10 (E[ρ²] = 1)."""
+    sys.path.insert(0, str(ROOT))
+    from pelicula import grao_fisico as gf
+    rho, w = _radius_quadrature(variation)
+    half = 2.0 * float(rho.max()) + 0.05
+    x = np.arange(-half, half + step / 2, step)
+    hr = np.linspace(0.0, half * math.sqrt(2.0) + step, 4000)
+    eg = sum(wi * ri * ri * gf.overlap_area(hr / ri) for ri, wi in zip(rho, w))
+    lam = float(density) * math.log(10.0) / math.pi
+    X, Y = np.meshgrid(x, x)
+    c = np.interp(np.hypot(X, Y), hr, np.expm1(lam * eg))
+    return math.sqrt(float(np.sum(c * _pair_kernel(aperture_r, x))) * step * step)
+
+
+def _ref_aperture() -> float:
+    r_k = physical_radius_k(reference_density())
+    return APERTURE_MM * REF_WIDTH_PX / REF_FRAME_MM / (round(r_k, 3) * REF_GRAIN_PX)
+
+
+def physical_extra_constants() -> dict:
+    """Compensação do KAPPA (por camada) para o *Tamanho do cristal* e a *Variação do tamanho*: o sigma D na abertura
+    de 48 µm, na densidade de referência, continua o do datasheet (NEG_SIGMA_D). Cristal m: a abertura fica com
+    1/m dos raios; variação: os raios se espalham com o mesmo E[r²]. Fatores = σ(referência) / σ(com o ajuste)."""
+    ref = reference_density()
+    ap = _ref_aperture()
+    crystal, variation = [], []
+    for d in ref:
+        base = physical_rel_sigma_v(d, ap, 0.0)
+        crystal.append(tuple(round(base / physical_rel_sigma_v(d, ap / m, 0.0), 5) for m in CRYSTAL_KNOTS))
+        variation.append(tuple(round(base / physical_rel_sigma_v(d, ap, v), 5) for v in VARIATION_KNOTS))
+    return {"CRYSTAL_KNOTS": CRYSTAL_KNOTS, "CRYSTAL_K": tuple(crystal),
+            "VARIATION_KNOTS": VARIATION_KNOTS, "VARIATION_K": tuple(variation)}
+
+
 def main() -> int:
     for k, v in constants().items():
         print(f"{k} = {v!r}")
     for k, v in structure_constants().items():
+        print(f"{k} = {v!r}")
+    for k, v in physical_extra_constants().items():
         print(f"{k} = {v!r}")
     return 0
 

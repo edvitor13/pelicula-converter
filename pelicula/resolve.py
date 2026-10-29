@@ -308,6 +308,7 @@ def lab_grain_controls() -> list[Ctl]:
         ctl("lab_grao_modelo", "Lab - Modelo do grao no negativo"),  # 1.6: grão físico (grao_fisico.py)
         ctl("grao_estrutura", "Grao - Estrutura pela densidade"),  # 1.6 (fase 3): grao_estrutura.py
         ctl("grao_aglomeracao", "Grao - Aglomeracao"),
+        ctl("lab_grao_cristal", "Lab - Tamanho do cristal"), ctl("lab_grao_variacao", "Lab - Variacao do tamanho"),
     ]
 
 
@@ -1569,10 +1570,131 @@ PC_DEVICE float3 pc_pg_grain(float3 D, float4 gq, float3 ga, int gs) {
                        _log2f(1.0f + ag * ((1.0f - cov.y) - tg) / tg) * -0.301029996f,
                        _log2f(1.0f + ab * ((1.0f - cov.z) - tb) / tb) * -0.301029996f);
 }
+// 1.6 (fase 3): tamanho do cristal e variacao do tamanho (grao_fisico.extras): fator do KAPPA de cada camada
+PC_DEVICE float3 pc_pg_kfactor(float m, float var) {
+    float tc = (_log2f(_clampf(m, 0.5f, 2.0f)) + 1.0f) * 4.0f;
+    int ic = pc_clampi(PC_I(tc), 0, 7);
+    float fc = tc - PC_F(ic);
+    float tv = _clampf(var, 0.0f, 1.0f) * 4.0f;
+    int iv = pc_clampi(PC_I(tv), 0, 3);
+    float fv = tv - PC_F(iv);
+    return make_float3(pc_lerp(PC_PG_CRYS[ic], PC_PG_CRYS[ic + 1], fc) * pc_lerp(PC_PG_VARK[iv], PC_PG_VARK[iv + 1], fv),
+                       pc_lerp(PC_PG_CRYS[9 + ic], PC_PG_CRYS[10 + ic], fc)
+                           * pc_lerp(PC_PG_VARK[5 + iv], PC_PG_VARK[6 + iv], fv),
+                       pc_lerp(PC_PG_CRYS[18 + ic], PC_PG_CRYS[19 + ic], fc)
+                           * pc_lerp(PC_PG_VARK[10 + iv], PC_PG_VARK[11 + iv], fv));
+}
+// raios variaveis: (0, maior raio relativo, s, 1/raiz(c)) para gw
+PC_DEVICE float4 pc_pg_var(float var) {
+    float v = _clampf(var, 0.0f, 1.0f);
+    float s = PC_PG_VAR_SIGMA * v;
+    float t = v * 20.0f;
+    int i = pc_clampi(PC_I(t), 0, 19);
+    float inv = pc_lerp(PC_PG_VARINV[i], PC_PG_VARINV[i + 1], t - PC_F(i));
+    return make_float4(0.0f, _expf(s * PC_PG_ZCLIP - s * s) * inv, s, inv);
+}
+PC_DEVICE uint pc_pg_hits_r(float dx, float dy, float r2) {
+    uint m = 0u;
+    for (int k = 0; k < PC_PG_N; k++) {
+        float ex = dx - PC_PG_OFS[2 * k];
+        float ey = dy - PC_PG_OFS[2 * k + 1];
+        if (ex * ex + ey * ey < r2) m = m | (1u << PC_U(k));
+    }
+    return m;
+}
+// raio relativo de um grao (log-normal com z cortado em +-PC_PG_ZCLIP; E[rho^2] = 1), de um hash do proprio grao
+PC_DEVICE float pc_pg_radius(uint h2, float s, float inv) {
+    uint h3 = pc_pcg(h2 ^ 0x85EBCA6Bu);
+    uint h4 = pc_pcg(h3);
+    float u1 = (PC_F(h3 >> 8u) + 0.5f) * (1.0f / 16777216.0f);
+    float u2 = PC_F(h4 >> 8u) * (1.0f / 16777216.0f);
+    float z = _clampf(_sqrtf(-2.0f * _logf(u1)) * _cosf(6.2831853f * u2), -PC_PG_ZCLIP, PC_PG_ZCLIP);
+    return _expf(s * z - s * s) * inv;
+}
+// cobertura de cada camada vista pelo spot do pixel em (px, py) px@1080; raio r, fracao propria chroma, semente
+PC_DEVICE float3 pc_pg_coverage_v(float3 D, float px, float py, float r, float chroma, uint seed, float vs,
+                                  float vinv, float vmax) {
+    float mr_ = _clampf(D.x, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mg_ = _clampf(D.y, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float mb_ = _clampf(D.z, 0.0f, PC_PG_DMAX) * PC_PG_MEAN_K;
+    float sr = mr_ * (1.0f - chroma);
+    float sg = mg_ * (1.0f - chroma);
+    float sb = mb_ * (1.0f - chroma);
+    float smax = _fmaxf(sr, _fmaxf(sg, sb));
+    float qx = px / r;
+    float qy = py / r;
+    float rv = PC_PG_REACH - 1.0f + vmax;
+    int c0x = PC_I(_floorf((qx - rv) / PC_PG_CELL));
+    int c0y = PC_I(_floorf((qy - rv) / PC_PG_CELL));
+    int c1x = PC_I(_floorf((qx + rv) / PC_PG_CELL));
+    int c1y = PC_I(_floorf((qy + rv) / PC_PG_CELL));
+    float rr = rv * rv;
+    uint mr = 0u;
+    uint mg = 0u;
+    uint mb = 0u;
+    for (int cy = c0y; cy <= c1y; cy++) {
+        for (int cx = c0x; cx <= c1x; cx++) {
+            float lox = PC_F(cx) * PC_PG_CELL;
+            float loy = PC_F(cy) * PC_PG_CELL;
+            float nx = _clampf(qx, lox, lox + PC_PG_CELL) - qx;
+            float ny = _clampf(qy, loy, loy + PC_PG_CELL) - qy;
+            if (nx * nx + ny * ny >= rr) continue;
+            uint bx = PC_U(cx + 65536);
+            uint by = PC_U(cy + 65536);
+            for (int proc = 0; proc < 4; proc++) {
+                float lim = (proc == 0) ? smax : ((proc == 1) ? mr_ * chroma : ((proc == 2) ? mg_ * chroma : mb_ * chroma));
+                if (lim <= 0.0f) continue;
+                uint base = pc_pcg(bx + pc_pcg(by + pc_pcg(seed * 4u + PC_U(proc))));
+                float t = 0.0f;
+                for (uint i = 0u; i < PC_PG_CAP; i++) {
+                    uint h = pc_pcg(base + i);
+                    uint h2 = pc_pcg(h ^ 0x9E3779B9u);
+                    t = t - _logf((PC_F(h2 >> 8u) + 0.5f) * (1.0f / 16777216.0f));
+                    if (t >= lim) break;
+                    float ccx = (PC_F(cx) + (PC_F(h & 0xFFFFu) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float ccy = (PC_F(cy) + (PC_F(h >> 16u) + 0.5f) * (1.0f / 65536.0f)) * PC_PG_CELL;
+                    float dx = ccx - qx;
+                    float dy = ccy - qy;
+                    float rho = pc_pg_radius(h2, vs, vinv);
+                    float ri = PC_PG_REACH - 1.0f + rho;
+                    if (dx * dx + dy * dy >= ri * ri) continue;
+                    uint hm = pc_pg_hits_r(dx, dy, rho * rho);
+                    if (proc == 0) {
+                        if (t < sr) mr = mr | hm;
+                        if (t < sg) mg = mg | hm;
+                        if (t < sb) mb = mb | hm;
+                    } else if (proc == 1) {
+                        mr = mr | hm;
+                    } else if (proc == 2) {
+                        mg = mg | hm;
+                    } else {
+                        mb = mb | hm;
+                    }
+                }
+            }
+        }
+    }
+    float inv = 1.0f / PC_F(PC_PG_N);
+    return make_float3(PC_F(pc_pg_bits(mr)) * inv, PC_F(pc_pg_bits(mg)) * inv, PC_F(pc_pg_bits(mb)) * inv);
+}
+// o mesmo com raios variaveis: gw = (0, maior raio relativo, s, 1/raiz(c)) (pc_pg_var)
+PC_DEVICE float3 pc_pg_grain_v(float3 D, float4 gq, float3 ga, int gs, float4 gw) {
+    float3 cov = pc_pg_coverage_v(D, gq.x, gq.y, gq.z, gq.w, PC_U(gs), gw.z, gw.w, gw.y);
+    float tr = _exp2f(_clampf(D.x, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tg = _exp2f(_clampf(D.y, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float tb = _exp2f(_clampf(D.z, 0.0f, PC_PG_DMAX) * -3.321928095f);
+    float ar = _fminf(ga.x, PC_PG_AMP_MAX);
+    float ag = _fminf(ga.y, PC_PG_AMP_MAX);
+    float ab = _fminf(ga.z, PC_PG_AMP_MAX);
+    return make_float3(_log2f(1.0f + ar * ((1.0f - cov.x) - tr) / tr) * -0.301029996f,
+                       _log2f(1.0f + ag * ((1.0f - cov.y) - tg) / tg) * -0.301029996f,
+                       _log2f(1.0f + ab * ((1.0f - cov.z) - tb) / tb) * -0.301029996f);
+}
 """
 
 # Dentro de pc_lab_path (só no nó Laboratório e no OpenFX): o grão físico soma o desvio na densidade do negativo.
-B_PGRAIN_LAB = """    if (ga.x + ga.y + ga.z > 0.0f) dn = dn + pc_pg_grain(dn, gq, ga, gs);  // 1.6: grao fisico
+B_PGRAIN_LAB = """    if (ga.x + ga.y + ga.z > 0.0f && gw.z > 0.0f) dn = dn + pc_pg_grain_v(dn, gq, ga, gs, gw);  // 1.6 (fase 3)
+    else if (ga.x + ga.y + ga.z > 0.0f) dn = dn + pc_pg_grain(dn, gq, ga, gs);  // 1.6: grao fisico
 """
 
 # No nó Laboratório (dentro de B_LAB, na passada da imagem): `gn` = a densidade do grão deste pixel.
@@ -1605,6 +1727,15 @@ B_NGRAIN = r"""        if (v_lab_grao == 1 && v_grao_on == 1 && v_grao_forca > 0
                 float g1080 = 0.8f * v_grao_tamanho * PC_GAUGE[ggi * 7 + 0] * _powf(giso / 250.0f, 0.18f);
                 gq = make_float4((PC_F(p_X) + 0.5f) * gk, (PC_F(p_Y) + 0.5f) * gk, PC_PG_RK * g1080, v_grao_cor);
                 gs = gseed;
+                if (v_lab_grao_cristal != 1.0f || v_lab_grao_variacao > 0.0f) {
+                    // 1.6 (fase 3): tamanho do cristal e variacao do tamanho (grao_fisico.extras)
+                    float3 kf = pc_pg_kfactor(v_lab_grao_cristal, v_lab_grao_variacao);
+                    ga = make_float3(_fminf(PC_PG_KAPPA[0] * kf.x * gmul, PC_PG_AMP_MAX),
+                                     _fminf(PC_PG_KAPPA[1] * kf.y * gmul, PC_PG_AMP_MAX),
+                                     _fminf(PC_PG_KAPPA[2] * kf.z * gmul, PC_PG_AMP_MAX));
+                    gq = make_float4(gq.x, gq.y, gq.z * v_lab_grao_cristal, gq.w);
+                    if (v_lab_grao_variacao > 0.0f) gw = pc_pg_var(v_lab_grao_variacao);
+                }
             } else {
                 uint gs8 = PC_U(gseed) * 8u;
                 float4 gnf = pc_noise(gu, gv, ggw, ggh, gs8) * 2.08f;
@@ -2009,6 +2140,11 @@ def _pgrain_tables(dialect: str) -> str:
     out += _define("PC_PG_MEAN_K", gf.LN10 * gf.CELL * gf.CELL / math.pi)
     out += _table(dialect, "PC_PG_KAPPA", list(gf.KAPPA))
     out += f"#define PC_GRAO_FISICO {[k for k, _l in params.GRAO_MODELOS].index('fisico')}\n"
+    # 1.6 (fase 3): tamanho do cristal e variação do tamanho (grao_fisico.extras)
+    out += _table(dialect, "PC_PG_CRYS", [x for row in gf.CRYSTAL_K for x in row])
+    out += _table(dialect, "PC_PG_VARK", [x for row in gf.VARIATION_K for x in row])
+    out += _table(dialect, "PC_PG_VARINV", [gf.radius_params(i / 20.0)[1] for i in range(21)])
+    out += _define("PC_PG_VAR_SIGMA", gf.VAR_SIGMA) + _define("PC_PG_ZCLIP", gf.Z_CLIP)
     return out
 
 

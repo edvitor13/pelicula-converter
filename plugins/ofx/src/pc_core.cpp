@@ -694,6 +694,7 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     float3 pg_amp = make_float3(0.0f, 0.0f, 0.0f);
     float pg_r = 1.0f, pg_k = 1.0f;
     int pg_seed = 0;
+    float4 pg_w = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // 1.6 (fase 3): raios variáveis (pc_pg_var)
     if (pgrain) {
         float iso = PC_ISO[V.iso];
         float mul = V.grao_forca * gauge(gi, 1) * std::pow(iso / 250.0f, 0.35f)
@@ -704,6 +705,15 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
         pg_k = 1080.0f / H;
         long long seed = (long long)V.grao_semente * 7919LL + (V.grao_animado == 1 ? frame : 0);
         pg_seed = (int)(seed % 2147483647LL);
+        if (V.lab_grao_cristal != 1.0f || V.lab_grao_variacao > 0.0f) {
+            // 1.6 (fase 3): tamanho do cristal e variação do tamanho (grao_fisico.extras)
+            float3 kf = pc_pg_kfactor(V.lab_grao_cristal, V.lab_grao_variacao);
+            pg_amp = make_float3(std::fmin(PC_PG_KAPPA[0] * kf.x * mul, PC_PG_AMP_MAX),
+                                 std::fmin(PC_PG_KAPPA[1] * kf.y * mul, PC_PG_AMP_MAX),
+                                 std::fmin(PC_PG_KAPPA[2] * kf.z * mul, PC_PG_AMP_MAX));
+            pg_r = pg_r * V.lab_grao_cristal;
+            if (V.lab_grao_variacao > 0.0f) pg_w = pc_pg_var(V.lab_grao_variacao);
+        }
     }
     // 1.6: respiração por camada (grao.breathing): a exposição de cada camada neste quadro, antes da cor
     const bool breath = V.grao_on == 1 && V.grao_respiracao > 0.0f;
@@ -763,7 +773,10 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                 float3 yv;
                 if (pgrain) {
                     float4 gq = make_float4(((float)x + 0.5f) * pg_k, ((float)y + 0.5f) * pg_k, pg_r, V.grao_cor);
-                    yv = pc_colorpipe_pg(V, l, pg_amp, gq, pg_seed);
+                    if (pg_w.z > 0.0f)
+                        yv = pc_colorpipe_pgv(V, l, pg_amp, gq, pg_seed, pg_w);
+                    else
+                        yv = pc_colorpipe_pg(V, l, pg_amp, gq, pg_seed);
                 } else if (ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
