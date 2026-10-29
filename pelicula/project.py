@@ -7,11 +7,13 @@ miniatura em JPEG (base64) para a lista de projetos recentes.
 Com o modo Edição, o projeto também guarda a sequência (`"edicao"`, ver `timeline.Sequence`) e o
 modo aberto (`"modo"`).
 
-Formato (`"formato"`): esta versão lê até `FORMAT` (3) e grava o **menor** formato que o projeto precisa, para
+Formato (`"formato"`): esta versão lê até `FORMAT` (4) e grava o **menor** formato que o projeto precisa, para
 abrir nas versões antigas sempre que der: 1 = só o arquivo (sem sequência); 2 = com sequência; 3 = usa algum
-recurso da 1.5 (`features()`: os testes de `FEATURES_V3` e de `timeline.FEATURES`), listado em `"recursos"`.
-Versões antigas recusam formato maior que o delas com aviso. Abrir um formato antigo passa pelos passos de
-`MIGRATIONS` (1 → 2 → 3), puros e testados (`tests/test_project_migration.py`).
+recurso da 1.5 (`features()`: os testes de `FEATURES_V3` e de `timeline.FEATURES`); 4 = usa algo da 1.6 (os de
+`FEATURES_V4` e de `timeline.FEATURES_V4`: um ajuste ou uma opção que a 1.5 não lê entra sozinho, pelo retrato
+`params.known_1_5`). Os recursos ficam listados em `"recursos"`. Versões antigas recusam formato maior que o
+delas com aviso. Abrir um formato antigo passa pelos passos de `MIGRATIONS` (1 → 2 → 3 → 4), puros e testados
+(`tests/test_project_migration.py`).
 """
 
 from __future__ import annotations
@@ -28,9 +30,10 @@ from . import APP_NAME, __version__, keyframes, params
 from .i18n import _
 
 EXT = ".plc"
-FORMAT = 3          # maior formato que esta versão lê
+FORMAT = 4          # maior formato que esta versão lê
 FORMAT_SIMPLE = 1   # projeto sem sequência do modo Edição
 FORMAT_EDIT = 2     # projeto com sequência, sem nada da 1.5
+FORMAT_15 = 3       # usa algum recurso da 1.5, nada da 1.6
 MODES = ("pelicula", "edicao")
 
 
@@ -90,12 +93,13 @@ class Project:
         if keys:
             data["chaves"] = keys
         if feats:
-            data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3
+            data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3 ou 4
         return data
 
     def features(self) -> set[str]:
-        """Recursos da 1.5 que o projeto usa: os de `FEATURES_V3` e os da montagem (`timeline.FEATURES`)."""
-        found = {fid for fid, check in FEATURES_V3.items() if check(self)}
+        """Recursos da 1.5 e da 1.6 que o projeto usa: os de `FEATURES_V3`/`FEATURES_V4` e os da montagem
+        (`timeline.FEATURES`/`timeline.FEATURES_V4`)."""
+        found = {fid for reg in (FEATURES_V3, FEATURES_V4) for fid, check in reg.items() if check(self)}
         if self.sequence:
             from . import timeline
             found |= timeline.Sequence.from_json(self.sequence).features()
@@ -110,10 +114,21 @@ FEATURES_V3: dict[str, Callable[[Project], bool]] = {
 }
 
 
+# Recursos da 1.6 fora da montagem (mesma regra; os da montagem ficam em `timeline.FEATURES_V4`). Um ajuste ou
+# uma opção nova do look não precisa de linha: "ajustes_1_6" pega tudo o que a 1.5 não lê (`params.beyond_1_5`).
+FEATURES_V4: dict[str, Callable[[Project], bool]] = {
+    "ajustes_1_6": lambda p: params.beyond_1_5(params.FILM, params.known_1_5()["look"], p.values, p.look_keys),
+}
+
+
 def needed_format(features: set[str] | frozenset[str], has_sequence: bool) -> int:
-    """O menor formato que guarda o projeto: 3 com recursos da 1.5, 2 com sequência, 1 só com o arquivo."""
-    if features:
+    """O menor formato que guarda o projeto: 4 com algo da 1.6, 3 com recursos da 1.5, 2 com sequência, 1 só com
+    o arquivo."""
+    from . import timeline
+    if features & (set(FEATURES_V4) | set(timeline.FEATURES_V4)):
         return FORMAT
+    if features:
+        return FORMAT_15
     return FORMAT_EDIT if has_sequence else FORMAT_SIMPLE
 
 
@@ -140,8 +155,17 @@ def _v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
+    """Formato 3 → 4: nada muda (a 1.6 só acrescenta campos); o bloco "edicao" é migrado ao ser lido
+    (`timeline.Sequence.from_json`), que recusa um bloco de versão mais nova com o aviso do projeto."""
+    out = dict(data)
+    out.setdefault("recursos", [])
+    out["formato"] = 4
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:

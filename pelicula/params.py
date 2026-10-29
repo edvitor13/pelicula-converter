@@ -7,8 +7,11 @@ convertidas para a resolução real, então a prévia e o vídeo final ficam igu
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -531,3 +534,39 @@ def defaults() -> dict[str, Any]:
 def sanitize(values: dict[str, Any]) -> dict[str, Any]:
     """Completa e limita valores vindos de presets ou arquivos."""
     return FILM.sanitize(values)
+
+
+# ------------------------------------------------------------------ 1.6: o que a 1.5 lê (formato 4)
+# Retrato das chaves e das opções de escolha da 1.5.0, por esquema ("look" = FILM, "video"/"audio" = ajustes de
+# clipe). A 1.5 descarta chave desconhecida e opção que não conhece (`Schema.sanitize`), então um projeto que usa
+# um ajuste da 1.6 abriria nela sem o efeito: com algo fora do retrato, o projeto vai para o formato 4, que a
+# 1.5 recusa com aviso (`project.FEATURES_V4`, `timeline.FEATURES_V4`). Ajuste novo não precisa de registro.
+KNOWN_1_5_FILE = Path(__file__).with_name("data") / "conhecidos_1_5.json"
+
+
+@lru_cache(maxsize=1)
+def known_1_5() -> dict[str, dict[str, list[str] | None]]:
+    """{"look"|"video"|"audio": {chave: opções da escolha, ou None}} como a 1.5.0 conhecia."""
+    data = json.loads(KNOWN_1_5_FILE.read_text(encoding="utf-8"))
+    return {k: data[k] for k in ("look", "video", "audio")}
+
+
+def beyond_1_5(schema: Schema, known: dict[str, list[str] | None], values: dict[str, Any] | None,
+               keys: dict[str, Any] | None = None) -> bool:
+    """Se os valores usam algo que a 1.5 não lê: um ajuste novo fora do padrão, uma opção nova numa escolha
+    ou chaves de animação num ajuste novo."""
+    for k, v in (values or {}).items():
+        p = schema.params.get(k)
+        if p is None:
+            continue
+        try:
+            v = _clean(p, v)
+        except (TypeError, ValueError):
+            continue
+        if k not in known:
+            if v != _default_of(p):
+                return True
+        elif p.kind == "choice" and known[k] is not None and v not in known[k]:
+            return True
+    return any(k in schema.params and k not in known for k in (keys or {}))
+

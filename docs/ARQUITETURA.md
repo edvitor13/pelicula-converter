@@ -33,6 +33,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 25. [Sequências de imagens, exportar com transparência, geradores e títulos](#25-sequências-de-imagens-exportar-com-transparência-geradores-e-títulos)
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
+28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
 
 ---
 
@@ -2666,3 +2667,26 @@ de cada palavra (as da transcrição) aparecem; qualquer mudança limpa as marca
   (botão, painel, faixa, módulo desligado, receita com a legenda, desfazer com o foco no painel), "Gerar
   legendas" (módulo, componentes faltando, fila, um passo de desfazer, erros, cancelar, outro projeto),
   "Remover silêncios" e "Cortar pelo texto".
+
+## 28. Base da 1.6: formato 4
+
+A 1.5 lê projetos até o formato 3 e descarta, sem avisar, o que não conhece: chave de ajuste desconhecida e
+opção de escolha que não está na lista (`params.Schema.sanitize`). Um projeto da 1.6 com um perfil de câmera
+novo ou um ajuste novo abriria nela sem o efeito. Por isso a 1.6 grava o **formato 4** quando o projeto usa algo
+dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
+
+- **Retrato da 1.5** (`pelicula/data/conhecidos_1_5.json`, `params.known_1_5()`): as chaves de cada esquema
+  (`"look"` = `params.FILM`, `"video"`/`"audio"` = ajustes de clipe) e, nas escolhas, as opções da 1.5.0.
+  Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção dele sumiu do app (o que
+  também pega renomeações).
+- `params.beyond_1_5(schema, known, values, keys)`: True com um ajuste fora do retrato e fora do padrão, uma
+  opção nova numa escolha antiga ou chaves de animação num ajuste novo. Ajuste novo no padrão não conta: um
+  projeto antigo salvo de novo continua no formato dele.
+- **Registros:** `project.FEATURES_V4` (do projeto; já tem `"ajustes_1_6"` = o look e as chaves do look) e
+  `timeline.FEATURES_V4` (da montagem; já tem `"ajustes_clipe_1_6"` = os ajustes e as chaves dos clipes). Uma
+  **estrutura nova** no JSON (campo ou bloco que a 1.5 ignoraria) ganha uma linha num deles. Os da 1.5
+  continuam em `project.FEATURES_V3` e `timeline.FEATURES`.
+- **Formatos:** projeto 4 (`project.FORMAT`; `FORMAT_15` = 3 para algo da 1.5); bloco `"edicao"` 3
+  (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
+  `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
+

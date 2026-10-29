@@ -37,7 +37,7 @@ pelicula/
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
-                             (needed_format, FEATURES_V3) e migração passo a passo (MIGRATIONS)
+                             (needed_format, FEATURES_V3, FEATURES_V4) e migração passo a passo (MIGRATIONS)
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
@@ -221,8 +221,13 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    `es.json` (o teste `tests/test_i18n.py` falha se faltar tradução). Chaves de parâmetros e
    identificadores ficam em português sem acento (`grao_forca`, `scan_on`); docstrings e
    comentários em PT-BR.
-8. **Nomes de filmes são aproximações artísticas.** Presets com nomes de marcas descrevem um estilo;
-   não use dados, perfis ou LUTs dos fabricantes e mantenha o aviso legal (README e "Sobre").
+8. **Dados de fabricantes só de publicações públicas.** Curvas e números de datasheets e publicações técnicas
+   públicas (Kodak, Fujifilm, fórmulas de log das câmeras…) podem calibrar os modelos, com a fonte registrada
+   junto dos dados (publicação, revisão, página e figura; decisão do autor em 23/10/2026). Não copie PDFs nem
+   gráficos para o repositório, não inclua LUTs proprietários (Adobe, Blackmagic), não use perfis de terceiros
+   sem licença e não apresente o resultado como oficial. Presets com nomes de marcas continuam sendo
+   aproximações; mantenha o aviso legal (README e "Sobre": as marcas são dos donos e o app não é um produto
+   oficial) e, quando um modelo for calibrado por datasheet, diga isso nele e no `docs/EFEITOS.md`.
 9. **Compatibilidade de presets.** Presets são JSON com chaves de `params.PARAMS` e passam por
    `params.sanitize()`. Não renomeie nem remova chaves sem migração. Parâmetros novos precisam de um
    **padrão neutro** (que não mude o visual de presets antigos). IDs de presets prontos são gravados
@@ -244,13 +249,16 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (3) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (4) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
-    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5, listado
-    em `"recursos"`. Recurso novo que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES`
-    (da montagem) ou `project.FEATURES_V3` (do projeto) e o campo dele no JSON só quando usado — assim um
-    projeto que não usa nada novo continua abrindo nas versões antigas, e um que usa é recusado com aviso
-    em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
+    mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
+    algo da 1.6 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não precisa de registro:
+    o retrato do que a 1.5 lê (`pelicula/data/conhecidos_1_5.json`, `params.beyond_1_5`; nunca editar) faz o
+    projeto ir para o 4 quando o valor sai do padrão ou é uma opção nova. **Estrutura nova no JSON** (campo,
+    bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES_V4` (da
+    montagem) ou `project.FEATURES_V4` (do projeto) — os da 1.5 ficam em `timeline.FEATURES` e
+    `project.FEATURES_V3` — e o campo dele no JSON só quando usado. Assim um projeto que não usa nada novo
+    continua abrindo nas versões antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
     `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 em `tests/data/projetos_1_4/`);
     aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e

@@ -153,7 +153,7 @@ def test_json_round_trip_and_untouched_projects():
     assert not any("rampa" in c or "reverso" in c for c in plain["clipes"]) and "rampa" not in seq.features()
     seq.retime(v.id, ramp=RAMP)
     d = seq.to_json()
-    assert "rampa" in seq.features() and d["formato"] == tl.FORMAT
+    assert "rampa" in seq.features() and d["formato"] == tl.FORMAT_15
     vj = next(c for c in d["clipes"] if c["tipo"] == tl.VIDEO)
     assert vj["rampa"] == timemap.ramp_json(RAMP)
     back = tl.Sequence.from_json(json.loads(json.dumps(d)))

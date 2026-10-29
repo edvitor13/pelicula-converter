@@ -133,13 +133,13 @@ def test_keys_go_to_json_and_mark_the_feature():
     d = seq.to_json()
     cd = next(c for c in d["clipes"] if c["id"] == v.id)
     assert cd["chaves"]["opacidade"][0] == [10, 0.0] and cd["chaves_ref"] == 6
-    assert d["formato"] == tl.FORMAT and "chaves" in seq.features()
+    assert d["formato"] == tl.FORMAT_15 and "chaves" in seq.features()
     back = tl.Sequence.from_json(json.loads(json.dumps(d)))
     bv = back.find(v.id)
     assert bv.keys == v.keys and bv.key_off == 6 and curve(back, bv, "opacidade") == curve(seq, v, "opacidade")
     assert seq.is_trivial() is None
     p = project.Project(media_path="C:/v/a.mp4", sequence=d, mode="edicao")
-    assert p.to_json()["formato"] == project.FORMAT and "chaves" in p.to_json()["recursos"]
+    assert p.to_json()["formato"] == project.FORMAT_15 and "chaves" in p.to_json()["recursos"]
 
 
 def test_move_moves_the_animation():
@@ -445,7 +445,7 @@ def test_project_and_job_keep_the_look_keys(make_info):
     keys = {name: [[0, -1.0], [24, 2.0, "suavizar"]]}
     p = project.Project(media_path="C:/v/a.mp4", look_keys=keys)
     d = p.to_json()
-    assert d["chaves"] == keys and d["formato"] == project.FORMAT and d["recursos"] == ["chaves_look"]
+    assert d["chaves"] == keys and d["formato"] == project.FORMAT_15 and d["recursos"] == ["chaves_look"]
     assert project.from_json(json.loads(json.dumps(d))).look_keys == keys
     plain = project.Project(media_path="C:/v/a.mp4").to_json()
     assert "chaves" not in plain and plain["formato"] == project.FORMAT_SIMPLE

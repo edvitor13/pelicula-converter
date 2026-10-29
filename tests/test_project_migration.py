@@ -200,7 +200,7 @@ def test_writer_uses_the_smallest_format(tmp_path):
     seq.insert_media(_alpha_source(), at=0, vtrack=1, with_audio=False)
     p.sequence = seq.to_json()
     data = p.to_json()
-    assert data["formato"] == 3 and data["recursos"] == ["alfa"] and data["edicao"]["formato"] == tl.FORMAT
+    assert data["formato"] == 3 and data["recursos"] == ["alfa"] and data["edicao"]["formato"] == tl.FORMAT_15
     project.save(p, str(tmp_path / "alfa.plc"))
     q = project.load(str(tmp_path / "alfa.plc"))
     assert tl.Sequence.from_json(q.sequence).sources["C:/v/recorte_cutout.mov"].has_alpha
@@ -238,7 +238,7 @@ def test_feature_registry_is_extended_with_one_line(monkeypatch):
     p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json())
     assert p.features() == set() and p.to_json()["formato"] == 2
     monkeypatch.setitem(tl.FEATURES, "teste_montagem", lambda s: len(s.clips) > 1)
-    assert seq.features() == {"teste_montagem"} and seq.to_json()["formato"] == tl.FORMAT
+    assert seq.features() == {"teste_montagem"} and seq.to_json()["formato"] == tl.FORMAT_15
     assert p.to_json()["formato"] == 3 and p.to_json()["recursos"] == ["teste_montagem"]
     monkeypatch.setitem(project.FEATURES_V3, "teste_projeto", lambda proj: proj.preset_id == "x")
     p.preset_id = "x"
@@ -266,3 +266,103 @@ def test_recovery_copy_of_a_format_3_project(tmp_path):
     path.write_text(json.dumps(payload), encoding="utf-8")
     q, _orig, _ui = recovery.project_from_copy(recovery.read_copy(path))
     assert tl.Sequence.from_json(q.sequence).sources["C:/v/recorte_cutout.mov"].has_alpha
+
+
+# ------------------------------------------------------------------ formato 4 (1.6)
+def _known_without(schema: str, key: str, choice: str | None = None) -> dict:
+    """O retrato da 1.5 como se `key` (ou só a opção `choice` dele) tivesse vindo na 1.6."""
+    known = {k: dict(v) for k, v in params.known_1_5().items()}
+    if choice is None:
+        del known[schema][key]
+    else:
+        known[schema][key] = [c for c in known[schema][key] if c != choice]
+    return known
+
+
+def test_the_1_5_snapshot_keeps_every_key_and_choice():
+    """O retrato da 1.5 nunca perde chave nem opção: renomear ou tirar quebra projetos (regra dos ajustes)."""
+    from pelicula import editparams
+    raw = json.loads(params.KNOWN_1_5_FILE.read_text(encoding="utf-8"))
+    assert raw["versao"] == "1.5.0"
+    for name, schema in (("look", params.FILM), ("video", editparams.VIDEO), ("audio", editparams.AUDIO)):
+        for k, choices in params.known_1_5()[name].items():
+            p = schema.params.get(k)
+            assert p is not None, f"{name}/{k}"
+            if choices is not None:
+                assert p.kind == "choice" and set(choices) <= {c[0] for c in p.choices}, f"{name}/{k}"
+        assert not params.beyond_1_5(schema, params.known_1_5()[name], schema.defaults()), name
+
+
+def test_a_new_look_setting_or_choice_writes_format_4(monkeypatch):
+    from pelicula import project
+    p = project.Project(media_path="C:/v/fundo.mp4")
+    assert p.to_json()["formato"] == project.FORMAT_SIMPLE
+    known = _known_without("look", "exposicao")
+    monkeypatch.setattr(params, "known_1_5", lambda: known)
+    assert p.to_json()["formato"] == project.FORMAT_SIMPLE  # ajuste novo no padrão: nada muda
+    p.values = {**p.values, "exposicao": 0.5}
+    data = p.to_json()
+    assert data["formato"] == project.FORMAT == 4 and data["recursos"] == ["ajustes_1_6"]
+    p.values = params.defaults()
+    p.look_keys = {"exposicao": [[0, 0.0], [10, 0.5]]}
+    assert p.to_json()["formato"] == 4  # chaves num ajuste novo
+    p.look_keys = {}
+    first = params.PARAMS["entrada"].choices[0][0]
+    other = params.PARAMS["entrada"].choices[1][0]
+    monkeypatch.undo()
+    known = _known_without("look", "entrada", other)
+    monkeypatch.setattr(params, "known_1_5", lambda: known)
+    p.values = {**params.defaults(), "entrada": first}
+    assert p.to_json()["formato"] == project.FORMAT_SIMPLE
+    p.values = {**params.defaults(), "entrada": other}
+    assert p.to_json()["formato"] == 4  # opção nova numa escolha antiga
+
+
+def test_a_new_clip_setting_writes_block_3_and_project_4(monkeypatch):
+    from pelicula import project, timeline as tl
+    seq = tl.Sequence.for_source(_plain_source())
+    p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json())
+    assert p.to_json()["formato"] == project.FORMAT_EDIT
+    known = _known_without("video", "exposicao")
+    monkeypatch.setattr(params, "known_1_5", lambda: known)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_values(v.id, {**v.values, "exposicao": 1.0})
+    block = seq.to_json()
+    assert seq.features() == {"ajustes_clipe_1_6"} and block["formato"] == tl.FORMAT == 3
+    p.sequence = block
+    assert p.to_json()["formato"] == 4 and p.to_json()["recursos"] == ["ajustes_clipe_1_6"]
+    seq.insert_media(_alpha_source(), at=0, vtrack=1, with_audio=False)  # 1.5 + 1.6: continua 4
+    p.sequence = seq.to_json()
+    assert p.to_json()["formato"] == 4 and p.to_json()["recursos"] == ["ajustes_clipe_1_6", "alfa"]
+
+
+def test_step_3_to_4_is_pure_and_keeps_the_fields():
+    from pelicula import project, timeline as tl
+    seq = tl.Sequence.for_source(_alpha_source())
+    old = {"app": "PeliculaConverter", "formato": 3, "valores": {"exposicao": 0.2}, "edicao": seq.to_json(),
+           "recursos": ["alfa"]}
+    assert old["edicao"]["formato"] == tl.FORMAT_15
+    new = project._v3_to_v4(old)
+    assert new["formato"] == 4 and new["recursos"] == ["alfa"] and new["valores"] == {"exposicao": 0.2}
+    assert new["edicao"] == old["edicao"] and old["formato"] == 3  # o bloco migra ao ser lido
+    assert tl.Sequence.from_json(new["edicao"]).sources["C:/v/recorte_cutout.mov"].has_alpha
+    assert tl._seq_v2_to_v3({"formato": 2, "clipes": []}) == {"formato": 3, "clipes": []}
+
+
+def test_a_1_5_reader_refuses_a_format_4_project(tmp_path, monkeypatch):
+    """O que a 1.5 faz (FORMAT = 3, bloco 2) com um projeto que usa algo da 1.6: recusa com aviso."""
+    from pelicula import project, timeline as tl
+    known = _known_without("video", "exposicao")
+    monkeypatch.setattr(params, "known_1_5", lambda: known)
+    seq = tl.Sequence.for_source(_plain_source())
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_values(v.id, {**v.values, "exposicao": 1.0})
+    p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json(), mode="edicao")
+    project.save(p, str(tmp_path / "novo.plc"))
+    block = seq.to_json()
+    monkeypatch.setattr(project, "FORMAT", 3)
+    with pytest.raises(project.ProjectError):
+        project.load(str(tmp_path / "novo.plc"))
+    monkeypatch.setattr(tl, "FORMAT", 2)
+    with pytest.raises(tl.FormatError):
+        tl.Sequence.from_json(block)

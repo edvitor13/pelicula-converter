@@ -44,9 +44,11 @@ VIDEO = "video"
 AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
 # Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
-# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes). Veja `features()` e `migrate()`.
-FORMAT = 2
+# 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes), uma com algo da 1.5 e nada da 1.6 com FORMAT_15.
+# Veja `features()` e `migrate()`.
+FORMAT = 3
 FORMAT_BASE = 1
+FORMAT_15 = 2
 # Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
 # ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
 SOURCE_FILE = "arquivo"
@@ -1904,8 +1906,16 @@ class Sequence:
         return Sequence.from_json(self.to_json())
 
     def features(self) -> set[str]:
-        """Recursos da 1.5 que esta montagem usa (`FEATURES`): com algum, o projeto vai para o formato 3."""
-        return {fid for fid, check in FEATURES.items() if check(self)}
+        """Recursos que esta montagem usa: os da 1.5 (`FEATURES`, o projeto vai para o formato 3) e os da 1.6
+        (`FEATURES_V4`, formato 4)."""
+        return {fid for reg in (FEATURES, FEATURES_V4) for fid, check in reg.items() if check(self)}
+
+    def block_format(self) -> int:
+        """O formato do bloco "edicao": FORMAT com algo da 1.6, FORMAT_15 com algo da 1.5, FORMAT_BASE sem nada."""
+        feats = self.features()
+        if feats & set(FEATURES_V4):
+            return FORMAT
+        return FORMAT_15 if feats else FORMAT_BASE
 
     def used_sources(self) -> list[Source]:
         """As fontes que algum clipe usa (na ordem de `sources`)."""
@@ -1915,7 +1925,7 @@ class Sequence:
     def to_json(self) -> dict[str, Any]:
         used = {c.src for c in self.clips}
         out = {
-            "formato": FORMAT if self.features() else FORMAT_BASE,
+            "formato": self.block_format(),
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
             "faixas": [t.to_json() for t in self.tracks],
@@ -2032,6 +2042,20 @@ FEATURES["rampa"] = lambda seq: any(c.ramp for c in seq.clips)        # rampa de
 FEATURES["reverso"] = lambda seq: any(c.reverse for c in seq.clips)   # clipe tocado de trás para a frente
 
 
+def _clips_beyond_1_5(seq: Sequence) -> bool:
+    """Algum clipe usa um ajuste (ou opção, ou chave de animação) que a 1.5 não lê (`params.beyond_1_5`)."""
+    from .params import beyond_1_5, known_1_5
+    known = known_1_5()
+    return any(beyond_1_5(editparams.SCHEMAS[c.kind], known[c.kind], c.values, c.keys) for c in seq.clips)
+
+
+# Recursos da 1.6 numa montagem (mesma regra de `FEATURES`): o bloco vai para o formato 3 e o projeto para o 4,
+# que a 1.5 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_6" pega tudo o que a 1.5 não lê.
+FEATURES_V4: dict[str, Callable[[Sequence], bool]] = {
+    "ajustes_clipe_1_6": _clips_beyond_1_5,
+}
+
+
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
     do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
@@ -2049,8 +2073,15 @@ def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _seq_v2_to_v3(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.5 (formato 2) → formato 3: nada muda nos campos (a 1.6 só acrescenta)."""
+    out = dict(d)
+    out["formato"] = 3
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2, 2: _seq_v2_to_v3}
 
 
 def migrate(d: dict[str, Any]) -> dict[str, Any]:

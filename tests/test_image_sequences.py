@@ -117,7 +117,7 @@ def test_probe_sequence_and_source_json(seq_dir):
     assert "sequencia" not in plain and tl.Source.from_json(plain).seq_start == -1
     seq = tl.Sequence.for_source(src)
     assert seq.fps_str == "25/1" and seq.duration == COUNT
-    assert "sequencia_imagens" in seq.features() and seq.to_json()["formato"] == tl.FORMAT
+    assert "sequencia_imagens" in seq.features() and seq.to_json()["formato"] == tl.FORMAT_15
     assert seq.is_trivial() == src.path and seq.direct_file() is None  # no modo Película, pela montagem
     assert media.probe(src.path).seq_start == FIRST and media.probe(src.path, "30/1").fps_str == "30/1"
     assert media.probe_source(src.path).is_sequence
