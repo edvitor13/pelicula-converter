@@ -37,6 +37,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
+33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 
 ---
 
@@ -3238,3 +3239,125 @@ compara os dois na GPU.
   `_module_tools` (que já usa a chave "scopes" para o painel).
 - Nenhum arquivo da renderização importa `modules` (`tests/test_modules_cor.py`): desligar só esconde, e um
   projeto salvo sai igual.
+
+## 33. Câmera, formato e montagem na 1.6
+
+Frente E da 1.6 (#38). Sete recursos, todos com padrão neutro (o plano e os bits de sempre com eles desligados) e
+pelo caminho único `frame.Recipe` (prévia = exportação). Os módulos novos ficam em `ui/filme_ui.py` (um ponto só de
+ligação com a janela: `install`, `module_tools`, `apply_modules`).
+
+### 33.1 Obturador de película (`tempo_camera.py`, módulo Beta "camera_cinema")
+
+Vídeo rápido (≥ 2× a taxa da saída, `tempo_camera.MIN_RATIO`) vira o rastro de movimento de um obturador de cinema:
+cada quadro da saída é a média, **na luz linear**, dos quadros do arquivo que caem na janela aberta (ângulo/360 do
+período; 180° = metade). `window_weights` dá os pesos pela sobreposição de cada quadro com a janela (somam 1, no
+máximo `MAX_FRAMES`); fechando a janela, sobra o quadro mais próximo, o mesmo do filtro `fps` do ffmpeg.
+
+- **Onde mora.** No modo Película com o arquivo direto, é um ajuste do look (seção "obturador"; o ângulo é uma
+  escolha, então não anima: a janela decide quais quadros ler). Só vale quando a exportação muda a taxa: a
+  exportação e a "prévia da exportação" leem o arquivo na taxa dele (`tempo_camera.WindowReader` em
+  `export.open_reader`; `grab_window` em `export.preview_frame`). A prévia da janela, "Salvar quadro" e o `quadro` da
+  linha de comando trabalham na taxa do arquivo: lá não há o que misturar. No modo Edição o obturador é **por
+  clipe**: `Sequence.src_window(clip, t, ângulo)` (a janela entre `src_time(t)` e `src_time(t+1)`, com a manivela)
+  só existe quando o clipe passa ≥ 2 quadros do arquivo por quadro da sequência (60 qps numa sequência de 24, ou um
+  clipe acelerado). A troca de taxa da sequência para a exportação continua no quadro mais próximo.
+- **Leitura.** `sequence.grab(..., shutter=)` e `SequenceReader(..., shutter=)` devolvem `LayerImage.stack`
+  ((imagens…), (pesos…)); a leitura em sequência guarda os últimos quadros do `_ClipStream` (`keep`) para as janelas
+  que se sobrepõem, sem quebrar o leitor contínuo; o reverso usa o cache de blocos de sempre. Sem obturador, `stack`
+  é None e nada muda. A janela principal relê o quadro quando o obturador muda (`MainWindow._shutter`).
+- **Mistura.** `Engine.temporal_blend` (programas `shutter_acc`/`shutter_enc`, compilados no primeiro uso): 4
+  quadros por passo, decodifica pela curva (`toLinear` da entrada do look, ou do perfil de câmera do clipe com a faixa
+  do arquivo dele: `Recipe._blend_layer`), acumula e volta à curva em float32 (a imagem que o look ou o compositor
+  leem). Alfa pré-multiplicado. `tempo_camera.blend_numpy` é a referência.
+- **Custo** (GPU da máquina de desenvolvimento, 1080p): 11,5 ms com 2 quadros, 13 ms com 3 (60 → 24 a 180°), 17 ms
+  com 6 (8 ou 16 bits); mais a decodificação de 2,5× quadros (60 → 24), que domina a exportação.
+
+### 33.2 Manivela (`tempo_camera.py`, ajuste de clipe "manivela")
+
+Câmera de manivela a 16/18/20/22 qps projetada na taxa da sequência: trocar a cadência multiplica a velocidade do
+clipe por `crank_factor` (`Sequence.set_values`, 24 ÷ 16 = 1,5×; voltar a "Normal" desfaz e preserva a velocidade
+manual), então a duração, o som (atempo, pela velocidade de sempre) e os vínculos seguem o caminho da velocidade. A
+"Oscilação da mão" desloca o instante de cada imagem (`Sequence.src_frame` → `crank_offset`, ruído de valor com a
+semente do clipe, no máximo `CRANK_JITTER_S` = 50 ms, nunca acumula nem volta). Só a imagem oscila (o som segue a
+velocidade média): pergunta aberta. Por que por clipe e não no look: o tempo pertence a `timeline.Sequence`, e o
+modo Película não pode mudar a duração do arquivo. O cartão fica no inspetor logo depois de "Velocidade"
+(`edit_panels.DISPLAY_AFTER`).
+
+### 33.3 Lente anamórfica (`anamorfico.py`, módulo Beta "anamorfico")
+
+Seção "anamorfico" do look. No BASE, `filmLight(uv, vuv)` (desligado é `imageLin(uv) * vignette(vuv)`, bit a bit):
+desespremer (1,33/1,5/1,8/2×) em caixa de letra (`(y − 0,5)·S + 0,5`, borda suave), barril horizontal maior na
+linha do meio e bordas macias (5 amostras horizontais com raio ∝ x²). Uniform `u_anam` (neutro em
+`look.SPARSE_UNIFORMS`; `imageLin` ganhou um protótipo antes de `filmLight`, para o `planes.BASE_CP` compilar). O
+risco de luz é a cadeia "streak" (`Chain` com esse nome, sem campo novo no `Plan`): `Engine._streak` extrai num alvo
+sem mipmaps, reduz só a largura pela metade a cada passo (altura inteira: nada vaza na vertical) e termina com uma
+gaussiana; o FINAL soma `t_streak × u_streak_col × u_streak_amt` ao lado do bloom (`u_streak_on` neutro em
+`Engine.FINAL_NEUTRAL`). Com o scan ligado o anamórfico não desespreme: o scan mostra o negativo espremido, como um
+scan de verdade (o risco vale). O plugin não tem o anamórfico (geometria e desfoque horizontal longo fora do nó
+Textura).
+
+Nota de compilação: chamar `filmLight` (ou qualquer código novo) no meio do caminho do scan mudou o código gerado
+pelo driver e alguns pixels em 1/2048; por isso a data entra no scan só no fim do `main` e a tira deitada é outra
+variante do programa (33.5). `Engine._alpha_out` agora manda `look.SPARSE_UNIFORMS` antes do plano (um programa
+"base" que só serviu à Cor por planos não guarda valores velhos).
+
+### 33.4 Data impressa (`data_impressa.py`, módulo Beta "data_impressa")
+
+Sete segmentos procedurais (`shaders.dateMask`, segmentos com bordas suaves, itálico de 0,1), glifos em
+`u_date_g0..g2` (bits a=1…g=64, 128 = apóstrofo, 0 = espaço), caixa em px@1080 do quadro da câmera (`layout`; a
+mesma posição e tamanho em qualquer resolução; com o anamórfico, dentro da caixa de letra). **Etapa:** a câmera
+expõe o negativo com o mostrador, então a data é luz da cena no BASE, somada depois da vinheta: passa pela halação
+(o brilho em volta), pela cor do negativo e da cópia, e o grão fica por cima. `u_date_on` neutro em
+`SPARSE_UNIFORMS` e desligado em `alphashaders.ALPHA_GEOMETRY` (é luz, não transparência). Sem relógio: ano, mês e
+dia são parâmetros.
+
+### 33.5 Formatos de foto no scan (`scanformatos.py`)
+
+135 (36 × 24 mm, 8 furos KS, passo 38 mm), meio quadro (18 × 24, 4 furos, 19 mm) e 120 (6 × 6 a cada 60 mm e
+6 × 4,5 a cada 45 mm, 61,5 mm de largura, sem furos: o furo fica em x < 0, fora da película) no fim de
+`SCAN_FORMATS`, `GAUGES`, `GAUGE_SCAN`, `params.BITOLAS` e da escolha `scan_formato`; textos de borda próprios
+(`scanformatos.EDGE_TEXTS`). O grão segue o lado maior do quadro (`grao.FRAME_W_MM_EXTRA`: 36, 24, 56 mm). 135, meio
+quadro e 6 × 6 mostram a tira deitada: `scanformatos.rotated` gira o sistema de coordenadas da película no `main`
+do scan por substituição de texto (do BASE ou do BASE da Cor por planos) e `Engine._base_program` escolhe
+`base_rot`/`base_cp_rot` quando o plano traz `u_scan_rot` (uma marca, não um uniform); o BASE de sempre não muda. As
+bitolas novas entram nas tabelas do plugin (`resolve._gauge_tables`), com paridade (`tests/test_resolve.py`; chave
+`plugin` de `tests/data/cor_base.json` regravada).
+
+### 33.6 Máquina do tempo (`maquina.py`, `ui/maquina_ui.py`, módulo estável "maquina_tempo")
+
+Ano 1920–2020 × lugar (cinema, televisão, filme caseiro) → uma linha de `maquina.ROWS` com título, motivo histórico
+e valores. Toda linha escreve as mesmas chaves (`maquina.KEYS`, completadas por `maquina.BASE`), então o resultado
+não depende do que estava nelas; o resto do look fica. A janela (botão no painel de looks, modo Película) mostra a
+época, o motivo e cada ajuste que muda (de → para); "Aplicar" chama `ParamStore.set_all` (um passo de desfazer) e
+avisa na barra de status. A cadência da manivela das épocas mudas e do Super 8 aparece como sugestão (é tempo da
+montagem, por clipe). Estável e no perfil Criador porque só escreve ajustes estáveis que o usuário vê e desfaz.
+
+### 33.7 A montagem comanda a película (`montagem_filme.py`, módulo Beta "montagem_pelicula")
+
+`frame.Recipe.plan` calcula, com a seção ligada e uma montagem, `montagem_filme.edit_info(seq, índice, fps)`: os
+quadros da saída desde o último corte seco da V1 (clipe com `entrada_tipo` "corte" e início > 0; corte com
+transição não é emenda) e o número do corte; `look.build_plan(..., edit=)` chama `montagem_filme.apply` depois dos
+defeitos. A emenda (com a probabilidade "Emendas visíveis" e a semente) usa o desenho da Emenda (`u_splice`) no
+primeiro quadro; o clarão soma exposição (quente) no primeiro e um pouco no segundo quadro; o pulo desloca o quadro
+(`u_shift`). Rolos de Super 8: 3 600 quadros (50 pés) = 200 s a 18 qps ou 150 s a 24, contados no tempo da saída
+(valem também no modo Película sem montagem); velamento crescente nos últimos 2,5 s e na ponta do rolo seguinte
+pelo vazamento de luz (`u_leak*`), pulo no primeiro quadro do rolo novo. Nenhum programa novo nem estrutura nova no
+JSON (só parâmetros do look; sem linha em `FEATURES_V4`).
+
+### 33.8 Módulos e plugin
+
+Beta (começam desligados, fora dos perfis): "camera_cinema" (cartão Obturador + cartão Manivela do inspetor),
+"anamorfico", "data_impressa", "montagem_pelicula" — efeitos novos de imagem cujo resultado ainda precisa de
+olho humano. Estável: "maquina_tempo" (só preenche ajustes estáveis). Formatos de foto não são módulo: são
+entradas novas nos registros da bitola e do scan (módulo "scan" de sempre). O plugin do DaVinci recebe só as
+bitolas novas; obturador, manivela e montagem são tempo da linha do tempo do app, e anamórfico e data ficam fora
+do nó Textura (docs/DAVINCI.md).
+
+### 33.9 Testes
+
+`tests/test_camera_tempo.py` (pesos, 180° = meio período, barras em movimento num FFV1 sem perdas com a energia
+conservada, desligado = leitor de sempre, prévia da exportação = exportação, `grab` = `SequenceReader`, tabelas da
+manivela, oscilação limitada e determinística), `tests/test_formato_camera.py` (anamórfico e data: neutros, caixa
+de letra, círculo, barril, bordas, risco só horizontal, pixels da data em duas resoluções, etapa antes da
+película), `tests/test_scan_foto.py`, `tests/test_maquina.py`, `tests/test_montagem_filme.py` e os casos de janela
+em `tests/filme_ui_cases.py` (`test_filme_ui.py`).

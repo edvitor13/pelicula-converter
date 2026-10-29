@@ -642,3 +642,32 @@ clipes escolhidos) e tira todos de uma vez:
 - **Tirar os marcados** corta todas as faixas destravadas e encosta o resto (som e imagem continuam
   juntos; marcadores, animações e legendas acompanham). Ctrl+Z desfaz tudo de uma vez. Faixas travadas
   (o cadeado) não mudam — por exemplo, uma música de fundo.
+
+## 9. Câmera de cinema e a montagem na película (1.6, Beta)
+
+Ligue em *Configurações › Recursos* os recursos **Câmera de cinema** e **A montagem na película** (em teste,
+começam desligados).
+
+### Manivela (no inspetor do clipe, depois de Velocidade)
+
+- **Cadência da manivela**: 16, 18, 20 ou 22 qps, como uma câmera de manivela projetada na velocidade da
+  sequência. O clipe fica mais rápido e aos saltos (16 qps numa sequência de 24 = 1,5×): a duração e o **som**
+  acompanham, como numa mudança de velocidade. Voltar a *Normal* devolve a velocidade de antes.
+- **Oscilação da mão**: a mão não gira a manivela num ritmo perfeito; a imagem adianta e atrasa um pouco (no
+  máximo 50 ms com 100%), sem atrasar o clipe. Só a imagem oscila; o som segue a velocidade média.
+- **Semente** (avançado): outro jeito da mão.
+
+### Obturador de película
+
+Com o look de película na montagem (*Com película*) e o **Obturador de película** ligado no look, cada clipe com
+pelo menos o dobro de quadros por segundo da sequência (60 qps numa sequência de 24, ou um clipe acelerado)
+ganha o rastro de movimento de um obturador de cinema: os quadros do arquivo dentro da janela aberta (180° =
+metade do quadro) são misturados na luz. A prévia, "Salvar quadro" e a exportação mostram o mesmo.
+
+### A montagem na película
+
+Com a seção **A montagem na película** ligada no look, cada **corte seco** da faixa V1 vira uma emenda: a fita
+aparece no primeiro quadro do clipe novo, a junta deixa passar um clarão e o quadro pula na janela do projetor.
+Cortes com transição (dissolver, queima, emenda com clarão…) não contam. **Rolos de Super 8** dividem o vídeo em
+rolos de 50 pés (3 min 20 s a 18 qps, 2 min 30 s a 24): o fim de cada rolo vela e a troca dá um pulo. Tudo é igual
+a cada reprodução (mesma semente, mesmos quadros).

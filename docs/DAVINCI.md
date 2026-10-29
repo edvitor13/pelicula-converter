@@ -316,3 +316,19 @@ plugins/ofx/
   (`Contents/Resources/OpenFX-LICENSE.txt`).
 
 Os nomes de filmes são aproximações artísticas, sem relação com os fabricantes. O grão no negativo e a diferença de nitidez entre camadas usam números de datasheets públicos da Kodak.
+
+## Câmera, formato e montagem da 1.6 no plugin
+
+- **Formatos de foto** (Foto 35 mm 135, Foto meio quadro, Foto médio formato 120): entram na escolha *Bitola* dos
+  nós e do OpenFX, com o mesmo grão, maciez, tremor, vinheta e halação do app (paridade conferida em
+  `tests/test_resolve.py`). O scan da película continua fora do plugin.
+- **Fora do plugin**, porque são tempo da linha do tempo do app ou geometria que o nó Textura não tem:
+  - *Obturador de película* (mistura vários quadros do arquivo: no Resolve, use o Motion Blur do Resolve Studio ou
+    exporte do app a partir do vídeo rápido);
+  - *Manivela* (velocidade e oscilação por clipe: no Resolve, Retime/Speed Change);
+  - *A montagem na película* (emendas nos cortes e rolos de Super 8: o plugin vê um quadro de cada vez, sem os
+    cortes da timeline);
+  - *Lente anamórfica* (desespremer, barril, bordas e o risco horizontal longo: no Resolve, o desespremer fica
+    nos atributos do clipe e o risco num efeito de brilho);
+  - *Data impressa* (desenhada na luz da cena antes da película: use um texto no Fusion antes dos nós do
+    Película Converter).
