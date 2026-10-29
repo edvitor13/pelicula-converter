@@ -152,6 +152,11 @@ HAL_MODELOS = [  # 1.6: halação física (grao.physical_halation)
     ("fisica", "Física (reflexo na base)"),
 ]
 
+GRAO_MODELOS = [  # 1.6: modelo do grão no negativo (grao_fisico.py; "fisico" no módulo Beta grao_fisico)
+    ("ruido", "Ruído (campo procedural)"),
+    ("fisico", "Físico (grãos de prata)"),
+]
+
 PROCESSOS = [
     ("normal", "Normal (negativo + cópia)"),
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
@@ -271,6 +276,12 @@ SECTIONS: list[Section] = [
           "antes da cópia: a curva da cópia molda o grão, que some nos pretos e nas altas luzes estouradas, e o "
           "azul tem mais grão que o verde e o vermelho, como nos datasheets da Kodak. A resposta por tom da "
           "seção Grão deixa de valer: quem decide é a cópia."),
+        C("lab_grao_modelo", "Modelo do grão no negativo", "ruido", GRAO_MODELOS,
+          "Ruído: o campo do grão de sempre somado à densidade. Físico (Beta): cada camada vira grãos de prata "
+          "opacos espalhados ao acaso, tantos quanto a densidade daquele ponto pede (lei de Nutting); nas partes "
+          "finas do negativo aparecem grãos soltos, nas densas, buracos soltos, sem nenhum ajuste por faixa de "
+          "brilho. A força segue os datasheets da Kodak e o tamanho segue a bitola, o ISO e o Tamanho do grão. "
+          "Mais pesado para a placa de vídeo."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,

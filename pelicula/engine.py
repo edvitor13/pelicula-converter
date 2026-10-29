@@ -263,8 +263,16 @@ class Engine:
             "t_noise": noise[0] if noise else lin[0],
             "t_lut": self._lut_texture(plan.lut_path),
         }
-        self._run("final", out, textures, {**self.FINAL_NEUTRAL, **U})
+        self._run(self._final_program(U), out, textures, {**self.FINAL_NEUTRAL, **U})
         return out
+
+    def _final_program(self, U: dict) -> str:
+        """O FINAL de sempre, ou (1.6) o FINAL com o grão físico no negativo (`u_grain_on = 3`, `grao_fisico`)."""
+        if U.get("u_grain_on") != 3:
+            return "final"
+        from . import grao_fisico
+        self._lazy_program("final_pg", grao_fisico.FINAL_PG)
+        return "final_pg"
 
     def _base_program(self, U: dict) -> str:
         """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela."""

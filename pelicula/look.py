@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from . import grao
+from . import grao, grao_fisico
 
 # Curva neutra usada para levar vídeo Rec.709 até a luz da cena e de volta.
 D_SLOPE = 0.155
@@ -1122,6 +1122,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_chroma"] = v["grao_cor"] * (NET_GRAIN_CHROMA if net_grain > 0 else 1.0)
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
         grao.negative_grain(U, v, v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net)
+        grao_fisico.negative_grain(plan, U, v, gauge, scale, v["grao_forca"] * gauge["grain_amt"] * iso_amt * push * net,
+                                   net_grain)  # 1.6: modelo "fisico" do grão no negativo (nada no "ruido")
 
     grao.breathing(U, v, frame)  # 1.6: respiração por camada (nada sem ela)
 

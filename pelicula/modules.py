@@ -100,6 +100,10 @@ MODULES: tuple[Module, ...] = (
     Module("cor_simples", N_("Cor simples"),
            N_("No modo Edição: conta-gotas do balanço de branco, clicar numa cor e mudar só ela, igualar a outro "
               "clipe ou a uma imagem, pele natural, degradê e grupos de cor."), "cor"),
+    Module("grao_fisico", N_("Grão físico"),
+           N_("Um modelo novo para o \"Grão no negativo\" do Laboratório: cada camada do negativo vira grãos de prata "
+              "espalhados ao acaso, tantos quanto a densidade de cada ponto pede (um processo só, com os mesmos "
+              "ajustes na imagem inteira). Mais pesado para a placa de vídeo."), "pelicula", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -223,6 +227,10 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
             used.add(module_id)
     if v.get("lut_on") and v.get("lut_arquivo"):
         used.add("luts")
+    if v.get("lab_grao_modelo") == "fisico":  # 1.6: só quando o modelo físico vale de fato
+        from . import grao_fisico
+        if grao_fisico.on(v):
+            used.add("grao_fisico")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):
