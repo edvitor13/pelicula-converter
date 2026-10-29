@@ -79,7 +79,9 @@ def qimage_from(arr: np.ndarray) -> QImage:
     if arr.ndim == 3 and arr.shape[2] == 4:  # transparência: sobre o xadrez (só para ver)
         from .alphaview import over_checker
         arr = over_checker(arr)
-    if arr.dtype != np.uint8:
+    if arr.dtype == np.float32:  # leitura de log com super-brancos (`media.float_input`): só para ver
+        arr = np.clip(arr * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+    elif arr.dtype != np.uint8:
         arr = (arr >> 8).astype(np.uint8)
     arr = np.ascontiguousarray(arr)
     return QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
@@ -108,9 +110,11 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, source, frame, w, h) -> None:
+    def request(self, source, frame, w, h, profile: str | None = None) -> None:
+        """Pede o quadro `frame` de `source` em w × h; `profile`: o perfil de entrada do look (a leitura de um
+        arquivo log em faixa legal vem em float32, `media.float_input`)."""
         with self._lock:
-            self._pending = (source, frame, w, h)
+            self._pending = (source, frame, w, h, profile)
             if self._busy:
                 return
             self._busy = True
@@ -124,12 +128,12 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            source, frame, w, h = job
+            source, frame, w, h, profile = job
             try:
                 if isinstance(source, timeline.Sequence):
                     img = sequence.grab(source, frame, w, h, 8)
                 else:
-                    img = media.grab_frame(source, frame, w, h, 8)
+                    img = media.grab_frame(source, frame, w, h, 8, profile=profile)
             except Exception as exc:  # noqa: BLE001
                 self.failed.emit(str(exc))
                 continue
@@ -143,7 +147,7 @@ class Player:
         self.q: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
 
-    def start(self, source, start, end, w, h, loop, loop_start) -> None:
+    def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
@@ -162,7 +166,7 @@ class Player:
         def open_reader(f):
             if is_seq:
                 return sequence.SequenceReader(source, w, h, 8, f, end - f + 1)
-            return media.FrameReader(source, w, h, 8, f)
+            return media.FrameReader(source, w, h, 8, f, profile=profile)
 
         def run():
             f = start
@@ -1150,7 +1154,9 @@ class MainWindow(QMainWindow):
         self.frame_idx = f
         self._update_time()
         w, h = self.preview_size()
-        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h)
+        prof = self.store.get("entrada")
+        self._float_source = self.src_seq is None and media.float_input(self.info, prof)
+        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof)
 
     def _frame_loaded(self, source, frame: int, img) -> None:
         expected = self.src_seq if self.src_seq is not None else self.info
@@ -1932,6 +1938,9 @@ class MainWindow(QMainWindow):
         timer = getattr(self, "thumb_timer", None)
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
             timer.start()  # as miniaturas dos presets usam o perfil do arquivo
+        if (key in ("entrada", "*") and self.info is not None and self.src_seq is None and not self.playing
+                and media.float_input(self.info, self.store.get("entrada")) != getattr(self, "_float_source", False)):
+            self.request_frame(self.frame_idx)  # log ↔ Rec.709: o quadro é lido de novo (super-brancos em float)
         self._update_modified()
         self._update_title()
         if self.curve_graph.isVisible():
@@ -2028,7 +2037,7 @@ class MainWindow(QMainWindow):
             f = loop_start
         w, h = self.preview_size()
         self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
-                          loop_start)
+                          loop_start, self.store.get("entrada"))
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -2699,9 +2708,12 @@ class MainWindow(QMainWindow):
         if self.src_seq is not None:
             img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
         else:
-            img = media.grab_frame(self.info, frame, w, h, 16, hq=True)
+            img = None
+        recipe = self.frame_recipe(16, full=True, alpha=alpha)
+        if img is None:
+            img = media.grab_frame(self.info, frame, w, h, 16, hq=True, profile=recipe.profile)
         self._uploaded = None
-        return self.frame_recipe(16, full=True, alpha=alpha).render(self.engine, img, frame)
+        return recipe.render(self.engine, img, frame)
 
     # ================================================================ projetos (.plc)
     def _seq_json(self) -> dict | None:

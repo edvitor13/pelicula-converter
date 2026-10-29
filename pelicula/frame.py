@@ -73,6 +73,12 @@ class Recipe:
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
                    None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha))
 
+    @property
+    def profile(self) -> str | None:
+        """O perfil de entrada do look: a leitura do arquivo depende dele (log com super-brancos sai em float32,
+        `media.float_input`); None sem look."""
+        return (self.values or {}).get("entrada")
+
     def with_(self, **kw) -> "Recipe":
         """Cópia com alguns campos trocados (ex.: a prévia em 16 bits para comparar com a exportação)."""
         return replace(self, **kw)

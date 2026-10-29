@@ -33,7 +33,9 @@ def _subsample(img: np.ndarray) -> np.ndarray:
     h, w = img.shape[:2]
     step = max(1, int(math.ceil(w / MAX_W)))
     sub = img[::step, ::step]
-    if sub.dtype != np.uint8:
+    if sub.dtype == np.float32:  # leitura de log com super-brancos (`media.float_input`)
+        sub = np.clip(sub * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+    elif sub.dtype != np.uint8:
         sub = (sub >> 8).astype(np.uint8)
     return np.ascontiguousarray(sub[..., :3])
 

@@ -568,7 +568,7 @@ def cmd_frame(a) -> int:
         if seq is not None:
             img = sequence.grab(seq, frame, w, h, 16, hq=True)
         else:
-            img = media.grab_frame(info, frame, w, h, 16, hq=True)
+            img = media.grab_frame(info, frame, w, h, 16, hq=True, profile=recipe.profile)
         out = recipe.render(engine, img, frame)
     finally:
         engine.release()

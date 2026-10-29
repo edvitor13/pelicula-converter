@@ -34,6 +34,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
+29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
 
 ---
 
@@ -373,8 +374,10 @@ build_plan(..., legal) → u_legal ; INPUT_DOMAIN[entrada] e log_reescalado → 
 - **Plugin do Resolve**: o nó recebe o valor que o Resolve tem do clipe, sem saber a faixa do arquivo; o
   controle *Faixa do vídeo* (padrão *Vídeo* = `bake_lut(legal=True)`, *Cheia* = `legal=False`) faz o papel de
   `u_legal` (seção 15).
-- **Limite conhecido**: a saída RGB inteira do decodificador corta em 1,0 o que passa do código 940 (super
-  brancos). No S-Log3, que usa códigos até ~1000, isso corta as luzes mais de ~6,7 stops acima do cinza.
+- **Super-brancos** (1.6): até a 1.5 a saída RGB inteira do decodificador cortava em 1,0 o que passa do código
+  940 (no S-Log3, que usa códigos até ~1000, as luzes mais de ~6,7 stops acima do cinza). Agora log de câmera
+  num vídeo de faixa legal é lido em ponto flutuante (`media.float_input`): v passa de 1 (e fica abaixo de 0
+  no pé) e a curva recebe o código certo. Sem o zscale no ffmpeg, a leitura de antes (seção 29.1).
 
 ## 6. Determinismo e independência de resolução
 
@@ -488,6 +491,9 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
   (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso.
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
+- Log de câmera num vídeo de faixa legal (`profile=` o perfil do look; `media.float_input`), em qualquer
+  profundidade: `zscale=w=L:h=A:filter=lanczos|bicubic:matrixin=M:rangein=limited:range=full,format=gbrpf32le`
+  → float32 (textura `f4`), sem cortar em 0–1 (seção 29.1).
 - **Windows**: `NamedPipe` cria `\\.\pipe\pelicula_<uuid>` com buffer de 1 MiB; o ffmpeg escreve
   nele como se fosse um arquivo. A conexão espera o ffmpeg abrir o pipe e destrava sozinha se ele
   morrer antes (timeout de 60 s). Isso é bem mais rápido que `stdout` para quadros 4K.
@@ -2690,3 +2696,38 @@ dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
   (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
   `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
 
+## 29. Entrada da câmera na 1.6
+
+O que a câmera gravou chega ao look sem perdas: a leitura guarda os super-brancos do log, os perfis de câmera
+ganham as curvas que faltavam e o modo Edição normaliza clipes de câmeras diferentes. Com os ajustes padrão
+nada muda (referência da BASE em `tests/entrada_base.py`, conferida por `tests/test_entrada_base.py`: uniforms,
+quadros do look em 8 e 16 bits, LUTs exportados, montagem do modo Edição, nó Cor do plugin e leitura de 8 bits).
+
+### 29.1 Super-brancos na leitura de log
+
+Até a 1.5 o `FrameReader` pedia ao swscale RGB inteiro (`rgb24`/`rgb48le`) com a faixa legal expandida: tudo
+acima do código 940 virava 1,0 e tudo abaixo do 64 virava 0. As câmeras gravam log acima do 940 (o S-Log3 vai a
+~1000; o F-Log e o V-Log também passam), então as luzes mais altas se perdiam antes do shader.
+
+- `media.float_input(info, perfil)`: verdadeiro para um perfil log de câmera (todos menos `DISPLAY_PROFILES` =
+  Rec.709, linear, HLG e PQ) num vídeo YUV de faixa legal, com o zscale no ffmpeg (`media.has_zscale`, lido de
+  `ffmpeg -filters`; `reset_cache` esquece). Imagens, RGB e vídeo de faixa cheia não têm o que expandir.
+- `FrameReader(..., profile=)` / `grab_frame(..., profile=)`: nesse caso o filtro é
+  `zscale=…:rangein=limited:range=full,format=gbrpf32le` (planar G, B, R; `read` devolve h × w × 3 float32
+  intercalado) em qualquer `depth`. O valor é o mesmo v = (código − 64)/876 de antes, sem corte; o shader não
+  muda: `toLinear` volta ao código das curvas `"cv"` (`legalToCv`) ou usa o sinal das `"sinal"` como sempre.
+  `Engine.set_input` envia float32 como textura `f4`.
+- **Quem passa o perfil**: `frame.Recipe.profile` (o `entrada` dos ajustes) na exportação (`export.open_reader`,
+  `preview_frame`), no terminal (`quadro`) e no "Salvar quadro"; a prévia (`FrameLoader.request`, `Player.start`)
+  usa o perfil atual e lê o quadro de novo quando a troca de perfil muda a leitura (`MainWindow._on_param`).
+- **Visualização**: a imagem "antes" da comparação, o histograma e os escopos convertem float32 para 8 bits só
+  para ver (`qimage_from`, `scopes._subsample`); legendas gravadas na cópia compõem em float sem cortar
+  (`subtitles.composite`).
+- **Mesmo arquivo, mesmo resultado em 8 e 16 bits**: a leitura em float não depende da profundidade da saída.
+- **Fora**: transparência (o caminho do alfa continua em inteiros), HLG/PQ (a 1.6 deixa como estava: a região
+  acima de 940 no HDR é rara e a leitura em float custa 4× a banda da prévia de 8 bits), o modo Edição com
+  montagem de verdade (a tela da montagem é inteira; veja 29.5) e ffmpeg sem zscale (leitura de antes).
+- **Custo**: 12 bytes por pixel no cano (1080p ≈ 25 MB por quadro, 4× o de 8 bits), só nos arquivos log.
+- **ffmpeg 8+**: ao gerar vídeo de teste a partir de `rawvideo`, a faixa vai também como opção de entrada
+  (`-color_range tv` antes do `-i`); sem ela o ffmpeg converte o "sem faixa" para a legal e corta os códigos
+  fora de 64–943 (`tests/entrada_base.synthetic_video`).

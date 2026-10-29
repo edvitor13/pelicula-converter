@@ -746,10 +746,10 @@ def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, f
     if fps_out:
         # Com troca de fps a decodificação começa no tempo e não no quadro.
         reader = media.FrameReader(info, f.dec_w, f.dec_h, frames.depth, 0, None, fps_out, hq=True, perf=perf,
-                                   crop=f.crop)
+                                   crop=f.crop, profile=frames.profile)
         return reader, round(start / info.fps * frames.fps)
     return media.FrameReader(info, f.dec_w, f.dec_h, frames.depth, start, total, None, hq=True, perf=perf,
-                             crop=f.crop), 0
+                             crop=f.crop, profile=frames.profile), 0
 
 
 def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: ExportSettings, frame: int, seq=None,
@@ -763,7 +763,8 @@ def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: Export
         from . import sequence
         img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True)
     else:
-        img = media.grab_frame(info, frame, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop)
+        img = media.grab_frame(info, frame, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop,
+                               profile=frames.profile)
     index = round(frame * frames.fps / info.fps) if s.fps != "original" else frame
     return frames.render(engine, img, index)
 

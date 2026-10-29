@@ -41,10 +41,11 @@ def _candidates() -> list[Path]:
 
 def reset_cache() -> None:
     """Esquece codificadores e acelerações detectados (depois de trocar o ffmpeg)."""
-    global _ENCODERS, _HWACCELS, _DECODERS
+    global _ENCODERS, _HWACCELS, _DECODERS, _FILTERS
     _ENCODERS = None
     _HWACCELS = None
     _DECODERS = None
+    _FILTERS = None
     _WORKING.clear()
 
 
@@ -544,6 +545,35 @@ def legal_range(info) -> bool:
     return _in_range(info) == "limited"
 
 
+# Perfis de entrada que não são log de câmera: a leitura deles continua em inteiros de 0 a 1 (8 ou 16 bits).
+# Os outros (log) num vídeo de faixa legal são lidos em ponto flutuante (`float_input`).
+DISPLAY_PROFILES = frozenset({"rec709", "linear", "hlg", "pq"})
+
+# Matriz YUV → RGB do arquivo (`_in_matrix`) com o nome que o zscale (zimg) usa.
+_ZSCALE_MATRIX = {"bt709": "709", "bt601": "470bg", "bt2020": "2020_ncl", "smpte240m": "240m"}
+
+
+def float_input(info, profile: str | None) -> bool:
+    """A leitura de `info` para o perfil de entrada `profile` vem em ponto flutuante (super-brancos)?
+
+    Log de câmera num vídeo YUV de faixa legal: o decodificador expande a faixa (v = (código − 64)/876) sem
+    cortar em 0–1 — o que a câmera gravou acima do código 940 (e abaixo do 64) chega ao shader, que volta ao
+    domínio da curva como sempre (`look.INPUT_DOMAIN`). Precisa do filtro zscale no ffmpeg (`has_zscale`); sem
+    ele, e em Rec.709, linear, HLG e PQ, imagens e arquivos de faixa cheia, a leitura de sempre (8 ou 16 bits).
+    """
+    if not profile or profile in DISPLAY_PROFILES or getattr(info, "is_image", False):
+        return False
+    return legal_range(info) and has_zscale()
+
+
+def _zscale(info, width: int, height: int, hq: bool) -> str:
+    """zscale que redimensiona e converte YUV de faixa legal em RGB de faixa cheia, sem cortar (float) e exato
+    nos níveis (16 bits): o swscale corta em 0–1 e, em 16 bits, entrega o branco em 65280 (0,4% abaixo)."""
+    kernel = "lanczos" if hq else "bicubic"
+    return (f"zscale=w={width}:h={height}:filter={kernel}:matrixin={_ZSCALE_MATRIX[_in_matrix(info)]}"
+            f":rangein=limited:range=full")
+
+
 # Transferências HDR do ffprobe (`color_transfer`) → perfil de entrada. O vídeo HDR do iPhone (Dolby
 # Vision 8.4) é marcado como HLG (arib-std-b67).
 HDR_TRANSFERS = {"arib-std-b67": "hlg", "smpte2084": "pq"}
@@ -666,6 +696,9 @@ def use_named_pipes() -> bool:
 class FrameReader:
     """Decodifica quadros RGB (8 ou 16 bits) já na resolução pedida.
 
+    `profile` (o perfil de entrada do look, `params` "entrada"): log de câmera num vídeo de faixa legal sai em
+    float32 (h × w × 3) com o que passa do branco e do preto nominais (`float_input`), em qualquer `depth`.
+
     `crop` (x, y, largura, altura, em pixels do arquivo já girado) recorta antes de redimensionar: é o
     "cortar" da exportação num quadro de outra proporção (`fit.py`).
 
@@ -678,19 +711,23 @@ class FrameReader:
 
     def __init__(self, info: MediaInfo, width: int, height: int, depth: int = 8, start_frame: int = 0,
                  max_frames: int | None = None, fps_out: str | None = None, hq: bool = False,
-                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
+                 perf: Perf | None = None, crop: tuple[int, int, int, int] | None = None, alpha: bool = False,
+                 profile: str | None = None):
         perf = perf or Perf()
         alpha = alpha and decodes_alpha(info)
         self.w, self.h, self.depth = width, height, depth
         self.channels = 4 if alpha else 3
         # Fonte com alfa de 8 bits: o ffmpeg trabalha e entrega em 8 bits; a 16 bits, `read` amplia (x257, exato).
         self._widen = bool(alpha and depth != 8 and info.bit_depth <= 8)
+        self.float = not alpha and float_input(info, profile)
         if alpha:
             self.pix = "rgba" if depth == 8 or self._widen else "rgba64le"
+        elif self.float:
+            self.pix = "gbrpf32le"  # planar (G, B, R); `read` entrega RGB intercalado
         else:
             self.pix = "rgb24" if depth == 8 else "rgb48le"
-        self.dtype = np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
-        self.frame_bytes = width * height * self.channels * (1 if self.dtype == np.uint8 else 2)
+        self.dtype = np.float32 if self.float else np.uint8 if self.pix in ("rgba", "rgb24") else np.uint16
+        self.frame_bytes = width * height * self.channels * np.dtype(self.dtype).itemsize
         args = [ffmpeg(), "-v", "error", "-nostdin", "-hide_banner"]
         numbered = getattr(info, "seq_start", -1) >= 0
         if perf.hwaccel and perf.hwaccel != "none" and not info.is_image and not alpha and not numbered:
@@ -714,6 +751,9 @@ class FrameReader:
         th = max(0, perf.threads)
         if alpha:
             vf.append(_alpha_graph(info, width, height, flags, th, self.pix))
+        elif self.float:
+            vf.append(_zscale(info, width, height, hq))
+            vf.append(f"format={self.pix}")
         else:
             vf.append(f"scale={width}:{height}:flags={flags}:in_color_matrix={_in_matrix(info)}"
                       f":in_range={_in_range(info)}:threads={th}")
@@ -769,6 +809,9 @@ class FrameReader:
             if not n:
                 return None
             got += n
+        if self.float:
+            g, b, r = np.frombuffer(buf, dtype="<f4").reshape(3, self.h, self.w)
+            return np.dstack([r, g, b])
         img = np.frombuffer(buf, dtype=self.dtype).reshape(self.h, self.w, self.channels)
         return img.astype(np.uint16) * np.uint16(257) if self._widen else img
 
@@ -809,14 +852,15 @@ def _alpha_graph(info: MediaInfo, width: int, height: int, flags: str, threads: 
 
 
 def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int = 8, hq: bool = False,
-               crop: tuple[int, int, int, int] | None = None, alpha: bool = False):
-    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado, veja `FrameReader`)."""
-    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha)
+               crop: tuple[int, int, int, int] | None = None, alpha: bool = False, profile: str | None = None):
+    """Um quadro (h × w × 3; com `alpha`, RGBA pré-multiplicado; com `profile` log, float32: veja `FrameReader`)."""
+    r = FrameReader(info, width, height, depth, frame, 1, hq=hq, crop=crop, alpha=alpha, profile=profile)
     try:
         img = r.read()
         if img is None and frame > 0:
             r.close()
-            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha)
+            r = FrameReader(info, width, height, depth, max(0, frame - 2), 1, hq=hq, crop=crop, alpha=alpha,
+                            profile=profile)
             img = r.read()
         if img is None:
             raise RuntimeError(r.error or _("Falha ao ler o quadro."))
@@ -828,6 +872,25 @@ def grab_frame(info: MediaInfo, frame: int, width: int, height: int, depth: int 
 _ENCODERS: set[str] | None = None
 _WORKING: dict[str, bool] = {}
 _DECODERS: set[str] | None = None
+_FILTERS: set[str] | None = None
+
+
+def filters() -> set[str]:
+    """Filtros desta compilação do ffmpeg (nomes)."""
+    global _FILTERS
+    if _FILTERS is None:
+        try:
+            res = subprocess.run([ffmpeg(), "-hide_banner", "-filters"], capture_output=True, creationflags=NO_WINDOW)
+            lines = res.stdout.decode("utf-8", "replace").splitlines()
+        except OSError:
+            lines = []
+        _FILTERS = {parts[1] for parts in (ln.split() for ln in lines) if len(parts) >= 3 and "->" in parts[2]}
+    return _FILTERS
+
+
+def has_zscale() -> bool:
+    """O ffmpeg tem o zscale (zimg)? É ele que lê log com super-brancos e 16 bits exatos (veja `_zscale`)."""
+    return "zscale" in filters()
 
 
 def decoders() -> set[str]:

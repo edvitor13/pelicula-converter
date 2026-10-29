@@ -89,9 +89,10 @@ class Engine:
         return tex, fbo
 
     def set_input(self, frame: np.ndarray) -> None:
-        """Envia a imagem do look (h × w × 3; ou × 4, RGBA de cor direta: o alfa vai à parte, veja `render`)."""
+        """Envia a imagem do look (h × w × 3; ou × 4, RGBA de cor direta: o alfa vai à parte, veja `render`).
+        float32: a leitura de log com super-brancos (`media.float_input`), valores fora de 0–1 inclusive."""
         h, w = frame.shape[:2]
-        dtype = "f1" if frame.dtype == np.uint8 else "nu2"
+        dtype = "f1" if frame.dtype == np.uint8 else "f4" if frame.dtype == np.float32 else "nu2"
         if frame.ndim == 3 and frame.shape[2] == 4:
             self._set_alpha(frame[..., 3], dtype)
             frame = frame[..., :3]

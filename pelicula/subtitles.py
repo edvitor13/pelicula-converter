@@ -910,12 +910,18 @@ def composite(frame, ov: Overlay):
     x0, y0, x1, y1 = max(0, ax), max(0, ay), min(w, ax + img.width), min(h, ay + img.height)
     if x0 >= x1 or y0 >= y1:
         return out
-    peak = np.float32(65535.0 if out.dtype == np.uint16 else 255.0)
+    if out.dtype == np.float32:  # leitura de log com super-brancos (`media.float_input`): sem cortar nem arredondar
+        peak = np.float32(1.0)
+    else:
+        peak = np.float32(65535.0 if out.dtype == np.uint16 else 255.0)
     src_peak = np.float32(65535.0 if img.rgba.dtype == np.uint16 else 255.0)
     src = img.rgba[y0 - ay:y1 - ay, x0 - ax:x1 - ax].astype(np.float32) / src_peak
     a = src[..., 3:4]
     cur = out[y0:y1, x0:x1].astype(np.float32) / peak
     res = src[..., :3] * a + cur * (np.float32(1.0) - a)   # pré-multiplicado, "por cima"
+    if out.dtype == np.float32:
+        out[y0:y1, x0:x1] = res
+        return out
     out[y0:y1, x0:x1] = np.round(np.clip(res, 0.0, 1.0) * peak).astype(out.dtype)
     return out
 
@@ -981,5 +987,5 @@ class Burn:
         """O quadro com a legenda do instante t por cima; sem legenda nesse instante, o mesmo objeto."""
         import numpy as np
         h, w = frame.shape[:2]
-        ov = self.overlay(t, w, h, 16 if frame.dtype == np.uint16 else 8)
+        ov = self.overlay(t, w, h, 8 if frame.dtype == np.uint8 else 16)
         return frame if ov is None else composite(frame, ov)

@@ -927,7 +927,9 @@ class Histogram(QWidget):
             self.h = None
         else:
             sub = img[::6, ::6]
-            if sub.dtype != np.uint8:
+            if sub.dtype == np.float32:  # leitura de log com super-brancos (`media.float_input`)
+                sub = np.clip(sub * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+            elif sub.dtype != np.uint8:
                 sub = (sub >> 8).astype(np.uint8)
             hs = []
             for c in range(3):
