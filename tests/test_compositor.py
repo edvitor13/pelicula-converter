@@ -80,6 +80,8 @@ def _non_default(p):
         return not p.default
     if p.kind == "choice":
         return next(v for v, _l in p.choices if v != p.default)
+    if p.kind == "int":  # 1.6: semente da manivela
+        return p.max if p.default != p.max else p.min
     if p.kind == "wheel":
         return [0.6, 0.3]
     raise AssertionError(p.kind)
@@ -187,6 +189,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
         if key in ("velocidade", "congelar") or key in transition_keys:  # transições: tests/test_transitions.py
             continue
         if key.startswith("camera_"):  # perfil de câmera do clipe (1.6): pela receita, tests/test_entrada_camera.py
+            continue
+        if key.startswith("manivela"):  # 1.6: tempo do clipe (`Sequence.src_frame`), tests/test_camera_tempo.py
             continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)

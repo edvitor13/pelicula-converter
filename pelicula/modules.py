@@ -100,6 +100,9 @@ MODULES: tuple[Module, ...] = (
     Module("cor_simples", N_("Cor simples"),
            N_("No modo Edição: conta-gotas do balanço de branco, clicar numa cor e mudar só ela, igualar a outro "
               "clipe ou a uma imagem, pele natural, degradê e grupos de cor."), "cor"),
+    Module("camera_cinema", N_("Câmera de cinema"),
+           N_("Obturador de película (o rastro de movimento de 180° a partir de vídeo de 50, 60 ou 120 qps) e "
+              "manivela por clipe no modo Edição (16 ou 18 qps, com a oscilação da mão)."), "pelicula", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -223,6 +226,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
             used.add(module_id)
     if v.get("lut_on") and v.get("lut_arquivo"):
         used.add("luts")
+    if v.get("obturador_on"):  # 1.6: câmera de cinema
+        used.add("camera_cinema")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):
@@ -240,6 +245,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         clips = getattr(sequence, "clips", [])
         if any(getattr(c, "color_group", "") or colorsimple.active(c.values) for c in clips):
             used.add("cor_simples")
+        if any(c.values.get("manivela", "nenhuma") != "nenhuma" for c in clips if c.kind == "video"):
+            used.add("camera_cinema")  # 1.6: manivela
     for subs in (subtitles, getattr(sequence, "subtitles", None)):
         if subs is not None and not subs.is_empty():
             used.add("legendas")

@@ -599,8 +599,35 @@ class Sequence:
             s = self.time_map(clip).src_at(1 / self.fps) if clip.frozen else self.src_time(clip, t + 1)
         else:
             s = self.src_time(clip, t)
+        if not clip.frozen and clip.values.get("manivela", "nenhuma") != "nenhuma":  # 1.6: manivela (tempo_camera)
+            s += self.crank_offset(clip, t)
         f = int(math.floor(s * src.fps + EPS))
         return min(max(f, 0), max(0, src.frames - 1))
+
+    def crank_offset(self, clip: Clip, t: int) -> float:
+        """1.6: segundos que a oscilação da manivela soma ao instante do arquivo no quadro t (0 sem ela)."""
+        from . import tempo_camera
+        v = clip.values
+        if tempo_camera.crank_rate(v.get("manivela")) <= 0:
+            return 0.0
+        return tempo_camera.crank_offset((t - clip.start) / self.fps, float(v.get("manivela_oscila", 0.0)),
+                                         int(v.get("manivela_semente", 0)))
+
+    def src_window(self, clip: Clip, t: int, angle: float) -> list[tuple[int, float]] | None:
+        """1.6, obturador do look (`tempo_camera`): os quadros do arquivo (e os pesos) que a janela aberta do
+        obturador cobre no quadro t, ou None quando o clipe não tem o que misturar (menos do dobro de quadros do
+        arquivo por quadro da sequência, imagem, congelado ou sem arquivo). Mesma regra de `src_frame`."""
+        if angle <= 0 or clip.frozen:
+            return None
+        src = self.sources.get(clip.src)
+        if src is None or src.is_image or not src.is_file or src.fps <= 0:
+            return None
+        s0, s1 = self.src_time(clip, t), self.src_time(clip, t + 1)
+        if clip.values.get("manivela", "nenhuma") != "nenhuma":
+            s0 += self.crank_offset(clip, t)
+            s1 += self.crank_offset(clip, t + 1)
+        from . import tempo_camera
+        return tempo_camera.clip_window(s0, s1, src.fps, src.frames, angle, clip.reverse)
 
     def max_dur(self, clip: Clip, src_in: float | None = None) -> int:
         """Maior duração (quadros) que o arquivo permite a partir de `src_in` (no sentido em que o clipe toca)."""
@@ -1155,6 +1182,11 @@ class Sequence:
         if c is None:
             return
         clean = editparams.SCHEMAS[c.kind].sanitize(values)
+        if c.kind == VIDEO and clean.get("manivela") != c.values.get("manivela", "nenhuma"):
+            from . import tempo_camera  # 1.6: a cadência da manivela acelera o clipe (o som segue pela velocidade)
+            old = tempo_camera.crank_factor(self.fps, c.values.get("manivela"))
+            clean["velocidade"] = float(clean.get("velocidade", 1.0)) * tempo_camera.crank_factor(
+                self.fps, clean.get("manivela")) / old
         speed = clean.get("velocidade", 1.0)
         if abs(speed - c.speed) > 1e-9:
             self.set_speed(cid, speed)

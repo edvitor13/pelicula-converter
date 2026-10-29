@@ -186,6 +186,11 @@ PROPORCOES = [
 ]
 
 
+# 1.6: ângulos do obturador (`tempo_camera`); a escolha não anima (a janela decide quais quadros ler)
+ANGULOS = [("45", "45°"), ("90", "90°"), ("144", "144°"), ("172.8", "172,8° (sem cintilação a 50 Hz)"),
+           ("180", "180° (o padrão do cinema)"), ("270", "270°"), ("360", "360° (todo aberto)")]
+
+
 def F(key, label, default, lo, hi, step=0.01, decimals=2, unit="", tip="", advanced=False, percent=False):
     return Param(key, label, "float", default, lo, hi, step, decimals, unit, None, tip, advanced, percent)
 
@@ -549,6 +554,17 @@ SECTIONS: list[Section] = [
           "Quanto o matiz pode se afastar da cor da pele. Estreite se madeira ou areia entrarem na máscara.",
           advanced=True),
     ], "Frente, fundo e pele com ajustes próprios"),
+
+    # 1.6 (`tempo_camera.py`, módulo Beta "camera_cinema"): obturador de película a partir de vídeo rápido.
+    Section("obturador", "Obturador de película", "obturador_on", [
+        B("obturador_on", "Ativo", False),
+        C("obturador_angulo", "Ângulo do obturador", "180", ANGULOS,
+          "Quanto tempo de cada quadro o obturador fica aberto: 180° = metade (1/48 s a 24 qps), o rastro de "
+          "movimento do cinema. Vale quando o vídeo tem pelo menos o dobro dos quadros por segundo da saída "
+          "(50, 60 ou 120 qps exportados a 24, 25 ou 30): os quadros dentro da janela aberta são misturados na luz. "
+          "No modo Película, a exportação com outra taxa (a prévia da exportação mostra); no modo Edição, cada "
+          "clipe rápido numa sequência mais lenta."),
+    ], "Rastro de movimento de uma câmera de cinema"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])

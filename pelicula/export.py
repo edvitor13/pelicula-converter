@@ -742,7 +742,14 @@ def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, f
     if seq is not None:
         from .sequence import SequenceReader
         return SequenceReader(seq, f.dec_w, f.dec_h, frames.depth, start, total, hq=True, perf=perf,
-                              fps_out=fps_out), 0
+                              fps_out=fps_out, shutter=frames.shutter), 0
+    from . import tempo_camera
+    if fps_out and tempo_camera.active(frames.shutter, float(info.fps), frames.fps):
+        # 1.6, obturador: o arquivo na taxa dele; cada quadro da saída mistura os quadros da janela aberta
+        first = round(start / info.fps * frames.fps)
+        return tempo_camera.WindowReader(info, f.dec_w, f.dec_h, frames.depth, first, total, frames.fps,
+                                         frames.shutter, hq=True, perf=perf, crop=f.crop,
+                                         profile=frames.profile), 0
     if fps_out:
         # Com troca de fps a decodificação começa no tempo e não no quadro.
         reader = media.FrameReader(info, f.dec_w, f.dec_h, frames.depth, 0, None, fps_out, hq=True, perf=perf,
@@ -761,10 +768,18 @@ def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: Export
     frame = max(0, min(int(frame), info.frames - 1))
     if seq is not None:
         from . import sequence
-        img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True)
+        img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True, shutter=frames.shutter)
     else:
-        img = media.grab_frame(info, frame, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop,
-                               profile=frames.profile)
+        img = None
+        index = round(frame * frames.fps / info.fps) if s.fps != "original" else frame
+        from . import tempo_camera
+        win = tempo_camera.file_window(index, frames.fps, float(info.fps), frames.shutter, info.frames)
+        if win is not None:  # 1.6, obturador: a mesma janela da exportação
+            img = tempo_camera.grab_window(info, win, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop,
+                                           profile=frames.profile)
+        if img is None:
+            img = media.grab_frame(info, frame, f.dec_w, f.dec_h, frames.depth, hq=True, crop=f.crop,
+                                   profile=frames.profile)
     index = round(frame * frames.fps / info.fps) if s.fps != "original" else frame
     return frames.render(engine, img, index)
 

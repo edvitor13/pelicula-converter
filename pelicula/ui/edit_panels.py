@@ -23,7 +23,7 @@ from .widgets import SectionCard, Segmented, timecode
 
 THUMB = QSize(72, 42)
 # 1.6: as seções de cor novas (acrescentadas no fim de `editparams.VIDEO_SECTIONS`) aparecem depois destas.
-DISPLAY_AFTER = {"pele": "cor", "alvo": "hsl", "degrade": "efeitos"}
+DISPLAY_AFTER = {"pele": "cor", "alvo": "hsl", "degrade": "efeitos", "manivela": "tempo"}  # 1.6: manivela
 
 
 def display_order(sections):

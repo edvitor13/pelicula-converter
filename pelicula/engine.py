@@ -405,6 +405,38 @@ class Engine:
         grid.release()
         return np.frombuffer(data, dtype=np.float32).reshape(-1, 3).copy()
 
+    # ------------------------------------------------------------ 1.6: obturador (tempo_camera)
+    def temporal_blend(self, images: list[np.ndarray], weights: list[float], curve: int, cv: bool) -> np.ndarray:
+        """Média ponderada de quadros do mesmo tamanho na luz linear da curva `curve` (`look.input_id`; `cv`: código
+        de 10 bits numa fonte de faixa legal), devolvida no valor da mesma curva em float32 (h × w × 3; × 4 com RGBA
+        pré-multiplicado, misturado pela cobertura). `tempo_camera.ACC` soma 4 quadros por passo; `ENC` volta à
+        curva. O obturador do look (`frame.Recipe.montage`)."""
+        from . import tempo_camera as tc
+        self._lazy_program("shutter_acc", tc.ACC)
+        self._lazy_program("shutter_enc", tc.ENC)
+        h, w = images[0].shape[:2]
+        alpha = images[0].ndim == 3 and images[0].shape[2] == 4
+        size = (int(w), int(h))
+        accs = (self._target("shutter_a", size, dtype="f4"), self._target("shutter_b", size, dtype="f4"))
+        common = {"u_curve": int(curve), "u_cv": int(bool(cv)), "u_alpha": int(alpha)}
+        prev = None
+        for n, i in enumerate(range(0, len(images), 4)):
+            chunk = images[i:i + 4]
+            ws = [float(x) for x in weights[i:i + 4]] + [0.0] * (4 - len(chunk))
+            texs = {f"t_f{j}": self._clip_texture(1000 + j, img) for j, img in enumerate(chunk)}
+            for j in range(len(chunk), 4):
+                texs[f"t_f{j}"] = texs["t_f0"]
+            texs["t_prev"] = prev[0] if prev is not None else texs["t_f0"]
+            dst = accs[n % 2]
+            self._run("shutter_acc", dst, texs, {**common, "u_prev": int(prev is not None), "u_n": len(chunk),
+                                                 "u_w": tuple(ws)})
+            prev = dst
+        out = self._target("shutter_out", size, dtype="f4")
+        self._run("shutter_enc", out, {"t_acc": prev[0]}, common)
+        comps = 4 if alpha else 3
+        data = out[1].read(components=comps, alignment=1, dtype="f4")
+        return np.frombuffer(data, dtype=np.float32).reshape(h, w, comps).copy()
+
     # ------------------------------------------------------------ modo Edição
     def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:
         h, w = img.shape[:2]

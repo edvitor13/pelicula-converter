@@ -79,6 +79,13 @@ class Recipe:
         `media.float_input`); None sem look."""
         return (self.values or {}).get("entrada")
 
+    @property
+    def shutter(self) -> float:
+        """1.6: o ângulo do obturador do look em graus (0 = desligado; `tempo_camera`). Os leitores pedem os quadros
+        da janela aberta com ele: `tempo_camera.WindowReader` (arquivo), `sequence.grab`/`SequenceReader` (Edição)."""
+        from . import tempo_camera
+        return tempo_camera.shutter_angle(self.values)
+
     def with_(self, **kw) -> "Recipe":
         """Cópia com alguns campos trocados (ex.: a prévia em 16 bits para comparar com a exportação)."""
         return replace(self, **kw)
@@ -99,8 +106,13 @@ class Recipe:
         """Passo 2: as camadas da montagem viram uma imagem (no tamanho da receita); uma imagem passa direto.
         `neutral`: sem os ajustes de cor dos clipes (a imagem "antes" da comparação no modo Edição)."""
         from .sequence import FrameLayers
+        from .tempo_camera import Stack
+        if isinstance(img, Stack):  # 1.6, obturador: os quadros do arquivo misturados na luz linear do look
+            return self.blend(engine, img)
         if not isinstance(img, FrameLayers):
             return img
+        if any(li.stack is not None for li in img.layers):  # 1.6, obturador por clipe (modo Edição)
+            img = FrameLayers(img.frame, [self._blend_layer(engine, li) for li in img.layers])
         w, h = self.montage_size()
         crop = self.fit.canvas_crop if self.fit is not None else None
         from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
@@ -113,6 +125,33 @@ class Recipe:
                       float_out=self.values is not None and not self.alpha)
         return engine.compose(img, self.seq, w, h, self.depth, neutral=neutral, crop=crop,
                               light=light_of(self.values, self.legal), **kw)
+
+    def blend(self, engine, stack, curve: tuple[int, bool] | None = None):
+        """1.6, obturador: a média ponderada dos quadros (`tempo_camera.Stack`) na luz linear da curva (a entrada do
+        look, na faixa da receita), de volta no valor da curva (float32, a imagem que o look lê)."""
+        from . import tempo_camera
+        if len(stack.images) == 1:
+            return stack.images[0]
+        cid, cv = curve if curve is not None else tempo_camera.curve_of(self.values, self.legal)
+        return engine.temporal_blend(list(stack.images), list(stack.weights), cid, cv)
+
+    def _blend_layer(self, engine, li):
+        """Uma camada com os quadros da janela do obturador vira a mistura deles, na curva do próprio clipe (o perfil
+        de câmera dele, com a faixa do arquivo; ou a entrada do look)."""
+        if li.stack is None:
+            return li
+        from . import camera, media, tempo_camera
+        from .sequence import LayerImage
+        clip = li.layer.clip
+        legal = self.legal
+        values = self.values
+        if camera.clip_profile(clip.values) is not None:
+            src = self.seq.sources.get(clip.src) if self.seq is not None else None
+            legal = media.legal_range(src.to_info()) if src is not None else self.legal
+            values = camera.clip_values(clip.values)
+        imgs, ws = li.stack
+        img = self.blend(engine, tempo_camera.Stack(list(imgs), list(ws)), tempo_camera.curve_of(values, legal))
+        return LayerImage(li.layer, img)
 
     def look_values(self, index: int) -> dict:
         """Passo 3: os ajustes do look no quadro `index` da saída (com as chaves de animação avaliadas)."""

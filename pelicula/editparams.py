@@ -14,7 +14,7 @@ import copy
 from typing import Any
 
 from .i18n import N_
-from .params import ENTRADAS, LOGC3_EIS, B, C, F, Param, Schema, Section
+from .params import ENTRADAS, LOGC3_EIS, B, C, F, I, Param, Schema, Section
 
 # Faixas de cor do HSL: (chave, rótulo, matiz central em graus no círculo de cores RGB).
 HSL_COLORS: list[tuple[str, str, float]] = [
@@ -229,6 +229,24 @@ VIDEO_SECTIONS += [
     ], "Céu ou chão com cor e luz próprias"),
 ]
 
+# 1.6, manivela (`tempo_camera.py`, módulo Beta "camera_cinema"): o clipe "filmado" a 16/18 qps e projetado na taxa da
+# sequência. Trocar a cadência acelera o clipe (`Sequence.set_values`: 24 ÷ 16 = 1,5×; o som segue pela velocidade); a
+# oscilação da mão desloca o instante de cada imagem (`Sequence.src_frame`). Padrão: sem manivela (o clipe de sempre).
+VIDEO_SECTIONS += [
+    Section("manivela", "Manivela", None, [
+        C("manivela", "Cadência da manivela", "nenhuma", [
+            ("nenhuma", N_("Normal (sem manivela)")), ("16", N_("16 qps (cinema mudo)")),
+            ("18", N_("18 qps (Super 8, manivela)")), ("20", N_("20 qps")), ("22", N_("22 qps"))],
+          "Quadros por segundo em que a câmera de manivela teria filmado. Projetado na velocidade da sequência, o "
+          "movimento fica mais rápido e aos saltos, como nos filmes mudos: escolher a cadência acelera o clipe "
+          "(16 qps numa sequência de 24 = 1,5×) e o som acompanha pela velocidade."),
+        _pct("manivela_oscila", "Oscilação da mão", lo=0.0,
+             tip="A mão não gira a manivela num ritmo perfeito: a velocidade oscila um pouco, sem atrasar o clipe. "
+                 "Só a imagem oscila; o som segue a velocidade média (diferença de no máximo 50 ms com 100%)."),
+        I("manivela_semente", "Semente", 3, 0, 9999, "Muda o jeito da mão.", advanced=True),
+    ], "Cadência de câmera de manivela (16 ou 18 qps)"),
+]
+
 AUDIO_SECTIONS: list[Section] = [
     Section("som", "Som", None, [
         F("volume", "Volume", 0.0, -60, 12, 0.5, 1, " dB"),
@@ -322,6 +340,7 @@ SPARSE_KEYS: set[str] = {
     "entrada_zoom", "entrada_quadros", "entrada_clarao",
     "saida_suavidade", "saida_centro_x", "saida_centro_y", "saida_anel",
     "camera_entrada", "camera_reescalado", "camera_ei",  # 1.6: perfil de câmera do clipe (`camera.py`)
+    "manivela", "manivela_oscila", "manivela_semente",  # 1.6: manivela (`tempo_camera.py`)
 }
 SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
