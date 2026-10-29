@@ -94,6 +94,7 @@ As três cópias, resumidas:
 | **Exposição** | −3 a +3 EV | 0 EV | Mais ou menos luz, antes de qualquer curva (como abrir ou fechar o diafragma). |
 | **Temperatura** | −100 a +100 | 0 | Negativo esfria, positivo esquenta. Em +100: vermelho +0,28 EV e azul −0,38 EV. |
 | **Tonalidade** | −100 a +100 | 0 | Negativo puxa para verde, positivo para magenta. Em +100: verde −0,22 EV, vermelho e azul +0,08 EV. |
+| **Proteger cores saturadas** (1.6) | 0 a 100% | 0% | Traz com suavidade para dentro do Rec.709 as cores que a câmera grava além dele (LED, neon, céu muito saturado), logo depois da conversão do gamut e antes do look e do negativo. Sem isso, uma dessas cores chega com um canal "negativo", que vira zero: o tom muda de repente e o negativo do Laboratório vê um canal sem exposição. Com 100%, a cor mais saturada que o gamut da câmera guarda cai na borda do Rec.709; as cores comuns (até ~80% do caminho até a borda) não mudam. Abaixo de 100% é uma mistura: as cores mais extremas ainda podem passar da borda. É a compressão da *ACES Reference Gamut Compression*, no espaço do app. Presets não mudam. Chave `proteger_cores`. |
 
 Perfis disponíveis:
 

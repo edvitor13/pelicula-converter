@@ -54,7 +54,7 @@ INTERNAL_TEXT = {
 }
 # Ajustes do clipe, não do look: escolher um preset ou carregar um look .json não muda (como no app,
 # presets.SOURCE_KEYS que existem no plugin) — o perfil e a faixa do vídeo dependem do clipe no Resolve.
-KEEP_ON_PRESET = ("entrada", "faixa_video", "logc3_ei")
+KEEP_ON_PRESET = ("entrada", "faixa_video", "logc3_ei", "proteger_cores")
 
 
 class OfxError(RuntimeError):

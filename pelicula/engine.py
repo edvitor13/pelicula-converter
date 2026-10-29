@@ -203,7 +203,7 @@ class Engine:
         lin = self._target("lin", (w, h))
         if U.get("u_scan_on"):
             U["u_text_aspect"] = self._edge_text(plan.edge_text)
-        self._run("base", lin, {"t_in": self.input_tex, "t_text": self._text_tex}, U)
+        self._run("base", lin, {"t_in": self.input_tex, "t_text": self._text_tex}, {**look.SPARSE_UNIFORMS, **U})
 
         soft = lin
         if plan.soft_sigma > 0:
@@ -338,7 +338,8 @@ class Engine:
         info = lut_info(vals.get("lut_arquivo", "")) if vals.get("lut_on") else None
         plan = look.build_plan(vals, n * n, n, 0, 24.0, info, dither=False, legal=legal)
         out = self._target("bake", (n * n, n), dtype="f4")
-        self._run("bake", out, {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)}, plan.uniforms)
+        self._run("bake", out, {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)},
+                  {**look.SPARSE_UNIFORMS, **plan.uniforms})
         data = out[1].read(components=3, alignment=1, dtype="f4")
         grid.release()
         return np.frombuffer(data, dtype=np.float32).reshape(-1, 3).copy()

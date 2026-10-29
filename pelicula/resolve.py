@@ -230,7 +230,7 @@ def range_control() -> Ctl:
 def input_controls() -> list[Ctl]:
     """Perfil do vídeo, faixa, exposição e balanço (o começo dos nós Cor e Laboratório)."""
     return [ctl("entrada", "Perfil do video", ENTRADA_TIP), range_control(), ctl("logc3_ei", "EI do LogC3"),
-            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade")]
+            ctl("exposicao"), ctl("temperatura"), ctl("tint", "Tonalidade"), ctl("proteger_cores")]
 
 
 def cor_controls() -> list[Ctl]:
@@ -594,6 +594,21 @@ PC_DEVICE float3 pc_to_linear(float3 c, int id, int cv) {
     if (id >= 14) return pc_cam_dec(c, id);
     return make_float3(pc_cineon_dec(c.x), pc_cineon_dec(c.y), pc_cineon_dec(c.z));
 }
+// Proteger cores saturadas (1.6; shaders.gamutCompress, ACES Reference Gamut Compression): limites em PC_GCL
+PC_DEVICE float pc_gc_compress(float d, float lim, float thr) {
+    if (d < thr) return d;
+    float s = (lim - thr) / _powf(_powf((1.0f - thr) / (lim - thr), -PC_GC_PWR) - 1.0f, 1.0f / PC_GC_PWR);
+    float nd = (d - thr) / s;
+    return thr + (d - thr) / _powf(1.0f + _powf(nd, PC_GC_PWR), 1.0f / PC_GC_PWR);
+}
+PC_DEVICE float3 pc_gamut_compress(float3 c, float3 lim) {
+    float a = _fmaxf(c.x, _fmaxf(c.y, c.z));
+    if (a == 0.0f) return c;
+    float aa = _fabs(a);
+    return make_float3(a - pc_gc_compress((a - c.x) / aa, lim.x, PC_GC_THR_R) * aa,
+                       a - pc_gc_compress((a - c.y) / aa, lim.y, PC_GC_THR_G) * aa,
+                       a - pc_gc_compress((a - c.z) / aa, lim.z, PC_GC_THR_B) * aa);
+}
 """
 
 K_LOOK = r"""
@@ -704,6 +719,9 @@ B_INPUT = r"""
     lin_in = pc_mat3(make_float3(PC_GAM[ent * 9 + 0], PC_GAM[ent * 9 + 1], PC_GAM[ent * 9 + 2]),
                      make_float3(PC_GAM[ent * 9 + 3], PC_GAM[ent * 9 + 4], PC_GAM[ent * 9 + 5]),
                      make_float3(PC_GAM[ent * 9 + 6], PC_GAM[ent * 9 + 7], PC_GAM[ent * 9 + 8]), lin_in);
+    if (v_proteger_cores > 0.0f)
+        lin_in = pc_lerp3(lin_in, pc_gamut_compress(lin_in, make_float3(PC_GCL[ent * 3 + 0], PC_GCL[ent * 3 + 1],
+                                                                        PC_GCL[ent * 3 + 2])), v_proteger_cores);
 """
 
 # Exposição e balanço (u_gain do app) sobre `lin`; `gx` soma ganhos por canal (cintilação etc., no OFX).
@@ -794,6 +812,9 @@ def _cor_tables(dialect: str) -> str:
     eis = [c[0] for c in params.PARAMS["logc3_ei"].choices]
     out += _table(dialect, "PC_LC3", [float(x) for ei in eis for i, x in enumerate(look.LOGC3_EI[ei]) if i != 1])
     out += f"#define PC_LC3_STD ({eis.index('800')})\n"
+    out += _table(dialect, "PC_GCL", [x for e in entradas for x in look.gamut_limits(look.INPUT_GAMUT[e])])
+    out += (_define("PC_GC_THR_R", look.GC_THRESHOLDS[0]) + _define("PC_GC_THR_G", look.GC_THRESHOLDS[1])
+            + _define("PC_GC_THR_B", look.GC_THRESHOLDS[2]) + _define("PC_GC_PWR", look.GC_POWER))
     gam = []
     for e in entradas:
         m = look.gamut_to_709(look.INPUT_GAMUT[e])

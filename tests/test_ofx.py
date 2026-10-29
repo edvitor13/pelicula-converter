@@ -382,7 +382,7 @@ def test_video_range_is_a_plugin_control_in_the_input_group():
     assert ofx.choice_labels(s.ctl)[0].startswith("Vídeo") and ofx.choice_labels(s.ctl)[1].startswith("Cheia")
     src = (ROOT / "plugins" / "ofx" / "generated" / "pc_params.h").read_text(encoding="ascii")
     assert ofx._cstr("Vídeo (faixa legal, 64–940)") in src
-    assert set(ofx.KEEP_ON_PRESET) == {"entrada", "faixa_video", "logc3_ei"}
+    assert set(ofx.KEEP_ON_PRESET) == {"entrada", "faixa_video", "logc3_ei", "proteger_cores"}
     assert {k for k in presets.SOURCE_KEYS if k in fields} <= set(ofx.KEEP_ON_PRESET)  # como no app
 
 

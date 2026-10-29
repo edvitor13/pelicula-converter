@@ -576,6 +576,39 @@ vec3 colorPipe(vec3 lin) {
     }
     return y;
 }
+
+// ---------------------------------------------------------------- 1.6: proteger cores saturadas
+// Compressão suave do gamut logo depois da matriz da câmera (u_gamut), antes do look e do negativo. Algoritmo da
+// "ACES Reference Gamut Compression" (Academy Software Foundation / AMPAS, especificação em CC BY 4.0): a
+// distância de cada canal ao acromático A = máx(r, g, b) é d = (A − c)/|A|; abaixo do limiar t nada muda, acima
+// a distância é comprimida por d' = t + (d − t)/(1 + ((d − t)/s)^p)^(1/p), com s tal que o limite l vá para 1.
+// Aqui o espaço é o Rec.709 linear do app e o limite (u_gc_lim, look.gamut_limits) cobre a fronteira inteira do
+// gamut da câmera: a cor mais saturada que ela grava cai na borda do Rec.709, sem canal negativo.
+uniform float u_gc_amt;  // 0..1 (proteger_cores); 0 = a cor de sempre, bit a bit (look.SPARSE_UNIFORMS)
+uniform vec3 u_gc_lim;   // limite da distância por canal (ciano, magenta, amarelo)
+const vec3 GC_THR = vec3(0.815, 0.803, 0.880);
+const float GC_PWR = 1.2;
+
+float gcCompress(float d, float lim, float thr) {
+    if (d < thr) return d;
+    float s = (lim - thr) / pow(pow((1.0 - thr) / (lim - thr), -GC_PWR) - 1.0, 1.0 / GC_PWR);
+    float nd = (d - thr) / s;
+    return thr + (d - thr) / pow(1.0 + pow(nd, GC_PWR), 1.0 / GC_PWR);
+}
+
+vec3 gamutCompress(vec3 c, vec3 lim) {
+    float a = max(c.r, max(c.g, c.b));
+    if (a == 0.0) return c;
+    float aa = abs(a);
+    vec3 d = (vec3(a) - c) / aa;
+    vec3 cd = vec3(gcCompress(d.r, lim.r, GC_THR.r), gcCompress(d.g, lim.g, GC_THR.g),
+                   gcCompress(d.b, lim.b, GC_THR.b));
+    return vec3(a) - cd * aa;
+}
+
+vec3 protectGamut(vec3 c) {
+    return u_gc_amt > 0.0 ? mix(c, gamutCompress(c, u_gc_lim), u_gc_amt) : c;
+}
 """
 
 BASE = COMMON + """
@@ -634,7 +667,8 @@ vec3 imageLin(vec2 uv) {
     } else {
         code = texture(t_in, lens(uv, 1.0)).rgb;
     }
-    return max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
+    return max(protectGamut(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1)), vec3(0.0))
+           * exp2(u_gain);
 }
 
 float vignette(vec2 uv) {
@@ -1062,7 +1096,8 @@ uniform mat3 u_gamut;
 uniform vec3 u_gain;
 void main() {
     vec3 code = texelFetch(t_grid, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec3 lin = max(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1), vec3(0.0)) * exp2(u_gain);
+    vec3 lin = max(protectGamut(u_gamut * toLinear(code, u_input, u_input_cv == 1 && u_legal == 1)), vec3(0.0))
+               * exp2(u_gain);
     f_out = vec4(colorPipe(lin), 1.0);
 }
 """

@@ -241,6 +241,11 @@ SECTIONS: list[Section] = [
         F("exposicao", "Exposição", 0.0, -3, 3, 0.05, 2, " EV"),
         F("temperatura", "Temperatura", 0.0, -100, 100, 1, 0, "", "Negativo esfria, positivo esquenta."),
         F("tint", "Tonalidade", 0.0, -100, 100, 1, 0, "", "Negativo puxa para verde, positivo para magenta."),
+        F("proteger_cores", "Proteger cores saturadas", 0.0, 0, 1, percent=True,
+          tip="Traz com suavidade para dentro do Rec.709 as cores que a câmera grava além dele (LED, neon, céu "
+              "muito saturado), antes do look e do negativo: em vez de estourar um canal e mudar de tom de "
+              "repente, elas chegam à borda das cores. As cores comuns não mudam. Trocar de preset não muda este "
+              "ajuste."),
     ], "Perfil de cor e balanço"),
 
     Section("lab", "Laboratório (negativo e cópia)", "lab_on", [

@@ -52,7 +52,9 @@ do OpenFX. Para desinstalar, apague essa pasta.
    N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon e, desde a 1.6, Canon Log 2
    e 3, F-Log, F-Log2, F-Log2 C, D-Log, S-Log2 e L-Log), **HLG** ou **PQ** para vídeo HDR (celulares gravam em
    HLG) ou *Rec.709* se a linha do tempo já está em Rec.709 / Gamma 2.4 (ou ponha um *Color Space Transform*
-   antes). No LogC3, **EI do LogC3** escolhe a curva do EI do clipe (padrão 800). **Faixa do vídeo** só muda
+   antes). No LogC3, **EI do LogC3** escolhe a curva do EI do clipe (padrão 800). **Proteger cores saturadas**
+   (1.6, padrão 0%) traz LED, neon e céu muito saturado para dentro do Rec.709 antes do look, como no app.
+   **Faixa do vídeo** só muda
    S-Log3, V-Log, N-Log, F-Log, F-Log2 e D-Log, curvas que os fabricantes escrevem no código de 10 bits (o
    cinza do S-Log3 é o código 420): deixe **Vídeo (faixa
    legal)** com o clipe em *Data Levels* Auto/Video (o padrão do Resolve para arquivos de câmera, que ele
@@ -180,12 +182,13 @@ atualizar, instale de novo pela versão nova do app: a pasta inteira é trocada.
    **ou** o *Cor*, não os dois: o *Cor* já contém o laboratório inteiro (com a chave *Laboratorio negativo
    e copia*) mais o look paramétrico, a cópia 2383/2393/3513 e o envelhecimento.
 3. **Gestão de cor.** No primeiro nó, escolha em **Perfil do video** a curva da câmera (S-Log3, LogC3,
-   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon) ou HLG / PQ
-   para vídeo HDR. Se a linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um
+   LogC4, V-Log, N-Log, Log3G10, Blackmagic Film Gen 5, Apple Log, DaVinci Intermediate, Cineon e, desde a
+   1.6, Canon Log 2 e 3, F-Log, F-Log2, F-Log2 C, D-Log, S-Log2 e L-Log) ou HLG / PQ para vídeo HDR. Se a linha do tempo já está em Rec.709 / Gamma 2.4, deixe *Rec.709*. Outra opção é pôr um
    *Color Space Transform* antes do primeiro nó convertendo para Rec.709 / Gamma 2.4. A saída dos nós é
    Rec.709 (como no app). **Faixa do video**: *Video faixa legal* (padrão) para clipes em *Data Levels*
    Auto/Video; *Cheia* para clipes em *Full* ou log reescalado pela saída HDMI *Limited* (só muda S-Log3,
-   V-Log e N-Log; veja o plugin OpenFX acima).
+   V-Log, N-Log, F-Log, F-Log2 e D-Log; veja o plugin OpenFX acima). **EI do LogC3** e **Proteger cores
+   saturadas** funcionam como no plugin OpenFX.
 4. Na *Textura* e no *Projetor*, escolha a **mesma bitola** (ela muda o tamanho do grão, a maciez, o
    tremor e a vinheta). No *Projetor*, escolha os **quadros por segundo** da linha do tempo: o tremor, a
    cintilação e os defeitos seguem o tempo real.

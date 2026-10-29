@@ -287,6 +287,36 @@ def mat3_uniform(m: np.ndarray) -> tuple:
     return tuple(float(v) for v in np.asarray(m, dtype=np.float64).T.flatten())
 
 
+# "Proteger cores saturadas" (`proteger_cores`, shaders.gamutCompress): limiares, limites e potência da "ACES
+# Reference Gamut Compression" (Academy Software Foundation / AMPAS, especificação em CC BY 4.0), por canal
+# (ciano, magenta, amarelo). O limite de cada perfil é o maior entre o da ACES e a distância da fronteira do gamut
+# da câmera levada ao Rec.709: com 100%, o gamut inteiro da câmera cabe no Rec.709.
+GC_THRESHOLDS = (0.815, 0.803, 0.880)
+GC_LIMITS_ACES = (1.147, 1.264, 1.312)
+GC_POWER = 1.2
+
+# Uniforms da 1.6 que só vão no plano com o efeito ligado (o plano de um projeto antigo continua o mesmo,
+# `tests/test_project_migration.py`). Um programa guarda o último valor de cada uniform: o Engine manda estes
+# valores neutros antes do plano (passos "base" e "bake"), então desligar o efeito volta à cor de sempre.
+SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0}
+
+
+@lru_cache(maxsize=None)
+def gamut_limits(gamut: str) -> tuple[float, float, float]:
+    """Maior distância ao acromático, por canal, das cores da fronteira do gamut `gamut` (faces do cubo RGB da
+    câmera com um canal em 0) no Rec.709, nunca abaixo de `GC_LIMITS_ACES`."""
+    m = gamut_to_709(gamut)
+    t = np.linspace(0.0, 1.0, 129)
+    s, u = (a.ravel() for a in np.meshgrid(t, t))
+    z = np.zeros_like(s)
+    cam = np.concatenate([np.stack([z, s, u], 1), np.stack([s, z, u], 1), np.stack([s, u, z], 1)])
+    rgb = cam @ m.T
+    a = rgb.max(axis=1)
+    ok = a > 1e-9
+    far = ((a[ok, None] - rgb[ok]) / np.abs(a[ok, None])).max(axis=0)
+    return tuple(float(max(lim, x)) for lim, x in zip(GC_LIMITS_ACES, far))
+
+
 def _hash(i: int, s: int) -> float:
     x = (i * 0x9E3779B1 + s * 0x85EBCA77 + 0x165667B1) & 0xFFFFFFFF
     x ^= x >> 15
@@ -884,6 +914,10 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_input_cv"] = 1 if (code_value_curve(v["entrada"]) and not v.get("log_reescalado")) else 0
     U["u_legal"] = 1 if legal else 0
     U["u_gamut"] = mat3_uniform(gamut_to_709(INPUT_GAMUT.get(v["entrada"], "709")))
+    gc = float(v.get("proteger_cores", 0.0))
+    if gc > 0.0:  # Proteger cores saturadas (1.6): só ligado; desligado, o Engine manda o 0 (SPARSE_UNIFORMS)
+        U["u_gc_amt"] = gc
+        U["u_gc_lim"] = gamut_limits(INPUT_GAMUT.get(v["entrada"], "709"))
     temp = v["temperatura"] / 100.0
     tint = v["tint"] / 100.0
     gain = [v["exposicao"] + 0.28 * temp + 0.08 * tint,

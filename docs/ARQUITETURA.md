@@ -2807,3 +2807,36 @@ repositório).
 - **Leitura**: todos são log de câmera, então um arquivo de faixa legal é lido em float (29.1).
 - **Fora**: Apple Log 2 (a Apple não publicou a curva nem as primárias do Apple Wide Gamut; a documentação do
   AVFoundation só cita o nome) e o D-Log M da DJI (sem documento público da curva).
+
+### 29.4 Proteger cores saturadas
+
+`proteger_cores` (seção "entrada", 0 a 100%, padrão 0, em `presets.SOURCE_KEYS` e `ofx.KEEP_ON_PRESET`): LED,
+neon e céu muito saturado gravados num gamut largo saem da matriz da câmera (`u_gamut`) com um canal negativo no
+Rec.709 linear do app; o `max(…, 0)` de `imageLin` o zera e o tom muda de repente (o negativo do Laboratório vê
+um canal "sem exposição", plano M4). `shaders.protectGamut` comprime essas cores logo depois da matriz, antes do
+`max`, da exposição, do look e do negativo, em `imageLin` (prévia e exportação) e no `BAKE` (LUT exportado).
+
+- **Algoritmo**: o da *ACES Reference Gamut Compression* (Academy Software Foundation / AMPAS; a especificação,
+  docs.acescentral.com/rgc/specification, é CC BY 4.0, e a fórmula foi escrita a partir dela, sem copiar código).
+  A = máx(r, g, b); por canal, d = (A − c)/|A|; abaixo do limiar t nada muda; acima,
+  d' = t + (d − t)/(1 + ((d − t)/s)^p)^(1/p), com s escolhido para o limite l ir a 1 (a borda do gamut);
+  c' = A − d'·|A|. Limiares (ciano, magenta, amarelo) 0,815, 0,803, 0,880 e p = 1,2, os da ACES
+  (`look.GC_THRESHOLDS`, `GC_POWER`; no shader, `GC_THR`/`GC_PWR`). A ACES comprime para o AP1; aqui o alvo é o
+  Rec.709 linear do app.
+- **Limites por perfil** (`look.gamut_limits`, uniform `u_gc_lim`): a maior distância das cores da fronteira do
+  gamut da câmera (faces do cubo RGB dela com um canal em 0) levadas ao Rec.709, nunca abaixo dos limites da ACES
+  (1,147, 1,264, 1,312). Com 100% o gamut inteiro da câmera cabe no Rec.709, sem canal negativo; no Rec.709 os
+  limites são os da ACES (nada fora do cubo vem do arquivo).
+- **Força**: `mix(c, comprimida, u_gc_amt)`. Com 0 o shader nem chama a compressão (`u_gc_amt > 0.0`): a cor é a
+  de sempre, bit a bit. `u_gc_amt` e `u_gc_lim` só vão no plano com o efeito ligado, então o plano de um projeto
+  antigo continua o mesmo (`tests/test_project_migration.py`); como um programa guarda o último valor de cada
+  uniform, o Engine manda antes do plano os neutros de `look.SPARSE_UNIFORMS` (`u_gc_amt` = 0) nos passos
+  "base" e "bake". Abaixo de 100% as cores mais extremas ainda passam da borda (é uma mistura).
+- **Edição**: a montagem entrega a imagem antes do look; a proteção vale para o look sobre ela, como o perfil.
+- **Plugin**: `pc_gamut_compress` em `resolve.K_DECODE`, aplicado no fim de `B_INPUT`; tabela `PC_GCL` (3 limites
+  por perfil) e `PC_GC_THR_R/G/B`, `PC_GC_PWR`; o controle logo depois de *Tonalidade* nos nós Cor e Laboratório
+  (e no OFX).
+- **Testes** (`tests/test_entrada_gamut.py`): a fórmula de referência em float64 (dentro do limiar nada muda, o
+  limite vai à borda, monótona, sem quina no limiar); a GPU contra ela; a fronteira de cada gamut sem canal
+  negativo com 100%; manchas em S-Gamut3.Cine varrendo a saturação com saída contínua em três presets; 0% igual
+  a não ter o ajuste, também no LUT. `tests/test_resolve.py` confere o plugin contra o app.

@@ -389,6 +389,32 @@ def test_logc3_ei_control_matches_the_app(harness, gl_engine, kind, ei):
     assert np.abs(got - std).max() > 0.01
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("kind", resolve.COLOR_KINDS)
+@pytest.mark.parametrize("entrada, amt", [("slog3", 1.0), ("logc4", 0.6), ("dwg", 1.0), ("rec709", 1.0)])
+def test_proteger_cores_control_matches_the_app(harness, gl_engine, kind, entrada, amt):
+    """Proteger cores saturadas (1.6): a mesma compressão do app (look.gamut_limits por perfil); 0 = a de sempre."""
+    v = dict(presets.builtin_values("vision3_500t"), entrada=entrada, proteger_cores=amt, proj_on=False,
+             lut_on=False)
+    if kind == "laboratorio":
+        v = dict(_lab_app_values(v), proj_on=False, lut_on=False)
+    n = 13
+    got = harness.run(kind, v, _grid(n)).reshape(-1, 3)
+    assert np.abs(np.clip(gl_engine.bake_lut(v, n, legal=True), 0, 1) - got).max() < 2e-3
+    off = harness.run(kind, dict(v, proteger_cores=0.0), _grid(n)).reshape(-1, 3)
+    assert np.abs(got - off).max() > 0.01
+
+
+def test_proteger_cores_is_in_the_plugin():
+    src = SOURCES["cor"]
+    assert "pc_gamut_compress" in src and "Proteger cores saturadas" in src
+    m = re.search(r"PC_GCL\[(\d+)\] = \{", src)
+    assert int(m.group(1)) == 3 * len(params.PARAMS["entrada"].choices)
+    for kind in resolve.COLOR_KINDS:
+        names = [c.name for c in resolve.spec(kind).controls]
+        assert names[names.index("ui_tint") + 1] == "ui_proteger_cores"
+
+
 def test_profiles_of_16_are_in_the_plugin():
     src = SOURCES["cor"]
     for fn in ("pc_clog2_dec", "pc_clog3_dec", "pc_flog_dec", "pc_flog2_dec", "pc_dlog_dec", "pc_slog2_dec",

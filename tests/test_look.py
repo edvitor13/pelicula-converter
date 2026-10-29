@@ -51,7 +51,8 @@ def everything_on() -> dict:
         if p.kind == "bool":
             v[k] = True
     v.update(copia="k2383", vazamento=0.6, nevoa_forca=0.4, virada="sepia", maciez=0.5, nitidez=0.5, aberracao=2.0,
-             distorcao=0.1, cabelo=1.0, manchas=1.0, queima=1.0, emenda=1.0, cor_instavel=0.8, lut_arquivo="x.cube")
+             distorcao=0.1, cabelo=1.0, manchas=1.0, queima=1.0, emenda=1.0, cor_instavel=0.8, lut_arquivo="x.cube",
+             proteger_cores=0.5)
     return v
 
 
