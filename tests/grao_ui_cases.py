@@ -26,6 +26,7 @@ NEW = {
     "mtf_camadas": ("pelicula", "NumberRow", 0.0),
     "lab_grao": ("lab", "BoolRow", False),
     "hal_modelo": ("halacao", "ChoiceRow", "brilho"),
+    "lab_grao_modelo": ("lab", "ChoiceRow", "ruido"),  # 1.6: grão físico (módulo Beta "grao_fisico")
 }
 
 
@@ -103,6 +104,26 @@ def test_negative_grain_switch():
     assert look.build_plan(dict(st.values), 320, 180, 0, 24.0, None, dither=False).uniforms["u_grain_on"] == 2
     st.set("lab_grao", False)
     assert not row.sw.isChecked()
+
+
+def test_physical_grain_model_choice():
+    """1.6: o modelo do grão no negativo: "ruido" (o de sempre) ou "fisico" (grao_fisico.py, outro programa)."""
+    from pelicula.ui import grao_fisico_ui
+    st, cards = _look()
+    row = _row(cards, "lab_grao_modelo")
+    assert grao_fisico_ui.row(cards.values()) is row
+    assert [row.combo.itemData(i) for i in range(row.combo.count())] == ["ruido", "fisico"]
+    assert row.combo.itemText(1) == "Físico (grãos de prata)"
+    for key in ("lab_on", "grao_on", "lab_grao"):
+        st.set(key, True)
+    plan = lambda: look.build_plan(dict(st.values), 320, 180, 0, 24.0, None, dither=False).uniforms  # noqa: E731
+    assert plan()["u_grain_on"] == 2
+    row.combo.setCurrentIndex(1)
+    assert st.get("lab_grao_modelo") == "fisico"
+    u = plan()
+    assert u["u_grain_on"] == 3 and u["u_pg_r"] > 0
+    st.set("lab_grao_modelo", "ruido")  # o store manda no combo
+    assert row.combo.currentData() == "ruido" and plan()["u_grain_on"] == 2
 
 
 def test_new_labels_are_translated():

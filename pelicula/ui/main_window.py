@@ -46,7 +46,7 @@ from .scopes import Scopes
 from .timeline_view import HEADER_W, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
-from . import cor_ui
+from . import cor_ui, grao_fisico_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -3250,6 +3250,7 @@ class MainWindow(QMainWindow):
             "silencios": [self.tl_editor.btn_silences],
             "titulos_geradores": [self.bin.btn_new],  # e os editores no inspetor (`apply_modules`)
             **cor_ui.module_tools(self),  # 1.6: "cor_planos" e "cor_simples" (`ui/cor_ui.py`)
+            **grao_fisico_ui.module_tools(self),  # 1.6: "grao_fisico" (`ui/grao_fisico_ui.py`)
         }
 
     def apply_modules(self) -> None:

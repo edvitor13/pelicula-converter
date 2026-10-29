@@ -264,7 +264,7 @@ def _final_pg() -> str:
         ("// Um caminho completo. lin:", GLSL + "\n// Um caminho completo. lin:"),
         ("    dn += g_ng;\n", "    dn += g_ng;\n    dn += physGrain(dn, g_pg_pos, uint(u_pg_seed));  // 1.6: grão físico\n"),
         ("    vec2 uv = v_uv;\n",
-         "    vec2 uv = v_uv;\n    g_pg_pos = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y) * u_pg_k;\n"),
+         "    vec2 uv = v_uv;\n    g_pg_pos = gl_FragCoord.xy * u_pg_k;  // linha 0 da imagem: gl_FragCoord.y = 0,5\n"),
     )
     for old, new in anchors:
         assert src.count(old) == 1, old

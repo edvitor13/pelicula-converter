@@ -694,6 +694,38 @@ def test_negative_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engi
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("extra", [{}, dict(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0,
+                                            lab_processo="tech3", grao_cor=0.0, iso="500", lab_revelacao=1.0),
+                                   dict(lab_copia="nenhuma", grao_tamanho=2.5, grao_forca=2.0)],
+                         ids=["2383", "tech3_s8", "scan"])
+def test_physical_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: o grão físico (grao_fisico.py) do nó Laboratório = o do app: os mesmos discos, os mesmos pontos do spot e
+    a mesma densidade de cada camada. Parado no DCTL (o nó também vale como LUT), como o grão no negativo. Um disco
+    exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do float (cálculo em outra
+    ordem): só uma fração mínima dos pixels pode passar de 2,5 níveis de 8 bits."""
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico", **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got).max(axis=2) * 255
+        assert d.mean() < 0.5 and (d > 2.5).mean() < 2e-3, f"quadro {frame}: {d.max():.2f}"
+    noise = harness.run("laboratorio", dict(vals, lab_grao_modelo="ruido"), test_rgb, 0)
+    plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.5 and np.abs(got - noise).mean() * 255 > 0.5
+
+
+def test_physical_grain_constants_of_the_plugin_are_the_app_ones():
+    from pelicula import grao_fisico as gf
+    src = resolve.source("laboratorio", resolve.DCTL)
+    assert "ui_lab_grao_modelo" in src and "pc_pg_grain(dn, gq, ga, gs)" in src
+    assert f"#define PC_PG_N {gf.N_SAMPLES}" in src and f"#define PC_PG_RK {resolve.flt(gf.R_K)}" in src
+    # o nó Cor não tem o grão físico (nem o ruído dele)
+    cor = resolve.source("cor", resolve.DCTL)
+    assert "pc_pg_grain(" not in cor and "/*PGRAIN*/" not in cor
+
+
+@pytest.mark.gpu
 @pytest.mark.parametrize("extra", [dict(grao_forca=0.0), dict(grao_semente=31, grao_respiracao=0.4)],
                          ids=["so_respiracao", "com_grao"])
 def test_breathing_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):

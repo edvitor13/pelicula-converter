@@ -492,6 +492,10 @@ RENDER_CASES = [
                                     grao_cor=0.8, lab_revelacao=1.0)),
     ("respiracao", _neutral(grao_on=True, grao_forca=0.0, grao_respiracao=1.0)),
     ("respiracao_lab", _neutral(lab_on=True, grao_on=True, grao_respiracao=1.0, lab_grao=True)),
+    # 1.6: grão físico (pelicula/grao_fisico.py)
+    ("grao_fisico", _neutral(lab_on=True, lab_grao=True, grao_on=True, lab_grao_modelo="fisico")),
+    ("grao_fisico_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
+                                  grao_cor=0.8, lab_revelacao=1.0, iso="500", lab_grao_modelo="fisico")),
 ]
 
 
@@ -508,7 +512,10 @@ def test_full_frame_matches_the_app(core, gl_engine, test_rgb, name, vals):
         d = np.abs(want - got).max(axis=2) * 255
         assert np.percentile(d, 99) < 1.0 and d.mean() < 0.5, f"{name} quadro {frame}"
         limit = 4.0 if name in ("nitidez", "halacao") else 2.0
-        assert (d > limit).mean() < 5e-4, f"{name} quadro {frame}: {d.max():.2f}"
+        # grão físico: um disco exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do
+        # float (GLSL × C++); são pixels soltos
+        frac = 2e-3 if name.startswith("grao_fisico") else 5e-4
+        assert (d > limit).mean() < frac, f"{name} quadro {frame}: {d.max():.2f}"
 
 
 @pytest.mark.gpu

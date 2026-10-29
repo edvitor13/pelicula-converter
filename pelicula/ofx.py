@@ -253,8 +253,10 @@ def kernels_source() -> str:
                 + resolve._define("PC_DP", look.D_P))
     tables = (resolve._cor_tables(CPP) + resolve._lab_tables(CPP) + resolve._gauge_tables(CPP)
               + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP))
-    kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_LAB + resolve.K_CURVE
-              + resolve.K_RAND + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
+    # 1.6: K_RAND e o grão físico (K_PGRAIN) antes do laboratório, que soma o grão físico na densidade
+    kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_RAND + resolve.K_PGRAIN
+              + resolve.K_LAB.replace("/*PGRAIN*/", resolve.B_PGRAIN_LAB) + resolve.K_CURVE
+              + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
               ).replace("PC_DEVICE ", "static inline ")
     body = []
     body.append("\n// ---------------------------------------------------------------- valores (formato do app)\n")
@@ -286,6 +288,12 @@ def kernels_source() -> str:
     body.append("// colorPipe com o grao no negativo (grao.negative_grain)\n")
     body.append(f"static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in) {{\n{loc}{lab_ng}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6: a mesma conta com o grão físico (`ga_in` = fração por camada, `gq_in` = posição px@1080, raio e fração
+    # própria, `gs_in` = semente do quadro); a densidade de cada camada decide o resto dentro de pc_lab_path
+    lab_pg = resolve.B_LAB.replace("/*NGRAIN*/", "        ga = ga_in;\n        gq = gq_in;\n        gs = gs_in;\n")
+    body.append("// colorPipe com o grao fisico no negativo (grao_fisico.negative_grain)\n")
+    body.append("static inline float3 pc_colorpipe_pg(const pc_vals& V, float3 lin, float3 ga_in, float4 gq_in, "
+                f"int gs_in) {{\n{loc}{lab_pg}{resolve.B_LOOK}    return y;\n}}\n")
     frame_body = resolve.B_FRAME
     for a, b in _FRAME_FIX:
         assert a in frame_body, a
