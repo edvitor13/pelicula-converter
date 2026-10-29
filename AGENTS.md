@@ -45,6 +45,9 @@ pelicula/
   grao.py                    grão e textura da 1.6 (ARQUITETURA §30): modelos chamados por ganchos de build_plan
                              (maciez pelo grão, nitidez por camada, grão no negativo, halação física,
                              respiração por camada), constantes calibradas por datasheets
+  grao_fisico.py             1.6, grão físico (ARQUITETURA §30.7; módulo Beta grao_fisico): modelo booleano no
+                             negativo, gancho negative_grain (u_grain_on = 3, u_pg_*), GLSL e FINAL_PG (o FINAL
+                             com physGrain, compilado só quando usado), referência exata (covariance, pixel_stats)
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
@@ -178,7 +181,8 @@ pelicula/
                              um botão);
                              1.6, cor: cor_ui (ponto único de ligação com a janela), planes_ui (cartão da Cor
                              por planos), color_tools (barra "Cor simples" do inspetor), preview_tools (camadas
-                             da tela: Context, PreviewTools), preview_bar (zebra, falsa cor, referência)
+                             da tela: Context, PreviewTools), preview_bar (zebra, falsa cor, referência);
+                             1.6, grao_fisico_ui (a linha "Modelo do grão no negativo" sob o módulo grao_fisico)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -395,6 +399,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
 | `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, grão moldado pela cópia, halação física (área lisa igual), respiração (estatística, sem estado preso), LUT igual, determinismo |
 | `tests/test_grao_ui.py` | os controles de grão e textura da 1.6 nos cartões das seções (casos em `grao_ui_cases.py`, subprocesso offscreen) |
+| `tests/test_grao_fisico.py` | grão físico (1.6): padrão "ruido" e módulo Beta, plano em px@1080, constantes = `tools/ajustar_grao.py`, referência numpy do modelo booleano (cobertura média, variância exata, pico no meio, sinal da assimetria, correlação ~ raio), sigma D na abertura = datasheet, cópia molda o grão, LUT igual, determinismo sem estado preso, prévia = exportação, independência da resolução |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_entrada_base.py` | a entrada da 1.6 não muda os padrões: Película e Edição em 8/16 bits, LUT exportado e plugin iguais à BASE (`entrada_base.py` + `data/entrada_base.json`) |
 | `tests/test_entrada_leitura.py` | leitura de log com super-brancos (códigos acima de 940 sobrevivem, em float32) e 16 bits exatos da faixa legal (preto, cinza e branco) com o ffmpeg |

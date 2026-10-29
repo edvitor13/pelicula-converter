@@ -247,7 +247,8 @@ def test_each_module_hides_and_restores_its_tools(win):
                 "luts": cards["lut"], "scopes": win.hist, "curva": win.curve_switch, "davinci": win.act_resolve,
                 "exportar_lut": win.act_luts[0], "edicao": win.mode_switch, "medidor_som": win.meter,
                 "legendas": win.btn_subs, "silencios": win.tl_editor.btn_silences,
-                "cor_simples": win.color_tools.bar, "cor_planos": cards["planos"]}
+                "cor_simples": win.color_tools.bar, "cor_planos": cards["planos"],
+                "grao_fisico": next(r for r in cards["lab"].rows if r.param.key == "lab_grao_modelo")}
     for module_id in win._module_tools():  # os recursos em teste (1.6: "cor_planos") também, ligados à mão
         set_module(win, module_id, True)
     for module_id, items in win._module_tools().items():

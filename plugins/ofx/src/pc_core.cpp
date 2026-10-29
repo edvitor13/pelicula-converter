@@ -688,6 +688,23 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     const bool ngrain = grain && V.lab_on == 1 && V.lab_grao == 1;
     float3 ng_amp = make_float3(0.0f, 0.0f, 0.0f);
     if (ngrain) ng_amp = make_float3(PC_NG_AMP[0], PC_NG_AMP[1], PC_NG_AMP[2]) * ng_k;
+    // 1.6: grão físico (grao_fisico.negative_grain): o modelo booleano na densidade, em px@1080 (sem a compensação
+    // da prévia reduzida), a cada quadro como o grão de sempre
+    const bool pgrain = ngrain && V.lab_grao_modelo == PC_GRAO_FISICO;
+    float3 pg_amp = make_float3(0.0f, 0.0f, 0.0f);
+    float pg_r = 1.0f, pg_k = 1.0f;
+    int pg_seed = 0;
+    if (pgrain) {
+        float iso = PC_ISO[V.iso];
+        float mul = V.grao_forca * gauge(gi, 1) * std::pow(iso / 250.0f, 0.35f)
+                    * (V.lab_on == 1 ? std::pow(1.15f, V.lab_revelacao) : 1.0f);
+        pg_amp = make_float3(std::fmin(PC_PG_KAPPA[0] * mul, PC_PG_AMP_MAX), std::fmin(PC_PG_KAPPA[1] * mul, PC_PG_AMP_MAX),
+                             std::fmin(PC_PG_KAPPA[2] * mul, PC_PG_AMP_MAX));
+        pg_r = PC_PG_RK * (0.8f * V.grao_tamanho * gauge(gi, 0) * std::pow(iso / 250.0f, 0.18f));
+        pg_k = 1080.0f / H;
+        long long seed = (long long)V.grao_semente * 7919LL + (V.grao_animado == 1 ? frame : 0);
+        pg_seed = (int)(seed % 2147483647LL);
+    }
     // 1.6: respiração por camada (grao.breathing): a exposição de cada camada neste quadro, antes da cor
     const bool breath = V.grao_on == 1 && V.grao_respiracao > 0.0f;
     float3 breath_m = make_float3(1.0f, 1.0f, 1.0f);
@@ -744,7 +761,10 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                 if (F.leak_on > 0.0f) l = l + pc_leak(u, v, W / H, F.L0, F.L1, V.vazamento_cor, V.vazamento);
                 if (breath) l = make_float3(l.x * breath_m.x, l.y * breath_m.y, l.z * breath_m.z);
                 float3 yv;
-                if (ngrain) {
+                if (pgrain) {
+                    float4 gq = make_float4(((float)x + 0.5f) * pg_k, ((float)y + 0.5f) * pg_k, pg_r, V.grao_cor);
+                    yv = pc_colorpipe_pg(V, l, pg_amp, gq, pg_seed);
+                } else if (ngrain) {
                     float4 nf = noise.sample(u, v) * 2.08f;
                     float4 nc = noise.sample(u * 0.4347f + 0.311f, v * 0.4347f + 0.173f) * 2.08f;
                     yv = pc_colorpipe_ng(V, l, pc_neg_grain(nf, nc, V.grao_aspereza, V.grao_cor) * ng_amp);

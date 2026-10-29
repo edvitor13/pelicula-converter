@@ -36,6 +36,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
 29. [Entrada da câmera na 1.6](#29-entrada-da-câmera-na-16)
 30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
+    - [30.7 Grão físico: o modelo booleano no negativo](#307-grão-físico-o-modelo-booleano-no-negativo)
 31. [Cor simples e cor por planos](#31-cor-simples-e-cor-por-planos)
 
 ---
@@ -2966,6 +2967,9 @@ o caso, para um advogado). O que a 1.6 faz com o grão continua sendo **um** cam
 soma esse campo na densidade de cada camada do negativo e quem molda o grão visível é a curva da cópia (a
 transferência física do modelo), sem mattes nem tratamentos por faixa (§30.3).
 
+Depois, por decisão do usuário, a M1 entrou com outra forma (§30.7): um processo físico só (o modelo booleano), com
+um conjunto só de parâmetros, e o quadro das reivindicações dessas três patentes contra o código.
+
 ### 30.2 Maciez pelo grão (M2)
 
 `grao_maciez` (seção Grão, 0–100%, padrão 0%) soma `sig_grao = k · s · quantidade` na mesma raiz quadrada da
@@ -3099,6 +3103,123 @@ Plugin: `K_BREATH` (`pc_breath`, a mesma conta com `pc_hash`/`pc_vnoise`) no nó
 *Textura* vem depois da cor e usa `TIMELINE_FRAME_INDEX` (os nós de cor não podem): multiplica a luz da saída
 (`pc_code_to_lin`) pelo mesmo fator, o que é igual ao app com a cor neutra (teste de paridade) e uma aproximação com
 uma cópia ou o Laboratório. O OpenFX multiplica a luz antes da cor, como o app.
+
+### 30.7 Grão físico: o modelo booleano no negativo
+
+`lab_grao_modelo` (seção Laboratório, logo depois de `lab_grao`; `"ruido"` = a M3 de §30.4, o padrão; `"fisico"`)
+troca o **gerador** do grão no negativo. Vale só quando a M3 vale (`grao_fisico.on(v)` = `grao.negative_grain_on(v)`
+e o modelo físico); a linha fica escondida pelo módulo Beta **"grao_fisico"** (desligado, fora de todos os perfis;
+`ui/grao_fisico_ui.py`). Desligar o módulo só esconde a linha: `build_plan` nunca consulta `modules`, e um projeto
+com `"fisico"` sai igual (`modules.used_by` o aponta).
+
+**O modelo.** Um processo estocástico só, com um conjunto só de parâmetros para a imagem inteira: o modelo booleano
+(Matheron, 1975) de discos opacos de raio `r` com centros de Poisson. A intensidade local vem do valor da própria
+camada pela lei da cobertura:
+
+- Nutting (1913): uma camada com uma fração `u` coberta por partículas opacas transmite `T = 1 − u`, e a densidade é
+  `D = −log10 T`.
+- Newson, Delon e Galerne (2017): no modelo booleano com raios de segundo momento `E[r²]`, a cobertura média `u`
+  pede `λ = −ln(1 − u) / (π·E[r²])` centros por unidade de área. Com `u = 1 − 10^(−D)`: `λ·πr² = D·ln 10`.
+
+A covariância da cobertura a uma distância `h` é `(1 − u)²·(e^{λγ(h)} − 1)` (`γ` = área comum de dois discos;
+`grao_fisico.covariance`); em `h = 0` dá `u(1 − u)`. O que se vê **sai da lei**, nada é escolhido por faixa: numa
+camada fina (D pequeno) há grãos isolados (assimetria positiva), numa densa há buracos isolados (assimetria
+negativa), e a variância é máxima no meio (`u = 1/2`). Os raios são globais (um só `R_K · s`, `s` =
+`grao.grain_size_1080`). Implementado a partir dos artigos, sem código de terceiros.
+
+**Do negativo ao pixel.** Os grãos de verdade (nuvens de corante de ~0,25 µm) são muito menores que um pixel de 1080
+linhas. O app usa discos do tamanho do grão visível e uma fração `a` da transmitância por camada: com `û` = a
+cobertura vista pelo spot do pixel e `T̂ = 1 − û`, `T' = (1 − a)·T + a·T̂` (a transmitância média fica a do
+negativo) e o desvio de densidade é `dD = −log10(T'/T) = −log10(1 + a·(T̂ − T)/T)`. `a = KAPPA_c · Intensidade ·
+bitola · ISO · revelação · redes` (o mesmo multiplicador do grão de sempre, **sem** a compensação da prévia
+reduzida, para valer igual em qualquer resolução), com teto `AMP_MAX = 0,95`. O desvio entra no mesmo lugar do
+`g_ng` (`dn += …` em `labPath`), e a cópia molda o grão como na M3.
+
+**Calibração** (`tools/ajustar_grao.py`, offline; `tests/test_grao_fisico.py` confere que as constantes são as da
+ferramenta):
+
+- `R_K = 0,759`: o raio que dá a mesma meia-distância de correlação do campo de ruído da M3 (0,99 célula) no verde
+  da densidade de referência; o grão físico tem o mesmo tamanho visível do "ruido".
+- `REF_DENSITY` (R 0,96198, G 0,96198, B 0,94202): a densidade de cada camada no cinza médio do VISION3 250D
+  (`look.lab_paths`).
+- `KAPPA` (R 0,02564, G 0,02975, B 0,05393): a fração que dá, na densidade de referência, o sigma D numa abertura
+  de 48 µm igual a `grao.NEG_SIGMA_D` (H-1-5207, §30.4) no 35 mm com ISO 250 e *Tamanho* 1 (a abertura =
+  3,70 px@1080). O sigma da média na abertura vem da integral exata da covariância do modelo com a área comum de
+  dois círculos (passo de 0,01 raio). Medido no shader do look: R 0,00599, G 0,00695, B 0,01232 (−2,0%, −2,0%,
+  −2,4% do datasheet; azul > verde > vermelho).
+
+**A aproximação em tempo real** (`grao_fisico.GLSL`; o mesmo caminho na prévia e na exportação):
+
+- O spot do pixel são `N_SAMPLES = 16` pontos fixos (espiral de Vogel com raios pelos quantis de uma gaussiana de
+  sigma `FILTER_K = 0,75` raio), em px@1080: o mesmo número de pontos na prévia e na exportação, e a estatística
+  não depende da resolução. `û` = a fração dos pontos cobertos.
+- Grade de células de lado `CELL = REACH` (≈ 2,97 raios, o alcance do spot mais um raio); só as células que tocam o
+  círculo de alcance são visitadas. Em cada célula, os centros são as chegadas de Poisson no **eixo da
+  intensidade** (`t += −ln U` com o hash `pcg` de (célula, processo, semente)): o disco `i` existe numa camada se
+  `t_i < λ·área da célula`. Isso dá a contagem de Poisson do λ local e é aninhado (mais densidade = os mesmos
+  grãos e mais alguns). Teto de 64 discos por célula e processo (`CAP`; a média em `D_MAX = 3` é ≈ 19).
+- *Grão colorido*: um processo comum às três camadas (fração `1 − grao_cor` de λ) e um próprio de cada uma
+  (`grao_cor`); a soma continua Poisson(λ). Em 0 as três camadas têm os mesmos grãos.
+- Determinístico: a semente é `plan.grain_seed` (a do grão de sempre: muda a cada quadro com *Muda a cada quadro*).
+- Erro contra a referência numpy (`tests/test_grao_fisico.py`: rasterização global de Poisson com o mesmo spot)
+  e contra a variância exata do modelo:
+
+| D | `u` | média GPU | variância GPU / exata | assimetria GPU / numpy |
+|---|---|---|---|---|
+| 0,05 | 0,1087 | 0,1084 | −0,5% | +1,74 / +1,73 |
+| 0,3 | 0,4988 | 0,4964 | +0,2% | −0,14 / −0,15 |
+| 1,0 | 0,9000 | 0,8998 | −0,3% | −1,88 / −1,88 |
+| 2,0 | 0,9900 | 0,9898 | +1,8% (sorteio) | −4,88 / −5,02 |
+
+  Meia-distância de correlação: 1,43 r (numpy 1,40 r) em D = 0,3 e 1,29 r (1,28 r) em D = 1. A mesma cena em 1080 e
+  em 2160 linhas tem a mesma média e o mesmo desvio (±5%) depois de reduzida.
+- Custo (RTX 3060, cena de teste, render + leitura): o FINAL com "ruido" ≈ 2,2 ms em 1080p e ≈ 7 ms em 4K; com
+  "fisico" ≈ 13 ms e ≈ 41 ms. Com 8 pontos em vez de 16 cairia uns 10–25%; células de meio alcance ficaram mais
+  lentas (20/76 ms) e de dois alcances, iguais. A prévia e a exportação usam a mesma conta.
+
+**Onde está.** O gancho `grao_fisico.negative_grain(plan, U, v, gauge, scale, amt, net_grain)`, logo depois de
+`grao.negative_grain` em `build_plan`, troca `u_grain_on = 2` por `3`, tira `u_ngrain` e grava `u_pg_r`, `u_pg_k`
+(`1/scale`), `u_pg_amp`, `u_pg_chroma` e `u_pg_seed`; `plan.grain_size = 0` (sem a passada do NOISE). Com "ruido"
+o gancho não faz nada. O `Engine` (`_final_program`) usa `grao_fisico.FINAL_PG` só com `u_grain_on == 3`: o FINAL
+de sempre com `physGrain` somado depois de `dn += g_ng` e a posição `g_pg_pos = gl_FragCoord.xy · u_pg_k` (linha 0
+= topo), compilado no primeiro uso (`_lazy_program`). O FINAL e o BAKE continuam letra por letra: com "ruido" os
+planos, os quadros e o LUT são os de antes (`tests/test_grao.py`, `tests/test_cor_base.py`), e o LUT exportado nunca
+tem o grão físico (o BAKE não o escreve; teste). Nenhum uniform novo nos planos de sempre: os `u_pg_*` só existem
+no programa `final_pg`, e o plano que o usa sempre grava todos.
+
+Plugin: `K_PGRAIN` (`pc_pg_coverage`/`pc_pg_grain`, a mesma conta) e as constantes de `_pgrain_tables`
+(`PC_PG_OFS`, `PC_PG_RK`, `PC_PG_KAPPA`…). `pc_lab_path` ganhou `ga, gq, gs` (fração por camada, posição/raio/
+fração própria, semente) e o marcador `/*PGRAIN*/`, que só o nó *Laboratorio* e o OpenFX preenchem
+(`B_PGRAIN_LAB`); o nó *Cor* fica sem ele. Controle `lab_grao_modelo` em `lab_grain_controls()`. No DCTL o grão fica
+parado (como a M3); o OpenFX gera `pc_colorpipe_pg` e o anima (`pc_core.cpp`, semente `semente·7919 + quadro`).
+Paridade na GPU: `test_resolve.py` (nó *Laboratorio* × app: média < 0,5/255, menos de 0,2% dos pixels acima de
+2,5/255 — um disco exatamente na borda de um ponto do spot pode cair do outro lado pela última casa do float) e
+`test_ofx.py` (quadros 0, 7 e 61). Custo do nó *Laboratorio* no harness GLSL (aproximação do DCTL, mesma placa):
+14,6 → 27,4 ms em 1080p e 52,6 → 95,3 ms em 4K; o OpenFX na CPU: 236 → 762 ms em 1080p.
+
+**Patentes: quadro das reivindicações.** Leitura factual das reivindicações publicadas contra o que o código faz.
+**Não é parecer jurídico**; a decisão de publicar é do usuário (e, se for o caso, de um advogado).
+
+| Patente / reivindicação | O que a reivindicação exige (resumo) | O grão físico |
+|---|---|---|
+| US 9,692,987 B2, reiv. 1 e 9 | gerar dois ou mais mattes delimitados pela luminância; somar a cada um "um tratamento de grão diferente"; combinar | não há mattes nem divisão da imagem; uma função só, com os mesmos parâmetros em todos os pixels |
+| US 9,692,987 B2, reiv. 16 | um primeiro tratamento de grão numa primeira faixa de luminância e um segundo, diferente, numa segunda faixa | não há faixas nem limites: `physGrain(D, posição, semente)` não tem ramo por valor; λ é uma função contínua da densidade da camada (a lei de Nutting, a física da transmitância), o mesmo processo em toda a imagem |
+| US 9,438,821 B1, reiv. 1, 12 e 20 | receber "assets" de grão ligados a níveis de exposição; mattes pela luminância; um asset diferente por matte; combinar | não há assets, placas nem scans: os discos são gerados pelo hash; não há mattes |
+| US 12,705,810 B2, reiv. 1 e 12 | receber uma imagem; achar regiões de valor constante; estimar delas estatísticas de segunda ordem; sintetizar ruído correlacionado dependente do sinal a partir delas (as dependentes cobrem o modelo booleano filtrado) | nada é estimado de um quadro ou de um scan: os parâmetros vêm dos ajustes e das constantes dos datasheets (`NEG_SIGMA_D`, `R_K`, `KAPPA`, calculadas offline). O modelo booleano das dependentes só pesa se os passos da independente existirem |
+
+Anterioridade (datas para conferência):
+
+- P. G. Nutting, "On the absorption of light in heterogeneous media", *Philosophical Magazine* 26 (1913): a densidade
+  de uma camada de partículas opacas pela fração coberta.
+- E. W. H. Selwyn, "A theory of graininess", *Photographic Journal* 75 (1935): a granularidade de um modelo de grãos
+  aleatórios e a lei `σ_D·√A` ≈ constante (o sigma D numa abertura, a medida usada pelos datasheets).
+- G. Matheron, *Random Sets and Integral Geometry* (Wiley, 1975): o modelo booleano.
+- ITU-T H.264 | ISO/IEC 14496-10, Anexo D, mensagem SEI *film grain characteristics* (das extensões FRExt, de
+  2004; na edição ITU-T H.264 de 03/2005): parâmetros de grão sintético transmitidos com o vídeo, com intervalos
+  de intensidade e um modelo de grão por intervalo — grão dependente do nível do sinal antes de 2014.
+- A. Newson, J. Delon e B. Galerne, "A Stochastic Film Grain Model for Resolution-Independent Rendering",
+  *Computer Graphics Forum* 36(8) (2017): o modelo booleano para renderizar grão, a relação λ ↔ cobertura e o
+  filtro do spot (anterior ao provisório de 2023 da US 12,705,810).
 
 ## 31. Cor simples e cor por planos
 
