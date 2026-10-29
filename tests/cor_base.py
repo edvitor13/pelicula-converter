@@ -14,6 +14,8 @@ e compara com `tests/data/cor_base.json`, gravado pela BASE:
 
     python tests/cor_base.py        # regrava a referência (só faz sentido no código da BASE)
 
+Para regravar depois: uma cópia de `pelicula/` da BASE (575c6f5) com este arquivo em `tests/` ao lado.
+
 Os uniforms e os textos valem em qualquer computador; os hashes dos quadros e dos LUTs dependem da placa e do
 driver, então `tests/test_cor_base.py` só os confere quando o `GL_RENDERER` é o mesmo da gravação.
 """
@@ -50,10 +52,12 @@ def image(depth: int) -> np.ndarray:
 
 
 def look_cases() -> list[tuple[str, dict]]:
+    """Os ajustes padrão e todos os presets embutidos. O texto da borda do scan sai (ele é desenhado pelo Qt com
+    a fonte do sistema e só existe com uma QGuiApplication: mudaria o hash conforme a ordem dos testes)."""
     from pelicula import params, presets
     out = [("padrao", params.defaults())]
     out += [(p["id"], presets.builtin_values(p["id"])) for p in presets.BUILTIN]
-    return out
+    return [(name, {**values, "scan_texto": "nenhum"}) for name, values in out]
 
 
 def _num(v):

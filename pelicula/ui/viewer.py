@@ -22,6 +22,8 @@ class Viewer(QWidget):
     testRequested = Signal()
     filesDropped = Signal(list)
     zoomChanged = Signal(str)
+    picked = Signal(float, float)  # 1.6: conta-gotas — ponto clicado na imagem (fração 0 a 1, y para baixo)
+    pickCanceled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +45,11 @@ class Viewer(QWidget):
         self._hint = False
         self.safe_area = ""  # área segura desenhada por cima (platforms.SAFE_AREAS); "" = nenhuma
         self.label_proc = _("PELÍCULA")
+        # 1.6 (`ui/preview_tools.py`, `ui/planes_ui.py`): só na tela, a exportação nunca passa por aqui.
+        self.overlay: QImage | None = None      # zebra, falsa cor ou "Ver planos" por cima da prévia
+        self.reference: QImage | None = None    # quadro fixado ou imagem para comparar
+        self.compare_reference = False          # True: a comparação mostra a referência no lugar do original
+        self._pick = False                      # conta-gotas ligado: o clique escolhe um ponto da imagem
         self._build_empty()
         self.hint_timer = QTimer(self)
         self.hint_timer.setSingleShot(True)
@@ -98,6 +105,91 @@ class Viewer(QWidget):
     def set_mode(self, mode: str) -> None:
         self.mode = mode
         self.update()
+
+    def set_overlay(self, img: QImage | None) -> None:
+        """Imagem (RGBA, do tamanho da prévia) desenhada por cima do quadro processado. Só na tela."""
+        self.overlay = img
+        self.update()
+
+    def set_reference(self, img: QImage | None) -> None:
+        self.reference = img
+        if img is None:
+            self.compare_reference = False
+        self.update()
+
+    def set_compare_reference(self, on: bool) -> None:
+        self.compare_reference = bool(on) and self.reference is not None
+        self.update()
+
+    def _other(self) -> tuple[QImage | None, str]:
+        """O que fica do outro lado da comparação: a referência (se escolhida) ou o original."""
+        if self.compare_reference and self.reference is not None:
+            return self.reference, _("REFERÊNCIA")
+        return self.orig, _("ORIGINAL")
+
+    def start_pick(self) -> None:
+        """Conta-gotas: o próximo clique na imagem emite `picked` (Esc ou o botão direito cancelam)."""
+        self._pick = True
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def cancel_pick(self) -> None:
+        if self._pick:
+            self._pick = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.pickCanceled.emit()
+
+    def pick_at(self, fx: float, fy: float) -> None:
+        """Termina o conta-gotas no ponto (fração da imagem) e emite `picked`."""
+        self._pick = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.picked.emit(float(fx), float(fy))
+
+    @property
+    def picking(self) -> bool:
+        return self._pick
+
+    def image_point(self, pos: QPointF) -> tuple[float, float] | None:
+        """Fração (0 a 1) da imagem processada sob um ponto da tela, ou None fora dela."""
+        if self.proc is None:
+            return None
+        area = self._area()
+        if self.mode == "side" and self._other()[0] is not None:
+            half = (area.width() - 10) / 2
+            sub = QRectF(area.left() + half + 10, area.top(), half, area.height())
+            s = min(sub.width() / self.proc.width(), sub.height() / self.proc.height())
+            r = QRectF(sub.center().x() - self.proc.width() * s / 2, sub.center().y() - self.proc.height() * s / 2,
+                       self.proc.width() * s, self.proc.height() * s)
+        else:
+            r = self._image_rect(self.proc, area)
+        fx = (pos.x() - r.left()) / max(r.width(), 1e-6)
+        fy = (pos.y() - r.top()) / max(r.height(), 1e-6)
+        if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
+            return None
+        return fx, fy
+
+    @staticmethod
+    def _fit_in(img: QImage, r: QRectF) -> QRectF:
+        """`r` para uma imagem da mesma proporção; outra proporção (uma referência) fica inteira e centralizada."""
+        if img.width() <= 0 or img.height() <= 0 or r.height() <= 0:
+            return r
+        a, b = img.width() / img.height(), r.width() / r.height()
+        if abs(a - b) < 1e-3 * b:
+            return r
+        if a > b:
+            h = r.width() / a
+            return QRectF(r.left(), r.center().y() - h / 2, r.width(), h)
+        w = r.height() * a
+        return QRectF(r.center().x() - w / 2, r.top(), w, r.height())
+
+    def _draw_overlay(self, p: QPainter, r: QRectF, clip: QRectF | None = None) -> None:
+        if self.overlay is None or self.overlay.isNull():
+            return
+        p.save()
+        if clip is not None:
+            p.setClipRect(clip)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, r.width() < self.overlay.width())
+        p.drawImage(r, self.overlay)
+        p.restore()
 
     def set_safe_area(self, kind: str) -> None:
         """Mostra (ou esconde, com "") a área segura de uma plataforma por cima da prévia. Só na tela: a
@@ -273,10 +365,12 @@ class Viewer(QWidget):
             p.end()
             return
         area = self._area()
-        proc = self.orig if (self._peek or self.mode == "orig") and self.orig is not None else self.proc
-        if self.mode == "side" and self.orig is not None and not self._peek:
+        other, other_label = self._other()
+        showing_other = (self._peek or self.mode == "orig") and other is not None
+        proc = other if showing_other else self.proc
+        if self.mode == "side" and other is not None and not self._peek:
             half = (area.width() - 10) / 2
-            for i, (img, lab) in enumerate(((self.orig, _("ORIGINAL")), (self.proc, self.label_proc))):
+            for i, (img, lab) in enumerate(((other, other_label), (self.proc, self.label_proc))):
                 sub = QRectF(area.left() + i * (half + 10), area.top(), half, area.height())
                 s = min(sub.width() / img.width(), sub.height() / img.height())
                 r = QRectF(sub.center().x() - img.width() * s / 2, sub.center().y() - img.height() * s / 2,
@@ -285,29 +379,33 @@ class Viewer(QWidget):
                 p.drawImage(r, img)
                 p.setRenderHint(QPainter.RenderHint.Antialiasing)
                 if i == 1:
+                    self._draw_overlay(p, r)
                     self._draw_safe(p, r)
                 self._pill(p, r.left() + 10, r.top() + 10, lab)
             if self._hint:
                 self._draw_hint(p)
             p.end()
             return
-        r = self._image_rect(proc, area)
+        r = self._image_rect(self.proc, area)  # a referência pode ter outro tamanho: vai no lugar do quadro
         s = r.width() / proc.width()
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, s < 1.0)
-        p.drawImage(r, proc)
+        p.drawImage(self._fit_in(proc, r), proc)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        split = self.mode == "split" and self.orig is not None and not self._peek
+        split = self.mode == "split" and other is not None and not self._peek
+        if not showing_other:
+            xs0 = r.left() + r.width() * self.split if split else r.left()
+            self._draw_overlay(p, r, QRectF(xs0, r.top(), r.right() - xs0, r.height()) if split else None)
         if not split:
             self._draw_safe(p, r)
         if self._peek or self.mode == "orig":
-            self._pill(p, r.left() + 10, max(r.top(), 0) + 10, _("ORIGINAL"))
-        elif self.mode == "split" and self.orig is not None:
+            self._pill(p, r.left() + 10, max(r.top(), 0) + 10, other_label if other is not None else _("ORIGINAL"))
+        elif self.mode == "split" and other is not None:
             xs = r.left() + r.width() * self.split
             clip = QRectF(r.left(), r.top(), xs - r.left(), r.height()).intersected(QRectF(self.rect()))
             p.save()
             p.setClipRect(clip)
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, s < 1.0)
-            p.drawImage(r, self.orig)
+            p.drawImage(self._fit_in(other, r), other)
             p.restore()
             self._draw_safe(p, r)
             top = max(r.top(), 0)
@@ -326,7 +424,7 @@ class Viewer(QWidget):
                 path.lineTo(xs + sgn * 3, cy + 5)
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawPath(path)
-            self._pill(p, xs - 10, top + 10, _("ORIGINAL"), right=True)
+            self._pill(p, xs - 10, top + 10, other_label, right=True)
             self._pill(p, xs + 10, top + 10, self.label_proc)
         else:
             self._pill(p, r.left() + 10, max(r.top(), 0) + 10, self.label_proc)
@@ -336,12 +434,15 @@ class Viewer(QWidget):
 
     # ------------------------------------------------------------ mouse
     def _split_x(self) -> float | None:
-        if self.proc is None or self.mode != "split":
+        if self.proc is None or self.mode != "split" or self._other()[0] is None:
             return None
         r = self._image_rect(self.proc, self._area())
         return r.left() + r.width() * self.split
 
     def _hover_cursor(self, x: float) -> None:
+        if self._pick:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            return
         xs = self._split_x()
         if xs is not None and abs(x - xs) < 22:
             self.setCursor(Qt.CursorShape.SplitHCursor)
@@ -352,6 +453,14 @@ class Viewer(QWidget):
 
     def mousePressEvent(self, e):
         if self.proc is None:
+            return
+        if self._pick:
+            if e.button() == Qt.MouseButton.LeftButton:
+                pt = self.image_point(e.position())
+                if pt is not None:
+                    self.pick_at(*pt)
+            else:
+                self.cancel_pick()
             return
         if e.button() == Qt.MouseButton.RightButton:
             self._peek = True

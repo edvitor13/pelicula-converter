@@ -45,6 +45,7 @@ from .scopes import Scopes
 from .timeline_view import HEADER_W, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
+from . import cor_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -362,6 +363,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self.subs_ui = SubtitlesUI(self)  # legendas: painel, faixa e menu (antes de ligar o model: limpa o cache)
+        cor_ui.install(self)  # 1.6: ferramentas de cor (planos, cor simples, zebra, falsa cor e referência)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1877,6 +1879,7 @@ class MainWindow(QMainWindow):
             self.edit_scopes.set_image(img)
             self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
             self.st_render.setText("")
+            cor_ui.after_render(self, recipe)
             return
         upload = self._uploaded is not self.cur  # só os ajustes mudaram: a imagem já está na GPU
         self._uploaded = self.cur
@@ -1894,6 +1897,7 @@ class MainWindow(QMainWindow):
         self.edit_scopes.set_image(out)
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
+        cor_ui.after_render(self, recipe)
         if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None:
             self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
@@ -2556,11 +2560,13 @@ class MainWindow(QMainWindow):
         self._uploaded = None
         self.render_now()
         profile = dict(params.PARAMS["entrada"].choices).get(self.store.get("entrada"), "")
-        QMessageBox.information(
-            self, _("LUT exportado"),
-            _("LUT salvo em:\n{caminho}\n\nEle guarda só a cor (curva, cópia, tons e saturação). Grão, halação, "
-              "bloom e os outros efeitos de textura não cabem num LUT.\n\nEntrada do LUT: o mesmo perfil escolhido "
-              "em \"Perfil do vídeo\" ({perfil}).").format(caminho=path, perfil=_(profile)))
+        text = _("LUT salvo em:\n{caminho}\n\nEle guarda só a cor (curva, cópia, tons e saturação). Grão, halação, "
+                 "bloom e os outros efeitos de textura não cabem num LUT.\n\nEntrada do LUT: o mesmo perfil escolhido "
+                 "em \"Perfil do vídeo\" ({perfil}).").format(caminho=path, perfil=_(profile))
+        from .. import planes
+        if planes.active(self.store.values):  # 1.6: depende do lugar e da cor de cada pixel
+            text += "\n\n" + _("A Cor por planos (frente, fundo e pele) também fica fora do LUT.")
+        QMessageBox.information(self, _("LUT exportado"), text)
 
     def export_all_luts(self) -> None:
         d = QFileDialog.getExistingDirectory(self, _("Pasta onde salvar os LUTs dos presets"),
@@ -3184,6 +3190,7 @@ class MainWindow(QMainWindow):
             "legendas": [self.btn_subs],  # e o painel e a faixa (SubtitlesUI.apply_modules)
             "silencios": [self.tl_editor.btn_silences],
             "titulos_geradores": [self.bin.btn_new],  # e os editores no inspetor (`apply_modules`)
+            **cor_ui.module_tools(self),  # 1.6: "cor_planos" e "cor_simples" (`ui/cor_ui.py`)
         }
 
     def apply_modules(self) -> None:
@@ -3209,6 +3216,7 @@ class MainWindow(QMainWindow):
         self._meter_source()  # desligado: nem decodifica nem mede
         from . import transitions_ui  # 1.5: tipos novos e o menu "Transição ▸" (módulo "transicoes")
         transitions_ui.apply_module(self, "transicoes" in on)
+        cor_ui.apply_modules(self, on)
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
         self.subs_ui.apply_modules(on)
@@ -3366,6 +3374,8 @@ class MainWindow(QMainWindow):
             self.viewer.zoom_step(1)
         elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
             self.viewer.zoom_step(-1)
+        elif k == Qt.Key.Key_Escape and cor_ui.cancel_pick(self):
+            pass  # 1.6: Esc cancela o conta-gotas
         elif k == Qt.Key.Key_Escape and self.preview_fullscreen:
             self.toggle_preview_fullscreen()
         else:

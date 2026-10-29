@@ -48,6 +48,10 @@ SKIN_EDGE = 7.0        # borda suave da janela de matiz (graus)
 SKIN_SAT = (0.004, 0.014, 0.17, 0.21)   # C/L: entra entre os dois primeiros, sai entre os dois últimos
 SKIN_L = (0.10, 0.20)  # claridade OkLab: sai abaixo do primeiro, entra acima do segundo
 SKIN_MIN_SAT = SKIN_SAT[1]  # o conta-gotas só acerta o matiz de uma cor com pelo menos esta saturação
+# "Uniformizar" / "Pele natural" com força 1: o matiz chega `SKIN_EVEN[0]` mais perto do centro e a saturação C/L
+# acima de `SKIN_EVEN[1]` (manchas avermelhadas, pele queimada de sol) cai pela fração `SKIN_EVEN[2]`. Só a cor:
+# a claridade não muda, então a textura da pele fica como está.
+SKIN_EVEN = (0.7, 0.12, 0.5)
 
 
 def smoothstep(e0: float, e1: float, x):
@@ -104,6 +108,32 @@ def skin_hue_of(code) -> float | None:
     return float(h) % 360.0
 
 
+def lch_adjust(lab, hue_shift: float = 0.0, chroma: float = 1.0) -> np.ndarray:
+    """Gira o matiz (graus) e multiplica o croma de cores OkLab (a claridade fica)."""
+    lab = np.asarray(lab, dtype=np.float64)
+    a = math.radians(hue_shift)
+    ca, sa = math.cos(a) * chroma, math.sin(a) * chroma
+    return np.stack([lab[..., 0], ca * lab[..., 1] - sa * lab[..., 2], sa * lab[..., 1] + ca * lab[..., 2]], axis=-1)
+
+
+def skin_even(lab, hue: float = SKIN_HUE, k: float = 1.0) -> np.ndarray:
+    """"Uniformizar": matiz para perto do centro e menos saturação nas partes muito saturadas (OkLab)."""
+    lab = np.asarray(lab, dtype=np.float64)
+    L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
+    C = np.hypot(a, b)
+    if k <= 0.0:
+        return lab
+    h = np.degrees(np.arctan2(b, a))
+    dh = np.mod(h - hue + 540.0, 360.0) - 180.0
+    h = np.radians(hue + dh * (1.0 - SKIN_EVEN[0] * k))
+    Lp = np.maximum(L, 1e-4)
+    s = C / Lp
+    s = np.where(s > SKIN_EVEN[1], SKIN_EVEN[1] + (s - SKIN_EVEN[1]) * (1.0 - SKIN_EVEN[2] * k), s)
+    C2 = s * Lp
+    out = np.stack([L, C2 * np.cos(h), C2 * np.sin(h)], axis=-1)
+    return np.where((C < 1e-6)[..., None], lab, out)
+
+
 # ------------------------------------------------------------------ degradê
 def frame_points(w: int, h: int) -> np.ndarray:
     """Centro de cada pixel em px@1080 a partir do centro do quadro (h × w × 2, y para baixo)."""
@@ -149,6 +179,7 @@ const mat3 OK_M2_INV = {_mat(OK_M2_INV)};
 const vec4 SKIN_SAT = vec4({SKIN_SAT[0]}, {SKIN_SAT[1]}, {SKIN_SAT[2]}, {SKIN_SAT[3]});
 const vec2 SKIN_L = vec2({SKIN_L[0]}, {SKIN_L[1]});
 const float SKIN_EDGE = {SKIN_EDGE};
+const vec3 SKIN_EVEN = vec3({SKIN_EVEN[0]}, {SKIN_EVEN[1]}, {SKIN_EVEN[2]});
 
 vec3 linToOklab(vec3 lin) {{
     vec3 lms = max(OK_M1 * max(lin, vec3(0.0)), vec3(0.0));
@@ -171,6 +202,26 @@ float skinMask(vec3 code, vec2 win) {{
     float ws = smoothstep(SKIN_SAT.x, SKIN_SAT.y, s) * (1.0 - smoothstep(SKIN_SAT.z, SKIN_SAT.w, s));
     float wl = smoothstep(SKIN_L.x, SKIN_L.y, lab.x);
     return wh * ws * wl;
+}}
+
+// Gira o matiz (graus) e multiplica o croma de uma cor OkLab.
+vec3 lchAdjust(vec3 lab, float hueShift, float chroma) {{
+    float a = radians(hueShift);
+    float ca = cos(a) * chroma, sa = sin(a) * chroma;
+    return vec3(lab.x, ca * lab.y - sa * lab.z, sa * lab.y + ca * lab.z);
+}}
+
+// "Uniformizar" a pele (OkLab): matiz para perto de `hue` e menos saturação acima de SKIN_EVEN.y; força `k`.
+vec3 skinEven(vec3 lab, float hue, float k) {{
+    float C = length(lab.yz);
+    if (C < 1e-6 || k <= 0.0) return lab;
+    float h = degrees(atan(lab.z, lab.y));
+    float dh = mod(h - hue + 540.0, 360.0) - 180.0;
+    h = radians(hue + dh * (1.0 - SKIN_EVEN.x * k));
+    float Lp = max(lab.x, 1e-4);
+    float s = C / Lp;
+    if (s > SKIN_EVEN.y) s = SKIN_EVEN.y + (s - SKIN_EVEN.y) * (1.0 - SKIN_EVEN.z * k);
+    return vec3(lab.x, s * Lp * cos(h), s * Lp * sin(h));
 }}
 
 // Degradê: `p` em px@1080 do centro do quadro (y para baixo); g = (cx, cy, ângulo rad, suavidade),

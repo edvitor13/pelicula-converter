@@ -2718,3 +2718,37 @@ compara os dois na GPU.
   1 do lado da direção (0° = para cima, 90° = para a direita); radial: 1 dentro do raio. Suavidade em px@1080
   (0 = borda seca); "Inverter" troca os lados. Por ser em px@1080, a máscara cai no mesmo lugar em qualquer
   resolução.
+- **Uniformizar a pele** (`skin_even` / `skinEven(lab, centro, k)`): no OkLab, o matiz se aproxima do centro
+  (70% com k = 1) e o `C/L` acima de 0,12 cai pela metade; a claridade não muda. `lch_adjust` / `lchAdjust` gira o
+  matiz e multiplica o croma.
+
+### 31.2 Cor por planos no look (`planes.py`, módulo Beta "cor_planos")
+
+- **Seção** `params.SECTIONS[-1]` ("planos", chave `planos_on`, acrescentada no fim): geometria do degradê
+  (`planos_tipo`, `_angulo`, `_pos_x`, `_pos_y`, `_raio`, `_suavidade`, `_inverter`, em px@1080), cinco ajustes
+  por plano (`planos_{frente,fundo}_{exposicao,temperatura,tonalidade,saturacao,contraste}`), pele
+  (`planos_proteger_pele` = True, `planos_pele_{matiz,saturacao,luz,uniformizar}`) e a janela da máscara
+  (`planos_pele_centro`, `planos_pele_largura`, avançados). Todos os efeitos com padrão 0.
+- **Onde**: `look.build_plan` chama `planes.uniforms(v)` (um gancho depois de `u_vig`). Sem nada a fazer (seção
+  desligada ou ajustes em zero) devolve `{}` e o plano é o de sempre; com ajuste, os uniforms `u_cp_*` fazem o
+  `Engine._base_program` usar `planes.BASE_CP` — o `shaders.BASE` letra por letra, com `imageLin` renomeada para
+  `imageLinRaw` e uma `imageLin` nova que passa por `planes(lin, uv)` (compilado só na primeira vez). Assim a
+  mudança das outras frentes dentro de `imageLin` (entrada) vem junto sem conflito, e um look sem a seção usa o
+  mesmo programa da BASE. `tests/test_planes.py` confere que tirar o gancho devolve `shaders.BASE`.
+- **Matemática** (`planes.apply` em numpy = `planes()` no GLSL): frente = degradê (linear com o lado invertido:
+  a direção aponta para o fundo; radial: miolo); cada plano = ganho por canal (`2^(EV + mistura de
+  temperatura/tonalidade)`), contraste na luminância em stops em torno de 0,18 e saturação em torno da luminância;
+  os dois planos saem da mesma luz e se misturam pelo degradê; com "Proteger a pele", o resultado volta à luz
+  original na medida da máscara da pele. A pele é ajustada na cor exibida (curva neutra → vídeo → OkLab:
+  `skinEven` e `lchAdjust`), volta à luz pela curva inversa e recebe a luz (ganho). A máscara da pele lê a luz
+  pela curva neutra (`stopsToDisp(linToStops(lin))`).
+- **Fora do `colorPipe`**: o `BAKE` (LUT exportado) e o plugin do DaVinci não mudam (`tests/test_cor_base.py`,
+  `tests/test_planes.py`); `docs/DAVINCI.md` diz que o plugin não tem a seção e a mensagem do LUT exportado avisa.
+- **"Ver planos"** (`Engine.plane_view(plano, valores)`): o `BASE_CP` com `u_cp_view = 1` e a vinheta zerada
+  devolve (frente·(1 − proteção·pele), fundo·(1 − proteção·pele), pele, cobertura) num alvo f4; `ui/planes_ui`
+  pinta (laranja, azul, contorno da pele em 0,5) e a camada vai ao `Viewer` por `ui/preview_tools`. O conta-gotas
+  lê a luz da cena (`Engine.scene_light`) em volta do clique, passa pela curva neutra e usa `masks.skin_hue_of`.
+- **Interface** (`ui/planes_ui.py`): o `SectionCard` gerado é reagrupado (barra com Prontos, conta-gotas da pele e
+  "Ver planos"; geometria; blocos Frente, Fundo e Pele). Prontos (`planes.PRONTOS`) só preenchem os controles, um
+  passo do desfazer. A janela liga tudo por `ui/cor_ui.py` (`install`, `after_render`, `module_tools`,
+  `apply_modules`, Esc cancela o conta-gotas).

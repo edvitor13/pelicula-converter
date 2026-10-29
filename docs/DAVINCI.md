@@ -107,6 +107,8 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 - Só CPU por enquanto (sem GPU/CUDA): é mais lento que o app; use o Render Cache.
 - Sem o **scan da película** (furos, texto da borda, quadros vizinhos) e sem o **LUT externo** (ponha o
   seu LUT num nó próprio). Sem pontilhado: a saída é float.
+- Sem a **Cor por planos** do app (frente, fundo e pele, 1.6): ela depende do lugar e da cor de cada pixel e fica
+  fora da cor do look. No Resolve, use uma janela (Power Window) ou um qualificador num nó próprio.
 - Os rótulos estão em português (o OpenFX não informa o idioma do editor).
 - Os mipmaps das cadeias de brilho são médias 2×2; o driver do OpenGL do app pode filtrar um pouco
   diferente em tamanhos ímpares.

@@ -92,6 +92,10 @@ MODULES: tuple[Module, ...] = (
     Module("silencios", N_("Remover silêncios"),
            N_("Acha os trechos sem fala no som da montagem e tira todos de uma vez, depois que você revisa a "
               "lista."), "edicao"),
+    Module("cor_planos", N_("Cor por planos"),
+           N_("Frente, fundo e pele com ajustes próprios no look: separação por degradê, máscara da pele com "
+              "conta-gotas e \"Ver planos\". Não vai para o LUT exportado nem para o plugin do DaVinci."),
+           "cor", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -214,6 +218,10 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
             used.add(module_id)
     if v.get("lut_on") and v.get("lut_arquivo"):
         used.add("luts")
+    if v.get("planos_on"):
+        from . import planes
+        if planes.active(v):
+            used.add("cor_planos")
     # Montagem vazia ou só "o arquivo inteiro, sem mudanças" não é edição.
     trivial = getattr(sequence, "is_trivial", lambda: True)
     if sequence is not None and getattr(sequence, "clips", True) and not trivial():

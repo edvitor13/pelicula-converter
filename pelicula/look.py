@@ -880,6 +880,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_ca"] = (v["aberracao"] * scale / (0.5 * height)) if lente else 0.0
     vig = (v["vinheta"] if lente else 0.0) + gauge["vignette"] * v["bitola_vinheta"]
     U["u_vig"] = (min(vig, 1.5), v["vinheta_raio"], v["vinheta_suavidade"], v["vinheta_redondeza"])
+    if v.get("planos_on"):  # 1.6: Cor por planos no passo base (programa `planes.BASE_CP`; {} = nada a fazer)
+        from . import planes
+        U.update(planes.uniforms(v))
 
     plan = Plan(U)
 

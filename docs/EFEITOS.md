@@ -32,7 +32,7 @@ vídeo (no modo Película) ou o da montagem; a exportação usa as mesmas chaves
 
 ```
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
-      → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
+      → [cor por planos: frente, fundo e pele] → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
       → maciez (bitola, lente e MTF da película) / nitidez → névoa → bloom → halação → vazamento de luz
       → [laboratório: negativo (separação de cores, saturação do filme) → copiadora → cópia
          → rolagens, saturação final, densidade por cor, pele]
@@ -484,13 +484,70 @@ tremor do projetor move a tira inteira.
 
 ---
 
+## Cor por planos
+
+*Frente, fundo e pele com ajustes próprios.* Chave: liga a seção. **Recurso em teste (Beta)**: aparece quando o
+módulo *Cor por planos* está ligado em Configurações › Recursos (com *Mostrar recursos em teste*). Desligar o
+módulo só esconde o cartão: um projeto que usa a seção sai igual.
+
+O quadro é dividido em **frente** e **fundo** por um degradê, e a **pele** é achada pela cor. Cada parte tem os
+seus ajustes, aplicados na luz da cena logo depois da exposição e do balanço (antes da vinheta, do negativo e da
+cor da película): dá para escurecer e esfriar o fundo para destacar o assunto, tirar contraste e cor do que está
+longe (perspectiva aérea) ou cuidar só da pele.
+
+**Separação (degradê)** — distâncias em pixels de um quadro de 1080 linhas, a partir do centro:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Separação** | Degradê linear, Degradê radial | Linear | Linear: uma linha separa o fundo (do lado da *Direção*) da frente. Radial: a frente fica dentro do círculo e o fundo fora. |
+| **Direção** | −180° a 180° | 0° | Para que lado fica o fundo no degradê linear: 0° = em cima (céu), 90° = à direita, 180° = embaixo. |
+| **Centro horizontal / vertical** | ±1920 / ±1080 px | 0 | Desloca a linha ou o círculo. |
+| **Raio** | 10–2000 px | 400 px | Tamanho do círculo do degradê radial. |
+| **Suavidade** | 0–2000 px | 300 px | Largura da passagem entre frente e fundo (0 = borda seca). |
+| **Trocar frente e fundo** | liga/desliga | desligado | Inverte os dois lados. |
+
+**Frente** e **Fundo** — os mesmos cinco ajustes em cada um:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Exposição** | ±3 EV | 0 | Mais ou menos luz só nesta parte. |
+| **Temperatura** / **Tonalidade** | ±100 | 0 | Balanço só nesta parte (a mesma mistura da *Entrada e exposição*). |
+| **Saturação** | ±100 % | 0 | −100 % deixa a parte em preto e branco. |
+| **Contraste** | ±100 % | 0 | Em torno do cinza médio, em stops (100 % = 1,5× a inclinação). |
+
+**Pele**:
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Proteger a pele** | liga/desliga | ligado | Os ajustes da frente e do fundo não mexem na pele. |
+| **Matiz** | ±30° | 0 | Negativo puxa a pele para o vermelho; positivo para o amarelo. |
+| **Saturação** | ±100 % | 0 | Mais ou menos cor na pele. |
+| **Luz** | ±1,5 EV | 0 | Clareia ou escurece só a pele. |
+| **Uniformizar** | 0–100 % | 0 | Deixa a cor da pele mais uniforme (o matiz se aproxima da cor da pele e as manchas muito saturadas perdem cor). Só a cor: a claridade e a textura não mudam — não é um filtro de alisar. |
+| **Cor da pele** *(avançado)* | 0–360° | 64,5° | O matiz que a máscara procura. O **conta-gotas** do cartão acerta este valor clicando na pele da prévia. |
+| **Largura da cor da pele** *(avançado)* | 5–60° | 21° | Quanto o matiz pode se afastar da cor da pele. Estreite se madeira ou areia entrarem. |
+
+A máscara da pele olha a cor como ela aparece (matiz, saturação e claridade no espaço OkLab) e foi acertada
+para pegar todos os tons da escala Monk Skin Tone, do mais claro ao mais escuro, e deixar de fora laranja forte,
+madeiras avermelhadas, areia amarelada e cinzas. Uma máscara só de cor não separa a pele de uma madeira clara ou
+de uma areia da mesma cor: use o conta-gotas e a largura.
+
+- **Prontos**: *Destacar o assunto* (radial, fundo −0,5 EV, menos cor e mais frio), *Fundo frio, pele quente*,
+  *Perspectiva aérea* (fundo em cima com menos contraste e cor, um pouco mais claro e frio) e *Pele natural*
+  (uniformizar 50 %). Só preenchem os ajustes.
+- **Ver planos**: pinta por cima da prévia a frente em laranja, o fundo em azul e o contorno da pele. Só na
+  tela: nunca vai para a exportação nem para o "Salvar quadro".
+- Não entra no **LUT exportado** nem no **plugin do DaVinci** (depende do lugar e da cor de cada pixel).
+
+---
+
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
 tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
 cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
 dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
-nitidez, lente, vinheta, projetor, defeitos, moldura e scan.
+nitidez, lente, vinheta, projetor, defeitos, moldura, scan e cor por planos.
 
 A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o
 **código de 10 bits** da câmera, como nos LUTs oficiais da Sony, da Panasonic e da Nikon ("Full range"): no
