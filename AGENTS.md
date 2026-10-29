@@ -45,6 +45,8 @@ pelicula/
   grao.py                    grão e textura da 1.6 (ARQUITETURA §30): modelos chamados por ganchos de build_plan
                              (maciez pelo grão, nitidez por camada, grão no negativo, halação física,
                              respiração por camada), constantes calibradas por datasheets
+  labx.py                    1.6, Laboratório (ARQUITETURA §32): scanner de luz branca, película vencida, pré-exposição;
+                             variante FINAL_LX/BAKE_LX (só com u_lx_on) e o pc_lab_path_x do nó Laboratório/OFX
   shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
@@ -393,6 +395,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_transicoes_ui.py` | casos de `transicoes_ui_cases.py`: inspetor (ícones, dicas, ajustes do tipo, módulo desligado), menu "Transição" do corte (alvo, desfazer num passo, última duração, faixa travada), desenho na linha do tempo e o módulo na janela |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_lab_lad.py` | Laboratório conferido pelo LAD da Kodak (M9): cinza de 16%, pontos da copiadora, escala de cinza |
+| `tests/test_lab_processos.py` | Laboratório da 1.6 (`labx.py`): scanner de luz branca, película vencida (véu sobe com os anos), pré-exposição, reversível e revelação cruzada; desligados não mudam nada; GPU (prévia e LUT) = numpy |
+| `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |

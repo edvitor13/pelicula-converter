@@ -8,13 +8,13 @@ exportação geram exatamente o mesmo resultado.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
 
-from . import grao
+from . import grao, labx
 
 # Curva neutra usada para levar vídeo Rec.709 até a luz da cena e de volta.
 D_SLOPE = 0.155
@@ -459,6 +459,9 @@ LAB_PRINTS: dict[str, dict[str, Any] | None] = {
 # Processos especiais (caminho B). Os registros da câmera Technicolor são negativos preto e branco
 # de pouca latitude; a matriz de separação (filtros estreitos) satura mais que um filme de três camadas.
 _TECH_RECORD = dict(gamma=(0.68, 0.68, 0.68), toe=(-1.20, -1.20, -1.20), shoulder=(1.45, 1.45, 1.45), width=0.20)
+_LINEAR_STAGE = dict(gamma=(1.0, 1.0, 1.0), toe=(-6.0, -6.0, -6.0), shoulder=(6.0, 6.0, 6.0), width=0.20)
+_XPRO_E6C41_GAMMA = (1.10, 1.00, 0.92)
+_XPRO_C41E6_GAMMA = (1.25, 1.12, 0.98)
 LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
     "normal": None,
     "prata": None,  # caminho A + densidade de prata retida (média das camadas), sem caminho B
@@ -473,6 +476,24 @@ LAB_PROCESSES: dict[str, dict[str, Any] | None] = {
                   print=dict(gamma=(2.30, 2.30, 2.30), dmax=(3.4, 3.4, 3.4), width=0.16,
                              dye=((1.00, 0.10, 0.0), (0.25, 0.85, 0.0), (0.12, 1.00, 0.0))),
                   key=(0.0, 0.0, 0.0)),
+    # 1.6: processos do próprio filme da câmera (a cópia escolhida não é usada). No reversível e no negativo
+    # revelado como slide, o "negativo" do caminho B é um estágio linear (densidade = log E, sem pé nem ombro
+    # na faixa da cena) e a "cópia" é a curva positiva do próprio filme: pé = altas luzes, dmax = preto.
+    "reversivel": dict(sens=_SENS_VIVID, **_LINEAR_STAGE, interimage=0.30,
+                       print=dict(gamma=(2.20, 2.20, 2.20), dmax=(3.50, 3.50, 3.45), width=0.18,
+                                  dye=((1.00, 0.09, 0.03), (0.07, 1.00, 0.09), (0.03, 0.13, 1.00))),
+                       key=(0.0, 0.0, 0.0)),
+    # Slide revelado em C-41: negativo de emulsão de slide (contraste alto, pouca latitude, sem máscara), camadas
+    # com contrastes diferentes (virada de cor) e "interimage" forte; copiado numa 2383.
+    "cruzado_e6c41": dict(sens=_SENS_VIVID, gamma=_XPRO_E6C41_GAMMA, toe=(-1.05, -1.05, -1.00),
+                          shoulder=(1.25, 1.25, 1.20), width=0.18, interimage=0.55,
+                          print=dict(LAB_PRINTS["2383"]), key=(0.0, 0.0, 0.0)),
+    # Negativo revelado em E-6: positivo de pouco contraste e preto lavado (dmax baixo), camadas com contrastes
+    # diferentes (a máscara laranja que sobra nas altas luzes).
+    "cruzado_c41e6": dict(sens=_SENS_V3, **_LINEAR_STAGE, interimage=0.20,
+                          print=dict(gamma=_XPRO_C41E6_GAMMA, dmax=(2.50, 2.40, 2.30), width=0.25,
+                                     dye=((1.00, 0.08, 0.02), (0.06, 1.00, 0.08), (0.02, 0.14, 1.00))),
+                          key=(0.0, 0.0, 0.0)),
 }
 
 
@@ -668,16 +689,22 @@ class LabPath:
     mid: tuple        # densidade do negativo no cinza médio (para a inversão do scan)
     off: tuple        # luz da copiadora calibrada (log E), antes das luzes do usuário
     scan: bool        # sem cópia: o negativo é invertido digitalmente
+    add: tuple = (0.0, 0.0, 0.0)  # 1.6 (labx): exposição somada a cada camada (véu da idade + pré-exposição)
+    white: bool = False           # 1.6 (labx, M6): scanner de luz branca no Sem cópia
 
     def eval(self, lin, lights=(0.0, 0.0, 0.0)) -> np.ndarray:
         """Mesmo cálculo do `labPath` do shader, em numpy (lin: (..., 3) luz linear Rec.709)."""
         lin = np.asarray(lin, dtype=np.float64)
         e = np.maximum(lin @ np.asarray(self.sens).T, 1e-7)
+        if any(self.add):
+            e = np.maximum(lin @ np.asarray(self.sens).T + np.asarray(self.add), 1e-7)
         le = np.log10(e / 0.18)
         dn = lab_curve(le, self.ng, self.nt, self.ns, self.nw) @ np.asarray(self.ii).T
         off = np.asarray(self.off) + np.asarray(lights)
         if self.scan:
             st = (dn - np.asarray(self.mid)) / (np.asarray(self.pg) * LOG10_2) - off / LOG10_2
+            if self.white:
+                st = labx.white_scan_stops(dn, self.mid, self.pg, off)
             return _stops_to_disp(np.clip(st, -12.0, 12.0))
         dl = lab_curve(off - dn, self.pg, self.pt, self.ps, self.pw)
         d = dl @ np.asarray(self.dye).T + (dl @ np.asarray(self.key))[..., None]
@@ -747,14 +774,20 @@ class LabMods:
     toe: float = 0.0      # pé da cópia: positivo lava os pretos (menos densidade máxima)
     split: float = 0.0    # separação de cores (Hue Split), na densidade do negativo
     split_hue: float = 35.0
+    age: float = 0.0      # 1.6 (labx): película vencida, em anos
+    flash: tuple = (0.0, 0.0, 0.0)  # 1.6 (labx): pré-exposição (luz Rec.709 linear somada antes da sensibilidade)
+    white: bool = False   # 1.6 (labx, M6): scanner de luz branca no Sem cópia
 
 
 def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
                mods: LabMods = LabMods()) -> LabPath:
     gamma = _neutral3(neg["gamma"], mods.neutral_neg)
-    ng = gamma * (1.0 + 0.12 * push)                                       # forçar = mais contraste
-    nt = _neutral3(neg["toe"], mods.neutral_neg) + 0.08 * push             # ... e sombras mais fechadas
+    toe0 = _neutral3(neg["toe"], mods.neutral_neg)
     ns = _neutral3(neg["shoulder"], mods.neutral_neg)
+    if mods.age:
+        gamma, toe0, ns = labx.aged(gamma, toe0, ns, mods.age, neg["sens"])  # 1.6: película vencida
+    ng = gamma * (1.0 + 0.12 * push)                                       # forçar = mais contraste
+    nt = toe0 + 0.08 * push                                                # ... e sombras mais fechadas
     nw = float(neg["width"])
     a_ii, b_ii = ii_coefs(neg.get("interimage", 0.0), mods.film_sat, mods.bypass_neg)
     ii = np.eye(3) * a_ii + b_ii  # dn' = A·dn + B·(soma): linhas somam A + 3B
@@ -762,11 +795,18 @@ def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
         ii = split_matrix(mods.split, mods.split_hue) @ ii  # comuta com A·I + B·J
     dn_mid = ii @ lab_curve(np.zeros(3), ng, nt, ns, nw)
     sens = _t3x3(neg["sens"])
+    add = (0.0, 0.0, 0.0)
+    if mods.age or any(mods.flash):
+        # 1.6: exposição somada (véu + pré-exposição); o cinza da calibração também a recebe
+        add = _t3(labx.added_exposure(sens, mods.flash, mods.age))
+        e_mid = np.asarray(sens) @ np.full(3, 0.18) + np.asarray(add)
+        dn_mid = ii @ lab_curve(np.log10(e_mid / 0.18), ng, nt, ns, nw)
     if pr is None:
         # Sem cópia o campo `pg` guarda o gama nominal (sem forçar) usado na inversão do scan: assim
         # a revelação forçada aparece como mais contraste, como num scan com inversão fixa.
         return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(gamma), (0.0, 0.0, 0.0),
-                       (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True)
+                       (1.0, 1.0, 1.0), 0.2, _t3x3(np.eye(3)), (0.0, 0.0, 0.0), _t3(dn_mid), (0.0, 0.0, 0.0), True,
+                       add, bool(mods.white))
     pg = _neutral3(pr["gamma"], mods.neutral_print)
     dmax = _neutral3(pr["dmax"], mods.neutral_print) * 2.0 ** (-0.6 * mods.toe)
     ps = dmax / pg
@@ -778,7 +818,7 @@ def _make_path(neg: dict, pr: dict | None, push: float, crosstalk: float, key,
     key = np.asarray(key, dtype=np.float64)
     off = _calibrate_print(dn_mid, pg, ps, pw, dye, key)
     return LabPath(sens, _t3(ng), _t3(nt), _t3(ns), nw, _t3x3(ii), _t3(pg), (0.0, 0.0, 0.0), _t3(ps), pw,
-                   _t3x3(dye), _t3(key), _t3(dn_mid), _t3(off), False)
+                   _t3x3(dye), _t3(key), _t3(dn_mid), _t3(off), False, add)
 
 
 @lru_cache(maxsize=512)
@@ -799,7 +839,8 @@ def lab_paths(negativo: str, copia: str, processo: str, push: float, crosstalk: 
     proc = LAB_PROCESSES.get(processo)
     if not proc:
         return a, None
-    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]), mods)
+    b = _make_path(proc, proc["print"], push, crosstalk, tuple(chave * k for k in proc["key"]),
+                   replace(mods, white=False))  # o scanner de luz branca só existe no Sem cópia do caminho A
     return a, b
 
 
@@ -816,7 +857,8 @@ def _r4(x) -> float:
 def lab_paths_for(v: dict) -> tuple[LabPath, LabPath | None]:
     mods = LabMods(_r4(v["lab_saturacao_filme"]), _r4(v["lab_bypass_negativo"]), _r4(v["lab_neutro_negativo"]),
                    _r4(v["lab_neutro_copia"]), _r4(v["lab_pe"]), _r4(v["lab_separacao"]),
-                   _r4(v["lab_separacao_eixo"]))
+                   _r4(v["lab_separacao_eixo"]), _r4(v.get("lab_vencida", 0.0)), labx.flash_light(v),
+                   labx.white_scan(v))
     return lab_paths(v["lab_negativo"], v["lab_copia"], v["lab_processo"], float(v["lab_revelacao"]),
                      float(v["lab_diafonia"]), float(v["lab_chave"]), float(v["lab_processo_forca"]), mods,
                      _r4(v["lab_bypass_copia"]))
@@ -1087,6 +1129,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_lab_b_on"] = 1 if lb is not None else 0
         U["u_lab_mix"] = float(v["lab_processo_forca"]) if lb is not None else 0.0
         _lab_post_uniforms(U, lab_post(v))
+        labx.uniforms(U, la, lb)  # 1.6: véu, pré-exposição e scanner de luz branca (só quando ligados)
 
     pr = PRINTS.get(v["copia"])
     U["u_print_on"] = 1 if pr else 0

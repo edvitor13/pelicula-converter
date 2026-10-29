@@ -162,7 +162,8 @@ def test_plugin_has_every_control_of_the_dctl_nodes():
     names = [s.ctl.name for s in ofx.slots()]
     assert len(names) == len(set(names))
     want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()
-            + resolve.lab_grain_controls()}  # 1.6: "Grão no negativo" do Laboratório
+            + resolve.lab_grain_controls()  # 1.6: "Grão no negativo" do Laboratório
+            + resolve.lab_extra_controls()}  # 1.6 (labx.py): scanner, película vencida e pré-exposição
     assert set(names) == want - set(ofx.SKIP)
     keys = {s.ctl.key for s in ofx.slots() if s.ctl.key}
     for k in ("lab_separacao", "lab_dens_r", "lab_bypass_copia", "lab_neutro_negativo", "mtf", "entrada",
@@ -730,3 +731,25 @@ app.exit(0)
     res = subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=str(ROOT), env=env,
                          capture_output=True, timeout=120)
     assert res.returncode == 0 and b"OK" in res.stdout, res.stderr.decode("utf-8", "replace")[-2000:]
+
+# ------------------------------------------------------------------ 1.6: laboratório (labx.py e processos novos)
+LABX_CASES = [
+    dict(lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_copia="nenhuma", lab_scanner="branca", lab_vencida=12.0, lab_revelacao=1.0, lab_luz_g=2.0),
+    dict(lab_vencida=25.0),
+    dict(lab_negativo="double_x", lab_copia="2302", lab_vencida=20.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=3.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=2.0, lab_pre_exposicao_cor="ambar", lab_vencida=8.0),
+    dict(lab_processo="reversivel"),
+    dict(lab_processo="reversivel", lab_vencida=10.0, lab_pre_exposicao=True, lab_pre_exposicao_cor="azul"),
+    dict(lab_processo="cruzado_e6c41", lab_processo_forca=0.7, lab_revelacao=1.0),
+    dict(lab_processo="cruzado_c41e6", lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_negativo="vision3_500t_v2", lab_copia="2383_v2", lab_luz_r=2.0),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", LABX_CASES, ids=[str(i) for i in range(len(LABX_CASES))])
+def test_color_matches_the_app_with_the_16_lab(core, gl_engine, over):
+    v = dict(params.defaults(), lab_on=True, lab_luz_b=-1.0, **over)
+    assert _color_diff(core, gl_engine, params.sanitize(v), n=9) < 1e-4

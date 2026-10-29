@@ -3299,3 +3299,54 @@ maior do vermelho na cópia medida. Esses pares ficam fora do teste da escala de
 Ficaram de fora o 50D 5203 (a curva do vermelho é pontilhada no gráfico e o leitor de traço não a segue) e a 2393
 (não lida nesta versão). O selo "Desatualizada" nos filmes à mão **não** foi ligado (decisão do
 usuário).
+
+### 32.3 Tipo de scanner no Sem cópia (M6)
+
+`lab_scanner` (escolha no fim do Laboratório; padrão `rgb`, igual bit a bit ao de antes). Com `branca` e a cópia
+*Sem cópia*, a inversão do caminho A troca a densidade de cada camada pela de cada canal visto em luz branca:
+
+```
+T_c = Σ_k M_ck · 10^(−(d_k + Dmin_k))        d_c = −log10 T_c        (o mesmo no cinza: dm_c)
+st_c = (d_c − dm_c) / (γef_c · log10 2) − luz_c / log10 2,   γef_c = Σ_k J_ck · γ_k,   J_ck = M_ck · 10^(−(dm_k + Dmin_k)) / Tm_c
+```
+
+`M` (linhas somam 1) é a absorção de cada corante do 250D (H-1-5207, p. 4, *Spectral Dye Density Curves*) vista
+por cada canal: observador CIE 1931 2° (ajuste analítico de Wyman, Sloan e Shirley, JCGT 2(2), 2013) levado ao
+Rec.709, só a parte positiva, sob corpo negro de 5500 K (`tools/ajustar_lab.py`, `scan_mix`):
+R = 0,644 C + 0,294 M + 0,062 Y, G = 0,115/0,765/0,120, B = 0,066/0,070/0,864. `Dmin` = base + máscara do 250D
+(0,175/0,574/0,834, do ajuste da §32.2). Como `γef` é o gama efetivo no cinza, o cinza sai igual ao do RGB
+estreito; as cores perdem saturação (cerca de 40% na média de cores ao acaso nos testes). A câmera "típica" é o observador padrão
+(nenhuma curva de sensor de fabricante): é a escolha conservadora com fonte pública.
+
+### 32.4 Película vencida, pré-exposição e processos novos
+
+**Módulo `labx.py`** (ganchos pequenos em `look._make_path`, `look.build_plan`, `Engine`, `resolve.spec` e
+`ofx`). Véu e pré-exposição são **exposição somada** a cada camada antes da curva do negativo
+(`e = sens · luz + soma`; `soma = sens · flash + véu`); a calibração do cinza recebe a mesma soma, então o cinza
+continua em 0,45. `LabPath` ganhou `add` e `white` e `LabMods` ganhou `age`, `flash` e `white`, todos com
+padrão neutro no fim (o cache e os planos de sempre não mudam).
+
+| Recurso | Modelo | Conferido em `tests/test_lab_processos.py` |
+|---|---|---|
+| Película vencida (`lab_vencida`, 0–30 anos) | Por década (`a` = anos/10, peso `w` da camada = `grao.NEG_SIGMA_D` normalizado: R 0,484, G 0,562, B 1): gama ÷ (1 + 0,10·a·w), pé e ombro + 0,15·a·w log E, véu = 0,18 · 0,02 · a·w · 10^(0,15·a·w) (o véu medido na sensibilidade da película vencida). Preto e branco: o peso médio nas três | Dmin do negativo sobe a cada ano em todas as camadas (azul > verde > vermelho; P&B cinza); cinza calibrado; preto lavado, sombras azuladas, altas luzes amareladas, menos contraste no cinza |
+| Pré-exposição (`lab_pre_exposicao`, stops, cor) | Luz `0,18 · 2^(−stops)` na cor escolhida (normalizada na luminância Rec.709), somada à cena antes da sensibilidade | Sombras sobem a cada stop a menos; com ≥ 4 stops, +3 e +4 stops mudam < 0,012; cor tinge as sombras |
+| Reversível | Caminho B (`LAB_PROCESSES`): estágio "negativo" linear (gama 1, pé −6, ombro +6: densidade = log E na faixa da cena) e a curva positiva do slide como "cópia" (gama 2,2, dmax 3,5, largura 0,18), sensibilidade `_SENS_VIVID` | A cópia escolhida não muda nada; contraste no cinza > 1,3 × o do caminho normal; preto mais denso |
+| Slide no C-41 | Negativo de emulsão de slide (gama 1,10/1,00/0,92, pé −1,05, ombro 1,25, "interimage" 0,55) copiado numa 2383 | Contraste > 1,3 × o normal; sombras azuladas, altas luzes amareladas |
+| Negativo no E-6 | Estágio linear e positivo de pouco contraste (gama 1,25/1,12/0,98, dmax 2,5/2,4/2,3) | Contraste < o normal; preto > 0,08; altas luzes quentes, sombras azuladas |
+
+As constantes da película vencida são **regra prática** (decisão conservadora; a calibração por dados de
+filmes vencidos fica em aberto). Tudo é determinístico (só ajustes; nada de sorteio).
+
+**Uniforms e programas.** Nada novo entra nos planos padrão. Com algum recurso de `labx` ligado o plano traz
+`u_lx_on`, `u_lx_add_a`, `u_lx_add_b` e `u_lx_white` (sempre os quatro) e o `Engine` usa `final_lx`/`bake_lx`
+(`Engine._lab_program`), compilados na primeira vez: o texto do FINAL/BAKE com `labPathX` (uma cópia de
+`labPath` com `+ add` na exposição e o scanner de luz branca) no lugar de `labPath` nas duas chamadas do
+`labPipe`. Os processos novos não precisam da variante (são caminhos B com tabelas novas).
+
+**Plugin.** Os controles novos (`labx.CONTROLS`) ficam só no nó **Laboratorio** e no OpenFX (o nó Cor está perto
+do limite de controles do DCTL). No nó Laboratorio, `labx.body` troca `pc_lab_path` por `pc_lab_path_x` (cópia
+de `pc_lab_path` com idade, pré-exposição e scanner em blocos com guarda, depois das expressões originais) e
+`labx.tables` acrescenta `PC_LX_*`. O nó Cor continua com o texto de antes, a menos das tabelas
+(`PC_NEG`, `PC_LPR`, `PC_PROC` com as linhas novas no fim). Paridade na GPU (`tests/test_resolve.py`,
+`tests/test_ofx.py`, casos `LABX_CASES`): diferença ≤ 0,000002. Com os ajustes novos no padrão, LUT, quadros, nós
+do plugin e OpenFX ficam iguais à BASE bit a bit (suítes douradas de §30/§31).

@@ -707,3 +707,33 @@ def test_breathing_of_the_textura_node_matches_the_app(harness, gl_engine, test_
         assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
         outs.append(got)
     assert np.abs(outs[0] - outs[1]).mean() * 255 > 0.5
+
+# ------------------------------------------------------------------ 1.6: laboratório (labx.py e processos novos)
+LABX_CASES = [
+    dict(lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_copia="nenhuma", lab_scanner="branca", lab_vencida=12.0, lab_revelacao=1.0, lab_luz_g=2.0),
+    dict(lab_vencida=25.0),
+    dict(lab_negativo="double_x", lab_copia="2302", lab_vencida=20.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=3.0),
+    dict(lab_pre_exposicao=True, lab_pre_exposicao_stops=2.0, lab_pre_exposicao_cor="ambar", lab_vencida=8.0),
+    dict(lab_processo="reversivel"),
+    dict(lab_processo="reversivel", lab_vencida=10.0, lab_pre_exposicao=True, lab_pre_exposicao_cor="azul"),
+    dict(lab_processo="cruzado_e6c41", lab_processo_forca=0.7, lab_revelacao=1.0),
+    dict(lab_processo="cruzado_c41e6", lab_copia="nenhuma", lab_scanner="branca"),
+    dict(lab_negativo="vision3_500t_v2", lab_copia="2383_v2", lab_luz_r=2.0),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("over", LABX_CASES, ids=[str(i) for i in range(len(LABX_CASES))])
+def test_laboratorio_node_matches_the_app_with_the_16_lab(harness, gl_engine, over):
+    """Scanner de luz branca, película vencida, pré-exposição, processos novos e filmes do datasheet: nó = app."""
+    assert _lab_diff(harness, gl_engine, params.sanitize(dict(params.defaults(), **over))) < 2e-3
+
+
+def test_cor_node_has_none_of_the_16_lab_controls():
+    """Os controles novos do laboratório ficam só no nó Laboratório (o nó Cor está perto do limite do DCTL)."""
+    names = {c.key for c in resolve.spec("cor").controls if c.key}
+    lab = {c.key for c in resolve.spec("laboratorio").controls if c.key}
+    for k in ("lab_scanner", "lab_vencida", "lab_pre_exposicao", "lab_pre_exposicao_stops", "lab_pre_exposicao_cor"):
+        assert k in lab and k not in names

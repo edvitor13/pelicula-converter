@@ -263,8 +263,16 @@ class Engine:
             "t_noise": noise[0] if noise else lin[0],
             "t_lut": self._lut_texture(plan.lut_path),
         }
-        self._run("final", out, textures, {**self.FINAL_NEUTRAL, **U})
+        self._run(self._lab_program("final", U), out, textures, {**self.FINAL_NEUTRAL, **U})
         return out
+
+    def _lab_program(self, name: str, U: dict) -> str:
+        """O FINAL/BAKE de sempre, ou (1.6) a variante com véu, pré-exposição e scanner de luz branca (labx.py)."""
+        if "u_lx_on" not in U:
+            return name
+        from . import labx
+        self._lazy_program(name + "_lx", labx.program(name + "_lx"))
+        return name + "_lx"
 
     def _base_program(self, U: dict) -> str:
         """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela."""
@@ -399,7 +407,8 @@ class Engine:
         info = lut_info(vals.get("lut_arquivo", "")) if vals.get("lut_on") else None
         plan = look.build_plan(vals, n * n, n, 0, 24.0, info, dither=False, legal=legal)
         out = self._target("bake", (n * n, n), dtype="f4")
-        self._run("bake", out, {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)},
+        self._run(self._lab_program("bake", plan.uniforms), out,
+                  {"t_grid": grid, "t_lut": self._lut_texture(plan.lut_path)},
                   {**look.SPARSE_UNIFORMS, **plan.uniforms})
         data = out[1].read(components=3, alignment=1, dtype="f4")
         grid.release()

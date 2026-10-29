@@ -215,8 +215,8 @@ ganham cor (o vermelho do negativo medido tem menos contraste que o verde e o az
 | **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
 | **Grão no negativo** | liga/desliga | desligado | Põe o grão da seção *Grão* (que precisa estar ligada) **dentro do negativo**: cada camada recebe o grão na sua densidade, antes da cópia, como na película de verdade. Quem molda o grão visível passa a ser a curva da cópia: ele some nos pretos profundos e nas altas luzes estouradas e aparece nos tons médios; o azul tem mais grão que o verde e o vermelho (a granularidade das camadas, veja *Modelos calibrados por datasheets*). *Intensidade*, *Tamanho*, *Aspereza*, *Grão colorido*, *Muda a cada quadro*, a bitola, o ISO e a revelação valem como sempre; a resposta por tom (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) deixa de valer. Não entra no LUT exportado. |
 | **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido), Kodak 2383 (datasheet) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
-| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
-| **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
+| **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass), Reversível (slide, sem cópia), Revelação cruzada: slide no C-41, Revelação cruzada: negativo no E-6 | Normal | Veja abaixo. Nos dois Technicolor, no reversível e nas revelações cruzadas a cópia escolhida não é usada (eles têm a própria). |
+| **Força do processo** | 0–100% | 100% | Technicolor, reversível e revelações cruzadas: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
 | **Chave preta (Technicolor)** | 0–100% | 30% | Imagem preto e branco de baixo contraste (tirada do registro verde) somada aos corantes no Technicolor 3 tiras: pretos mais profundos e sombras mais densas. |
 | **Luz vermelha da copiadora** | −12 a +12 pt | 0 | Pontos de luz vermelha (1 ponto = 0,025 log E; 12 pontos = 0,3 log E = 1 stop da cópia; cerca de 7 pontos = 1 stop da câmera, como no LAD da Kodak). Como no laboratório, **mais vermelho deixa a cópia mais ciano** (e menos, mais vermelha). Os pontos são relativos ao cinza calibrado, o "25-25-25" do laboratório. |
 | **Luz verde da copiadora** | −12 a +12 pt | 0 | Mais verde deixa a cópia mais magenta. |
@@ -237,6 +237,11 @@ ganham cor (o vermelho do negativo medido tem menos contraste que o verde e o az
 | Curva neutra do negativo (**avançado**) | 0–100% | 0% | Aproxima o gama, o pé e o ombro das três camadas do negativo da média delas: tira a virada de cor entre sombras e luzes do filme. |
 | Curva neutra da cópia (**avançado**) | 0–100% | 0% | O mesmo para o gama e a densidade máxima das camadas da cópia. |
 | Mistura entre camadas (**avançado**) | 0,00–2,00× | 1,00× | Multiplica as absorções indesejadas dos corantes da cópia: acima de 1 a cor fica mais suja e densa; abaixo, mais pura. |
+| **Tipo de scanner** | RGB estreito (cada camada sozinha), Luz branca (camadas misturadas) | RGB estreito | Só com a cópia *Sem cópia*. O RGB estreito (o de sempre) lê cada camada do negativo sozinha, como um scanner de cinema com LEDs vermelho, verde e azul estreitos. A luz branca é a de uma câmera fotografando o negativo numa mesa de luz: cada canal vê um pouco das outras camadas (no vermelho, 29% da camada magenta), então as cores saem **menos saturadas**; o cinza e a escala de cinza continuam iguais (a inversão usa o contraste de cada canal no cinza). A mistura vem das curvas de densidade espectral do Vision3 250D (veja *Modelos calibrados por datasheets*). |
+| **Película vencida** | 0–30 anos | 0 | Anos guardada fora da geladeira (regra prática dos laboratórios, não uma medida): por década, ~1/2 stop a menos de sensibilidade, 10% a menos de contraste e um **véu** de 2% da exposição do cinza. A camada do azul (a mais rápida, a de grão maior) envelhece mais: o véu levanta os pretos, que ficam lavados e **azulados**, e as altas luzes ficam **amareladas**; o cinza médio continua calibrado. A densidade mínima do negativo só sobe com os anos. Num preto e branco o véu é cinza. Vale também para o filme dos processos reversível e cruzados. |
+| **Pré-exposição (flashing)** | liga/desliga | desligada | Uma luz uniforme no negativo antes da cena (como o *flashing* de laboratório): levanta e suaviza as sombras e quase não mexe nas altas luzes (com 4 stops ou mais, as altas luzes mudam menos de 0,012); o cinza continua calibrado. |
+| Pré-exposição abaixo do cinza | 1–8 stops | 4 stops | Quanto abaixo do cinza médio fica a luz da pré-exposição: 4 stops = 1/16 da exposição do cinza. Menos stops, mais efeito. |
+| Cor da pré-exposição | Neutra, Âmbar (quente), Azul (fria), Verde, Magenta | Neutra | Cor da luz da pré-exposição (mesmo brilho em todas): tinge as sombras. |
 
 **Processos.**
 
@@ -253,6 +258,16 @@ ganham cor (o vermelho do negativo medido tem menos contraste que o verde e o az
   da cópia e soma uma imagem preto e branca aos corantes: menos cor, mais contraste, pretos
   profundos. Os controles *Bleach bypass no negativo* e *na cópia* fazem o mesmo em qualquer
   processo e em quantidade ajustável.
+- **Reversível** (slide, Ektachrome em E-6): o próprio filme da câmera vira o positivo, sem
+  negativo nem cópia. Mais contraste que o caminho negativo + cópia (cerca de 1,5 vez no cinza),
+  pretos mais densos, pouca latitude (as altas luzes estouram uns 6 stops acima do cinza) e cores
+  puras. *Revelação* forçada aumenta ainda mais o contraste, como no slide forçado.
+- **Revelação cruzada: slide no C-41** (o *cross processing* dos anos 90): o filme de slide revelado
+  como negativo e copiado: contraste muito alto, cor saturada, **sombras azuladas e altas luzes
+  amareladas** (as camadas ficam com contrastes diferentes).
+- **Revelação cruzada: negativo no E-6**: o negativo revelado como slide: positivo de **pouco
+  contraste**, preto lavado (densidade máxima baixa), **altas luzes quentes** (a máscara laranja que
+  sobra) e **sombras azuladas**.
 
 **Calibração.** Tudo o que muda as curvas (negativo, revelação, separação, saturação do filme,
 bleach bypass, curvas neutras, pé, diafonia, chave) entra na calibração do cinza: o cinza médio

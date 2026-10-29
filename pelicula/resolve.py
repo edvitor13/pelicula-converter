@@ -288,8 +288,14 @@ def curve_control() -> Ctl:
 
 def laboratorio_controls() -> list[Ctl]:
     """Nó Laboratório: entrada, exposição e o laboratório (sempre ligado), como um nó de emulação de filme."""
-    return (input_controls() + lab_controls(with_switch=False) + lab_grain_controls()
+    return (input_controls() + lab_controls(with_switch=False) + lab_grain_controls() + lab_extra_controls()
             + [ctl("mix_geral", "Forca geral do look"), curve_control()])
+
+
+def lab_extra_controls() -> list[Ctl]:
+    """1.6 (labx.py): tipo de scanner, película vencida e pré-exposição (só no nó Laboratório e no OFX)."""
+    from . import labx
+    return [ctl(k, label) for k, label in labx.CONTROLS]
 
 
 def lab_grain_controls() -> list[Ctl]:
@@ -888,15 +894,18 @@ def spec(kind: str, dialect: str = DCTL) -> Spec:
     if kind in COLOR_KINDS:
         lab_only = kind == "laboratorio"
         controls = laboratorio_controls() if lab_only else cor_controls()
-        body = B_COR.replace("/*LAB*/", B_LAB).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
+        from . import labx
+        b_lab = labx.body(B_LAB) if lab_only else B_LAB  # 1.6: véu, pré-exposição e scanner (labx.py)
+        body = B_COR.replace("/*LAB*/", b_lab).replace("/*LOOK*/", B_LAB_ONLY if lab_only else B_LOOK)
         body = body.replace("/*NGRAIN*/", B_NGRAIN if lab_only else "")  # 1.6: grão no negativo
         if lab_only:
             body = "    int v_lab_on = 1;\n" + body  # o nó Laboratório é o laboratório sempre ligado
         kernel = K_COMMON + K_DECODE + K_LOOK + K_LAB + K_CURVE
         tables = _cor_tables(dialect) + _lab_tables(dialect)
         if lab_only:
-            kernel += K_RAND + K_TEXTURA + K_NGRAIN
+            kernel += K_RAND + K_TEXTURA + K_NGRAIN + labx.kernel(K_LAB)
             tables += _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)
+            tables += labx.tables(_define, _table, dialect)
         return Spec(kind, controls, tables, kernel, body, False)
     if kind == "textura":
         tables = _gauge_tables(dialect) + _mtf_table(dialect) + _grao_tables(dialect)

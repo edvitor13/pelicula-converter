@@ -162,6 +162,23 @@ PROCESSOS = [
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
     ("tech2", "Technicolor 2 cores (anos 20)"),
     ("prata", "Retenção de prata (bleach bypass)"),
+    ("reversivel", "Reversível (slide, sem cópia)"),
+    ("cruzado_e6c41", "Revelação cruzada: slide no C-41"),
+    ("cruzado_c41e6", "Revelação cruzada: negativo no E-6"),
+]
+
+# 1.6 (labx.py): scanner do "Sem cópia" e cor da pré-exposição.
+SCANNERS = [
+    ("rgb", "RGB estreito (cada camada sozinha)"),
+    ("branca", "Luz branca (camadas misturadas)"),
+]
+
+CORES_PRE_EXPOSICAO = [
+    ("neutra", "Neutra"),
+    ("ambar", "Âmbar (quente)"),
+    ("azul", "Azul (fria)"),
+    ("verde", "Verde"),
+    ("magenta", "Magenta"),
 ]
 
 # MTF da película: maciez fina que tira a nitidez "digital" (poros, serrilhado) e mantém o detalhe maior.
@@ -330,6 +347,20 @@ SECTIONS: list[Section] = [
         F("lab_diafonia", "Mistura entre camadas", 1.0, 0, 2, 0.01, 2, "×",
           "Absorções indesejadas dos corantes: acima de 1 a cor fica mais suja e densa; abaixo, mais pura.",
           advanced=True),
+        C("lab_scanner", "Tipo de scanner", "rgb", SCANNERS,
+          "Só na cópia \"Sem cópia\". RGB estreito lê cada camada do negativo sozinha (o de sempre); luz branca "
+          "vê as camadas misturadas, como uma câmera fotografando o negativo numa mesa de luz: cores menos "
+          "saturadas, cinza igual."),
+        F("lab_vencida", "Película vencida", 0.0, 0, 30, 1, 0, " anos",
+          "Anos guardada fora da geladeira: véu que levanta e tinge as sombras, menos sensibilidade e menos "
+          "contraste, mais na camada do azul (a mais rápida). Regra prática dos laboratórios, não uma medida."),
+        B("lab_pre_exposicao", "Pré-exposição (flashing)", False,
+          "Uma luz uniforme no negativo antes da cena: levanta e suaviza as sombras e quase não mexe nas altas "
+          "luzes."),
+        F("lab_pre_exposicao_stops", "Pré-exposição abaixo do cinza", 4.0, 1, 8, 0.5, 1, " stops",
+          "Quanto abaixo do cinza médio fica a luz da pré-exposição: menos stops, mais efeito."),
+        C("lab_pre_exposicao_cor", "Cor da pré-exposição", "neutra", CORES_PRE_EXPOSICAO,
+          "Cor da luz da pré-exposição: tinge as sombras."),
     ], "Simula a película de verdade: negativo, revelação, luzes da copiadora e cópia"),
 
     Section("cor", "Cor da película", "cor_on", [
