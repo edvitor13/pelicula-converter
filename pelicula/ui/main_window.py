@@ -641,6 +641,7 @@ class MainWindow(QMainWindow):
         vl.setSpacing(0)
         bar = AdaptiveBar()
         bar.setObjectName("ViewerBar")
+        self.viewer_bar = bar  # a barra da prévia (a da linha do tempo usa o mesmo nome de estilo)
         hl = FlowLayout(bar, 8, 6)
         hl.setContentsMargins(12, 8, 12, 8)
         self.compare = Segmented([

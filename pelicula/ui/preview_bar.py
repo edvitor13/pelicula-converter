@@ -8,7 +8,7 @@ na comparação (Dividido ou Lado a lado). Tudo só na tela: a receita do quadro
 from __future__ import annotations
 
 from PySide6.QtGui import QAction, QActionGroup, QImage
-from PySide6.QtWidgets import QFileDialog, QMenu, QToolButton, QWidget
+from PySide6.QtWidgets import QFileDialog, QMenu, QToolButton
 
 from .. import exposure
 from ..i18n import _, decimal_sep
@@ -62,7 +62,7 @@ class PreviewBar:
         self.act_clear = rm.addAction(_("Tirar a referência"), self.clear_reference)
         rm.aboutToShow.connect(self._sync_ref_menu)
         self.btn_ref.setMenu(rm)
-        bar = win.findChild(QWidget, "ViewerBar")
+        bar = getattr(win, "viewer_bar", None)
         if bar is not None and bar.layout() is not None:
             for b in self.buttons():
                 bar.layout().addWidget(b)

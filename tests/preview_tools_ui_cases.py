@@ -72,6 +72,7 @@ def bar(win):
 
 def test_buttons_live_in_the_viewer_bar_and_follow_the_scopes_module(win):
     b = bar(win)
+    assert all(x.parent() is win.viewer_bar for x in b.buttons()), "na barra da prévia, não na da linha do tempo"
     assert all(not x.isHidden() for x in b.buttons())
     modules.set_enabled(win.settings, "scopes", False)
     win.settings_changed.emit("modulos")

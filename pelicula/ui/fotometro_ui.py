@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QLabel, QMenu, QToolButton, QWidget
+from PySide6.QtWidgets import QLabel, QMenu, QToolButton
 
 from .. import fotometro
 from ..i18n import _
@@ -79,7 +79,7 @@ class FilmMeter:
         self.info = QLabel()
         self.info.setObjectName("Faint")
         self.info.setVisible(False)
-        bar = win.findChild(QWidget, "ViewerBar")
+        bar = getattr(win, "viewer_bar", None)
         if bar is not None and bar.layout() is not None:
             bar.layout().addWidget(self.btn)
             bar.layout().addWidget(self.info)

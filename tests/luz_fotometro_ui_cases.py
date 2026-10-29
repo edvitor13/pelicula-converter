@@ -209,7 +209,7 @@ def test_meter_is_a_beta_module_off_by_default(win):
     meter = win.film_meter
     assert meter is not None and win._module_tools()["fotometro"] == [meter.btn]
     assert meter.btn.isHidden() and meter.info.isHidden()
-    assert meter.btn.parent() is win.findChild(type(meter.btn.parent()), "ViewerBar")
+    assert meter.btn.parent() is win.viewer_bar, "na barra da prévia, não na da linha do tempo"
     set_module(win, "fotometro", True)
     assert not meter.btn.isHidden()
     assert meter.info.isHidden(), "o texto só com o fotômetro ligado"
