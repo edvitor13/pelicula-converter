@@ -111,7 +111,7 @@ Três ideias guiam o projeto:
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
 | `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
 | `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
-| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (44 presets), presets do usuário (JSON), importar/exportar. |
+| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (48 presets; os 4 da 1.6 no fim), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels; transparência (`has_alpha`, `decodes_alpha`, leitura RGBA pré-multiplicada, seção 22.4). |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `frame_pipeline()`/`preview_frame()` (a receita de `frame.py` com os ajustes da exportação), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
@@ -3677,3 +3677,26 @@ negativo. Os valores do look são os do quadro (`Context.values`, com as chaves)
 **O que fica de fora.** É o eixo do cinza: uma cor saturada pode cair noutra zona numa camada (a leitura de um ponto
 mostra; a camada pinta pela luminância, como a falsa cor). O caminho B (o processo: cruzado, reversível) e a cópia
 não entram: o fotômetro mede o negativo, que é onde a latitude da câmera mora.
+
+### 35.3 Presets dos processos da 1.6
+
+Quatro ids novos no fim de `presets.BUILTIN` (um `BUILTIN += [...]` depois de "original", para que nenhum preset
+antigo mude de índice: o *Preset* do OpenFX é um índice): `lab_slide_reversivel` (`lab_processo="reversivel"`),
+`lab_cruzado_slide_c41` (`"cruzado_e6c41"`), `lab_vencida_18_anos` (`lab_vencida=18`, +0,5 EV) e
+`lab_flashing_suave` (pré-exposição âmbar a 3 stops, revelação −0,5, saturação final 0,9), todos no grupo
+"Laboratório" com `cor_on=False` e a cópia antiga desligada, como os outros do grupo. `tools/gerar_ofx.py` regenera
+`pc_params.h` (`PC_PRESET_COUNT` 48).
+
+As bases douradas (`tests/cor_base.py`, `tests/entrada_base.py`) iteram só `BUILTIN[:BASE_PRESETS]` (44, os da
+gravação): nenhuma referência foi regravada, e os presets novos são conferidos por `tests/test_presets_16.py` (fim da
+lista, processo certo, e no eixo do cinza: slide com mais contraste, pré-exposição com menos e sombras mais altas,
+véu da vencida, virada de cor da cruzada) e pelos testes que percorrem todos os presets (`test_presets`,
+`test_engine`, `test_look`, `test_ofx`, `test_resolve`). No DCTL, película vencida e pré-exposição só existem no
+nó Laboratorio, então `test_cor_node_matches_the_app_for_every_preset` pula os dois presets que as usam (o nó
+Laboratorio deles é conferido em `test_laboratorio_node_matches_the_app`).
+
+### 35.4 Testes
+
+`tests/test_luz_plano.py` (luz por plano: neutra no padrão, quadros certos, transições, V2, 12 pontos = 1 stop da
+cópia, JSON e formato 4, desfazer, prévia = exportação, GPU), `tests/test_fotometro.py` (latitude e zonas),
+`tests/test_presets_16.py` e os casos de janela em `tests/luz_fotometro_ui_cases.py` (`test_luz_fotometro_ui.py`).

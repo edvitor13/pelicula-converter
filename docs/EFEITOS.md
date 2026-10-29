@@ -837,3 +837,18 @@ o ombro e as camadas de cor que já estão noutra zona (uma luz vermelha forte c
 
 Sem o Laboratório ligado, o fotômetro usa o negativo padrão (Vision3 250D, revelação normal) e diz isso. Só na
 tela: nunca vai para a exportação, para um LUT nem para o plugin.
+
+### Presets novos (grupo Laboratório)
+
+Quatro presets usam os processos e os controles do Laboratório da 1.6 (cor pelo modelo de densidade; o *Cor da
+película* fica desligado):
+
+| Preset | O que liga | Resultado |
+|---|---|---|
+| **Slide reversível (laboratório)** | Processo *Reversível*, ISO 100 | Cromo projetado sem cópia: cor saturada, contraste alto, pouca latitude, altas luzes que estouram cedo. |
+| **Revelação cruzada: slide no C-41 (laboratório)** | Processo *Revelação cruzada: slide no C-41*, cópia 2383 | Contraste alto e cor virada entre sombras e altas luzes. |
+| **Película vencida (18 anos)** | Vision3 250D → 2383, *Película vencida* 18 anos, +0,5 EV, grão mais forte | Véu nas sombras, menos sensibilidade e contraste, azul mais fraco. |
+| **Pré-exposição (baixo contraste)** | Vision3 250D → 2383, *Pré-exposição* âmbar 3 stops abaixo do cinza, revelação puxada ½ stop, saturação 0,9 | Sombras abertas e lisas, contraste baixo, cor contida. |
+
+No plugin do DaVinci os quatro vêm no *Preset* do OpenFX e como nós DCTL; os dois últimos dependem da película
+vencida e da pré-exposição, que só o nó **Laboratorio** tem (o nó *Cor* desses presets sai sem elas).

@@ -38,6 +38,7 @@ W, H = 160, 90
 OLD_INPUTS = ["rec709", "linear", "nlog", "slog3", "logc3", "vlog", "log3g10", "dwg", "cineon", "bmd_gen5",
               "logc4", "applelog", "hlg", "pq"]
 PROFILE_PRESETS = ["vision3_500t", "lab_v3_250d_2383"]
+BASE_PRESETS = 44  # presets da gravação; os da 1.6 entram no fim de `presets.BUILTIN`, sem referência
 MONTAGE_FRAMES = [0, 12, 30, 47, 50, 60, 70, 100, 115]
 
 
@@ -75,7 +76,7 @@ def value_sets() -> dict[str, dict]:
     """Os ajustes de cada caso: padrão, todos os presets e cada perfil antigo em dois presets."""
     from pelicula import params, presets
     out = {"padrao": params.defaults()}
-    for p in presets.BUILTIN:
+    for p in presets.BUILTIN[:BASE_PRESETS]:
         out[f"preset:{p['id']}"] = presets.builtin_values(p["id"])
     for pid in PROFILE_PRESETS:
         for ent in OLD_INPUTS:

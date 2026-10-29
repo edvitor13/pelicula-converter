@@ -53,12 +53,17 @@ def image(depth: int) -> np.ndarray:
     return np.rint(rgb * mx).astype(np.uint8 if depth == 8 else np.uint16)
 
 
+# Presets que existiam na gravação; os da 1.6 entram no fim de `presets.BUILTIN` e não têm referência (os testes de
+# presets e do plugin os renderizam).
+BASE_PRESETS = 44
+
+
 def look_cases() -> list[tuple[str, dict]]:
     """Os ajustes padrão e todos os presets embutidos. O texto da borda do scan sai (ele é desenhado pelo Qt com
     a fonte do sistema e só existe com uma QGuiApplication: mudaria o hash conforme a ordem dos testes)."""
     from pelicula import params, presets
     out = [("padrao", params.defaults())]
-    out += [(p["id"], presets.builtin_values(p["id"])) for p in presets.BUILTIN]
+    out += [(p["id"], presets.builtin_values(p["id"])) for p in presets.BUILTIN[:BASE_PRESETS]]
     return [(name, {**values, "scan_texto": "nenhum"}) for name, values in out]
 
 

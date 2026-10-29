@@ -8,7 +8,7 @@ também no gratuito (páginas Color e Edit). Este módulo:
   tremor/defeitos), em `plugins/ofx/generated/`. A orquestração das passadas (desfoques, mipmaps,
   grão por grade, montagem final) fica em `plugins/ofx/src/pc_core.cpp`, escrita à mão seguindo
   `Engine.render()`;
-- descreve os parâmetros do efeito (rótulos e dicas do app, faixas dos DCTLs, os 44 presets prontos e
+- descreve os parâmetros do efeito (rótulos e dicas do app, faixas dos DCTLs, os presets prontos e
   a leitura de um look .json/.plc exportado pelo app);
 - acha, instala e confere o pacote `PeliculaConverter.ofx.bundle` (a instalação pede administrador:
   a pasta padrão do OFX fica em Program Files / /usr).

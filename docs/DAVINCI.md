@@ -44,7 +44,7 @@ do OpenFX. Para desinstalar, apague essa pasta.
 1. Página **Color**: abra **OpenFX** (botão *Effects*), procure **PeliculaConverter** (categoria
    *PeliculaConverter*) e arraste para um nó. Página **Edit**: *Effects › OpenFX › PeliculaConverter*
    sobre o clipe.
-2. Grupo **Look**: escolha um **Preset** (os 44 do app; trocar o preset troca os ajustes do look, num
+2. Grupo **Look**: escolha um **Preset** (os 48 do app; trocar o preset troca os ajustes do look, num
    passo só de desfazer — o *Perfil do vídeo* e a *Faixa do vídeo* são do clipe e ficam, como no app) ou
    **Carregar look do PeliculaConverter (.json)** — um preset exportado pelo app (menu ⋯ dos presets ›
    *Exportar preset (.json)…*) ou um projeto `.plc`. **Recarregar o look** lê o arquivo de novo.
@@ -94,7 +94,7 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 ### Igual ao app?
 
 - **Cor**: a mesma conta, gerada a partir do mesmo kernel dos DCTLs. Comparado com `Engine.bake_lut`
-  (GPU): diferença < 0,0001 nos 44 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
+  (GPU): diferença < 0,0001 nos 48 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
   (no PQ, que vai até 10000 cd/m², cores HDR muito saturadas chegam a 0,001); em todas as combinações de
   negativo × cópia × processo, mediana 0,000001 e máximo 0,0005 (nos ombros mais íngremes, onde a precisão
   do float da GPU pesa).
@@ -291,7 +291,7 @@ Dicas:
 plugins/ofx/
   openfx/        OpenFX 1.4 oficial (cabeçalhos + biblioteca de apoio C++), BSD-3: LICENSE e SOURCE.txt
                  (endereço, commit e SHA-256 de cada arquivo); só leitura
-  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 44 presets),
+  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 48 presets),
                  gerados por pelicula/ofx.py — não edite; rode python tools/gerar_ofx.py
   src/           pc_core.cpp (as passadas do Engine.render na CPU), pc_ofx.cpp (o efeito OpenFX),
                  pc_capi.cpp (interface C para os testes), pc_json.h (leitor dos looks .json/.plc)

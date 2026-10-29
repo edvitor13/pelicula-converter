@@ -58,7 +58,7 @@ pelicula/
                              legendas gravadas (burn: "copia" antes do look, "digital" depois)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
-  presets.py                 FILM_BASE, BUILTIN (44 presets em 7 grupos), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
                              transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
@@ -425,6 +425,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
 | `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
+| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): no fim da lista, processo certo, efeito no eixo do cinza |
 | `tests/test_fotometro.py` | fotômetro: latitude por negativo (Vision3 × Double-X), revelação, vencida e pré-exposição movem os limites como documentado, zonas da camada em stops conhecidos, leitura de um ponto, nada no caminho de render |
 | `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Ctrl+Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
