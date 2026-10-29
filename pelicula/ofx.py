@@ -43,6 +43,7 @@ SRC_DIR = ROOT / "plugins" / "ofx"
 GENERATED = ("pc_kernels.h", "pc_params.h")
 KIND_CODES = {"float": 0, "int": 1, "check": 2, "combo": 3, "color": 4}
 SKIP = ("ui_qualidade", "ui_fps")  # só fazem sentido no DCTL (o OFX tem a imagem inteira e o fps do clipe)
+SKIP += ("ui_mtf_copia",)  # 1.6: o OFX vê a cópia direto (copia, lab_on, lab_copia)
 # Rótulo, dica e opções com acento dos controles só do plugin (os do app vêm de params.py).
 INTERNAL_TEXT = {
     "ui_faixa_video": ("Faixa do vídeo",
@@ -84,7 +85,8 @@ def _section_of(key: str) -> str:
 def controls() -> list[Ctl]:
     """Todos os controles do plugin: os do nó Cor + Textura + Projetor, sem repetir."""
     out, seen = [], set()
-    for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls():
+    extra = resolve.lab_grain_controls()  # 1.6: "Grão no negativo" (o resto já vem do Textura)
+    for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls() + extra:
         if c.name in SKIP or c.name in seen:
             continue
         seen.add(c.name)
@@ -249,9 +251,10 @@ def kernels_source() -> str:
     head.append(resolve._define("PC_DSLOPE", look.D_SLOPE) + resolve._define("PC_DMID", look.D_MID)
                 + resolve._define("PC_DP", look.D_P))
     tables = (resolve._cor_tables(CPP) + resolve._lab_tables(CPP) + resolve._gauge_tables(CPP)
-              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP))
+              + resolve._mtf_table(CPP) + resolve._projetor_tables(CPP) + resolve._grao_tables(CPP))
     kernel = (resolve.K_COMMON + resolve.K_DECODE + resolve.K_LOOK + resolve.K_LAB + resolve.K_CURVE
-              + resolve.K_RAND + resolve.K_TEXTURA + resolve.K_PROJETOR).replace("PC_DEVICE ", "static inline ")
+              + resolve.K_RAND + resolve.K_TEXTURA + resolve.K_PROJETOR + resolve.K_NGRAIN + resolve.K_BREATH
+              ).replace("PC_DEVICE ", "static inline ")
     body = []
     body.append("\n// ---------------------------------------------------------------- valores (formato do app)\n")
     body.append("struct pc_vals {\n" + "".join(f"    {_ctype(s.ctl)} {s.field};\n" for s in sl) + "};\n")
@@ -274,7 +277,13 @@ def kernels_source() -> str:
     body.append(f"static inline float3 pc_gain(const pc_vals& V, float3 lin, float3 gx) {{\n{loc}{resolve.B_GAIN}"
                 "    return lin;\n}\n")
     body.append("// colorPipe do app: laboratorio + look + copia + envelhecimento (B_LAB + B_LOOK)\n")
-    body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{resolve.B_LAB}"
+    lab = resolve.B_LAB.replace("/*NGRAIN*/", "")
+    body.append(f"static inline float3 pc_colorpipe(const pc_vals& V, float3 lin) {{\n{loc}{lab}"
+                f"{resolve.B_LOOK}    return y;\n}}\n")
+    # 1.6: a mesma conta com o grão no negativo (`gn_in` = densidade do grão de cada camada neste pixel)
+    lab_ng = resolve.B_LAB.replace("/*NGRAIN*/", "        gn = gn_in;\n")
+    body.append("// colorPipe com o grao no negativo (grao.negative_grain)\n")
+    body.append(f"static inline float3 pc_colorpipe_ng(const pc_vals& V, float3 lin, float3 gn_in) {{\n{loc}{lab_ng}"
                 f"{resolve.B_LOOK}    return y;\n}}\n")
     frame_body = resolve.B_FRAME
     for a, b in _FRAME_FIX:

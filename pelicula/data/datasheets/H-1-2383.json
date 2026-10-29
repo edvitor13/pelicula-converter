@@ -1,0 +1,23 @@
+{
+  "documento": "KODAK VISION Color Print Film 2383 / 3383 - Technical Data",
+  "publicacao": "H-1-2383",
+  "revisao": "Revised 3-22 (março de 2022)",
+  "endereco": "https://www.kodak.com/content/products-brochures/Film/KODAK-VISION-Color-Print-Film-2383-3383-data-sheet.pdf",
+  "sha256": "181eecf54c11da2dab995ffc230a549d675883bd30cced41e7d823302c2c4db2",
+  "aviso": "Pontos lidos dos gráficos do datasheet só para calibrar modelos do app (nenhum gráfico nem PDF no repositório). A Kodak avisa que os dados são representativos e não especificações; Kodak e Vision são marcas da Eastman Kodak Company. O app não é um produto oficial.",
+  "leitura": {
+    "data": "2026-10-29",
+    "metodo": "O gráfico da página 4 é uma imagem raster dentro do PDF: extraída na resolução original, as linhas da grade dão a escala log dos dois eixos e o centro das linhas de cada curva foi lido coluna a coluna.",
+    "erro": "±1 px da imagem: ±1,7% na resposta (138 px por década)."
+  },
+  "mtf": {
+    "pagina": 4,
+    "figura": "Modulation-Transfer Function Curves (F010_0292AC)",
+    "condicoes": "Exposure: Tungsten 3200 K; Process: ECP-2D; Densitometry: Status A; 35% Modulation Target",
+    "unidade": "resposta em % por frequência espacial em ciclos/mm",
+    "ciclos_mm": [22.3, 25.5, 30.7, 40.4, 46.3, 52.3, 60.0, 65.7, 72.0],
+    "R": [76.6, 74.1, 71.6, 67.0, 64.8, 62.7, 60.6, 59.1, 57.7],
+    "G": [80.5, 80.5, 80.5, 80.5, 80.5, 79.2, 79.2, 76.6, 72.2],
+    "B": [61.6, 56.7, 51.3, 43.4, 40.6, 37.7, 35.0, 33.2, 32.2]
+  }
+}

@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from . import grao
+
 # Curva neutra usada para levar vídeo Rec.709 até a luz da cena e de volta.
 D_SLOPE = 0.155
 D_MID = 0.45
@@ -783,6 +785,7 @@ class Plan:
     grain_seed: int = 0
     lut_path: str = ""
     edge_text: str = ""
+    soft_sigma3: tuple[float, float, float] | None = None  # 1.6: sigma da maciez por canal (None = `soft_sigma`)
 
 
 def aspect_target(v: dict, gauge: dict) -> float:
@@ -887,7 +890,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     sig_g = gauge["blur"] * v["bitola_resolucao"] if v["bitola_desfoque_on"] else 0.0
     sig_u = (v["raio_maciez"] * v["maciez"] * 2.0) if lente else 0.0
     sig_m = mtf_sigma(v)  # MTF da película: gaussiana fina somada em quadratura
-    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2) * scale
+    sig_r = grao.soft_sigma(v, gauge)  # 1.6: maciez pelo grão (0 = desligada)
+    soft = math.sqrt(sig_g ** 2 + sig_u ** 2 + sig_m ** 2 + sig_r ** 2) * scale
     sharp = v["nitidez"] if lente else 0.0
     if soft > 0.05:
         plan.soft_sigma = soft
@@ -901,6 +905,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_soft_on"] = 0
         U["u_soft_mix"] = 0.0
     U["u_sharp"] = sharp
+    grao.layer_softness(plan, v, soft, scale)  # 1.6: nitidez por camada (nada com 0%)
 
     # ---- Halação, bloom e névoa
     U["u_hal_on"] = 0
@@ -912,6 +917,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_hal_on"] = 1
         U["u_hal_amt"] = v["hal_forca"] * 0.32
         U["u_hal_color"] = tuple(v["hal_cor"])
+        grao.physical_halation(plan, U, v, scale)  # 1.6: modo "fisica" (nada no modo "brilho")
     if v["bloom_on"] and v["bloom_forca"] > 0:
         plan.chains.append(Chain("bloom", 0.18 * 2 ** v["bloom_limiar"], v["bloom_raio"] * scale, 6.0, False))
         U["u_bloom_on"] = 1
@@ -1005,7 +1011,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.lut_path = v["lut_arquivo"]
 
     # ---- Grão
-    U["u_grain_on"] = 0
+    U["u_grain_on"] = 0  # 1 = grão na saída; 2 = grão no negativo (1.6, grao.negative_grain)
     if v["grao_on"] and v["grao_forca"] > 0:
         size = 0.8 * v["grao_tamanho"] * gauge["grain_size"] * iso_size * scale
         net = 1.0
@@ -1022,6 +1028,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_grain_rough"] = v["grao_aspereza"]
         U["u_grain_chroma"] = v["grao_cor"] * (NET_GRAIN_CHROMA if net_grain > 0 else 1.0)
         U["u_grain_resp"] = (v["grao_sombras"], v["grao_meios"], v["grao_luzes"])
+        grao.negative_grain(U, v, v["grao_forca"] * gauge["grain_amt"] * iso_amt * comp * push * net)
+
+    grao.breathing(U, v, frame)  # 1.6: respiração por camada (nada sem ela)
 
     # ---- Defeitos desenhados por cima
     dg = bool(v["desg_on"])

@@ -73,6 +73,10 @@ class Engine:
         self._clip_tex: dict[int, moderngl.Texture] = {}
 
     # ------------------------------------------------------------ recursos
+    # Uniforms do FINAL que o plano só grava com o efeito ligado (os planos de sempre não mudam): o valor neutro
+    # entra antes do plano, para que um quadro anterior com o efeito não deixe o valor no programa.
+    FINAL_NEUTRAL = {"u_breath": (1.0, 1.0, 1.0)}  # 1.6: respiração por camada (grao.breathing)
+
     def _target(self, name: str, size: tuple[int, int], dtype: str = "f2", mip: bool = False):
         cur = self._targets.get(name)
         if cur and cur[0].size == size and cur[0].dtype == dtype:
@@ -181,6 +185,11 @@ class Engine:
     def _blur(self, src, dst, direction, sigma, lod) -> None:
         self._run("blur", dst, {"t_src": src}, {"u_dir": direction, "u_sigma": float(sigma), "u_lod": float(lod)})
 
+    def _blur3(self, src, dst, direction, sigma3) -> None:
+        """BLUR com um sigma por canal (`shaders.BLUR3`, compilado no primeiro uso)."""
+        self._lazy_program("blur3", shaders.BLUR3)
+        self._run("blur3", dst, {"t_src": src}, {"u_dir": direction, "u_sigma3": tuple(float(x) for x in sigma3)})
+
     def render(self, plan: look.Plan, depth: int = 8, alpha: bool = False) -> np.ndarray:
         """Renderiza a imagem de entrada atual e devolve (h, w, 3) uint8 ou uint16. `alpha` com uma entrada RGBA:
         (h, w, 4) de cor direta, a mesma cor de sempre e o alfa com a geometria do look (`_alpha_out`)."""
@@ -208,8 +217,12 @@ class Engine:
         if plan.soft_sigma > 0:
             tmp = self._target("tmp", (w, h))
             soft = self._target("soft", (w, h))
-            self._blur(lin[0], tmp, (1.0 / w, 0.0), plan.soft_sigma, 0)
-            self._blur(tmp[0], soft, (0.0, 1.0 / h), plan.soft_sigma, 0)
+            if plan.soft_sigma3 is not None:  # 1.6: nitidez por camada (um sigma por canal)
+                self._blur3(lin[0], tmp, (1.0 / w, 0.0), plan.soft_sigma3)
+                self._blur3(tmp[0], soft, (0.0, 1.0 / h), plan.soft_sigma3)
+            else:
+                self._blur(lin[0], tmp, (1.0 / w, 0.0), plan.soft_sigma, 0)
+                self._blur(tmp[0], soft, (0.0, 1.0 / h), plan.soft_sigma, 0)
 
         glow = {}
         for ch in plan.chains:
@@ -248,7 +261,7 @@ class Engine:
             "t_noise": noise[0] if noise else lin[0],
             "t_lut": self._lut_texture(plan.lut_path),
         }
-        self._run("final", out, textures, U)
+        self._run("final", out, textures, {**self.FINAL_NEUTRAL, **U})
         return out
 
     def _alpha_out(self, plan: look.Plan, depth: int, out) -> np.ndarray:

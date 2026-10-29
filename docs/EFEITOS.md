@@ -34,6 +34,7 @@ vídeo (no modo Película) ou o da montagem; a exportação usa as mesmas chaves
 vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, temperatura, tonalidade
       → tremor do projetor / emendas → lente (distorção, aberração) → vinheta → [scan da película]
       → maciez (bitola, lente e MTF da película) / nitidez → névoa → bloom → halação → vazamento de luz
+      → respiração por camada
       → [laboratório: negativo (separação de cores, saturação do filme) → copiadora → cópia
          → rolagens, saturação final, densidade por cor, pele]
       → cor da película (ou LUT "no lugar do look") → cópia → envelhecimento → LUT "depois"
@@ -57,6 +58,7 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 | **Vinheta da bitola** | 0–100% | 100% | Escurecimento natural das bordas em bitolas pequenas. Vale mesmo com a seção *Lente* desligada. |
 | **MTF da película (maciez fina)** | Desligado, Close (rosto), Plano médio, Plano aberto, Textura 16 mm, Textura Super 8 | Desligado | A resposta de detalhe (MTF) de um filme: tira a nitidez "digital" demais (poros, serrilhado) e mantém o detalhe maior. Escolha pelo enquadramento — o close suaviza mais a pele, o plano aberto menos. É uma gaussiana fina somada em quadratura com o desfoque da bitola e a maciez da lente: σ em 1080p = 1,6 / 1,1 / 0,7 / 1,5 / 2,3 px × 2 × *Quantidade*. Chave `mtf`. |
 | **Quantidade do MTF** | 0–100% | 50% | 50% = o valor do enquadramento escolhido; 100% = o dobro. Chave `mtf_forca`. |
+| **Diferença de nitidez entre camadas** | 0–100% | 0% | Cada cor fica com a nitidez da sua camada na película. No negativo a camada do vermelho é a mais macia e a do azul a mais nítida; com uma cópia escolhida (a *Cópia de projeção* ou a do *Laboratório*), a cópia 2383 amacia o azul e o verde passa a ser o mais nítido. Dá franjas coloridas sutis nas bordas de alto contraste e quase nada nas áreas lisas. 50% = a diferença medida (veja *Modelos calibrados por datasheets*), convertida pelo tamanho do quadro da bitola: some no 35 mm e aparece mais no Super 8; 100% = o dobro. Soma-se em quadratura às outras maciezes. Chave `mtf_camadas`. |
 | **Força geral do efeito** | 0–100% | 100% | Mistura o resultado com o vídeo original (antes da moldura). |
 
 Valores por bitola (multiplicadores internos):
@@ -172,6 +174,7 @@ comportamento de cada um, sem dados nem curvas dos fabricantes.
 |---|---|---|---|
 | **Negativo** | Kodak Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Fujifilm Eterna 250D, Eterna Vivid 500, Eastman EXR 5248 (anos 90), Eastman 5247 ECN-II (anos 70), Kodak Vision2 5201 50D, Eastman ECN-II 5297 250D, Kodak Vision 5246 250D, Kodak Vision 5263 500T, Kodak Vision2 Expression 5229 500T, Kodak Double-X 5222 (P&B) | Vision3 250D | Filme da câmera: latitude (onde ficam o pé e o ombro), contraste de cada camada, mistura de cores entre as camadas e efeito entre camadas (que satura os filmes modernos). Double-X é preto e branco pancromático. |
 | **Revelação (puxar / forçar)** | −2 a +3 stops | 0 | Revelação forçada (+): mais contraste, sombras mais fechadas e grão maior (× 1,15 por stop). Puxada (−): o contrário. Cada stop muda o gama do negativo em 12%. |
+| **Grão no negativo** | liga/desliga | desligado | Põe o grão da seção *Grão* (que precisa estar ligada) **dentro do negativo**: cada camada recebe o grão na sua densidade, antes da cópia, como na película de verdade. Quem molda o grão visível passa a ser a curva da cópia: ele some nos pretos profundos e nas altas luzes estouradas e aparece nos tons médios; o azul tem mais grão que o verde e o vermelho (a granularidade das camadas, veja *Modelos calibrados por datasheets*). *Intensidade*, *Tamanho*, *Aspereza*, *Grão colorido*, *Muda a cada quadro*, a bitola, o ISO e a revelação valem como sempre; a resposta por tom (*Nas sombras*, *Nos tons médios*, *Nas altas luzes*) deixa de valer. Não entra no LUT exportado. |
 | **Cópia** | Kodak 2383, Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra), Eastman EXR Print 5386, Eastman Color Print 5385, Kodak 2302 (cópia P&B), Sem cópia (negativo escaneado e invertido) | Kodak 2383 | Filme da projeção. A cópia dá o contraste final, a rolagem suave das altas luzes (o pé da cópia) e o preto (a densidade máxima). *Sem cópia* inverte o negativo digitalmente, como num scan: muita latitude e pouco contraste. |
 | **Processo** | Normal (negativo + cópia), Technicolor 3 tiras (transferência de corante), Technicolor 2 cores (anos 20), Retenção de prata (bleach bypass) | Normal | Veja abaixo. Nos dois Technicolor a cópia escolhida não é usada (eles imprimem os próprios corantes). |
 | **Força do processo** | 0–100% | 100% | Technicolor: mistura com o caminho normal (negativo + cópia). Retenção de prata: quanto de prata fica na cópia. |
@@ -316,10 +319,14 @@ interpolação é trilinear na GPU.
 | **Nas altas luzes** | 0,00–2,00 | 0,45 | Quanto grão aparece nas altas luzes. |
 | **Grão muda a cada quadro** | liga/desliga | ligado | Desligado, o padrão do grão fica parado (útil para fotos ou efeitos especiais). |
 | Semente (**avançado**) | 0–9999 | 7 | Muda o padrão aleatório do grão. |
+| **Maciez pelo grão** | 0–100% | 0% | Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma imagem mais nítida que ele (na película, a imagem nunca é mais nítida que o grão). 100% dá à imagem a maciez do grão: cresce com o *Tamanho*, a bitola e o ISO. Soma-se às outras maciezes (bitola, lente, MTF) e só vale com o grão ligado. |
+| **Respiração por camada** | 0–100% | 0% | A cor e o brilho de cada quadro variam um pouco, cada camada por si (vermelho, verde e azul), como na película: a espessura da emulsão ao longo da fita, a revelação e a luz da copiadora nunca são iguais de um quadro para outro. Uma parte muda de quadro em quadro e outra devagar ao longo da fita (uns 24 quadros), sempre igual para o mesmo quadro e a mesma *Semente*. Entra como exposição **antes da cor**, então a cópia (ou o Laboratório) a esconde nos pretos e nas altas luzes estouradas. 100% ≈ um ponto de copiadora de desvio (0,015 de densidade do negativo), o de uma cópia revelada sem muito cuidado; vale com a seção *Grão* ligada, mesmo com a *Intensidade* em 0. Não entra no LUT exportado. Chave `grao_respiracao`. |
 
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
-bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é aplicado depois da curva de
-cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho). Em prévias reduzidas, grãos
+bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é **procedural**: nasce dos ajustes
+e de constantes publicadas, nunca de uma análise da sua imagem ou de um scan. Ele é aplicado depois da curva de
+cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho); com o **Grão no negativo** do
+Laboratório ligado, ele vai para a densidade das camadas do negativo e quem dá a resposta por tom é a cópia. Em prévias reduzidas, grãos
 menores que 1 pixel são levemente compensados; para ver o grão fiel, use a prévia *Máxima* com
 zoom 100%.
 
@@ -338,9 +345,25 @@ camada vermelha: daí o halo alaranjado em volta de lâmpadas e reflexos.
 | **Raio** | 1–100 px | 14 px | Medido num quadro de 1080 linhas (e multiplicado pela bitola: 1,6× em 8 mm, 0,75× em IMAX). |
 | **Limiar** | 0–6 EV | 2,50 EV | A partir de quantos stops acima do cinza médio brilha (com transição suave). |
 | **Cor** | cor | `#FF450D` (vermelho-alaranjado) | Cor do halo. Os presets de P&B usam branco. |
+| **Modelo** | Brilho (acima do limiar), Física (reflexo na base) | Brilho | Veja abaixo. Chave `hal_modelo`. |
 
-O halo é calculado só pela luminância das luzes e tingido pela cor escolhida. Com o *Scan da
-película* ligado, só a área da imagem emite halação (os furos iluminados não).
+No modelo **Brilho** (o de sempre), o halo é calculado só pela luminância das luzes acima do *Limiar*,
+tingido pela cor escolhida e somado por cima da imagem. Com o *Scan da película* ligado, só a área da
+imagem emite halação (os furos iluminados não).
+
+No modelo **Física**, o halo é a própria luz que volta da base do filme: nasce da exposição do vermelho
+(a camada mais perto da base) em toda a imagem, na proporção da luz, e entra na exposição **antes da
+cópia** (e do Laboratório, se ligado), como uma segunda exposição da camada. O *Limiar* não vale. Só o
+desvio local do reflexo entra: a parte que uma área lisa receberia já está nas curvas medidas do filme,
+então céus, paredes e rostos sem luz forte por perto ficam iguais (em qualquer cor), e o anel em volta
+de uma lâmpada sai da própria lâmpada. A *Cor* diz quanto do reflexo chega a cada camada (no padrão,
+quase só no vermelho e um pouco no verde). O *Raio* vale para o 35 mm e cresce na proporção do quadro
+das bitolas menores (o anel tem o mesmo tamanho na película, uns 0,2 mm): 2,4× no 16 mm, 4,3× no
+Super 8, 0,47× no 65 mm. Com a *Intensidade* padrão, uns 11% do vermelho voltam, o que é o caso de uma
+película sem camada anti-halo; o halo em volta de uma luz estourada fica com a força do modelo Brilho.
+Esse número não vem de datasheet: a camada anti-halo (o *remjet* da Vision3) tira quase todo o reflexo,
+e o quanto sobra muda de filme para filme. A luz de um ponto estourado no arquivo é contida suavemente
+(o valor dela é um palpite da entrada).
 
 ---
 
@@ -484,12 +507,46 @@ tremor do projetor move a tira inteira.
 
 ---
 
+## Modelos calibrados por datasheets
+
+Alguns modelos de grão e textura da 1.6 usam números lidos de datasheets **públicos** da Kodak. Os pontos
+lidos ficam em `pelicula/data/datasheets/` com a fonte (publicação, revisão, página, figura e o SHA-256 do PDF
+lido); os gráficos e os PDFs não estão no app. A Kodak avisa que esses dados são representativos e não
+especificações, e o resultado continua sendo uma **aproximação**: o app não é um produto oficial e as marcas
+são dos donos.
+
+| Modelo | Ajuste | O que foi medido | Fonte |
+|---|---|---|---|
+| Nitidez por camada do negativo | **Diferença de nitidez entre camadas** | Curvas de MTF de cada camada: o vermelho cai mais cedo que o verde, e o verde mais cedo que o azul | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Modulation-Transfer Function Curves* |
+| Nitidez por camada da cópia | **Diferença de nitidez entre camadas** (com cópia) | Curvas de MTF da cópia: o azul é a camada mais macia, o verde a mais nítida | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC |
+| Grão de cada camada do negativo | **Grão no negativo** | Granularidade rms difusa (sigma D, abertura de 48 µm) de cada camada: azul 0,0126, verde 0,0071, vermelho 0,0061 (média pela exposição) | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Diffuse rms Granularity Curves* |
+
+Como a conta é feita: cada camada ganha uma gaussiana (somada em quadratura) que leva a resposta da camada mais
+nítida à dela nas frequências do meio, de 20 a 62 ciclos/mm (`tools/ajustar_grao.py`). Ficam 4,3 µm no
+vermelho e 2,2 µm no verde do negativo e 2,3 µm no vermelho e 4,5 µm no azul da cópia, convertidos em pixels
+pelo tamanho do quadro da bitola (um quadro de 1080 linhas cobre a largura da imagem da bitola). A gaussiana
+fica a menos de 8% das razões publicadas no negativo e a menos de 18% na cópia; outros filmes usam os mesmos
+valores.
+
+No **Grão no negativo**, o sigma D de cada camada vale para o 35 mm com ISO 250 (o próprio 250D) e *Tamanho* 1:
+o app calcula quanto grão por pixel dá esse sigma D medido numa abertura de 48 µm (a média do grão nessa
+abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e a *Intensidade* multiplicam como no
+grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
+sua imagem.
+
+A **respiração por camada** também não: 100% é um ponto de copiadora de desvio, escolhido a olho.
+A **halação física** (*Halação › Modelo › Física*) não é calibrada por datasheet: o raio vem da geometria do
+reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (veja *Halação*).
+
+---
+
 ## O que vai para um LUT exportado
 
 *⋯ → Exportar a cor como LUT .cube* grava **só a cor**: perfil de entrada, exposição, temperatura,
 tonalidade, laboratório (negativo, revelação, luzes da copiadora, cópia e processo), cor da película,
 cópia, envelhecimento e LUT externo. Não cabem num LUT (porque
-dependem da posição do pixel, dos vizinhos ou do tempo): grão, halação, bloom, névoa, maciez,
+dependem da posição do pixel, dos vizinhos ou do tempo): grão (também o grão no negativo), respiração por
+camada, halação, bloom, névoa, maciez,
 nitidez, lente, vinheta, projetor, defeitos, moldura e scan.
 
 A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3, V-Log e N-Log ela é o

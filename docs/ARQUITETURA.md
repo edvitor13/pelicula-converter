@@ -34,6 +34,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 26. [Transições de película](#26-transições-de-película)
 27. [Legendas na interface, transcrição e silêncios](#27-legendas-na-interface-transcrição-e-silêncios)
 28. [Base da 1.6: formato 4](#28-base-da-16-formato-4)
+30. [Grão e textura na 1.6](#30-grão-e-textura-na-16)
 
 ---
 
@@ -2690,3 +2691,175 @@ dela, e a 1.5 recusa com "O projeto foi salvo por uma versão mais nova do app".
   (`timeline.FORMAT`; `FORMAT_15` = 2), escolhido por `Sequence.block_format()`. Os passos `project._v3_to_v4` e
   `timeline._seq_v2_to_v3` só trocam o número: a 1.6 só acrescenta campos.
 
+## 30. Grão e textura na 1.6
+
+Os modelos novos de grão e textura ficam em `pelicula/grao.py`; `look.build_plan`, os shaders, o `Engine` e o
+plugin só ganham ganchos pequenos. Todo ajuste novo começa num padrão neutro e, nele, o plano, os quadros, o LUT
+exportado e o plugin saem bit a bit os da BASE: `tests/grao_base.py` gravou a referência no código da BASE
+(`tests/data/grao_base.json`: planos de todos os presets e de looks com grão, halação, maciez e Laboratório;
+quadros do modo Película e do modo Edição em 8 e 16 bits; LUTs; nós do plugin em GLSL; o OpenFX compilado) e
+`tests/test_grao.py` confere (os hashes da GPU e do OpenFX só na mesma placa e no mesmo compilador da gravação).
+O comportamento de cada ajuste ligado fica em `tests/test_grao_efeitos.py`.
+
+### 30.1 Patentes conferidas antes da estrutura pela densidade (M1)
+
+Lidas em 29/10/2026, nas reivindicações publicadas (Google Patents):
+
+- **US 12,705,810 B2** (Northwestern University, "Real time film grain rendering and parameter estimation";
+  provisório 63/490,545 de 16/03/2023, pedido 18/608,381, concedida em 11/08/2026). As reivindicações
+  independentes (1, método; 12, sistema) recebem uma imagem, acham regiões de valor constante, tiram delas
+  estatísticas de segunda ordem (variância e correlação) e sintetizam um ruído correlacionado dependente do
+  sinal a partir dessas estatísticas; as dependentes cobrem o modelo booleano filtrado (centros de Poisson com
+  um parâmetro de densidade, raios i.i.d.). **Não conflita** com o grão do app enquanto ele não for estimado de
+  um quadro ou de um scan: os parâmetros vêm dos ajustes e das constantes σD dos datasheets.
+- **US 9,438,821 B1** (Suny Behar Parker, o Livegrain; prioridade 11/04/2014, concedida em 06/09/2016, em vigor
+  até cerca de 10/04/2035). Reivindicações 1, 12 e 20: receber "assets" de grão ligados a níveis de exposição,
+  dividir a imagem em mattes delimitados pela luminância, somar a cada matte um asset diferente e combinar
+  (2 a 5: três ou cinco mattes no pé, na reta e no ombro da curva D log E). A descrição usa placas de grão
+  escaneadas de um cartão cinza de −6 a +6 stops.
+- **US 9,692,987 B2** (continuação da anterior; concedida em 27/06/2017, em vigor até cerca de 10/04/2035).
+  Reivindicações 1 e 9: somar "um tratamento de grão diferente" a cada um de dois ou mais mattes delimitados
+  pela luminância e combinar. Reivindicação 16: aplicar um primeiro tratamento de grão a uma primeira faixa de
+  luminância e um segundo tratamento, diferente, a uma segunda faixa (sem mattes). Não exige grão escaneado.
+
+**Decisão: a M1 ficou de fora.** A proposta do plano (algumas camadas de ruído, cada uma com tamanho,
+aglomeração e assimetria próprios, misturadas por pesos suaves da densidade local) lê quase ao pé da letra as
+reivindicações 1 e 16 da US 9,692,987, e mesmo uma estrutura que muda de forma contínua com a densidade pode ser
+lida como "tratamentos de grão diferentes por faixa de luminância". Fica como pergunta para o usuário (e, se for
+o caso, para um advogado). O que a 1.6 faz com o grão continua sendo **um** campo procedural por quadro: a M3
+soma esse campo na densidade de cada camada do negativo e quem molda o grão visível é a curva da cópia (a
+transferência física do modelo), sem mattes nem tratamentos por faixa (§30.3).
+
+### 30.2 Maciez pelo grão (M2)
+
+`grao_maciez` (seção Grão, 0–100%, padrão 0%) soma `sig_grao = k · s · quantidade` na mesma raiz quadrada da
+maciez (`soft = √(sig_g² + sig_u² + sig_m² + sig_grao²) · scale`), só com o grão ligado. `s` é o tamanho
+natural do grão em px@1080 (`grao.grain_size_1080`: `0,8 · Tamanho · bitola · ISO`, sem o mínimo de 1 px da
+grade, para valer igual em qualquer resolução) e `k = 1/√3` (`grao.GRAIN_SOFT_K`): a grade de gaussianas do
+ruído é interpolada por B-spline cúbica, a convolução de quatro caixas de uma célula, com variância `4·s²/12`
+por eixo; com 100% a imagem recebe a gaussiana desse mesmo envelope e deixa de ser mais nítida que o grão. Em 0%
+`sig_grao = 0` e a soma é exatamente a de antes. O nó *Textura* e o OpenFX fazem a mesma conta
+(`PC_GRAIN_SOFT_K`, de `resolve._grao_tables`).
+
+### 30.3 Diferença de nitidez entre camadas (M7)
+
+`mtf_camadas` (seção Película, ao lado do MTF; 0–100%, padrão 0%) dá a cada canal a maciez da sua camada. Os
+dados: os pontos das curvas de MTF de cada camada lidos dos datasheets públicos (regra 8), em
+`pelicula/data/datasheets/H-1-5207.json` (VISION3 250D, revisão 3-26, p. 3) e `H-1-2383.json` (cópia 2383,
+revisão 3-22, p. 4), cada um com a publicação, a página, a figura, as condições, o SHA-256 do PDF lido, o método
+da leitura (as imagens raster dos gráficos, a escala pela grade, o centro das linhas coluna a coluna) e o erro
+(±1 px ≈ ±1,2–1,7%). `tools/ajustar_grao.py` (numpy, offline) toma a camada mais nítida como referência e dá a
+cada outra camada a gaussiana que, em quadratura, leva a resposta da referência à dela:
+`MTF_c/MTF_ref ≈ exp(−2π²·Δσ²·f²)`, Δσ² = média de `−ln(razão)/(2π²f²)` entre 20 e 62 ciclos/mm (abaixo, o
+efeito de adjacência passa de 100%; acima, a cauda das curvas cai mais devagar que uma gaussiana). O resultado
+fica em `grao.MTF_NEG_DSIGMA_UM` (R 4,261, G 2,167, B 0 µm) e `grao.MTF_PRINT_DSIGMA_UM` (R 2,291, G 0,
+B 4,462 µm), e `tests/test_grao_efeitos.py` confere que são as do ajuste e que a gaussiana fica a menos de 8%
+(negativo) e de 18% (cópia, cujo azul cai mais devagar) das razões publicadas entre 25 e 50 ciclos/mm.
+
+O modelo (`grao.layer_sigmas`): sem cópia, o Δσ do negativo; com cópia (`grao.print_chosen`: a *Cópia* do look
+com força > 0, ou o Laboratório ligado com uma cópia que não seja "sem cópia"), negativo e cópia em quadratura
+por camada, menos a camada mais nítida do caminho (em quadratura), para que ela continue com a maciez escalar de
+antes. µm → px@1080 por `1920 / largura da imagem da bitola` (as larguras de `look.SCAN_FORMATS`; 8 mm, 65 mm
+e IMAX pela abertura de câmera publicada, em `grao.FRAME_W_MM_EXTRA`; "nenhuma" usa o 35 mm), vezes
+`2 · quantidade` (50% = o medido, como a *Quantidade do MTF*). O gancho `grao.layer_softness(plan, v, soft,
+scale)`, logo depois da maciez em `build_plan`, soma em quadratura `soft` e o Δσ de cada canal e grava
+`Plan.soft_sigma3` (`soft_sigma` = o maior, `u_soft_on = 1`, `u_soft_mix = 1`); em 0% não mexe em nada.
+
+A máquina do desfoque é a mesma da maciez: com `soft_sigma3`, o `Engine` usa `shaders.BLUR3` (a gaussiana
+separável do BLUR com um `vec3` de sigma, raio pelo maior; compilado no primeiro uso por `_lazy_program`) nas
+duas passadas da maciez. O FINAL não muda (a mistura `u_soft_mix` e a nitidez são as de antes). O nó *Textura*
+faz a mesma gaussiana 2D por canal no laço da maciez: os pesos viram `float3` só com a diferença ligada (sem ela,
+`pc_s3(w0)` dá os mesmos bits de antes no GLSL dos testes, onde um segundo laço mudava a compilação do
+primeiro). Como o nó não vê a cópia dos nós *Cor*/*Laboratorio*, ganhou o controle interno `ui_mtf_copia`
+("MTF - Camadas com copia"), cujo padrão vem de `grao.print_chosen` (`resolve.DERIVED`, preenchido por
+`_with_defaults` e por `ui_uniforms`); o OpenFX tem a cópia nos próprios valores, então o pula (`ofx.SKIP`) e o
+`pc_core.cpp` faz a conta com `copia`, `copia_forca`, `lab_on` e `lab_copia` (`blur_pass3`). As tabelas
+`PC_PX_MM` e `PC_MTF_LAYERS` e os índices `PC_COPIA_NENHUMA`/`PC_LAB_COPIA_NENHUMA` saem de
+`resolve._grao_tables`.
+
+### 30.4 Grão no negativo (M3)
+
+`lab_grao` (seção Laboratório, depois da revelação; padrão desligado) vale com o Laboratório e o grão ligados
+(`grao.negative_grain_on`). O gancho `grao.negative_grain(U, v, k)`, no fim do bloco do grão de `build_plan`, tira
+o grão da saída e o põe no negativo com `u_grain_on = 2` (1 = o grão de sempre) e `u_ngrain` = a amplitude por
+pixel de cada camada R, G, B. Nenhum uniform novo entra nos planos de sempre (`u_ngrain` só é lido com
+`u_grain_on = 2`, e esse plano sempre o grava; os planos dos projetos da 1.4 seguem iguais). A grade do ruído (`grain_size`, `grain_seed`, NOISE) é a de sempre. No FINAL, `negGrain(uv)` faz a mesma
+mistura de aspereza e de cor do `applyGrain`, **sem** a resposta por tom, e grava a global `g_ng` (COMMON) antes
+do `colorPipe`; `labPath` soma `g_ng` à densidade do negativo (`dn += g_ng`), nos dois caminhos do Laboratório e
+também no "sem cópia". O BAKE nunca escreve `g_ng` (fica zero): o LUT exportado não muda, e o teste confere bit a
+bit. É um campo procedural só (sem mattes nem tratamentos por faixa, §30.1): a curva da cópia é que esconde o grão
+nos pretos e nas altas luzes estouradas.
+
+A amplitude: `NEG_SIGMA_D` é a média da granularidade rms difusa de cada camada (sigma D numa abertura de 48 µm)
+lida de H-1-5207 p. 3 (`pelicula/data/datasheets/H-1-5207.json`): R 0,00611, G 0,00709, B 0,01262. O app põe
+grão por pixel; para que a média numa abertura de 48 µm tenha esse sigma D, divide-se pelo sigma da média do campo
+do grão (variância 1 por pixel) nessa abertura, `GRAN_APERTURE_SIGMA = 0,43215`, na referência: célula de 0,8
+px@1080 (35 mm, ISO 250, Tamanho 1) e abertura de 48 µm · 1920 / 24,9 mm = 3,70 px@1080. `tools/ajustar_grao.py`
+calcula esse sigma pela integral exata `∫∫ C(r)·K(r) d²r` (autocovariância do campo = B-spline cúbica
+correlacionada consigo mesma em x e em y; `K` = área comum de dois círculos / área²); a lei de Selwyn (sigma ∝ s/D)
+daria uns 15% a mais nessa abertura pequena, e uma simulação em numpy no teste confirma o valor exato. A amplitude
+final é `NEG_GRAIN_AMP · Intensidade · bitola · ISO · compensação · revelação · redes` (o mesmo multiplicador do
+grão de sempre). Medido no 35 mm com a 2383 e os ajustes padrão do grão: no cinza médio o verde fica com ≈ 1,4× o
+grão de sempre e o azul com ≈ 1,6× o verde; 4 stops acima do cinza (altas luzes estouradas) e 6 abaixo, menos de
+um terço do grão dos tons médios (`tests/test_grao_efeitos.py` confere essas relações e que o brilho médio de cada
+faixa muda menos de 0,003).
+
+Plugin: `pc_lab_path` ganhou o argumento `gn` (`dn = dn + gn`; o nó *Cor* passa zero). O nó *Laboratorio* ganhou
+`lab_grain_controls()` (o modo e os ajustes do grão que ele usa) e `B_NGRAIN` (no lugar de `/*NGRAIN*/` de
+`B_LAB`): a mesma grade do Textura (`pc_noise`, `K_RAND` + `K_TEXTURA`) e `pc_neg_grain` (`K_NGRAIN`), com
+`PC_NG_AMP` de `_grao_tables`. Como o nó de cor também serve de LUT, ele não usa `TIMELINE_FRAME_INDEX` (o teste
+`test_frame_index_is_version_guarded` exige isso): no DCTL o grão no negativo fica parado (semente sem o quadro).
+O OpenFX tem o controle `lab_grao` (`ofx.controls()` soma `lab_grain_controls()`; os outros já vêm do Textura),
+gera `pc_colorpipe_ng(V, lin, gn)` (o mesmo `B_LAB` com `gn = gn_in`) e, com o modo ligado, faz a cor exata por
+pixel com a densidade do grão (sem o LUT rápido, que não tem a posição) e não soma o grão na saída.
+
+### 30.5 Halação física
+
+`hal_modelo` (seção Halação; `"brilho"` = a de sempre, o padrão; `"fisica"`). O gancho
+`grao.physical_halation(plan, U, v, scale)`, logo depois da cadeia da halação em `build_plan`, troca a cadeia `hal`
+por uma sem limiar e sem misturar os canais (`Chain("hal", 0, sigma, HAL_PHYS_LIMIT, False, scan)`), com
+`sigma = hal_raio · FRAME_W(35 mm) / FRAME_W(bitola) · scale` (o anel tem o mesmo tamanho na película: ~2 ·
+espessura da base · tan(ângulo crítico) ≈ 0,23 mm), e põe `u_hal_on = 2` e `u_hal_amt = hal_forca · HAL_PHYS_K`.
+Nenhum uniform novo. No FINAL, antes do `colorPipe` (logo, antes da cópia e do Laboratório):
+
+    lin += a / (1 + a) · (halo.r − e(E)),   a = Cor · u_hal_amt,   e(E) = E / (1 + E / HAL_PHYS_LIMIT)
+
+com `E` = o vermelho de `t_lin` no ponto vezes o alfa (a máscara do scan; 1 sem ele), a mesma fonte do EXTRACT
+(`halSource` no FINAL, com a constante `HAL_PHYS_LIMIT` igual à de `grao`, o teste confere). A parte uniforme do
+reflexo (a de uma área lisa) já está nas curvas do filme, medidas com ele; só o desvio local entra, e uma área lisa
+fica igual em qualquer cor (com o arredondamento das texturas f2 da cadeia, < 1/4 de código de 8 bits). O limite
+suave da fonte (16, ~6,5 stops acima do cinza) existe porque o valor de uma luz estourada no arquivo é um palpite da
+entrada (o Rec.709 abre o branco do vídeo até ~700): sem ele, o halo de um ponto estourado cresceria sem fim.
+`HAL_PHYS_K = 0,18` (11% com a Intensidade padrão, na ordem de uma película sem anti-halo) não vem de datasheet: é
+escolhido para que o halo em volta de uma luz estourada tenha a força do modelo brilho com os mesmos ajustes
+(medido: 0,41 / 0,21 / 0,05 contra 0,41 / 0,19 / 0,05 de diferença no R, G, B logo fora de uma luz de 12 px, no
+35 mm). A cor não muda com a bitola (ela vem do filme, e não há dado publicado por bitola): só o raio.
+
+Plugin: o nó *Textura* tem o controle `hal_modelo` e, no modo físico, troca a flag `hal` por `halp` (a mesma
+espiral numa passada de `_glow`, sem limiar, `PC_HAL_PHYS_LIMIT`, sem misturar canais, raio `PC_HAL_PX[bitola]`)
+e soma o desvio local com `pc_extract` no próprio pixel. O OpenFX faz o mesmo na cadeia de verdade (`hal_phys` em
+`pc_core.cpp`). Tabelas em `_grao_tables`: `PC_HAL_PX`, `PC_HAL_PHYS_K`, `PC_HAL_PHYS_LIMIT`, `PC_HAL_FISICA`.
+
+### 30.6 Respiração por camada
+
+`grao_respiracao` (seção Grão; 0 = desligada, o padrão; vale com `grao_on`, mesmo com a Intensidade em 0). O modelo
+(`grao.breath_density`): cada camada tem, em cada quadro, um desvio de densidade do negativo
+
+    dD_c(q) = BREATH_SIGMA_D · Respiração · (0,8 · rápido_c(q) + 0,6 · lento_c(q))
+
+com `rápido = (look._hash(q, s_c) · 2 − 1) · √3` (de quadro em quadro) e `lento = look._vnoise(q / 24, s_c + 101) ·
+BREATH_SLOW_NORM` (ao longo da fita), os dois com variância 1 (`BREATH_SLOW_NORM = 2,0098` = 1 / desvio da
+`_vnoise`, conferido no teste), `s_c = semente · 3 + 7001 + c`. As camadas são independentes; a correlação de um
+quadro para o seguinte fica em ~0,36 (a parte lenta) e some em ~48 quadros. Está em quadros, não em segundos: o que
+varia é a fita. O desvio vira exposição pelo gama do negativo (`dlog E = dD / 0,6`) e o gancho
+`grao.breathing(U, v, frame)` grava `u_breath` = o fator `10^(dD/0,6)` de cada camada; o FINAL faz `lin *= u_breath`
+logo antes do `colorPipe` (depois de halação, bloom, névoa e vazamento: tudo o que expõe o quadro). O BAKE não o
+lê: o LUT exportado não muda. Sem a respiração o plano não grava `u_breath` (os planos de sempre não mudam) e o
+`Engine` põe o neutro `(1, 1, 1)` no FINAL antes do plano (`Engine.FINAL_NEUTRAL`), para que um quadro anterior com
+a respiração não deixe o valor no programa (o teste confere). `BREATH_SIGMA_D = 0,015` (100% ≈ 0,025 log E = um
+ponto de copiadora) não vem de datasheet.
+
+Plugin: `K_BREATH` (`pc_breath`, a mesma conta com `pc_hash`/`pc_vnoise`) no nó *Textura* e no OpenFX. O nó
+*Textura* vem depois da cor e usa `TIMELINE_FRAME_INDEX` (os nós de cor não podem): multiplica a luz da saída
+(`pc_code_to_lin`) pelo mesmo fator, o que é igual ao app com a cor neutra (teste de paridade) e uma aproximação com
+uma cópia ou o Laboratório. O OpenFX multiplica a luz antes da cor, como o app.

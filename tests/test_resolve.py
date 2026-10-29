@@ -497,6 +497,12 @@ EXACT = [
     ("luz", "projetor", _neutral(desg_on=True, poeira_on=False, riscos_on=False, vazamento=0.7,
                                  cor_instavel_on=True, queima_on=True, queima=1.0)),
     ("moldura", "projetor", _neutral(mold_on=True, proporcao="2.39", cantos=0.05, borda_irregular=0.5)),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("maciez_grao_s8", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
+                                           grao_maciez=0.6, grao_tamanho=1.8, iso="800")),
+    ("camadas", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_maciez", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=0.7, mtf="medio")),
 ]
 
 
@@ -515,7 +521,11 @@ def test_texture_and_projector_match_the_app(harness, gl_engine, test_rgb, name,
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("vals", [_neutral(hal_on=True, hal_forca=1.0, hal_limiar=1.0),
-                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0)], ids=["hal", "bloom"])
+                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica"),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica", bitola="super8",
+                                           bitola_desfoque_on=False, bitola_vinheta=0.0, hal_raio=6.0)],
+                         ids=["hal", "bloom", "hal_fisica", "hal_fisica_super8"])
 def test_glows_are_a_close_single_pass_approximation(harness, gl_engine, test_rgb, vals):
     """Halação e bloom numa passada: sem viés (média em blocos) e ruído pequeno."""
     want = _app(gl_engine, test_rgb, vals, 0)
@@ -583,3 +593,62 @@ app.exit(0)
     res = subprocess.run([sys.executable, "-c", code, str(tmp_path / "lut")], cwd=str(ROOT), env=env,
                          capture_output=True, timeout=120)
     assert res.returncode == 0 and b"OK" in res.stdout, res.stderr.decode("utf-8", "replace")[-2000:]
+
+
+@pytest.mark.gpu
+def test_layer_softness_with_a_print_matches_the_app(harness, gl_engine, test_rgb, monkeypatch):
+    """1.6: "MTF - Camadas com copia" segue a cópia do app (DERIVED) e dá a maciez por canal da cópia.
+
+    A cor da cópia fica nos nós Cor/Laboratorio; para comparar só a textura, o teste finge a cópia escolhida.
+    """
+    from pelicula import grao
+    vals = _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)
+    assert resolve.ui_uniforms("textura", vals)["ui_mtf_copia"] == 0
+    assert resolve.ui_uniforms("textura", dict(vals, copia="k2383"))["ui_mtf_copia"] == 1
+    assert resolve.ui_uniforms("textura", dict(vals, lab_on=True, lab_copia="2383"))["ui_mtf_copia"] == 1
+    ctl = {c.name: c for c in resolve._with_defaults(resolve.spec("textura").controls, dict(vals, copia="k2383"))}
+    assert ctl["ui_mtf_copia"].default == 1
+    plain = harness.run("textura", vals, test_rgb, 0)
+    monkeypatch.setattr(grao, "print_chosen", lambda v: True)
+    want = _app(gl_engine, test_rgb, vals, 0)
+    got = harness.run("textura", vals, test_rgb, 0)
+    d = np.abs(want - got)
+    assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5
+    assert np.abs(got - plain)[..., 2].mean() > np.abs(got - plain)[..., 1].mean()  # a cópia amacia o azul
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [{}, dict(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0,
+                                            lab_processo="tech3", grao_cor=0.0, iso="500"),
+                                   dict(lab_copia="nenhuma", lab_revelacao=1.0, grao_aspereza=0.6)],
+                         ids=["2383", "tech3_s8", "scan"])
+def test_negative_grain_of_the_laboratorio_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: o grão no negativo do nó Laboratório = o do app (a grade do grão, a densidade de cada camada).
+
+    No DCTL o grão do nó de cor fica parado (o nó também vale como LUT): igual ao app sem "muda a cada quadro".
+    """
+    vals = _neutral(lab_on=True, lab_grao=True, grao_on=True, **extra)
+    still = dict(vals, grao_animado=False)
+    for frame, app_vals in ((0, vals), (7, still)):
+        want = _app(gl_engine, test_rgb, app_vals, frame)
+        got = harness.run("laboratorio", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, f"quadro {frame}"
+    plain = harness.run("laboratorio", dict(vals, lab_grao=False), test_rgb, 0)
+    assert np.abs(got - plain).mean() * 255 > 0.5  # o grão aparece
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("extra", [dict(grao_forca=0.0), dict(grao_semente=31, grao_respiracao=0.4)],
+                         ids=["so_respiracao", "com_grao"])
+def test_breathing_of_the_textura_node_matches_the_app(harness, gl_engine, test_rgb, extra):
+    """1.6: respiração por camada no nó Textura (depois da cor: igual ao app com a cor neutra)."""
+    vals = _neutral(**{"grao_on": True, "grao_respiracao": 1.0, **extra})
+    outs = []
+    for frame in (0, 7, 61):
+        want = _app(gl_engine, test_rgb, vals, frame)
+        got = harness.run("textura", vals, test_rgb, frame)
+        d = np.abs(want - got)
+        assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5, frame
+        outs.append(got)
+    assert np.abs(outs[0] - outs[1]).mean() * 255 > 0.5

@@ -125,6 +125,11 @@ COPIAS_LAB = [
     ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
 ]
 
+HAL_MODELOS = [  # 1.6: halação física (grao.physical_halation)
+    ("brilho", "Brilho (acima do limiar)"),
+    ("fisica", "Física (reflexo na base)"),
+]
+
 PROCESSOS = [
     ("normal", "Normal (negativo + cópia)"),
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
@@ -198,6 +203,11 @@ SECTIONS: list[Section] = [
           "um filme. Escolha pelo enquadramento: close suaviza mais a pele; plano aberto, menos."),
         F("mtf_forca", "Quantidade do MTF", 0.5, 0, 1, percent=True,
           tip="50% = o valor do enquadramento escolhido; 100% = o dobro."),
+        F("mtf_camadas", "Diferença de nitidez entre camadas", 0.0, 0, 1, percent=True,
+          tip="Cada cor fica com a nitidez da sua camada na película: no negativo o vermelho é o mais macio; com "
+              "uma cópia escolhida, o azul também perde nitidez. Dá franjas sutis nas bordas de alto contraste. "
+              "50% = a diferença medida nos datasheets da Kodak (Vision3 250D e cópia 2383), convertida pelo "
+              "tamanho do quadro da bitola; 100% = o dobro."),
         F("bitola_vinheta", "Vinheta da bitola", 1.0, 0, 1, percent=True,
           tip="Escurecimento natural das bordas em bitolas pequenas."),
         F("mix_geral", "Força geral do efeito", 1.0, 0, 1, percent=True,
@@ -224,6 +234,11 @@ SECTIONS: list[Section] = [
           "Filme da câmera. Cada um tem latitude, contraste e mistura de camadas próprios (aproximações artísticas)."),
         F("lab_revelacao", "Revelação (puxar / forçar)", 0.0, -2, 3, 0.5, 1, " stop",
           "Forçar (+) aumenta o contraste, fecha as sombras e aumenta o grão; puxar (−) suaviza."),
+        B("lab_grao", "Grão no negativo", False,
+          "Põe o grão (seção Grão, que precisa estar ligada) dentro do negativo, na densidade de cada camada, "
+          "antes da cópia: a curva da cópia molda o grão, que some nos pretos e nas altas luzes estouradas, e o "
+          "azul tem mais grão que o verde e o vermelho, como nos datasheets da Kodak. A resposta por tom da "
+          "seção Grão deixa de valer: quem decide é a cópia."),
         C("lab_copia", "Cópia", "2383", COPIAS_LAB,
           "Filme em que o negativo é copiado para a projeção. Sem cópia, o negativo é só invertido, como num scan."),
         C("lab_processo", "Processo", "normal", PROCESSOS,
@@ -344,6 +359,14 @@ SECTIONS: list[Section] = [
         F("grao_luzes", "Nas altas luzes", 0.45, 0, 2, 0.01, 2),
         B("grao_animado", "Grão muda a cada quadro", True),
         I("grao_semente", "Semente", 7, 0, 9999, "Muda o padrão aleatório do grão.", advanced=True),
+        F("grao_maciez", "Maciez pelo grão", 0.0, 0, 1, percent=True,
+          tip="Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma "
+              "imagem mais nítida que ele. 100% = a maciez do grão; 0% = como antes."),
+        F("grao_respiracao", "Respiração por camada", 0.0, 0, 1, percent=True,
+          tip="A cor e o brilho de cada quadro variam um pouco, de leve e cada camada por si (vermelho, verde e "
+              "azul), como na película: a emulsão, a revelação e a luz da copiadora nunca são iguais de um "
+              "quadro para outro. Muda a cada quadro e devagar ao longo da fita, sempre igual para o mesmo quadro "
+              "e a mesma semente. 100% = cerca de um ponto de copiadora; 0% = desligado."),
     ], "Textura da emulsão"),
 
     Section("halacao", "Halação", "hal_on", [
@@ -352,6 +375,11 @@ SECTIONS: list[Section] = [
         F("hal_raio", "Raio", 14, 1, 100, 0.5, 1, " px", "Medido num quadro de 1080 linhas."),
         F("hal_limiar", "Limiar", 2.5, 0, 6, 0.05, 2, " EV", "A partir de quantos stops acima do cinza médio brilha."),
         COR("hal_cor", "Cor", (1.0, 0.27, 0.05)),
+        C("hal_modelo", "Modelo", "brilho", HAL_MODELOS,
+          "Brilho: o halo nasce só acima do Limiar e é somado por cima (como sempre foi). Física: a luz que "
+          "atravessa a emulsão volta refletida pela base do filme e expõe de novo a camada do vermelho, antes da "
+          "cópia; nasce de toda a imagem na proporção da exposição (o Limiar não vale), o raio segue o tamanho do "
+          "quadro da bitola e o brilho de áreas lisas não muda: o halo só aparece em volta das luzes fortes."),
     ], "Brilho avermelhado em volta das luzes"),
 
     Section("bloom", "Bloom e difusão", "bloom_on", [

@@ -161,7 +161,8 @@ def test_generated_tables_have_no_floating_noise():
 def test_plugin_has_every_control_of_the_dctl_nodes():
     names = [s.ctl.name for s in ofx.slots()]
     assert len(names) == len(set(names))
-    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()}
+    want = {c.name for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()
+            + resolve.lab_grain_controls()}  # 1.6: "Grão no negativo" do Laboratório
     assert set(names) == want - set(ofx.SKIP)
     keys = {s.ctl.key for s in ofx.slots() if s.ctl.key}
     for k in ("lab_separacao", "lab_dens_r", "lab_bypass_copia", "lab_neutro_negativo", "mtf", "entrada",
@@ -473,11 +474,24 @@ RENDER_CASES = [
                      queima_on=True, queima=1.0)),
     ("moldura", _neutral(mold_on=True, proporcao="2.39", cantos=0.05, borda_irregular=0.5)),
     ("halacao", _neutral(hal_on=True, hal_forca=1.0, hal_limiar=1.0)),
+    ("halacao_fisica", _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica")),
+    ("halacao_fisica_super8", _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica", bitola="super8",
+                                       bitola_desfoque_on=False, bitola_vinheta=0.0, hal_raio=6.0)),
     ("bloom", _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0)),
     ("nevoa", _neutral(bloom_on=True, bloom_forca=0.0, nevoa_forca=0.6)),
     ("super8_kodachrome", _scene("super8_kodachrome")),
     ("vision3_500t", _scene("vision3_500t")),
     ("lab_teal_orange", _scene("lab_teal_orange_5201")),
+    # 1.6: grão e textura (pelicula/grao.py)
+    ("maciez_grao", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("camadas", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_copia", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=1.0, copia="k2383")),
+    ("camadas_lab", _neutral(bitola="super8", bitola_vinheta=0.0, mtf_camadas=0.6, lab_on=True)),
+    ("grao_negativo", _neutral(lab_on=True, lab_grao=True, grao_on=True)),
+    ("grao_negativo_tech", _neutral(bitola="16mm", lab_on=True, lab_grao=True, grao_on=True, lab_processo="tech3",
+                                    grao_cor=0.8, lab_revelacao=1.0)),
+    ("respiracao", _neutral(grao_on=True, grao_forca=0.0, grao_respiracao=1.0)),
+    ("respiracao_lab", _neutral(lab_on=True, grao_on=True, grao_respiracao=1.0, lab_grao=True)),
 ]
 
 
