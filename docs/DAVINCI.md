@@ -225,7 +225,7 @@ Dicas:
   negativo *Ruido*; plugin OpenFX, 1.6): o grão muda de forma e de força com a densidade, como no app. No nó
   *Laboratorio* e no OpenFX a densidade é a de cada camada do negativo, igual ao app. No nó *Textura* a densidade
   sai da imagem que chega ao nó (lida como o código de vídeo do app, antes da cor), então ele é igual ao app só
-  quando a cor da árvore é neutra; o plugin OpenFX vê a exposição da cena e segue o app. O nó *Cor* não tem esses
+  quando a cor da árvore é neutra (para o resultado exato, use o grão no negativo do nó *Laboratorio*); o plugin OpenFX vê a exposição da cena e segue o app. O nó *Cor* não tem esses
   controles. Com o *Fisico* a estrutura não muda nada (ele já a tem).
 - **Lab - Tipo de scanner**, **Lab - Pelicula vencida anos** e **Lab - Pre-exposicao** (com os stops abaixo do
   cinza e a cor) (nó *Laboratorio* e plugin OpenFX, 1.6): o scanner de luz branca do *Sem cópia*, o véu e a
