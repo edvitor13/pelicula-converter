@@ -377,12 +377,26 @@ def _ui_decl(c: Ctl, dialect: str) -> str:
     return out
 
 
+def _derived(name: str, values: dict) -> Any:
+    """Controles internos cujo valor sai dos ajustes do app (`DERIVED`, 1.6)."""
+    from . import grao
+    if name == "ui_mtf_copia":  # o nó Textura não vê a cópia dos nós Cor/Laboratorio
+        return 1 if grao.print_chosen(values) else 0
+    raise KeyError(name)
+
+
+DERIVED = ("ui_mtf_copia",)
+
+
 def _with_defaults(controls: list[Ctl], values: dict | None) -> list[Ctl]:
     """Copia dos controles com os padrões tirados de `values` (valores do app, já limpos)."""
     if not values:
         return controls
     out = []
     for c in controls:
+        if not c.key and c.name in DERIVED:  # 1.6: controle interno que segue os ajustes do app
+            c = Ctl(**{**c.__dict__})
+            c.default = _derived(c.name, values)
         if c.key and c.key in values:
             v = values[c.key]
             c = Ctl(**{**c.__dict__})
@@ -1162,6 +1176,8 @@ def ui_uniforms(kind: str, values: dict) -> dict[str, Any]:
     out = {}
     for c in spec(kind, GLSL).controls:
         v = values.get(c.key, c.default) if c.key else c.default
+        if not c.key and c.name in DERIVED:
+            v = _derived(c.name, values)
         out[c.name] = c.ui_value(v)
     return out
 
@@ -1413,6 +1429,25 @@ def _textura_body() -> str:
     } else if (sharp > 0.0f) {
         sigma = _fmaxf(v_raio_maciez * scale, 0.6f);
     }
+    // 1.6: diferenca de nitidez entre camadas (grao.layer_softness): um sigma por canal
+    int layers = 0;
+    float3 s3 = pc_s3(0.0f);
+    if (v_mtf_camadas > 0.0f) {
+        int lo = (v_mtf_copia == 1) ? 3 : 0;
+        float kl = 2.0f * v_mtf_camadas * PC_PX_MM[gi] * 0.001f * scale;
+        float dr = PC_MTF_LAYERS[lo] * kl;
+        float dg = PC_MTF_LAYERS[lo + 1] * kl;
+        float db = PC_MTF_LAYERS[lo + 2] * kl;
+        float3 t3 = make_float3(_sqrtf(soft * soft + dr * dr), _sqrtf(soft * soft + dg * dg),
+                                _sqrtf(soft * soft + db * db));
+        float tm = _fmaxf(t3.x, _fmaxf(t3.y, t3.z));
+        if (tm > 0.05f) {
+            layers = 1;
+            s3 = t3;
+            sigma = tm;
+            soft_mix = 1.0f;
+        }
+    }
     float vig_amt = _fminf(((v_lente_on == 1) ? v_vinheta : 0.0f) + PC_GAUGE[gi * 7 + 4] * v_bitola_vinheta, 1.5f);
     float vig = (vig_amt > 0.0f)
         ? pc_vignette(u, v, W, H, vig_amt, v_vinheta_raio, v_vinheta_suavidade, v_vinheta_redondeza) : 1.0f;
@@ -1431,19 +1466,26 @@ def _textura_body() -> str:
                 stp = PC_I(_ceilf(PC_F(rad) / 6.0f));
                 rad = 6 * stp;
             }
+            // 1.6: com a diferenca entre camadas, um sigma por canal no mesmo laco (sem ela, o calculo de antes)
+            float3 kk3 = pc_s3(-0.5f / (sigma * sigma));
+            if (layers == 1) {
+                float3 sc = pc_max3(s3, 1e-3f);
+                kk3 = make_float3(-0.5f / (sc.x * sc.x), -0.5f / (sc.y * sc.y), -0.5f / (sc.z * sc.z));
+            }
             float3 acc = pc_s3(0.0f);
-            float wsum = 0.0f;
-            float kk = -0.5f / (sigma * sigma);
+            float3 wsum = pc_s3(0.0f);
             for (int j = -rad; j <= rad; j += stp) {
                 for (int i = -rad; i <= rad; i += stp) {
-                    float w = _expf(PC_F(i * i + j * j) * kk);
+                    float d2 = PC_F(i * i + j * j);
+                    float w0 = _expf(d2 * kk3.x);
+                    float3 w = (layers == 1) ? make_float3(w0, _expf(d2 * kk3.y), _expf(d2 * kk3.z)) : pc_s3(w0);
                     int sx = pc_clampi(cx + i, 0, p_Width - 1);
                     int sy = pc_clampi(cy + j, 0, p_Height - 1);
                     acc = acc + pc_code_to_lin(PC_RGB(sx, sy)) * w;
                     wsum = wsum + w;
                 }
             }
-            float3 b = acc * (vig / wsum);
+            float3 b = make_float3(acc.x * (vig / wsum.x), acc.y * (vig / wsum.y), acc.z * (vig / wsum.z));
             float3 base = pc_lerp3(lin, b, soft_mix);
             lin = pc_max3(base + (lin - b) * sharp, 0.0f);
         }
@@ -1478,6 +1520,10 @@ def textura_controls() -> list[Ctl]:
         ctl("bitola"), ctl("iso", "Sensibilidade ISO"),
         ctl("bitola_desfoque_on"), ctl("bitola_resolucao"), ctl("bitola_vinheta"),
         ctl("mtf", "MTF da pelicula"), ctl("mtf_forca", "MTF - Quantidade"),
+        ctl("mtf_camadas", "MTF - Diferenca entre camadas"),
+        Ctl("ui_mtf_copia", "MTF - Camadas com copia", "check", 0, section="pelicula",
+            tip="Ligue quando houver copia print no no Cor ou Laboratorio: na copia o azul fica mais macio "
+                "(Diferenca entre camadas)."),
         ctl("grao_on", "Grao"), ctl("grao_forca", "Grao - Intensidade"), ctl("grao_tamanho", "Grao - Tamanho"),
         ctl("grao_aspereza", "Grao - Aspereza"), ctl("grao_cor", "Grao - Colorido"),
         ctl("grao_sombras", "Grao - Nas sombras"), ctl("grao_meios", "Grao - Nos tons medios"),
@@ -1507,7 +1553,15 @@ def _mtf_table(dialect: str) -> str:
 def _grao_tables(dialect: str) -> str:
     """Constantes do grão e da textura da 1.6 (`pelicula/grao.py`) para os nós e o OpenFX."""
     from . import grao
-    return _define("PC_GRAIN_SOFT_K", grao.GRAIN_SOFT_K)
+    out = _define("PC_GRAIN_SOFT_K", grao.GRAIN_SOFT_K)
+    # nitidez por camada: px@1080 por mm de cada bitola e as diferenças das camadas (sem cópia, com cópia), em µm
+    out += _table(dialect, "PC_PX_MM", [grao.REF_WIDTH_PX / grao.frame_width_mm(k) for k, _l in params.BITOLAS])
+    out += _table(dialect, "PC_MTF_LAYERS", list(grao.layer_dsigma_um(False)) + list(grao.layer_dsigma_um(True)))
+    copias = [k for k, _l in params.COPIAS]
+    lab_copias = [k for k, _l in params.COPIAS_LAB]
+    out += f"#define PC_COPIA_NENHUMA {copias.index('nenhuma')}\n"
+    out += f"#define PC_LAB_COPIA_NENHUMA {lab_copias.index('nenhuma')}\n"
+    return out
 
 
 def _gauge_tables(dialect: str) -> str:

@@ -480,6 +480,9 @@ RENDER_CASES = [
     ("lab_teal_orange", _scene("lab_teal_orange_5201")),
     # 1.6: grão e textura (pelicula/grao.py)
     ("maciez_grao", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
+    ("camadas", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_copia", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=1.0, copia="k2383")),
+    ("camadas_lab", _neutral(bitola="super8", bitola_vinheta=0.0, mtf_camadas=0.6, lab_on=True)),
 ]
 
 

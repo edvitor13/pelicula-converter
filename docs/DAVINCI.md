@@ -127,7 +127,7 @@ de **Laboratorio (ou Cor) → Textura → Projetor**.
 |---|---|---|
 | **PeliculaConverter Laboratorio** | Só o **Laboratório**, como um nó de emulação de filme: perfil do vídeo, exposição e balanço, negativo, cópia, revelação, separação de cores (Hue Split) e o eixo, luzes da copiadora, densidade da cópia e por cor, pé da cópia, rolagens, saturação do filme e final, pele, bleach bypass no negativo e na cópia, curvas neutras, processo (Technicolor, retenção de prata), chave, diafonia e força geral. **Mostrar curva** desenha por cima da imagem as curvas R, G e B do ajuste (eixo horizontal de −8 a +8 stops em volta do cinza médio; a linha cinza marca o 0,45). | **Sim.** É o app com *Laboratório* ligado, *Cor da película* desligada e *Cópia (print)* em *Nenhuma* (como nos presets do grupo *Laboratório*). Diferença < 0,000001 nos testes. |
 | **PeliculaConverter Cor** | Perfil do vídeo (Rec.709, log das câmeras), exposição e balanço, **Laboratório** (negativo, revelação, luzes da copiadora, cópia, Technicolor 3 tiras / 2 cores, retenção de prata), look de película (curva, saturação, densidade, tons de sombra/luz, pele, P&B e viragens), cópia 2383/2393/3513, envelhecimento e força geral. | **Sim.** É a mesma conta de `colorPipe()` (diferença < 0,002 nos testes, normalmente 0,000001). |
-| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado, maciez pelo grão), halação, bloom, névoa (filtro difusor), maciez da bitola e da lente, **MTF da película** (close, plano médio, plano aberto, 16 mm, Super 8), recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
+| **PeliculaConverter Textura** | Grão (tamanho, aspereza, cor, resposta por tom, animado, maciez pelo grão), halação, bloom, névoa (filtro difusor), maciez da bitola e da lente, **MTF da película** (close, plano médio, plano aberto, 16 mm, Super 8; diferença entre camadas), recuperar detalhe, aberração cromática, distorção e vinheta. | Grão, lente, maciez e vinheta: **sim** (< 1/255). Halação, bloom e névoa: **aproximação** numa passada (veja *Limitações*). |
 | **PeliculaConverter Projetor** | Tremor do quadro, cintilação, clarões de fim de rolo, cor instável, emendas, vazamento de luz, poeira, riscos, fio de cabelo, manchas químicas, marcas de troca de rolo e moldura (proporção, cantos, borda irregular). | **Sim** (< 1/255), quadro a quadro, com as mesmas sementes. |
 
 Além dos três nós "em branco" (que já abrem com o preset inicial do app, Kodak Vision3 250D), o pacote
@@ -201,6 +201,9 @@ Dicas:
 - Os nós *Laboratorio* e *Cor* podem ser aplicados também como LUT (botão direito no nó › *DCTL*), com os
   valores padrão.
 - A **Qualidade do brilho** (nó *Textura*) troca velocidade por suavidade da halação/bloom/névoa.
+- **MTF - Camadas com copia** (nó *Textura*): o nó não vê a cópia escolhida nos nós *Cor* ou *Laboratorio*;
+  ligue-o quando houver uma cópia (print) na sua árvore, para a *Diferença entre camadas* amaciar também o
+  azul, como no app. Os nós gerados pelo app já vêm com ele certo; o plugin OpenFX vê a cópia sozinho.
 
 ### Resolve Studio × gratuito
 
@@ -278,8 +281,8 @@ plugins/ofx/
   vazamento, cor, grão, defeitos, força geral, moldura). Distâncias em px@1080 (`scale = altura/1080`),
   quadro e sementes como no app (determinístico). Imagens com a linha 0 no topo; a cola OpenFX inverte as
   linhas (o OpenFX tem a origem embaixo).
-- **Parâmetros**: os controles dos nós Cor + Textura + Projetor (sem *Qualidade* e *fps*, que o OpenFX não
-  precisa), nas seções do app, com rótulos e dicas de `params.py`. O efeito novo abre com o preset padrão
+- **Parâmetros**: os controles dos nós Cor + Textura + Projetor (sem *Qualidade*, *fps* e *Camadas com copia*,
+  que o OpenFX não precisa), nas seções do app, com rótulos e dicas de `params.py`. O efeito novo abre com o preset padrão
   do app. Presets e looks `.json` viram o vetor de valores (`ofx.ui_values`); a leitura do `.json` em C++
   segue `params.sanitize` (chave ausente = padrão do app).
 - **Testes** (`tests/test_ofx.py`, compila na hora ou usa `plugins/ofx/dist` se foi compilado das mesmas

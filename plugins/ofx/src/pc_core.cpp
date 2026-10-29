@@ -174,6 +174,36 @@ void blur_pass(const Img& src, Img& dst, int dx, int dy, float sigma) {
     });
 }
 
+// BLUR3 do app (1.6, nitidez por camada): a mesma gaussiana separável com um sigma por canal.
+void blur_pass3(const Img& src, Img& dst, int dx, int dy, float3 sigma) {
+    dst.resize(src.w, src.h);
+    float sm = std::max(sigma.x, std::max(sigma.y, sigma.z));
+    int r = (int)std::min(std::ceil(sm * 3.0f), 48.0f);
+    std::vector<float3> wts(2 * r + 1);
+    float sx = std::max(sigma.x, 1e-3f), sy = std::max(sigma.y, 1e-3f), sz = std::max(sigma.z, 1e-3f);
+    float3 k = make_float3(-0.5f / (sx * sx), -0.5f / (sy * sy), -0.5f / (sz * sz));
+    float3 wsum = make_float3(0.0f, 0.0f, 0.0f);
+    for (int i = -r; i <= r; ++i) {
+        float d2 = (float)(i * i);
+        wts[i + r] = make_float3(std::exp(d2 * k.x), std::exp(d2 * k.y), std::exp(d2 * k.z));
+        wsum = wsum + wts[i + r];
+    }
+    for (auto& w : wts) w = make_float3(w.x / wsum.x, w.y / wsum.y, w.z / wsum.z);
+    parallel_rows(src.h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < src.w; ++x) {
+                float3 acc = make_float3(0.0f, 0.0f, 0.0f);
+                for (int i = -r; i <= r; ++i) {
+                    int px = clampi(x + i * dx, 0, src.w - 1);
+                    int py = clampi(y + i * dy, 0, src.h - 1);
+                    acc = acc + src.at(px, py) * wts[i + r];
+                }
+                dst.at(x, y) = acc;
+            }
+        }
+    });
+}
+
 // Um nível de mipmap a partir do anterior (média 2x2).
 void downsample(const Img& src, Img& dst) {
     int w = std::max(1, src.w / 2), h = std::max(1, src.h / 2);
@@ -566,11 +596,35 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
     } else if (sharp > 0.0f) {
         soft_sigma = std::max(V.raio_maciez * scale, 0.6f);
     }
+    // 1.6: diferença de nitidez entre camadas (grao.layer_softness): um sigma por canal
+    bool layers = false;
+    float3 s3 = make_float3(0.0f, 0.0f, 0.0f);
+    if (V.mtf_camadas > 0.0f) {
+        bool with_print = (V.copia != PC_COPIA_NENHUMA && V.copia_forca > 0.0f) ||
+                          (V.lab_on == 1 && V.lab_copia != PC_LAB_COPIA_NENHUMA);
+        int lo = with_print ? 3 : 0;
+        float kl = 2.0f * V.mtf_camadas * PC_PX_MM[gi] * 0.001f * scale;
+        float dr = PC_MTF_LAYERS[lo] * kl, dg = PC_MTF_LAYERS[lo + 1] * kl, db = PC_MTF_LAYERS[lo + 2] * kl;
+        float3 t3 = make_float3(std::sqrt(soft * soft + dr * dr), std::sqrt(soft * soft + dg * dg),
+                                std::sqrt(soft * soft + db * db));
+        float tm = std::max(t3.x, std::max(t3.y, t3.z));
+        if (tm > 0.05f) {
+            layers = true;
+            s3 = t3;
+            soft_sigma = tm;
+            soft_mix = 1.0f;
+        }
+    }
     Img softimg;
     if (soft_sigma > 0.0f) {
         Img t;
-        blur_pass(lin, t, 1, 0, soft_sigma);
-        blur_pass(t, softimg, 0, 1, soft_sigma);
+        if (layers) {
+            blur_pass3(lin, t, 1, 0, s3);
+            blur_pass3(t, softimg, 0, 1, s3);
+        } else {
+            blur_pass(lin, t, 1, 0, soft_sigma);
+            blur_pass(t, softimg, 0, 1, soft_sigma);
+        }
     }
 
     PC_MARK("soft");

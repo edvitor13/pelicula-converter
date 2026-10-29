@@ -2740,3 +2740,39 @@ ruído é interpolada por B-spline cúbica, a convolução de quatro caixas de u
 por eixo; com 100% a imagem recebe a gaussiana desse mesmo envelope e deixa de ser mais nítida que o grão. Em 0%
 `sig_grao = 0` e a soma é exatamente a de antes. O nó *Textura* e o OpenFX fazem a mesma conta
 (`PC_GRAIN_SOFT_K`, de `resolve._grao_tables`).
+
+### 30.3 Diferença de nitidez entre camadas (M7)
+
+`mtf_camadas` (seção Película, ao lado do MTF; 0–100%, padrão 0%) dá a cada canal a maciez da sua camada. Os
+dados: os pontos das curvas de MTF de cada camada lidos dos datasheets públicos (regra 8), em
+`pelicula/data/datasheets/H-1-5207.json` (VISION3 250D, revisão 3-26, p. 3) e `H-1-2383.json` (cópia 2383,
+revisão 3-22, p. 4), cada um com a publicação, a página, a figura, as condições, o SHA-256 do PDF lido, o método
+da leitura (as imagens raster dos gráficos, a escala pela grade, o centro das linhas coluna a coluna) e o erro
+(±1 px ≈ ±1,2–1,7%). `tools/ajustar_grao.py` (numpy, offline) toma a camada mais nítida como referência e dá a
+cada outra camada a gaussiana que, em quadratura, leva a resposta da referência à dela:
+`MTF_c/MTF_ref ≈ exp(−2π²·Δσ²·f²)`, Δσ² = média de `−ln(razão)/(2π²f²)` entre 20 e 62 ciclos/mm (abaixo, o
+efeito de adjacência passa de 100%; acima, a cauda das curvas cai mais devagar que uma gaussiana). O resultado
+fica em `grao.MTF_NEG_DSIGMA_UM` (R 4,261, G 2,167, B 0 µm) e `grao.MTF_PRINT_DSIGMA_UM` (R 2,291, G 0,
+B 4,462 µm), e `tests/test_grao_efeitos.py` confere que são as do ajuste e que a gaussiana fica a menos de 8%
+(negativo) e de 18% (cópia, cujo azul cai mais devagar) das razões publicadas entre 25 e 50 ciclos/mm.
+
+O modelo (`grao.layer_sigmas`): sem cópia, o Δσ do negativo; com cópia (`grao.print_chosen`: a *Cópia* do look
+com força > 0, ou o Laboratório ligado com uma cópia que não seja "sem cópia"), negativo e cópia em quadratura
+por camada, menos a camada mais nítida do caminho (em quadratura), para que ela continue com a maciez escalar de
+antes. µm → px@1080 por `1920 / largura da imagem da bitola` (as larguras de `look.SCAN_FORMATS`; 8 mm, 65 mm
+e IMAX pela abertura de câmera publicada, em `grao.FRAME_W_MM_EXTRA`; "nenhuma" usa o 35 mm), vezes
+`2 · quantidade` (50% = o medido, como a *Quantidade do MTF*). O gancho `grao.layer_softness(plan, v, soft,
+scale)`, logo depois da maciez em `build_plan`, soma em quadratura `soft` e o Δσ de cada canal e grava
+`Plan.soft_sigma3` (`soft_sigma` = o maior, `u_soft_on = 1`, `u_soft_mix = 1`); em 0% não mexe em nada.
+
+A máquina do desfoque é a mesma da maciez: com `soft_sigma3`, o `Engine` usa `shaders.BLUR3` (a gaussiana
+separável do BLUR com um `vec3` de sigma, raio pelo maior; compilado no primeiro uso por `_lazy_program`) nas
+duas passadas da maciez. O FINAL não muda (a mistura `u_soft_mix` e a nitidez são as de antes). O nó *Textura*
+faz a mesma gaussiana 2D por canal no laço da maciez: os pesos viram `float3` só com a diferença ligada (sem ela,
+`pc_s3(w0)` dá os mesmos bits de antes no GLSL dos testes, onde um segundo laço mudava a compilação do
+primeiro). Como o nó não vê a cópia dos nós *Cor*/*Laboratorio*, ganhou o controle interno `ui_mtf_copia`
+("MTF - Camadas com copia"), cujo padrão vem de `grao.print_chosen` (`resolve.DERIVED`, preenchido por
+`_with_defaults` e por `ui_uniforms`); o OpenFX tem a cópia nos próprios valores, então o pula (`ofx.SKIP`) e o
+`pc_core.cpp` faz a conta com `copia`, `copia_forca`, `lab_on` e `lab_copia` (`blur_pass3`). As tabelas
+`PC_PX_MM` e `PC_MTF_LAYERS` e os índices `PC_COPIA_NENHUMA`/`PC_LAB_COPIA_NENHUMA` saem de
+`resolve._grao_tables`.

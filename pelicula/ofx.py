@@ -43,6 +43,7 @@ SRC_DIR = ROOT / "plugins" / "ofx"
 GENERATED = ("pc_kernels.h", "pc_params.h")
 KIND_CODES = {"float": 0, "int": 1, "check": 2, "combo": 3, "color": 4}
 SKIP = ("ui_qualidade", "ui_fps")  # só fazem sentido no DCTL (o OFX tem a imagem inteira e o fps do clipe)
+SKIP += ("ui_mtf_copia",)  # 1.6: o OFX vê a cópia direto (copia, lab_on, lab_copia)
 # Rótulo, dica e opções com acento dos controles só do plugin (os do app vêm de params.py).
 INTERNAL_TEXT = {
     "ui_faixa_video": ("Faixa do vídeo",

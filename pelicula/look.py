@@ -785,6 +785,7 @@ class Plan:
     grain_seed: int = 0
     lut_path: str = ""
     edge_text: str = ""
+    soft_sigma3: tuple[float, float, float] | None = None  # 1.6: sigma da maciez por canal (None = `soft_sigma`)
 
 
 def aspect_target(v: dict, gauge: dict) -> float:
@@ -904,6 +905,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_soft_on"] = 0
         U["u_soft_mix"] = 0.0
     U["u_sharp"] = sharp
+    grao.layer_softness(plan, v, soft, scale)  # 1.6: nitidez por camada (nada com 0%)
 
     # ---- Halação, bloom e névoa
     U["u_hal_on"] = 0

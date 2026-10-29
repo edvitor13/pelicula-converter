@@ -501,6 +501,8 @@ EXACT = [
     ("maciez_grao", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, grao_on=True, grao_maciez=1.0)),
     ("maciez_grao_s8", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, grao_on=True,
                                            grao_maciez=0.6, grao_tamanho=1.8, iso="800")),
+    ("camadas", "textura", _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)),
+    ("camadas_maciez", "textura", _neutral(bitola="16mm", bitola_vinheta=0.0, mtf_camadas=0.7, mtf="medio")),
 ]
 
 
@@ -587,3 +589,25 @@ app.exit(0)
     res = subprocess.run([sys.executable, "-c", code, str(tmp_path / "lut")], cwd=str(ROOT), env=env,
                          capture_output=True, timeout=120)
     assert res.returncode == 0 and b"OK" in res.stdout, res.stderr.decode("utf-8", "replace")[-2000:]
+
+
+@pytest.mark.gpu
+def test_layer_softness_with_a_print_matches_the_app(harness, gl_engine, test_rgb, monkeypatch):
+    """1.6: "MTF - Camadas com copia" segue a cópia do app (DERIVED) e dá a maciez por canal da cópia.
+
+    A cor da cópia fica nos nós Cor/Laboratorio; para comparar só a textura, o teste finge a cópia escolhida.
+    """
+    from pelicula import grao
+    vals = _neutral(bitola="super8", bitola_desfoque_on=False, bitola_vinheta=0.0, mtf_camadas=1.0)
+    assert resolve.ui_uniforms("textura", vals)["ui_mtf_copia"] == 0
+    assert resolve.ui_uniforms("textura", dict(vals, copia="k2383"))["ui_mtf_copia"] == 1
+    assert resolve.ui_uniforms("textura", dict(vals, lab_on=True, lab_copia="2383"))["ui_mtf_copia"] == 1
+    ctl = {c.name: c for c in resolve._with_defaults(resolve.spec("textura").controls, dict(vals, copia="k2383"))}
+    assert ctl["ui_mtf_copia"].default == 1
+    plain = harness.run("textura", vals, test_rgb, 0)
+    monkeypatch.setattr(grao, "print_chosen", lambda v: True)
+    want = _app(gl_engine, test_rgb, vals, 0)
+    got = harness.run("textura", vals, test_rgb, 0)
+    d = np.abs(want - got)
+    assert d.max() * 255 < 2.5 and d.mean() * 255 < 0.5
+    assert np.abs(got - plain)[..., 2].mean() > np.abs(got - plain)[..., 1].mean()  # a cópia amacia o azul

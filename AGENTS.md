@@ -42,7 +42,9 @@ pelicula/
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
                              Laboratório: negativos, cópias, processos, calibração lab_paths, LabMods/LabPost)
-  shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE
+  grao.py                    grão e textura da 1.6 (ARQUITETURA §30): modelos chamados por ganchos de build_plan
+                             (maciez pelo grão, nitidez por camada…), constantes calibradas por datasheets
+  shaders.py                 GLSL 330: COMMON, BASE, EXTRACT, BLUR, NOISE, FINAL, BAKE (BLUR3: um sigma por canal)
   engine.py                  Engine: contexto moderngl, alvos, render(), bake_lut(), cache de LUT
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
@@ -72,7 +74,8 @@ pelicula/
   corridorkey.py             CorridorKey (módulo Beta recorte_ia, sem Qt): placa NVIDIA 8.0+ (nvidia-smi),
                              linha de comando e progresso do infer.py, run() num processo separado
   data/                      listas travadas com hash e manifestos de código das receitas (corridorkey/);
-                             fontes/ (fontes SIL OFL do app, com OFL.txt e SOURCE.txt: origem e SHA-256)
+                             fontes/ (fontes SIL OFL do app, com OFL.txt e SOURCE.txt: origem e SHA-256);
+                             datasheets/ (pontos lidos de datasheets públicos, com a fonte; regra 8)
   fontfile.py                leitor de TrueType (métricas, cmap, contornos da glyf) e cópia com nome único
   textrender.py              texto em RGBA igual em qualquer sistema: FAMILIES (fontes do app), TextStyle, layout(),
                              render() (contorno, sombra, caixa, destaque por palavra; 8/16 bits, alfa direto), paste()
@@ -162,7 +165,8 @@ plugins/ofx/                 plugin OpenFX (C++, funciona no Resolve gratuito): 
                              generated/ (gerado por ofx.py), src/ (pc_core, pc_ofx, pc_capi, pc_json), build.py,
                              build_windows.bat, build_linux.sh → dist/PeliculaConverter.ofx.bundle
 tools/                       i18n_extract.py (textos), gerar_ofx.py (regenera plugins/ofx/generated),
-                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas)
+                             gerar_manifesto.py (manifesto SHA-256 do código de um commit, para receitas),
+                             ajustar_grao.py (constantes de grao.py a partir de data/datasheets, offline)
 tests/                       pytest (conftest com fixtures gl_engine, ffmpeg_ok, qapp, make_info…); ofxhost.py
                              (host OpenFX mínimo em ctypes para tests/test_ofx.py); uicases.py (roda arquivos
                              <nome>_ui_cases.py de widgets num subprocesso offscreen)
@@ -367,6 +371,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_transicoes_ui.py` | casos de `transicoes_ui_cases.py`: inspetor (ícones, dicas, ajustes do tipo, módulo desligado), menu "Transição" do corte (alvo, desfazer num passo, última duração, faixa travada), desenho na linha do tempo e o módulo na janela |
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
+| `tests/test_grao.py` | grão e textura da 1.6: com os ajustes novos no padrão, planos, quadros (Película e Edição, 8/16 bits), LUTs, nós do plugin e OpenFX iguais à BASE bit a bit (`grao_base.py` + `data/grao_base.json`; GPU e compilador da gravação) |
+| `tests/test_grao_efeitos.py` | o que cada ajuste da 1.6 faz ligado: modelo (constantes = `tools/ajustar_grao.py`, fonte dos datasheets), px@1080, resposta em frequência e brilho na GPU, determinismo |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |

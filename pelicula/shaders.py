@@ -654,6 +654,27 @@ void main() {
 }
 """
 
+# 1.6: o mesmo desfoque da maciez com um sigma por canal ("Diferença de nitidez entre camadas", grao.py).
+BLUR3 = COMMON + """
+uniform sampler2D t_src;
+uniform vec2 u_dir;
+uniform vec3 u_sigma3;
+void main() {
+    float sm = max(u_sigma3.r, max(u_sigma3.g, u_sigma3.b));
+    float r = min(ceil(sm * 3.0), 48.0);
+    vec3 s = max(u_sigma3, vec3(1e-3));
+    vec3 k = -0.5 / (s * s);
+    vec3 acc = vec3(0.0);
+    vec3 wsum = vec3(0.0);
+    for (float i = -r; i <= r; i += 1.0) {
+        vec3 w = exp(i * i * k);
+        acc += texture(t_src, v_uv + u_dir * i).rgb * w;
+        wsum += w;
+    }
+    f_out = vec4(acc / wsum, 1.0);
+}
+"""
+
 NOISE = COMMON + """
 uniform int u_seed;
 void main() {

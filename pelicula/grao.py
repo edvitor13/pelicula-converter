@@ -4,6 +4,11 @@ Cada recurso começa num padrão neutro: com o ajuste no padrão, a função dev
 bit a bit o de antes (`tests/test_grao.py` confere com a referência gravada pela BASE). Distâncias em px@1080.
 
 - **Maciez pelo grão** (`grao_maciez`, M2): `soft_sigma` amacia a imagem até a nitidez do próprio grão.
+- **Diferença de nitidez entre camadas** (`mtf_camadas`, M7): `layer_softness` dá a cada canal a maciez da sua
+  camada (MTF dos datasheets), com o mesmo desfoque da maciez (`shaders.BLUR3`, um sigma por canal).
+
+Constantes calibradas por datasheets públicos (regra 8): os pontos lidos ficam em `pelicula/data/datasheets/`
+com a fonte, e `tools/ajustar_grao.py` refaz o ajuste (o teste confere que as constantes daqui são as dele).
 """
 
 from __future__ import annotations
@@ -30,3 +35,69 @@ def soft_sigma(v: dict, gauge: dict) -> float:
     if amt <= 0.0 or not v.get("grao_on") or float(v.get("grao_forca", 0.0)) <= 0.0:
         return 0.0
     return GRAIN_SOFT_K * grain_size_1080(v, gauge) * amt
+
+
+# ------------------------------------------------------------------ M7: nitidez por camada (MTF por canal)
+# Gaussiana extra (µm na película, em quadratura) de cada camada R, G, B em relação à mais nítida, ajustada por
+# `tools/ajustar_grao.py` aos pontos lidos de:
+# - negativo: KODAK VISION3 250D 5207/7207, publicação H-1-5207, revisão 3-26, p. 3, "Modulation-Transfer
+#   Function Curves" (5500 K, ECN-2, Status M): o azul é o mais nítido e o vermelho o mais macio;
+# - cópia: KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC (3200 K,
+#   ECP-2D, Status A): o verde é o mais nítido e o azul o mais macio.
+# Películas sem datasheet usam os mesmos valores (os da Vision3 e da 2383).
+MTF_NEG_DSIGMA_UM = (4.261, 2.167, 0.0)
+MTF_PRINT_DSIGMA_UM = (2.291, 0.0, 4.462)
+# Largura da imagem de cada bitola em mm (a conversão para px@1080 supõe um quadro 16:9 de 1920 px de largura):
+# as de `look.SCAN_FORMATS` e, para as bitolas sem scan, a abertura de câmera publicada (8 mm 0,192 pol.,
+# 65 mm de 5 perfurações 2,072 pol., IMAX 15/70 2,772 pol.). "Nenhuma" usa o 35 mm.
+FRAME_W_MM_EXTRA = {"8mm": 4.877, "65mm": 52.63, "imax": 70.41}
+REF_WIDTH_PX = 1920.0
+
+
+def frame_width_mm(bitola: str) -> float:
+    from .look import GAUGE_SCAN, SCAN_FORMATS
+    if bitola in FRAME_W_MM_EXTRA:
+        return FRAME_W_MM_EXTRA[bitola]
+    x0, x1 = SCAN_FORMATS[GAUGE_SCAN.get(bitola, "35mm")]["img"][:2]
+    return x1 - x0
+
+
+def print_chosen(v: dict) -> bool:
+    """Há uma cópia no caminho: a cópia do look ou a do Laboratório (que não seja "sem cópia")."""
+    look_print = v.get("copia", "nenhuma") != "nenhuma" and float(v.get("copia_forca", 1.0)) > 0.0
+    lab_print = bool(v.get("lab_on")) and v.get("lab_copia", "2383") != "nenhuma"
+    return look_print or lab_print
+
+
+def layer_dsigma_um(with_print: bool) -> tuple[float, float, float]:
+    """Diferença de maciez de cada camada (µm, em quadratura) em relação ao canal mais nítido do caminho."""
+    if not with_print:
+        return MTF_NEG_DSIGMA_UM
+    tot = [a * a + b * b for a, b in zip(MTF_NEG_DSIGMA_UM, MTF_PRINT_DSIGMA_UM)]
+    m = min(tot)
+    return tuple(math.sqrt(t - m) for t in tot)
+
+
+def layer_sigmas(v: dict) -> tuple[float, float, float] | None:
+    """Sigma extra (px@1080) de R, G e B da "Diferença de nitidez entre camadas"; None em 0%.
+    50% = a diferença dos datasheets; 100% = o dobro (como a "Quantidade do MTF")."""
+    amt = float(v.get("mtf_camadas", 0.0))
+    if amt <= 0.0:
+        return None
+    k = 2.0 * amt * REF_WIDTH_PX / frame_width_mm(v["bitola"]) / 1000.0
+    return tuple(k * x for x in layer_dsigma_um(print_chosen(v)))
+
+
+def layer_softness(plan, v: dict, soft: float, scale: float) -> None:
+    """Gancho de `build_plan` depois da maciez: um sigma por canal (`plan.soft_sigma3`) somado em quadratura à
+    maciez escalar `soft` (px da imagem). Com 0% não mexe em nada."""
+    d = layer_sigmas(v)
+    if d is None:
+        return
+    s3 = tuple(math.sqrt(soft * soft + (x * scale) ** 2) for x in d)
+    if max(s3) <= 0.05:
+        return
+    plan.soft_sigma3 = s3
+    plan.soft_sigma = max(s3)
+    plan.uniforms["u_soft_on"] = 1
+    plan.uniforms["u_soft_mix"] = 1.0

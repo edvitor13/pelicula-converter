@@ -57,6 +57,7 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 | **Vinheta da bitola** | 0–100% | 100% | Escurecimento natural das bordas em bitolas pequenas. Vale mesmo com a seção *Lente* desligada. |
 | **MTF da película (maciez fina)** | Desligado, Close (rosto), Plano médio, Plano aberto, Textura 16 mm, Textura Super 8 | Desligado | A resposta de detalhe (MTF) de um filme: tira a nitidez "digital" demais (poros, serrilhado) e mantém o detalhe maior. Escolha pelo enquadramento — o close suaviza mais a pele, o plano aberto menos. É uma gaussiana fina somada em quadratura com o desfoque da bitola e a maciez da lente: σ em 1080p = 1,6 / 1,1 / 0,7 / 1,5 / 2,3 px × 2 × *Quantidade*. Chave `mtf`. |
 | **Quantidade do MTF** | 0–100% | 50% | 50% = o valor do enquadramento escolhido; 100% = o dobro. Chave `mtf_forca`. |
+| **Diferença de nitidez entre camadas** | 0–100% | 0% | Cada cor fica com a nitidez da sua camada na película. No negativo a camada do vermelho é a mais macia e a do azul a mais nítida; com uma cópia escolhida (a *Cópia de projeção* ou a do *Laboratório*), a cópia 2383 amacia o azul e o verde passa a ser o mais nítido. Dá franjas coloridas sutis nas bordas de alto contraste e quase nada nas áreas lisas. 50% = a diferença medida (veja *Modelos calibrados por datasheets*), convertida pelo tamanho do quadro da bitola: some no 35 mm e aparece mais no Super 8; 100% = o dobro. Soma-se em quadratura às outras maciezes. Chave `mtf_camadas`. |
 | **Força geral do efeito** | 0–100% | 100% | Mistura o resultado com o vídeo original (antes da moldura). |
 
 Valores por bitola (multiplicadores internos):
@@ -319,7 +320,8 @@ interpolação é trilinear na GPU.
 | **Maciez pelo grão** | 0–100% | 0% | Amacia a imagem até a nitidez do próprio grão, para ele não parecer uma camada por cima de uma imagem mais nítida que ele (na película, a imagem nunca é mais nítida que o grão). 100% dá à imagem a maciez do grão: cresce com o *Tamanho*, a bitola e o ISO. Soma-se às outras maciezes (bitola, lente, MTF) e só vale com o grão ligado. |
 
 O grão é ruído gaussiano gerado na GPU numa grade do tamanho do grão e ampliado com interpolação
-bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é aplicado depois da curva de
+bicúbica, então tem forma arredondada (não é ruído de pixel). Ele é **procedural**: nasce dos ajustes
+e de constantes publicadas, nunca de uma análise da sua imagem ou de um scan. Ele é aplicado depois da curva de
 cor, com resposta por luminância (picos em 10%, 45% e 88% de brilho). Em prévias reduzidas, grãos
 menores que 1 pixel são levemente compensados; para ver o grão fiel, use a prévia *Máxima* com
 zoom 100%.
@@ -482,6 +484,28 @@ Medidas usadas:
 A borda da imagem tem uma leve irregularidade e a base tem variação de densidade, como num scan
 de verdade. Com o scan ligado, a *Moldura* é ignorada, a halação só nasce dentro da imagem e o
 tremor do projetor move a tira inteira.
+
+---
+
+## Modelos calibrados por datasheets
+
+Alguns modelos de grão e textura da 1.6 usam números lidos de datasheets **públicos** da Kodak. Os pontos
+lidos ficam em `pelicula/data/datasheets/` com a fonte (publicação, revisão, página, figura e o SHA-256 do PDF
+lido); os gráficos e os PDFs não estão no app. A Kodak avisa que esses dados são representativos e não
+especificações, e o resultado continua sendo uma **aproximação**: o app não é um produto oficial e as marcas
+são dos donos.
+
+| Modelo | Ajuste | O que foi medido | Fonte |
+|---|---|---|---|
+| Nitidez por camada do negativo | **Diferença de nitidez entre camadas** | Curvas de MTF de cada camada: o vermelho cai mais cedo que o verde, e o verde mais cedo que o azul | KODAK VISION3 250D 5207/7207, H-1-5207, revisão 3-26, p. 3, *Modulation-Transfer Function Curves* |
+| Nitidez por camada da cópia | **Diferença de nitidez entre camadas** (com cópia) | Curvas de MTF da cópia: o azul é a camada mais macia, o verde a mais nítida | KODAK VISION Color Print Film 2383/3383, H-1-2383, revisão 3-22, p. 4, figura F010_0292AC |
+
+Como a conta é feita: cada camada ganha uma gaussiana (somada em quadratura) que leva a resposta da camada mais
+nítida à dela nas frequências do meio, de 20 a 62 ciclos/mm (`tools/ajustar_grao.py`). Ficam 4,3 µm no
+vermelho e 2,2 µm no verde do negativo e 2,3 µm no vermelho e 4,5 µm no azul da cópia, convertidos em pixels
+pelo tamanho do quadro da bitola (um quadro de 1080 linhas cobre a largura da imagem da bitola). A gaussiana
+fica a menos de 8% das razões publicadas no negativo e a menos de 18% na cópia; outros filmes usam os mesmos
+valores.
 
 ---
 

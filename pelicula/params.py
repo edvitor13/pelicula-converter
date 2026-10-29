@@ -198,6 +198,11 @@ SECTIONS: list[Section] = [
           "um filme. Escolha pelo enquadramento: close suaviza mais a pele; plano aberto, menos."),
         F("mtf_forca", "Quantidade do MTF", 0.5, 0, 1, percent=True,
           tip="50% = o valor do enquadramento escolhido; 100% = o dobro."),
+        F("mtf_camadas", "Diferença de nitidez entre camadas", 0.0, 0, 1, percent=True,
+          tip="Cada cor fica com a nitidez da sua camada na película: no negativo o vermelho é o mais macio; com "
+              "uma cópia escolhida, o azul também perde nitidez. Dá franjas sutis nas bordas de alto contraste. "
+              "50% = a diferença medida nos datasheets da Kodak (Vision3 250D e cópia 2383), convertida pelo "
+              "tamanho do quadro da bitola; 100% = o dobro."),
         F("bitola_vinheta", "Vinheta da bitola", 1.0, 0, 1, percent=True,
           tip="Escurecimento natural das bordas em bitolas pequenas."),
         F("mix_geral", "Força geral do efeito", 1.0, 0, 1, percent=True,
