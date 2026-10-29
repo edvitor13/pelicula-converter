@@ -125,6 +125,11 @@ COPIAS_LAB = [
     ("nenhuma", "Sem cópia (negativo escaneado e invertido)"),
 ]
 
+HAL_MODELOS = [  # 1.6: halação física (grao.physical_halation)
+    ("brilho", "Brilho (acima do limiar)"),
+    ("fisica", "Física (reflexo na base)"),
+]
+
 PROCESSOS = [
     ("normal", "Normal (negativo + cópia)"),
     ("tech3", "Technicolor 3 tiras (transferência de corante)"),
@@ -365,6 +370,11 @@ SECTIONS: list[Section] = [
         F("hal_raio", "Raio", 14, 1, 100, 0.5, 1, " px", "Medido num quadro de 1080 linhas."),
         F("hal_limiar", "Limiar", 2.5, 0, 6, 0.05, 2, " EV", "A partir de quantos stops acima do cinza médio brilha."),
         COR("hal_cor", "Cor", (1.0, 0.27, 0.05)),
+        C("hal_modelo", "Modelo", "brilho", HAL_MODELOS,
+          "Brilho: o halo nasce só acima do Limiar e é somado por cima (como sempre foi). Física: a luz que "
+          "atravessa a emulsão volta refletida pela base do filme e expõe de novo a camada do vermelho, antes da "
+          "cópia; nasce de toda a imagem na proporção da exposição (o Limiar não vale), o raio segue o tamanho do "
+          "quadro da bitola e o brilho de áreas lisas não muda: o halo só aparece em volta das luzes fortes."),
     ], "Brilho avermelhado em volta das luzes"),
 
     Section("bloom", "Bloom e difusão", "bloom_on", [

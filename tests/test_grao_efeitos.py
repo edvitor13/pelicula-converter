@@ -354,3 +354,84 @@ def test_negative_grain_is_deterministic_per_frame(gl_engine):
     assert not np.array_equal(a, render(gl_engine, img, v, 8))           # muda a cada quadro
     still = dict(v, grao_animado=False)
     assert np.array_equal(render(gl_engine, img, still, 7), render(gl_engine, img, still, 8))
+
+
+# ------------------------------------------------------------------ halação física (reflexo na base)
+def hal(**kw) -> dict:
+    base = dict(hal_on=True, bitola="35mm", bitola_desfoque_on=False, grao_on=False)
+    base.update(kw)
+    return vals(**base)
+
+
+def test_physical_halation_is_off_by_default():
+    assert params.PARAMS["hal_modelo"].default == "brilho"
+    p = plan(hal())
+    (c,) = [c for c in p.chains if c.name == "hal"]
+    assert p.uniforms["u_hal_on"] == 1 and c.threshold > 0 and c.lum_only
+    assert plan(hal(hal_on=False, hal_modelo="fisica")).uniforms["u_hal_on"] == 0
+
+
+@pytest.mark.parametrize("bitola", ["35mm", "16mm", "super8", "8mm", "65mm", "nenhuma"])
+def test_physical_halation_chain(bitola):
+    """Sem limiar, da exposição de cada canal (o FINAL usa o vermelho), raio pelo quadro da bitola, em px@1080."""
+    for h in (540, 1080):
+        v = hal(bitola=bitola, hal_modelo="fisica", hal_raio=10.0, hal_forca=0.5)
+        p = plan(v, h * 16 // 9, h)
+        (c,) = [c for c in p.chains if c.name == "hal"]
+        assert c.threshold == 0.0 and not c.lum_only and c.limit == grao.HAL_PHYS_LIMIT
+        assert c.sigma == pytest.approx(10.0 * 24.9 / grao.frame_width_mm(bitola) * h / 1080)
+        assert p.uniforms["u_hal_on"] == 2 and p.uniforms["u_hal_amt"] == pytest.approx(0.5 * grao.HAL_PHYS_K)
+    # o limiar não vale no modo físico
+    a, b = plan(hal(hal_modelo="fisica", hal_limiar=0.0)), plan(hal(hal_modelo="fisica"))
+    assert a.uniforms == b.uniforms and a.chains == b.chains
+
+
+def code16(lin: np.ndarray) -> np.ndarray:
+    c = np.where(lin < 0.018, 4.5 * lin, 1.099 * np.power(np.maximum(lin, 1e-9), 0.45) - 0.099)
+    return np.rint(np.clip(c, 0, 1) * 65535).astype(np.uint16)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("level", [0.02, 0.18, 0.9, (0.7, 0.12, 0.03), (0.02, 0.3, 0.6)])
+def test_physical_halation_leaves_flat_areas_alone(gl_engine, level):
+    """Só o desvio local entra: uma área lisa fica igual, em qualquer cor (a parte uniforme já está nas curvas)."""
+    img = code16(np.full((180, 320, 3), level, dtype=np.float64))
+    off = render(gl_engine, img, hal(hal_on=False))
+    on = render(gl_engine, img, hal(hal_modelo="fisica", hal_forca=3.0))
+    # o halo passa por texturas de meia precisão (f2): sobra o arredondamento delas, bem abaixo de 1/4 de código de 8 bits
+    assert np.abs(on - off).max() < 0.25 / 255
+
+
+def test_physical_halation_source_limit_is_the_same_in_the_shader():
+    from pelicula import shaders
+    assert f"const float HAL_PHYS_LIMIT = {grao.HAL_PHYS_LIMIT!r};" in shaders.FINAL
+
+
+def spot(w=640, h=360, r=6.0, bg=0.05):
+    yy, xx = np.mgrid[0:h, 0:w]
+    lin = np.full((h, w, 3), bg)
+    lin[np.hypot(xx - w / 2, yy - h / 2) < r] = 1.0
+    return code16(lin)
+
+
+@pytest.mark.gpu
+def test_physical_halation_is_a_red_halo_around_strong_lights(gl_engine):
+    img = spot()
+    off = render(gl_engine, img, hal(hal_on=False))
+    d = render(gl_engine, img, hal(hal_modelo="fisica")) - off
+    ring = d[180, 327:332].mean(axis=0)            # logo fora da luz (raio 6 px)
+    assert ring[0] > 2 * ring[1] > 0 and ring[1] > ring[2] >= 0
+    assert np.abs(d[20:60, 20:60]).max() < 2.5 / 65535  # longe da luz, nada
+
+
+@pytest.mark.gpu
+def test_physical_halation_grows_with_smaller_gauges(gl_engine):
+    """O anel tem o mesmo tamanho na película: no Super 8 ele cobre mais do quadro que no 35 mm."""
+    img = spot()
+    off = render(gl_engine, img, hal(hal_on=False))
+
+    def reach(bitola):
+        d = (render(gl_engine, img, hal(hal_modelo="fisica", bitola=bitola)) - off)[180, 327:, 0]
+        return int(np.argmax(d < 0.25 * d[0]))
+
+    assert reach("super8") > 2 * reach("35mm") > 0

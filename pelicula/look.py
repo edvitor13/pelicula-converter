@@ -917,6 +917,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         U["u_hal_on"] = 1
         U["u_hal_amt"] = v["hal_forca"] * 0.32
         U["u_hal_color"] = tuple(v["hal_cor"])
+        grao.physical_halation(plan, U, v, scale)  # 1.6: modo "fisica" (nada no modo "brilho")
     if v["bloom_on"] and v["bloom_forca"] > 0:
         plan.chains.append(Chain("bloom", 0.18 * 2 ** v["bloom_limiar"], v["bloom_raio"] * scale, 6.0, False))
         U["u_bloom_on"] = 1

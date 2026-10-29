@@ -637,6 +637,15 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
         hal.limit = 8.0f;
         hal.lum_only = 1;
     }
+    // 1.6: halação física (grao.physical_halation): exposição do vermelho, sem limiar, raio pelo quadro da bitola
+    const bool hal_phys = hal.on && V.hal_modelo == PC_HAL_FISICA;
+    if (hal_phys) {
+        hal.thr = 0.0f;
+        hal.sigma = V.hal_raio * PC_HAL_PX[gi] * scale;
+        hal.limit = PC_HAL_PHYS_LIMIT;
+        hal.lum_only = 0;
+    }
+    const float3 hal_a = V.hal_cor * (V.hal_forca * PC_HAL_PHYS_K);
     if (V.bloom_on == 1 && V.bloom_forca > 0.0f) {
         bloom.on = true;
         bloom.thr = 0.18f * std::exp2(V.bloom_limiar);
@@ -719,7 +728,12 @@ void Renderer::render(const float* ui, const float* in, float* out, int w, int h
                     l = l + (m - l) * (0.3f * V.nevoa_forca) + m * (0.35f * V.nevoa_forca);
                 }
                 if (bloom.on) l = l + sample(bloom_b, u, v) * (V.bloom_forca * 0.22f);
-                if (hal.on) l = l + V.hal_cor * (sample(hal_b, u, v).x * V.hal_forca * 0.32f);
+                if (hal.on && !hal_phys) l = l + V.hal_cor * (sample(hal_b, u, v).x * V.hal_forca * 0.32f);
+                if (hal_phys) {  // só o desvio local: o halo menos a exposição do vermelho no ponto
+                    float dp = sample(hal_b, u, v).x - pc_extract(lin.at(x, y), 0.0f, PC_HAL_PHYS_LIMIT, 0).x;
+                    l = l + make_float3(hal_a.x / (1.0f + hal_a.x) * dp, hal_a.y / (1.0f + hal_a.y) * dp,
+                                        hal_a.z / (1.0f + hal_a.z) * dp);
+                }
                 if (F.leak_on > 0.0f) l = l + pc_leak(u, v, W / H, F.L0, F.L1, V.vazamento_cor, V.vazamento);
                 float3 yv;
                 if (ngrain) {

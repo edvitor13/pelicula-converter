@@ -343,9 +343,25 @@ camada vermelha: daí o halo alaranjado em volta de lâmpadas e reflexos.
 | **Raio** | 1–100 px | 14 px | Medido num quadro de 1080 linhas (e multiplicado pela bitola: 1,6× em 8 mm, 0,75× em IMAX). |
 | **Limiar** | 0–6 EV | 2,50 EV | A partir de quantos stops acima do cinza médio brilha (com transição suave). |
 | **Cor** | cor | `#FF450D` (vermelho-alaranjado) | Cor do halo. Os presets de P&B usam branco. |
+| **Modelo** | Brilho (acima do limiar), Física (reflexo na base) | Brilho | Veja abaixo. Chave `hal_modelo`. |
 
-O halo é calculado só pela luminância das luzes e tingido pela cor escolhida. Com o *Scan da
-película* ligado, só a área da imagem emite halação (os furos iluminados não).
+No modelo **Brilho** (o de sempre), o halo é calculado só pela luminância das luzes acima do *Limiar*,
+tingido pela cor escolhida e somado por cima da imagem. Com o *Scan da película* ligado, só a área da
+imagem emite halação (os furos iluminados não).
+
+No modelo **Física**, o halo é a própria luz que volta da base do filme: nasce da exposição do vermelho
+(a camada mais perto da base) em toda a imagem, na proporção da luz, e entra na exposição **antes da
+cópia** (e do Laboratório, se ligado), como uma segunda exposição da camada. O *Limiar* não vale. Só o
+desvio local do reflexo entra: a parte que uma área lisa receberia já está nas curvas medidas do filme,
+então céus, paredes e rostos sem luz forte por perto ficam iguais (em qualquer cor), e o anel em volta
+de uma lâmpada sai da própria lâmpada. A *Cor* diz quanto do reflexo chega a cada camada (no padrão,
+quase só no vermelho e um pouco no verde). O *Raio* vale para o 35 mm e cresce na proporção do quadro
+das bitolas menores (o anel tem o mesmo tamanho na película, uns 0,2 mm): 2,4× no 16 mm, 4,3× no
+Super 8, 0,47× no 65 mm. Com a *Intensidade* padrão, uns 11% do vermelho voltam, o que é o caso de uma
+película sem camada anti-halo; o halo em volta de uma luz estourada fica com a força do modelo Brilho.
+Esse número não vem de datasheet: a camada anti-halo (o *remjet* da Vision3) tira quase todo o reflexo,
+e o quanto sobra muda de filme para filme. A luz de um ponto estourado no arquivo é contida suavemente
+(o valor dela é um palpite da entrada).
 
 ---
 
@@ -515,6 +531,9 @@ o app calcula quanto grão por pixel dá esse sigma D medido numa abertura de 48
 abertura é 0,432 vezes o grão de um pixel) e a bitola, o ISO, a revelação e a *Intensidade* multiplicam como no
 grão de sempre. O grão continua **procedural**: nasce dos ajustes e dessas constantes, nunca de uma análise da
 sua imagem.
+
+A **halação física** (*Halação › Modelo › Física*) não é calibrada por datasheet: o raio vem da geometria do
+reflexo na base e o quanto volta é escolhido para igualar o modelo *Brilho* (veja *Halação*).
 
 ---
 

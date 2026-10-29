@@ -953,6 +953,14 @@ vec3 frameMask(vec3 y, vec2 uv) {
     return mix(u_bar_color, y, m);
 }
 
+// 1.6: a fonte da halação física no ponto, igual à do EXTRACT da cadeia (limiar 0; o alfa é a máscara do scan, 1
+// sem ele): e = E / (1 + E / limite), com o limite de grao.HAL_PHYS_LIMIT
+const float HAL_PHYS_LIMIT = 16.0;
+float halSource(vec4 s) {
+    float e = s.r * s.a;
+    return e / (1.0 + e / HAL_PHYS_LIMIT);
+}
+
 void main() {
     vec2 uv = v_uv;
     vec3 code0 = texture(t_in, uv).rgb;
@@ -968,6 +976,10 @@ void main() {
     }
     if (u_bloom_on == 1) lin += texture(t_bloom, uv).rgb * u_bloom_amt;
     if (u_hal_on == 1) lin += texture(t_hal, uv).r * u_hal_color * u_hal_amt;
+    if (u_hal_on == 2) {  // 1.6: halação física (grao.physical_halation): só o desvio local do reflexo na base
+        vec3 a = u_hal_color * u_hal_amt;
+        lin += a / (1.0 + a) * (texture(t_hal, uv).r - halSource(texture(t_lin, uv)));
+    }
     if (u_leak_on == 1) lin += leak(uv);
     if (u_grain_on == 2) g_ng = negGrain(uv);
     vec3 y = colorPipe(lin);

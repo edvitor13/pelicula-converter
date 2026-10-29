@@ -1442,6 +1442,12 @@ def _textura_body() -> str:
         _glow("gh", "hal", "v_hal_raio * PC_GAUGE[gi * 7 + 5] * scale", "0.18f * _exp2f(v_hal_limiar)", "8.0f", 1,
               41),
         "if (hal == 1) lin = lin + v_hal_cor * (gh.x * v_hal_forca * 0.32f);",
+        _glow("gp", "halp", "v_hal_raio * PC_HAL_PX[gi] * scale", "0.0f", "PC_HAL_PHYS_LIMIT", 0, 43),
+        "if (halp == 1) {",
+        "    float3 ap = v_hal_cor * (v_hal_forca * PC_HAL_PHYS_K);",
+        "    float dp = gp.x - pc_extract(pc_code_to_lin(PC_RGB(p_X, p_Y)), 0.0f, PC_HAL_PHYS_LIMIT, 0).x;",
+        "    lin = lin + make_float3(ap.x / (1.0f + ap.x) * dp, ap.y / (1.0f + ap.y) * dp, ap.z / (1.0f + ap.z) * dp);",
+        "}",
     ]), 8)
     return r"""
     float W = PC_F(p_Width);
@@ -1508,10 +1514,15 @@ def _textura_body() -> str:
     float vig = (vig_amt > 0.0f)
         ? pc_vignette(u, v, W, H, vig_amt, v_vinheta_raio, v_vinheta_suavidade, v_vinheta_redondeza) : 1.0f;
     int hal = (v_hal_on == 1 && v_hal_forca > 0.0f) ? 1 : 0;
+    int halp = 0;  // 1.6: halacao fisica (grao.physical_halation)
+    if (hal == 1 && v_hal_modelo == PC_HAL_FISICA) {
+        hal = 0;
+        halp = 1;
+    }
     int bloom = (v_bloom_on == 1 && v_bloom_forca > 0.0f) ? 1 : 0;
     int mist = (v_bloom_on == 1 && v_nevoa_forca > 0.0f) ? 1 : 0;
     float3 y = c0;
-    if (sigma > 0.0f || vig != 1.0f || hal == 1 || bloom == 1 || mist == 1) {
+    if (sigma > 0.0f || vig != 1.0f || hal == 1 || halp == 1 || bloom == 1 || mist == 1) {
         float3 lin = pc_code_to_lin(c0) * vig;
         if (sigma > 0.0f) {
             int cx = pc_clampi(PC_I(_floorf(pg.x * W)), 0, p_Width - 1);
@@ -1587,7 +1598,7 @@ def textura_controls() -> list[Ctl]:
         ctl("grao_semente", "Grao - Semente"), ctl("grao_maciez", "Grao - Maciez pelo grao"),
         ctl("hal_on", "Halacao"), ctl("hal_forca", "Halacao - Intensidade"),
         ctl("hal_raio", "Halacao - Raio px em 1080p"), ctl("hal_limiar", "Halacao - Limiar EV"),
-        ctl("hal_cor", "Halacao - Cor"),
+        ctl("hal_cor", "Halacao - Cor"), ctl("hal_modelo", "Halacao - Modelo"),
         ctl("bloom_on", "Bloom e difusao"), ctl("bloom_forca", "Bloom - Intensidade"),
         ctl("bloom_raio", "Bloom - Raio px em 1080p"), ctl("bloom_limiar", "Bloom - Limiar EV"),
         ctl("nevoa_forca", "Nevoa - Filtro difusor"), ctl("nevoa_raio", "Nevoa - Raio px em 1080p"),
@@ -1616,6 +1627,11 @@ def _grao_tables(dialect: str) -> str:
     copias = [k for k, _l in params.COPIAS]
     lab_copias = [k for k, _l in params.COPIAS_LAB]
     out += _table(dialect, "PC_NG_AMP", list(grao.NEG_GRAIN_AMP))  # grão no negativo: sigma D por pixel
+    # halação física: raio pelo quadro da bitola (35 mm = 1), fração refletida e limite da fonte
+    out += _table(dialect, "PC_HAL_PX", [grao.frame_width_mm("35mm") / grao.frame_width_mm(k)
+                                         for k, _l in params.BITOLAS])
+    out += _define("PC_HAL_PHYS_K", grao.HAL_PHYS_K) + _define("PC_HAL_PHYS_LIMIT", grao.HAL_PHYS_LIMIT)
+    out += f"#define PC_HAL_FISICA {[k for k, _l in params.HAL_MODELOS].index('fisica')}\n"
     out += f"#define PC_COPIA_NENHUMA {copias.index('nenhuma')}\n"
     out += f"#define PC_LAB_COPIA_NENHUMA {lab_copias.index('nenhuma')}\n"
     return out

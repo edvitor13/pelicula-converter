@@ -8,6 +8,9 @@ bit a bit o de antes (`tests/test_grao.py` confere com a referência gravada pel
   camada (MTF dos datasheets), com o mesmo desfoque da maciez (`shaders.BLUR3`, um sigma por canal).
 - **Grão no negativo** (`lab_grao`, M3): `negative_grain` leva o mesmo campo do grão para a densidade de cada
   camada do negativo dentro do Laboratório (`labPath` no shader), em unidades de sigma D por camada.
+- **Halação física** (`hal_modelo = "fisica"`): `physical_halation` troca a cadeia da halação por uma sem limiar,
+  da exposição do vermelho, com o raio pelo tamanho do quadro da bitola; o FINAL soma só o desvio local do reflexo
+  (o halo menos a exposição do próprio ponto), então áreas lisas não mudam.
 
 Constantes calibradas por datasheets públicos (regra 8): os pontos lidos ficam em `pelicula/data/datasheets/`
 com a fonte, e `tools/ajustar_grao.py` refaz o ajuste (o teste confere que as constantes daqui são as dele).
@@ -138,3 +141,39 @@ def negative_grain(U: dict, v: dict, amt: float) -> None:
         return
     U["u_grain_on"] = 2
     U["u_ngrain"] = tuple(a * amt for a in NEG_GRAIN_AMP)
+
+
+# ------------------------------------------------------------------ halação física (reflexo na base)
+# A luz que atravessa a emulsão chega à base do filme quase só no vermelho (o azul fica na camada amarela de filtro,
+# boa parte do verde na camada do magenta), volta refletida pela face de trás da base e expõe de novo a camada mais
+# perto dela, a do vermelho (e um pouco a do verde: a "Cor"). O anel tem uns 2 · espessura · tan(ângulo crítico):
+# base de ~0,13 mm, n = 1,5 → ~0,23 mm, uns 18 px@1080 no 35 mm; o "Raio" (padrão 14 px@1080) vale para o 35 mm e
+# as outras bitolas, com a mesma base, crescem na proporção do quadro (FRAME_W_MM). A quantidade refletida depende
+# da camada anti-halo (o remjet da Vision3 tira quase tudo; sem ela, como na CineStill, o halo é forte) e não vem
+# de datasheet: HAL_PHYS_K é a fração da exposição do vermelho que volta por unidade de "Intensidade" (com o padrão
+# 0,6: 11%, na ordem de uma película sem anti-halo: ~25% do vermelho chega à base e ~55% de uma luz difusa passa do
+# ângulo crítico). Com ela o halo em volta de uma luz estourada fica com a força do modo "brilho" nos mesmos ajustes.
+# A parte uniforme do reflexo (a de uma área lisa) já está nas curvas medidas do filme, que são feitas com ele: só
+# o desvio local entra, E' = E + a/(1 + a) · (halo − e(E)), com E a exposição do vermelho no ponto (na camada do
+# verde o mesmo desvio do vermelho, vezes a Cor). Assim uma área lisa fica igual em qualquer cor, e a luz que vai
+# para o anel sai da própria luz. A fonte e(E) = E / (1 + E / HAL_PHYS_LIMIT) tem um limite suave como a do modo
+# "brilho": o valor de uma luz que estourou no arquivo é um palpite da entrada (o Rec.709 a abre até centenas), e o
+# halo dela não pode crescer sem fim; até ~4 stops acima do cinza médio a fonte é a exposição (erro < 20%).
+HAL_PHYS_K = 0.18
+HAL_PHYS_LIMIT = 16.0  # também no FINAL (shaders.HAL_PHYS_LIMIT), para o mesmo e(E) no ponto
+
+
+def physical_halation(plan, U: dict, v: dict, scale: float) -> None:
+    """Gancho do bloco da halação de `build_plan`: no modo "fisica", a cadeia `hal` passa a ser a exposição do
+    vermelho (sem limiar, sem misturar os canais) com o raio pelo quadro da bitola, e o FINAL
+    (`u_hal_on = 2`) soma `a/(1 + a) · (halo − e(E))` (a = Cor · Intensidade · HAL_PHYS_K; e(E) = a fonte da
+    cadeia no próprio ponto): uma área lisa fica igual, só em volta das luzes fortes sobra o halo. Nenhum uniform
+    novo."""
+    if v.get("hal_modelo", "brilho") != "fisica" or U.get("u_hal_on") != 1:
+        return
+    from .look import Chain
+    sigma = float(v["hal_raio"]) * frame_width_mm("35mm") / frame_width_mm(v["bitola"]) * scale
+    phys = Chain("hal", 0.0, sigma, HAL_PHYS_LIMIT, False, bool(v["scan_on"]))
+    plan.chains = [phys if c.name == "hal" else c for c in plan.chains]
+    U["u_hal_on"] = 2
+    U["u_hal_amt"] = float(v["hal_forca"]) * HAL_PHYS_K

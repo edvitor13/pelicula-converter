@@ -521,7 +521,11 @@ def test_texture_and_projector_match_the_app(harness, gl_engine, test_rgb, name,
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("vals", [_neutral(hal_on=True, hal_forca=1.0, hal_limiar=1.0),
-                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0)], ids=["hal", "bloom"])
+                                  _neutral(bloom_on=True, bloom_forca=0.5, bloom_limiar=1.0),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica"),
+                                  _neutral(hal_on=True, hal_forca=1.5, hal_modelo="fisica", bitola="super8",
+                                           bitola_desfoque_on=False, bitola_vinheta=0.0, hal_raio=6.0)],
+                         ids=["hal", "bloom", "hal_fisica", "hal_fisica_super8"])
 def test_glows_are_a_close_single_pass_approximation(harness, gl_engine, test_rgb, vals):
     """Halação e bloom numa passada: sem viés (média em blocos) e ruído pequeno."""
     want = _app(gl_engine, test_rgb, vals, 0)
