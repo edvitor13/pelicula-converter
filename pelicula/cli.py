@@ -566,7 +566,7 @@ def cmd_frame(a) -> int:
     engine = Engine()
     try:
         if seq is not None:
-            img = sequence.grab(seq, frame, w, h, 16, hq=True)
+            img = sequence.grab(seq, frame, w, h, 16, hq=True, shutter=recipe.shutter)
         else:
             img = media.grab_frame(info, frame, w, h, 16, hq=True, profile=recipe.profile)
         out = recipe.render(engine, img, frame)

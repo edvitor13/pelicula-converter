@@ -75,7 +75,8 @@ class Engine:
     # ------------------------------------------------------------ recursos
     # Uniforms do FINAL que o plano só grava com o efeito ligado (os planos de sempre não mudam): o valor neutro
     # entra antes do plano, para que um quadro anterior com o efeito não deixe o valor no programa.
-    FINAL_NEUTRAL = {"u_breath": (1.0, 1.0, 1.0)}  # 1.6: respiração por camada (grao.breathing)
+    FINAL_NEUTRAL = {"u_breath": (1.0, 1.0, 1.0),  # 1.6: respiração por camada (grao.breathing)
+                     "u_streak_on": 0}  # 1.6: risco do anamórfico (`anamorfico.streak`)
 
     def _target(self, name: str, size: tuple[int, int], dtype: str = "f2", mip: bool = False):
         cur = self._targets.get(name)
@@ -228,10 +229,15 @@ class Engine:
 
         glow = {}
         for ch in plan.chains:
-            hi = self._target("hi", (w, h), mip=True)
+            # 1.6: o risco do anamórfico lê o nível 0 só (alvo sem mipmaps: um alvo com mipmaps não montados
+            # não é amostrável)
+            hi = self._target("streak_hi", (w, h)) if ch.name == "streak" else self._target("hi", (w, h), mip=True)
             self._run("extract", hi, {"t_src": lin[0]},
                       {"u_thr": float(ch.threshold), "u_limit": float(ch.limit), "u_lum_only": int(ch.lum_only),
                        "u_use_alpha": int(ch.alpha_mask)})
+            if ch.name == "streak":  # 1.6: risco horizontal do anamórfico (só na horizontal)
+                glow[ch.name] = self._streak(hi[0], w, h, ch.sigma)
+                continue
             hi[0].build_mipmaps()
             lvl = 0
             while ch.sigma / (2 ** lvl) > 6.0 and lvl < 8 and (w >> (lvl + 1)) >= 4 and (h >> (lvl + 1)) >= 4:
@@ -260,6 +266,7 @@ class Engine:
             "t_hal": glow.get("hal", lin[0]),
             "t_bloom": glow.get("bloom", lin[0]),
             "t_mist": glow.get("mist", lin[0]),
+            "t_streak": glow.get("streak", lin[0]),
             "t_noise": noise[0] if noise else lin[0],
             "t_lut": self._lut_texture(plan.lut_path),
         }
@@ -274,13 +281,33 @@ class Engine:
         self._lazy_program("final_pg", grao_fisico.FINAL_PG)
         return "final_pg"
 
+    def _streak(self, src, w: int, h: int, sigma: float):
+        """(1.6) Desfoque só na horizontal, longo (`sigma` px): reduz a largura pela metade a cada passo (altura
+        inteira, nada vaza para cima ou para baixo) e termina com uma gaussiana na largura reduzida."""
+        sw, lvl = w, 0
+        while sigma / (2 ** lvl) > 6.0 and lvl < 9 and (w >> (lvl + 1)) >= 4:
+            lvl += 1
+            nw = max(1, w >> lvl)
+            dst = self._target(f"streak_d{lvl}", (nw, h))
+            self._blur(src, dst, (1.0 / sw, 0.0), 1.0, 0)
+            src, sw = dst[0], nw
+        out = self._target("streak_b", (sw, h))
+        self._blur(src, out, (1.0 / sw, 0.0), max(sigma / (2 ** lvl), 0.5), 0)
+        return out[0]
+
     def _base_program(self, U: dict) -> str:
-        """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela."""
-        if "u_cp_on" not in U:
+        """O BASE de sempre, ou (1.6) o BASE com a Cor por planos quando o plano traz os uniforms dela e/ou com a tira
+        do scan deitada (`scanformatos.rotated`, o plano traz `u_scan_rot`)."""
+        cp = "u_cp_on" in U
+        rot = bool(U.get("u_scan_rot"))
+        if not cp and not rot:
             return "base"
-        from . import planes
-        self._lazy_program("base_cp", planes.BASE_CP)
-        return "base_cp"
+        from . import planes, scanformatos
+        name = ("base_cp" if cp else "base") + ("_rot" if rot else "")
+        if name not in self.progs:
+            src = planes.BASE_CP if cp else shaders.BASE
+            self._lazy_program(name, scanformatos.rotated(src) if rot else src)
+        return name
 
     def plane_view(self, plan: look.Plan, values: dict) -> np.ndarray:
         """"Ver planos" (1.6): (h, w, 4) float32 com frente, fundo e pele da imagem de entrada atual, no mesmo
@@ -327,8 +354,9 @@ class Engine:
         from . import alphashaders
         w, h = self.input_tex.size
         geo = self._target("alpha_geo", (w, h), dtype="f4")
-        self._run("base", geo, {"t_in": self.input_alpha, "t_text": self._text_tex},
-                  {**plan.uniforms, **alphashaders.ALPHA_GEOMETRY})
+        self._run(self._base_program({"u_scan_rot": plan.uniforms.get("u_scan_rot", 0)}), geo,
+                  {"t_in": self.input_alpha, "t_text": self._text_tex},
+                  {**look.SPARSE_UNIFORMS, **plan.uniforms, **alphashaders.ALPHA_GEOMETRY})
         out_dtype = "f1" if depth == 8 else "nu2"
         res = self._target("alpha_out8" if depth == 8 else "alpha_out16", (w, h), dtype=out_dtype)
         self._run("alpha", res, {"t_rgb": out[0], "t_geo": geo[0], "t_ain": self.input_alpha}, plan.uniforms)
@@ -412,6 +440,38 @@ class Engine:
         data = out[1].read(components=3, alignment=1, dtype="f4")
         grid.release()
         return np.frombuffer(data, dtype=np.float32).reshape(-1, 3).copy()
+
+    # ------------------------------------------------------------ 1.6: obturador (tempo_camera)
+    def temporal_blend(self, images: list[np.ndarray], weights: list[float], curve: int, cv: bool) -> np.ndarray:
+        """Média ponderada de quadros do mesmo tamanho na luz linear da curva `curve` (`look.input_id`; `cv`: código
+        de 10 bits numa fonte de faixa legal), devolvida no valor da mesma curva em float32 (h × w × 3; × 4 com RGBA
+        pré-multiplicado, misturado pela cobertura). `tempo_camera.ACC` soma 4 quadros por passo; `ENC` volta à
+        curva. O obturador do look (`frame.Recipe.montage`)."""
+        from . import tempo_camera as tc
+        self._lazy_program("shutter_acc", tc.ACC)
+        self._lazy_program("shutter_enc", tc.ENC)
+        h, w = images[0].shape[:2]
+        alpha = images[0].ndim == 3 and images[0].shape[2] == 4
+        size = (int(w), int(h))
+        accs = (self._target("shutter_a", size, dtype="f4"), self._target("shutter_b", size, dtype="f4"))
+        common = {"u_curve": int(curve), "u_cv": int(bool(cv)), "u_alpha": int(alpha)}
+        prev = None
+        for n, i in enumerate(range(0, len(images), 4)):
+            chunk = images[i:i + 4]
+            ws = [float(x) for x in weights[i:i + 4]] + [0.0] * (4 - len(chunk))
+            texs = {f"t_f{j}": self._clip_texture(1000 + j, img) for j, img in enumerate(chunk)}
+            for j in range(len(chunk), 4):
+                texs[f"t_f{j}"] = texs["t_f0"]
+            texs["t_prev"] = prev[0] if prev is not None else texs["t_f0"]
+            dst = accs[n % 2]
+            self._run("shutter_acc", dst, texs, {**common, "u_prev": int(prev is not None), "u_n": len(chunk),
+                                                 "u_w": tuple(ws)})
+            prev = dst
+        out = self._target("shutter_out", size, dtype="f4")
+        self._run("shutter_enc", out, {"t_acc": prev[0]}, common)
+        comps = 4 if alpha else 3
+        data = out[1].read(components=comps, alignment=1, dtype="f4")
+        return np.frombuffer(data, dtype=np.float32).reshape(h, w, comps).copy()
 
     # ------------------------------------------------------------ modo Edição
     def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:

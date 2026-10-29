@@ -133,6 +133,17 @@ pelicula/
                              escolhida, degradê, pele natural), conta-gotas do balanço, "Automático" do clipe
                              inteiro, igualar a outro clipe/imagem, clicar numa cor (sem Qt)
   exposure.py                1.6, zebra e falsa cor da prévia em stops em relação ao cinza de 18% (sem Qt)
+  tempo_camera.py            1.6, câmera de cinema (módulo Beta camera_cinema): obturador (pesos da janela aberta,
+                             WindowReader/grab_window do arquivo, GLSL da mistura na luz da curva; Engine.temporal_blend)
+                             e manivela por clipe (crank_factor, crank_offset); ARQUITETURA §33
+  anamorfico.py              1.6, lente anamórfica (módulo Beta): desespremer, barril, bordas (u_anam no BASE,
+                             shaders.filmLight) e o risco horizontal (cadeia "streak", Engine._streak)
+  data_impressa.py           1.6, data de sete segmentos (módulo Beta): texto, layout em px@1080, u_date_* (BASE)
+  scanformatos.py            1.6, formatos de foto no scan (135, meio quadro, 120): textos de borda e a variante do
+                             BASE com a tira deitada (rotated, por substituição de texto; Engine._base_program)
+  maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
+  montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
+                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
   transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
                              (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
   camera.py                  perfil de câmera por clipe (1.6, sem GPU nem Qt): FOLLOW ("Igual ao do look"), Target
@@ -182,7 +193,9 @@ pelicula/
                              1.6, cor: cor_ui (ponto único de ligação com a janela), planes_ui (cartão da Cor
                              por planos), color_tools (barra "Cor simples" do inspetor), preview_tools (camadas
                              da tela: Context, PreviewTools), preview_bar (zebra, falsa cor, referência);
-                             1.6, grao_fisico_ui (a linha "Modelo do grão no negativo" sob o módulo grao_fisico)
+                             1.6, grao_fisico_ui (a linha "Modelo do grão no negativo" sob o módulo grao_fisico);
+                             1.6, câmera e formato: filme_ui (ponto único de ligação: cartões dos módulos novos e o
+                             botão da máquina do tempo), maquina_ui (janela da máquina do tempo)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -777,7 +790,10 @@ Como a faixa do arquivo chega à cor (nunca leia o código direto no shader sem 
 
 `look.GAUGES` (multiplicadores e proporção), `look.GAUGE_SCAN` (qual geometria de scan usar),
 `params.BITOLAS`; se tiver geometria própria de scan, `look.SCAN_FORMATS` e a escolha em
-`scan_formato`. Documente a tabela de bitolas.
+`scan_formato`. Documente a tabela de bitolas. Se o grão deve seguir uma largura de quadro que não é a
+largura da imagem no scan, `grao.FRAME_W_MM_EXTRA`. A bitola nova entra sozinha nas tabelas do plugin
+(`resolve._gauge_tables`): regrave a chave `plugin` de `tests/data/cor_base.json` e rode `tests/test_resolve.py`.
+Tira deitada no scan (foto): `scanformatos.ROTATED`.
 
 ### Mexer no ffmpeg / dependências
 

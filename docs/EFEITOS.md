@@ -49,7 +49,7 @@ vídeo → perfil de entrada → luz linear (gamut Rec.709) → exposição, tem
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Bitola** | Nenhuma (manual), 8 mm, Super 8, 16 mm, Super 16, 35 mm, 65 mm, IMAX 70 mm (15/70) | 35 mm | Tamanho do quadro da película. Bitolas menores têm grão maior, menos nitidez e mais tremor. Multiplica grão, maciez, tremor, vinheta e halação e define a proporção usada por *Moldura → Da bitola escolhida* e o formato do *Scan → Da bitola escolhida*. |
+| **Bitola** | Nenhuma (manual), 8 mm, Super 8, 16 mm, Super 16, 35 mm, 65 mm, IMAX 70 mm (15/70); 1.6: Foto 35 mm (135), Foto meio quadro, Foto médio formato (120) | 35 mm | Tamanho do quadro da película. Bitolas menores têm grão maior, menos nitidez e mais tremor. Multiplica grão, maciez, tremor, vinheta e halação e define a proporção usada por *Moldura → Da bitola escolhida* e o formato do *Scan → Da bitola escolhida*. |
 | **Sensibilidade** | ISO 50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200 | ISO 250 | Filmes mais sensíveis têm grão maior e mais visível: tamanho × (ISO/250)^0,18 e força × (ISO/250)^0,35. Também escolhe o código do texto de borda automático no scan. |
 | **Cópia (print)** | Nenhuma (sem cópia), Kodak 2383 (cópia de cinema clássica), Kodak 2393 (mais contraste), Fuji 3513 (mais fria e neutra) | Nenhuma | Filme usado para copiar o negativo para a projeção. Aplica uma segunda curva de contraste, saturação e cor por canal por cima do negativo. |
 | **Força da cópia** | 0–100% | 100% | Mistura entre o negativo e o resultado com a cópia. |
@@ -516,7 +516,7 @@ milímetros (furos, linhas entre quadros, borda com texto) e coloca o vídeo den
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Película** | Da bitola escolhida, 35 mm (4 furos por quadro), 16 mm (1 furo), Super 16, Super 8 | Da bitola escolhida | Medidas reais de cada película: furos, linhas entre quadros e bordas. *Da bitola*: 8 mm e Super 8 → Super 8; 16 mm → 16 mm; Super 16 → Super 16; 35 mm, 65 mm, IMAX e Nenhuma → 35 mm. |
+| **Película** | Da bitola escolhida, 35 mm (4 furos por quadro), 16 mm (1 furo), Super 16, Super 8; 1.6: Foto 35 mm (135, 8 furos), Foto meio quadro (4 furos), Foto 120 6 × 6 e 6 × 4,5 (sem furos) | Da bitola escolhida | Medidas reais de cada película: furos, linhas entre quadros e bordas. *Da bitola*: 8 mm e Super 8 → Super 8; 16 mm → 16 mm; Super 16 → Super 16; 35 mm, 65 mm, IMAX e Nenhuma → 35 mm; 135 → 135; meio quadro → meio quadro; 120 → 120 6 × 6. |
 | **Tipo de scan** | Cópia projetada (furos claros), Negativo invertido (furos escuros) | Cópia projetada | Numa cópia escaneada com luz por trás, os furos aparecem brancos; num negativo invertido, escuros. |
 | **Enquadramento** | Mostrar o vídeo inteiro (barras no quadro), Preencher o quadro (corta as bordas) | Mostrar o vídeo inteiro | Como o vídeo cabe no quadro da película quando as proporções são diferentes. |
 | **Aproximação** | 1,00–1,60× | 1,00× | Aproxima do quadro e esconde parte das bordas (centraliza no quadro conforme aproxima). |
@@ -657,3 +657,87 @@ A entrada do LUT é o valor do vídeo no *Perfil do vídeo* escolhido. Em S-Log3
 D-Log ela é o **código de 10 bits** da câmera, como nos LUTs oficiais desses fabricantes ("Full range"): no
 DaVinci Resolve, ponha esses clipes em *Data Levels → Full* (Clip Attributes), como os fabricantes recomendam.
 Nos outros perfis a entrada é o próprio sinal (o clipe pode ficar em *Auto/Video*).
+
+---
+
+## Câmera, formato e montagem (1.6)
+
+Recursos novos da 1.6. Os de teste (Beta) começam desligados em *Configurações › Recursos*; todos começam com
+a chave desligada no look, e desligados a imagem é exatamente a de antes.
+
+### Obturador de película (Beta, recurso "Câmera de cinema")
+
+*O rastro de movimento de uma câmera de cinema, a partir de vídeo rápido.* Chave: liga o obturador.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Ângulo do obturador** | 45°, 90°, 144°, 172,8°, 180°, 270°, 360° | 180° | Quanto de cada quadro o obturador fica aberto: 180° = metade (1/48 s a 24 qps). Os quadros do vídeo dentro da janela aberta são misturados na luz, como a película recebia a luz. |
+
+Só funciona quando o vídeo tem **pelo menos o dobro** dos quadros por segundo da saída (50, 60 ou 120 qps
+exportados a 24, 25 ou 30). No modo Película vale na **exportação com outra taxa** (a *prévia da exportação*
+mostra; a prévia da janela fica na taxa do arquivo). No modo Edição vale em cada clipe rápido numa sequência mais
+lenta (e num clipe acelerado). Fica mais lento: lê e mistura 2 a 6 quadros por quadro (60 → 24 qps: 2,5×).
+
+### Lente anamórfica (Beta)
+
+*Desespremer, risco de luz, barril e bordas.* Chave: liga a lente.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. |
+| **Risco de luz** | 0–100% | 50% | A linha horizontal comprida das luzes fortes (só na horizontal). |
+| **Limiar do risco** | 0–5 stops | 2 | Quanto acima do cinza médio a luz precisa estar para riscar. |
+| **Comprimento do risco** | 40–1200 px | 420 | Em px de um quadro de 1080 linhas. |
+| **Cor do risco** | cor | azul | A cor do risco (o azul clássico das anamórficas). |
+| **Barril horizontal** | 0–100% | 30% | O centro estica um pouco na horizontal, mais na linha do meio. |
+| **Bordas macias** | 0–100% | 40% | As laterais ficam mais macias que o centro (até 6 px@1080). |
+
+### Data impressa (Beta)
+
+*A data laranja das câmeras dos anos 80 e 90.* Chave: liga a data.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Ano / Mês / Dia** | 1970–2099, 1–12, 1–31 | 1998, 10, 29 | A data mostrada (não usa o relógio do computador). |
+| **Formato** | '98 10 29, 10 29 '98, 29 10 '98, 1998 10 29 | '98 10 29 | A ordem dos números. |
+| **Canto** | embaixo/em cima, direita/esquerda | embaixo à direita | Onde a data fica. |
+| **Cor** | cor | laranja | A cor do mostrador. |
+| **Intensidade** | 0–100% | 60% | Quanto o mostrador expõe o negativo: forte, ele estoura e brilha em volta. |
+| **Tamanho** | 12–120 px | 34 | Altura dos números num quadro de 1080 linhas (a mesma em qualquer resolução). |
+| **Distância do canto** | 0–300 px | 60 | Avançado. |
+
+A data é **luz exposta no negativo**, como nas câmeras com data: passa pela halação (o brilho em volta), pela cor
+do negativo e da cópia, e o grão fica por cima dela.
+
+### A montagem na película (Beta)
+
+*Os cortes da montagem viram emendas, e os rolos de Super 8 acabam.* Chave: liga.
+
+| Ajuste | Faixa | Padrão | O que faz |
+|---|---|---|---|
+| **Emendas visíveis** | 0–100% | 70% | Em quantos cortes secos da faixa V1 a fita da emenda aparece no primeiro quadro do clipe novo. |
+| **Clarão no corte** | 0–100% | 40% | A luz que passa pela junta: o primeiro quadro depois do corte clareia (um pouco o segundo). |
+| **Pulo no corte** | 0–100% | 50% | A emenda pula na janela do projetor por um ou dois quadros. |
+| **Rolos de Super 8** | liga/desliga | desligado | Um rolo de 50 pés tem 3 600 quadros: 3 min 20 s a 18 qps, 2 min 30 s a 24. No fim de cada rolo a luz vela a película; o rolo seguinte começa velado e com um pulo. |
+| **Cadência do rolo** | 18, 24 qps | 18 | O comprimento de cada rolo. |
+| **Velamento no fim do rolo** | 0–100% | 70% | A força do velamento. |
+| **Cor do velamento** | cor | laranja | A cor da luz que vela. |
+
+As emendas precisam de uma montagem (modo Edição, ou a montagem como entrada do modo Película); só os cortes secos
+contam (um corte com transição não é emenda). Os rolos contam o tempo do vídeo e valem nos dois modos.
+
+### Máquina do tempo (painel de looks)
+
+O botão **Máquina do tempo…** (modo Película, abaixo da busca de looks) pede um **ano** (1920 a 2020) e **onde o
+filme passava** (cinema, televisão ou filme caseiro) e preenche, de uma vez, bitola, sensibilidade, preto e branco
+(com o filtro e a virada), cor, saturação, contraste, envelhecimento, cópia, grão, projetor, desgaste, moldura e
+halação como eram na época. A janela mostra o motivo histórico e a lista do que vai mudar antes de aplicar; depois,
+tudo continua editável e **Ctrl+Z** desfaz a máquina inteira de uma vez. A cadência de manivela da época (16 ou
+18 qps) aparece como sugestão para o modo Edição.
+
+### Formatos de foto
+
+Bitolas e formatos de scan novos: **Foto 35 mm (135, 36 × 24)**, **Foto meio quadro (18 × 24)** e **Foto médio
+formato (120)**; no *Scan da película*, 135 (8 furos), meio quadro (4 furos), 120 6 × 6 e 120 6 × 4,5 (sem furos).
+O 135, o meio quadro e o 6 × 6 aparecem com a tira deitada, como nos scans de foto. O grão segue o tamanho do
+quadro (maior quadro, grão menor: 120 < 135 < 35 mm de cinema < meio quadro).

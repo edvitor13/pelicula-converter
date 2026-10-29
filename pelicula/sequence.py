@@ -36,6 +36,9 @@ class LayerImage:
     desfaz a multiplicação depois de amostrar e usa o alfa como cobertura."""
     layer: timeline.Layer
     image: np.ndarray
+    # 1.6, obturador do look (`tempo_camera`): ((imagens…), (pesos…)) dos quadros do arquivo que a janela aberta cobre;
+    # `frame.Recipe.montage` mistura na luz linear antes da montagem. None = só `image` (o de sempre).
+    stack: tuple | None = None
 
 
 @dataclass
@@ -171,8 +174,9 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
 
 
 def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth: int = 8,
-         hq: bool = False) -> FrameLayers:
-    """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread)."""
+         hq: bool = False, shutter: float = 0.0) -> FrameLayers:
+    """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread). `shutter` (1.6): o ângulo do
+    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`)."""
     out = []
     for layer in seq.layers_at(frame):
         src = seq.sources.get(layer.clip.src)
@@ -184,8 +188,12 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
             continue
         if not present(src):
             continue
-        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq,
-                                                  camera.read_profile(layer.clip.values))))
+        prof = camera.read_profile(layer.clip.values)
+        win = seq.src_window(layer.clip, frame, shutter) if shutter > 0 else None
+        stack = None
+        if win is not None:
+            stack = (tuple(_cached_grab(src, k, w, h, depth, hq, prof) for k, _w in win), tuple(wt for _k, wt in win))
+        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq, prof), stack))
     return FrameLayers(int(frame), out)
 
 
@@ -206,6 +214,8 @@ class _ClipStream:
         self.last: np.ndarray | None = None
         self.last_idx = -1
         self.error = ""
+        self.keep = 0  # 1.6, obturador: quantos quadros recentes guardar (a janela relê quadros já passados)
+        self.recent: OrderedDict = OrderedDict()
         self._open(start)
 
     def _open(self, f: int) -> None:
@@ -217,6 +227,8 @@ class _ClipStream:
     def get(self, f: int, jump: int) -> np.ndarray:
         if f == self.last_idx and self.last is not None:
             return self.last
+        if self.keep and f in self.recent:
+            return self.recent[f]
         if self.reader is None or f < self.next or f - self.next > jump:
             self._open(f)
         while self.next <= f:
@@ -226,6 +238,10 @@ class _ClipStream:
                     self.error = self.reader.error
                 break
             self.last, self.last_idx = img, self.next
+            if self.keep:
+                self.recent[self.next] = img
+                while len(self.recent) > self.keep:
+                    self.recent.popitem(last=False)
             self.next += 1
         if self.last is None:
             self.last = _blank(self.w, self.h, self.depth)
@@ -325,8 +341,9 @@ class SequenceReader:
 
     def __init__(self, seq: timeline.Sequence, canvas_w: int, canvas_h: int, depth: int = 8, start: int = 0,
                  count: int | None = None, hq: bool = False, perf: media.Perf | None = None,
-                 fps_out: str | None = None, lookahead: float = 1.5):
+                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0):
         self.seq = seq.copy()
+        self.shutter = float(shutter)  # 1.6: ângulo do obturador do look (0 = o quadro de sempre)
         self.w, self.h, self.depth, self.hq = int(canvas_w), int(canvas_h), depth, hq
         self.perf = perf or media.Perf()
         self.start = max(0, int(start))
@@ -438,7 +455,17 @@ class SequenceReader:
                 img = self._image(c)
             else:
                 active.add(c.id)
-                img = self._stream(c, layer.src_frame).get(layer.src_frame, self.jump)
+                stream = self._stream(c, layer.src_frame)
+                win = self.seq.src_window(c, t, self.shutter) if self.shutter > 0 else None
+                if win is not None:  # 1.6, obturador: os quadros da janela, na ordem em que o leitor anda
+                    if isinstance(stream, _ClipStream):
+                        stream.keep = max(stream.keep, 2 * len(win) + 2)
+                    order = sorted((k for k, _w in win), reverse=c.reverse)
+                    got = {k: stream.get(k, self.jump) for k in order}
+                    img = stream.get(layer.src_frame, self.jump) if layer.src_frame not in got else got[layer.src_frame]
+                    out.append(LayerImage(layer, img, (tuple(got[k] for k, _w in win), tuple(wt for _k, wt in win))))
+                    continue
+                img = stream.get(layer.src_frame, self.jump)
             out.append(LayerImage(layer, img))
         for cid in [k for k in self._streams if k not in active]:
             c = self.seq.find(cid)

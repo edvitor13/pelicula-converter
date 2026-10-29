@@ -52,6 +52,9 @@ BITOLAS = [
     ("35mm", "35 mm"),
     ("65mm", "65 mm"),
     ("imax", "IMAX 70 mm (15/70)"),
+    ("135", "Foto 35 mm (135, 36 × 24)"),  # 1.6: formatos de foto (`scanformatos.py`)
+    ("meio_quadro", "Foto meio quadro (18 × 24)"),
+    ("120", "Foto médio formato (120)"),
 ]
 
 ISOS = [(str(v), f"ISO {v}") for v in (50, 100, 125, 200, 250, 400, 500, 800, 1600, 3200)]
@@ -189,6 +192,11 @@ PROPORCOES = [
     ("2.39", "2,39 (Scope)"),
     ("2.76", "2,76 (Ultra Panavision)"),
 ]
+
+
+# 1.6: ângulos do obturador (`tempo_camera`); a escolha não anima (a janela decide quais quadros ler)
+ANGULOS = [("45", "45°"), ("90", "90°"), ("144", "144°"), ("172.8", "172,8° (sem cintilação a 50 Hz)"),
+           ("180", "180° (o padrão do cinema)"), ("270", "270°"), ("360", "360° (todo aberto)")]
 
 
 def F(key, label, default, lo, hi, step=0.01, decimals=2, unit="", tip="", advanced=False, percent=False):
@@ -501,7 +509,9 @@ SECTIONS: list[Section] = [
         B("scan_on", "Ativo", False),
         C("scan_formato", "Película", "bitola", [
             ("bitola", "Da bitola escolhida"), ("35mm", "35 mm (4 furos por quadro)"), ("16mm", "16 mm (1 furo)"),
-            ("super16", "Super 16"), ("super8", "Super 8")],
+            ("super16", "Super 16"), ("super8", "Super 8"),
+            ("135", "Foto 35 mm (135, 8 furos)"), ("meio_quadro", "Foto meio quadro (4 furos)"),
+            ("120_66", "Foto 120, 6 × 6 (sem furos)"), ("120_645", "Foto 120, 6 × 4,5 (sem furos)")],
           "Medidas reais de cada película: furos, linhas entre quadros e bordas."),
         C("scan_tipo", "Tipo de scan", "copia", [
             ("copia", "Cópia projetada (furos claros)"), ("negativo", "Negativo invertido (furos escuros)")]),
@@ -560,6 +570,74 @@ SECTIONS: list[Section] = [
           "Quanto o matiz pode se afastar da cor da pele. Estreite se madeira ou areia entrarem na máscara.",
           advanced=True),
     ], "Frente, fundo e pele com ajustes próprios"),
+
+    # 1.6 (`tempo_camera.py`, módulo Beta "camera_cinema"): obturador de película a partir de vídeo rápido.
+    Section("obturador", "Obturador de película", "obturador_on", [
+        B("obturador_on", "Ativo", False),
+        C("obturador_angulo", "Ângulo do obturador", "180", ANGULOS,
+          "Quanto tempo de cada quadro o obturador fica aberto: 180° = metade (1/48 s a 24 qps), o rastro de "
+          "movimento do cinema. Vale quando o vídeo tem pelo menos o dobro dos quadros por segundo da saída "
+          "(50, 60 ou 120 qps exportados a 24, 25 ou 30): os quadros dentro da janela aberta são misturados na luz. "
+          "No modo Película, a exportação com outra taxa (a prévia da exportação mostra); no modo Edição, cada "
+          "clipe rápido numa sequência mais lenta."),
+    ], "Rastro de movimento de uma câmera de cinema"),
+
+    # 1.6 (`anamorfico.py`, módulo Beta "anamorfico"): lente anamórfica.
+    Section("anamorfico", "Lente anamórfica", "anam_on", [
+        B("anam_on", "Ativo", False),
+        C("anam_compressao", "Desespremer", "nenhuma", [
+            ("nenhuma", "Não (o vídeo já está na proporção certa)"), ("1.33", "1,33× (adaptador em 16:9 → 2,37:1)"),
+            ("1.5", "1,5×"), ("1.8", "1,8×"), ("2.0", "2× (cinema em 4:3 → 2,66:1)")],
+          "Para vídeo filmado com lente ou adaptador anamórfico, que chega espremido na horizontal: a imagem é "
+          "esticada na largura e fica numa caixa de letra (faixas pretas em cima e embaixo)."),
+        F("anam_flare", "Risco de luz", 0.5, 0, 1, percent=True,
+          tip="A linha horizontal comprida que as luzes fortes fazem numa lente anamórfica."),
+        F("anam_flare_limiar", "Limiar do risco", 2.0, 0, 5, 0.1, 1, " stops",
+          "Quanto acima do cinza médio a luz precisa estar para riscar."),
+        F("anam_flare_comprimento", "Comprimento do risco", 420.0, 40, 1200, 10, 0, " px"),
+        COR("anam_flare_cor", "Cor do risco", (0.35, 0.6, 1.0)),
+        F("anam_barril", "Barril horizontal", 0.3, 0, 1, percent=True,
+          tip="O centro estica um pouco na horizontal, mais na linha do meio (o \"mumps\" das anamórficas)."),
+        F("anam_bordas", "Bordas macias", 0.4, 0, 1, percent=True,
+          tip="As laterais ficam mais macias que o centro."),
+    ], "Desespremer, risco de luz e bordas"),
+
+    # 1.6 (`data_impressa.py`, módulo Beta "data_impressa"): a data laranja das câmeras com data.
+    Section("data", "Data impressa", "data_on", [
+        B("data_on", "Ativo", False),
+        I("data_ano", "Ano", 1998, 1970, 2099),
+        I("data_mes", "Mês", 10, 1, 12),
+        I("data_dia", "Dia", 29, 1, 31),
+        C("data_formato", "Formato", "aa_mm_dd", [
+            ("aa_mm_dd", "'98 10 29 (ano, mês, dia)"), ("mm_dd_aa", "10 29 '98 (mês, dia, ano)"),
+            ("dd_mm_aa", "29 10 '98 (dia, mês, ano)"), ("aaaa_mm_dd", "1998 10 29")]),
+        C("data_canto", "Canto", "inf_dir", [
+            ("inf_dir", "Embaixo à direita"), ("inf_esq", "Embaixo à esquerda"),
+            ("sup_dir", "Em cima à direita"), ("sup_esq", "Em cima à esquerda")]),
+        COR("data_cor", "Cor", (1.0, 0.45, 0.08)),
+        F("data_intensidade", "Intensidade", 0.6, 0, 1, percent=True,
+          tip="Quanto o mostrador expõe o negativo: forte, ele estoura e brilha em volta (com a halação)."),
+        F("data_tamanho", "Tamanho", 34.0, 12, 120, 1, 0, " px", "Altura dos números (num quadro de 1080 linhas)."),
+        F("data_margem", "Distância do canto", 60.0, 0, 300, 1, 0, " px", advanced=True),
+    ], "A data laranja das câmeras dos anos 80 e 90"),
+
+    # 1.6 (`montagem_filme.py`, módulo Beta "montagem_pelicula"): os cortes da montagem viram emendas na película.
+    Section("montagem_filme", "A montagem na película", "mfilme_on", [
+        B("mfilme_on", "Ativo", False),
+        F("mfilme_emenda", "Emendas visíveis", 0.7, 0, 1, percent=True,
+          tip="Em quantos cortes secos da faixa V1 a fita da emenda aparece no primeiro quadro do clipe novo."),
+        F("mfilme_clarao", "Clarão no corte", 0.4, 0, 1, percent=True,
+          tip="A luz que passa pela junta da emenda: o primeiro quadro depois do corte clareia."),
+        F("mfilme_salto", "Pulo no corte", 0.5, 0, 1, percent=True,
+          tip="A emenda é mais grossa e pula na janela do projetor por um ou dois quadros."),
+        I("mfilme_semente", "Semente", 7, 0, 9999, advanced=True),
+        B("rolo_on", "Rolos de Super 8", False,
+          "Um rolo de 50 pés tem 3 600 quadros: no fim dele a luz vela a película e a troca de rolo dá um pulo."),
+        C("rolo_cadencia", "Cadência do rolo", "18", [
+            ("18", "18 qps (3 min 20 s por rolo)"), ("24", "24 qps (2 min 30 s por rolo)")]),
+        F("rolo_velamento", "Velamento no fim do rolo", 0.7, 0, 1, percent=True),
+        COR("rolo_cor", "Cor do velamento", (1.0, 0.42, 0.12)),
+    ], "Emendas nos cortes e rolos de Super 8"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])

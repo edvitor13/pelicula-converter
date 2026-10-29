@@ -703,9 +703,87 @@ float edgeText(vec2 mm) {
     return m;
 }
 
+// 1.6: anamórfico (`anamorfico.py`) e data impressa (`data_impressa.py`), módulos Beta. Desligados
+// (look.SPARSE_UNIFORMS: u_anam = (1, 0, 0, 0), u_date_on = 0), `filmLight` é a conta de sempre, bit a bit.
+vec3 imageLin(vec2 uv);
+uniform vec4 u_anam;       // compressão (1 = nenhuma), barril horizontal, maciez das bordas (px@1080), ligado
+uniform int u_date_on;
+uniform vec4 u_date_box;   // canto de cima à esquerda do texto e altura do dígito (px@1080 do quadro da câmera), glifos
+uniform vec4 u_date_g0;    // segmentos de cada glifo (bits a=1 … g=64; 128 = apóstrofo; 0 = espaço)
+uniform vec4 u_date_g1;
+uniform vec4 u_date_g2;
+uniform vec3 u_date_col;   // cor × intensidade, luz linear somada à cena (a câmera expõe o negativo)
+
+float dateSeg(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    return length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0));
+}
+float dateGlyph(int i) { return i < 4 ? u_date_g0[i] : (i < 8 ? u_date_g1[i - 4] : u_date_g2[i - 8]); }
+float dateAdvance(float g) { return g > 127.5 ? 0.32 : (g < 0.5 ? 0.5 : 0.78); }
+float dateDigit(vec2 p, int b) {
+    const float W = 0.56;
+    float d = 1e3;
+    if ((b & 1) != 0) d = min(d, dateSeg(p, vec2(0.07, 0.0), vec2(W - 0.07, 0.0)));
+    if ((b & 2) != 0) d = min(d, dateSeg(p, vec2(W, 0.07), vec2(W, 0.43)));
+    if ((b & 4) != 0) d = min(d, dateSeg(p, vec2(W, 0.57), vec2(W, 0.93)));
+    if ((b & 8) != 0) d = min(d, dateSeg(p, vec2(0.07, 1.0), vec2(W - 0.07, 1.0)));
+    if ((b & 16) != 0) d = min(d, dateSeg(p, vec2(0.0, 0.57), vec2(0.0, 0.93)));
+    if ((b & 32) != 0) d = min(d, dateSeg(p, vec2(0.0, 0.07), vec2(0.0, 0.43)));
+    if ((b & 64) != 0) d = min(d, dateSeg(p, vec2(0.07, 0.5), vec2(W - 0.07, 0.5)));
+    return d;
+}
+float dateMask(vec2 px) {
+    vec2 p = (px - u_date_box.xy) / u_date_box.z;
+    if (p.y < -0.25 || p.y > 1.25 || p.x < -0.25) return 0.0;
+    float aa = max(1080.0 / u_res.y / u_date_box.z, 0.035);
+    p.x -= (1.0 - p.y) * 0.1;  // itálico, como os mostradores de sete segmentos das câmeras
+    float x = 0.0;
+    float m = 0.0;
+    int n = int(u_date_box.w + 0.5);
+    for (int i = 0; i < 12; i++) {
+        if (i >= n) break;
+        float g = dateGlyph(i);
+        vec2 q = vec2(p.x - x, p.y);
+        float d = 1e3;
+        if (g > 127.5) d = dateSeg(q, vec2(0.12, 0.0), vec2(0.08, 0.2));
+        else if (g > 0.5) d = dateDigit(q, int(g + 0.5));
+        m = max(m, smoothstep(0.075 + aa, 0.075 - aa, d));
+        x += dateAdvance(g);
+    }
+    return m;
+}
+
+// A luz da imagem no quadro da câmera: desespremer (caixa de letra), barril horizontal e bordas macias da lente
+// anamórfica, vinheta e a data impressa pela câmera no negativo.
+vec3 filmLight(vec2 uv, vec2 vuv) {
+    if (u_anam.w == 0.0 && u_date_on == 0) return imageLin(uv) * vignette(vuv);
+    float S = max(u_anam.x, 1.0);
+    vec2 cam = vec2(uv.x, (uv.y - 0.5) * S + 0.5);
+    vec2 vcam = vec2(vuv.x, (vuv.y - 0.5) * S + 0.5);
+    float cov = 1.0;
+    if (S > 1.0) cov = clamp((0.5 - abs(cam.y - 0.5)) * u_res.y / S + 0.5, 0.0, 1.0);
+    vec2 s = clamp(cam, 0.0, 1.0);
+    vec2 q = s * 2.0 - 1.0;
+    if (u_anam.y != 0.0) s.x = 0.5 + 0.5 * q.x / (1.0 + u_anam.y * (1.0 - q.y * q.y));
+    int taps = (u_anam.z > 0.0) ? 2 : 0;
+    float r = u_anam.z * q.x * q.x * (u_res.y / 1080.0) / u_res.x;
+    vec3 c = vec3(0.0);
+    float wsum = 0.0;
+    for (int i = -taps; i <= taps; i++) {
+        float w = 3.0 - float(abs(i));
+        c += w * imageLin(s + vec2(0.5 * r * float(i), 0.0));
+        wsum += w;
+    }
+    c /= wsum;
+    c *= vignette(clamp(vcam, 0.0, 1.0));
+    if (u_date_on == 1) c += u_date_col * dateMask(s * vec2(S * u_res.x / u_res.y * 1080.0, 1080.0));
+    return c * cov;
+}
+
 void main() {
     if (u_scan_on == 0) {
-        f_out = vec4(imageLin(weave(v_uv)) * vignette(v_uv), 1.0);
+        f_out = vec4(filmLight(weave(v_uv), v_uv), 1.0);
         return;
     }
     // Scan da película: a tira inteira (furos, bordas e quadros) treme junto.
@@ -758,6 +836,8 @@ void main() {
     lin = mix(lin, img, inImg);
     float edge = max(smoothstep(aa, -aa, mm.x), smoothstep(-aa, aa, mm.x - u_scan_view.x));
     lin = mix(lin, u_scan_outside, edge);
+    if (u_date_on == 1)  // 1.6: a data no quadro da câmera, dentro da janela da película
+        lin += inImg * inContent * u_date_col * dateMask(clamp(cuv, 0.0, 1.0) * vec2(Av * 1080.0, 1080.0));
     f_out = vec4(lin, inImg);
 }
 """
@@ -844,6 +924,10 @@ uniform sampler2D t_hal;
 uniform sampler2D t_bloom;
 uniform sampler2D t_mist;
 uniform sampler2D t_noise;
+uniform sampler2D t_streak;  // 1.6: risco horizontal do anamórfico (Engine._streak)
+uniform int u_streak_on;     // 0 fora do plano (Engine.FINAL_NEUTRAL)
+uniform float u_streak_amt;
+uniform vec3 u_streak_col;
 uniform vec2 u_res;
 uniform float u_scale;
 uniform int u_frame;
@@ -1117,6 +1201,7 @@ void main() {
         lin = mix(lin, m, 0.3 * u_mist_amt) + m * (0.35 * u_mist_amt);
     }
     if (u_bloom_on == 1) lin += texture(t_bloom, uv).rgb * u_bloom_amt;
+    if (u_streak_on == 1) lin += texture(t_streak, uv).r * u_streak_col * u_streak_amt;
     if (u_hal_on == 1) lin += texture(t_hal, uv).r * u_hal_color * u_hal_amt;
     if (u_hal_on == 2) {  // 1.6: halação física (grao.physical_halation): só o desvio local do reflexo na base
         vec3 a = u_hal_color * u_hal_amt;

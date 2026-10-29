@@ -111,4 +111,5 @@ ALPHA_GEOMETRY = {
     "u_input": 1, "u_input_cv": 0, "u_gamut": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
     "u_gain": (0.0, 0.0, 0.0), "u_ca": 0.0, "u_vig": (0.0, 0.5, 0.5, 0.0), "u_scan_base": (0.0, 0.0, 0.0),
     "u_scan_light": (0.0, 0.0, 0.0), "u_scan_outside": (0.0, 0.0, 0.0), "u_scan_textcol": (0.0, 0.0, 0.0),
+    "u_date_on": 0,  # 1.6: a data impressa é luz, não muda a transparência
 }

@@ -42,8 +42,9 @@ def _same_values(old: dict, new: dict) -> None:
     """Os valores da 1.4 voltam iguais; ajuste novo (de uma versão depois da 1.4) só pode vir no padrão."""
     for k, v in old.items():
         assert new.get(k) == v, k
+    defaults = params.defaults()  # cores em lista, como no JSON (1.6: as primeiras cores novas)
     for k in set(new) - set(old):
-        assert new[k] == params.PARAMS[k].default, k
+        assert new[k] == defaults[k], k
 
 
 @pytest.mark.ffmpeg

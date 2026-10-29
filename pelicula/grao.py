@@ -58,6 +58,7 @@ MTF_PRINT_DSIGMA_UM = (2.291, 0.0, 4.462)
 # as de `look.SCAN_FORMATS` e, para as bitolas sem scan, a abertura de câmera publicada (8 mm 0,192 pol.,
 # 65 mm de 5 perfurações 2,072 pol., IMAX 15/70 2,772 pol.). "Nenhuma" usa o 35 mm.
 FRAME_W_MM_EXTRA = {"8mm": 4.877, "65mm": 52.63, "imax": 70.41}
+FRAME_W_MM_EXTRA.update({"135": 36.0, "meio_quadro": 24.0, "120": 56.0})  # 1.6: foto (o lado maior do quadro)
 REF_WIDTH_PX = 1920.0
 
 

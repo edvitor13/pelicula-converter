@@ -104,13 +104,29 @@ MODULES: tuple[Module, ...] = (
            N_("Um modelo novo para o \"Grão no negativo\" do Laboratório: cada camada do negativo vira grãos de prata "
               "espalhados ao acaso, tantos quanto a densidade de cada ponto pede (um processo só, com os mesmos "
               "ajustes na imagem inteira). Mais pesado para a placa de vídeo."), "pelicula", BETA),
+    Module("camera_cinema", N_("Câmera de cinema"),
+           N_("Obturador de película (o rastro de movimento de 180° a partir de vídeo de 50, 60 ou 120 qps) e "
+              "manivela por clipe no modo Edição (16 ou 18 qps, com a oscilação da mão)."), "pelicula", BETA),
+    Module("anamorfico", N_("Lente anamórfica"),
+           N_("Desespremer vídeo filmado com adaptador anamórfico, risco de luz horizontal, barril e bordas macias. "
+              "Não vai para o plugin do DaVinci."), "pelicula", BETA),
+    Module("data_impressa", N_("Data impressa"),
+           N_("A data laranja de sete segmentos das câmeras dos anos 80 e 90, exposta no negativo."), "pelicula",
+           BETA),
+    Module("montagem_pelicula", N_("A montagem na película"),
+           N_("Os cortes secos da montagem viram emendas: a fita no primeiro quadro, o clarão e o pulo na janela; e "
+              "rolos de Super 8 de 50 pés, com o velamento no fim e o pulo na troca. Não vai para o plugin do "
+              "DaVinci."), "pelicula", BETA),
+    Module("maquina_tempo", N_("Máquina do tempo"),
+           N_("Escolha um ano (1920 a 2020) e onde o filme passava: um clique preenche a bitola, o filme, a cor, o "
+              "grão, a projeção, o desgaste e a moldura da época, com o motivo de cada escolha."), "pelicula"),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
 
 _SIMPLES = frozenset({"edicao", "notificacoes", "recuperacao"})
 _CRIADOR = _SIMPLES | {"defeitos", "luts", "scopes", "medidor_som", "transicoes", "legendas", "silencios",
-                       "titulos_geradores", "cor_simples"}
+                       "titulos_geradores", "cor_simples", "maquina_tempo"}
 _CINEMA = _CRIADOR | {"laboratorio", "scan", "curva", "exportar_lut", "davinci"}
 
 # (id, nome, descrição, módulos ligados). "Tudo" liga todo módulo estável; recursos em teste
@@ -231,6 +247,14 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         from . import grao_fisico
         if grao_fisico.on(v):
             used.add("grao_fisico")
+    if v.get("obturador_on"):  # 1.6: câmera de cinema
+        used.add("camera_cinema")
+    if v.get("anam_on"):  # 1.6: lente anamórfica
+        used.add("anamorfico")
+    if v.get("data_on"):  # 1.6: data impressa
+        used.add("data_impressa")
+    if v.get("mfilme_on"):  # 1.6: a montagem na película
+        used.add("montagem_pelicula")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):
@@ -248,6 +272,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         clips = getattr(sequence, "clips", [])
         if any(getattr(c, "color_group", "") or colorsimple.active(c.values) for c in clips):
             used.add("cor_simples")
+        if any(c.values.get("manivela", "nenhuma") != "nenhuma" for c in clips if c.kind == "video"):
+            used.add("camera_cinema")  # 1.6: manivela
     for subs in (subtitles, getattr(sequence, "subtitles", None)):
         if subs is not None and not subs.is_empty():
             used.add("legendas")

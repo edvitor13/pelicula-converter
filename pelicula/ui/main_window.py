@@ -47,6 +47,7 @@ from .timeline_view import HEADER_W, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
+from . import filme_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -112,11 +113,11 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, source, frame, w, h, profile: str | None = None) -> None:
+    def request(self, source, frame, w, h, profile: str | None = None, shutter: float = 0.0) -> None:
         """Pede o quadro `frame` de `source` em w × h; `profile`: o perfil de entrada do look (a leitura de um
-        arquivo log em faixa legal vem em float32, `media.float_input`)."""
+        arquivo log em faixa legal vem em float32, `media.float_input`); `shutter` (1.6): o ângulo do obturador."""
         with self._lock:
-            self._pending = (source, frame, w, h, profile)
+            self._pending = (source, frame, w, h, profile, shutter)
             if self._busy:
                 return
             self._busy = True
@@ -130,10 +131,10 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            source, frame, w, h, profile = job
+            source, frame, w, h, profile, shutter = job
             try:
                 if isinstance(source, timeline.Sequence):
-                    img = sequence.grab(source, frame, w, h, 8)
+                    img = sequence.grab(source, frame, w, h, 8, shutter=shutter)
                 else:
                     img = media.grab_frame(source, frame, w, h, 8, profile=profile)
             except Exception as exc:  # noqa: BLE001
@@ -149,7 +150,8 @@ class Player:
         self.q: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
 
-    def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None) -> None:
+    def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None,
+              shutter: float = 0.0) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
@@ -167,7 +169,7 @@ class Player:
 
         def open_reader(f):
             if is_seq:
-                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1)
+                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1, shutter=shutter)
             return media.FrameReader(source, w, h, 8, f, profile=profile)
 
         def run():
@@ -371,6 +373,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.subs_ui = SubtitlesUI(self)  # legendas: painel, faixa e menu (antes de ligar o model: limpa o cache)
         cor_ui.install(self)  # 1.6: ferramentas de cor (planos, cor simples, zebra, falsa cor e referência)
+        filme_ui.install(self)  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1196,7 +1199,9 @@ class MainWindow(QMainWindow):
         w, h = self.preview_size()
         prof = self.store.get("entrada")
         self._float_source = self.src_seq is None and media.float_input(self.info, prof)
-        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof)
+        self._shutter_read = self._shutter()
+        self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof,
+                            self._shutter_read)
 
     def _frame_loaded(self, source, frame: int, img) -> None:
         expected = self.src_seq if self.src_seq is not None else self.info
@@ -1233,7 +1238,7 @@ class MainWindow(QMainWindow):
             clip = seq.find(li.layer.clip.id)
             if clip is not None:  # com as chaves de animação do clipe atual avaliadas neste quadro
                 layer = dataclasses.replace(li.layer, clip=clip, values=seq.values_at(clip, fl.frame))
-                out.append(sequence.LayerImage(layer, li.image))
+                out.append(sequence.LayerImage(layer, li.image, li.stack))
         return sequence.FrameLayers(fl.frame, out)
 
     def frame_recipe(self, depth: int = 8, full: bool = False, alpha: bool | None = None) -> Recipe:
@@ -1256,6 +1261,11 @@ class MainWindow(QMainWindow):
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
                                  size=size, keys=self._export_keys(), burn=self._subtitle_burn(full),
                                  alpha=bool(alpha) and seq is not None)
+
+    def _shutter(self) -> float:
+        """1.6: o ângulo do obturador do look da prévia (0 = desligado ou sem película; `tempo_camera`)."""
+        from .. import tempo_camera
+        return tempo_camera.shutter_angle(None if (self.mode == "edicao" and not self.edit_film) else self.store.values)
 
     def _subtitle_burn(self, full: bool = False):
         """Legendas gravadas da receita (`SubtitlesUI.burn`; nenhuma antes de a interface delas existir)."""
@@ -1346,6 +1356,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("edit_film", "true" if on else "false")
         self._update_label_proc()
         self.render_now()
+        if self.src_seq is not None and not self.playing and self._shutter() != getattr(self, "_shutter_read", 0.0):
+            self.request_frame(self.frame_idx)  # 1.6: com o look, o obturador muda os quadros lidos
 
     def _use_sequence(self) -> bool:
         """A prévia mostra a montagem? (no modo Película só quando ela difere do arquivo aberto)"""
@@ -1990,6 +2002,9 @@ class MainWindow(QMainWindow):
         if (key in ("entrada", "*") and self.info is not None and self.src_seq is None and not self.playing
                 and media.float_input(self.info, self.store.get("entrada")) != getattr(self, "_float_source", False)):
             self.request_frame(self.frame_idx)  # log ↔ Rec.709: o quadro é lido de novo (super-brancos em float)
+        elif (self.src_seq is not None and not self.playing and key in ("obturador_on", "obturador_angulo", "*")
+              and self._shutter() != getattr(self, "_shutter_read", 0.0)):
+            self.request_frame(self.frame_idx)  # 1.6: o obturador muda os quadros lidos de cada clipe
         self._update_modified()
         self._update_title()
         if self.curve_graph.isVisible():
@@ -2086,7 +2101,7 @@ class MainWindow(QMainWindow):
             f = loop_start
         w, h = self.preview_size()
         self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
-                          loop_start, self.store.get("entrada"))
+                          loop_start, self.store.get("entrada"), self._shutter())
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -2756,11 +2771,11 @@ class MainWindow(QMainWindow):
         """O quadro `frame` em 16 bits no tamanho do arquivo, como sai na exportação ("Salvar quadro"); `alpha`:
         RGBA com a transparência da montagem (como numa exportação com alfa)."""
         w, h = self.info.width, self.info.height
+        recipe = self.frame_recipe(16, full=True, alpha=alpha)
         if self.src_seq is not None:
-            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True))
+            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True, shutter=recipe.shutter))
         else:
             img = None
-        recipe = self.frame_recipe(16, full=True, alpha=alpha)
         if img is None:
             img = media.grab_frame(self.info, frame, w, h, 16, hq=True, profile=recipe.profile)
         self._uploaded = None
@@ -3251,6 +3266,7 @@ class MainWindow(QMainWindow):
             "titulos_geradores": [self.bin.btn_new],  # e os editores no inspetor (`apply_modules`)
             **cor_ui.module_tools(self),  # 1.6: "cor_planos" e "cor_simples" (`ui/cor_ui.py`)
             **grao_fisico_ui.module_tools(self),  # 1.6: "grao_fisico" (`ui/grao_fisico_ui.py`)
+            **filme_ui.module_tools(self),  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
         }
 
     def apply_modules(self) -> None:
@@ -3277,6 +3293,7 @@ class MainWindow(QMainWindow):
         from . import transitions_ui  # 1.5: tipos novos e o menu "Transição ▸" (módulo "transicoes")
         transitions_ui.apply_module(self, "transicoes" in on)
         cor_ui.apply_modules(self, on)
+        filme_ui.apply_modules(self, on)
         self._notice_muted -= on  # religado e desligado de novo: volta a avisar
         self._sync_corridorkey_action()  # Beta: fora de _module_tools (ligado só com o componente instalado)
         self.subs_ui.apply_modules(on)

@@ -57,6 +57,11 @@ GAUGES: dict[str, dict[str, Any]] = {
     "35mm":    dict(grain_size=1.00, grain_amt=1.00, blur=0.35, weave=1.0, vignette=0.06, hal=1.00, aspect=1.85),
     "65mm":    dict(grain_size=0.60, grain_amt=0.72, blur=0.0, weave=0.7, vignette=0.03, hal=0.85, aspect=2.20),
     "imax":    dict(grain_size=0.45, grain_amt=0.55, blur=0.0, weave=0.55, vignette=0.02, hal=0.75, aspect=1.43),
+    # 1.6 (`scanformatos.py`): formatos de foto. O grão segue a largura do quadro (36, 24 e 56 mm contra os 24,9 do
+    # 35 mm de cinema); a câmera de foto não tem tremor de projeção nem desfoque de bitola pequena.
+    "135":     dict(grain_size=0.75, grain_amt=0.85, blur=0.2, weave=0.6, vignette=0.05, hal=0.90, aspect=1.5),
+    "meio_quadro": dict(grain_size=1.05, grain_amt=1.02, blur=0.4, weave=1.0, vignette=0.08, hal=1.00, aspect=1.33),
+    "120":     dict(grain_size=0.50, grain_amt=0.62, blur=0.0, weave=0.5, vignette=0.03, hal=0.80, aspect=1.0),
 }
 
 PRINTS: dict[str, dict[str, Any] | None] = {
@@ -80,9 +85,22 @@ SCAN_FORMATS: dict[str, dict[str, Any]] = {
                     perf_r=0.25, perf_phase=3.81, perf_period=7.62, text=(-1.0, -1.0, -1.0, -1.0), rough=0.025),
     "super8": dict(film_w=8.0, pitch=4.234, img=(1.55, 7.34, 4.01, 0.40), perf=(0.97, -1.0, 0.914, 1.143),
                    perf_r=0.13, perf_phase=2.117, perf_period=4.234, text=(-1.0, -1.0, -1.0, -1.0), rough=0.02),
+    # 1.6 (`scanformatos.py`): foto. 135 = 36 × 24 mm com 8 furos KS (38 mm por quadro), meio quadro = 18 × 24 mm com 4
+    # furos (19 mm), ambos com a tira deitada no scan; 120 = 61,5 mm de largura, sem furos (6 × 6: 56 × 56 mm a cada
+    # 60 mm; 6 × 4,5: 56 × 41,5 mm a cada 45 mm). Sem furos: o furo fica fora da película (x < 0).
+    "135": dict(film_w=35.0, pitch=38.0, img=(5.5, 29.5, 36.0, 0.6), perf=(3.41, 31.59, 2.794, 1.981),
+                perf_r=0.33, perf_phase=2.375, perf_period=4.75, text=(0.35, 1.75, 33.25, 34.65), rough=0.035),
+    "meio_quadro": dict(film_w=35.0, pitch=19.0, img=(5.5, 29.5, 18.0, 0.5), perf=(3.41, 31.59, 2.794, 1.981),
+                        perf_r=0.33, perf_phase=2.375, perf_period=4.75, text=(0.35, 1.75, 33.25, 34.65),
+                        rough=0.035),
+    "120_66": dict(film_w=61.5, pitch=60.0, img=(2.75, 58.75, 56.0, 0.3), perf=(-10.0, -1.0, 0.0, 0.0),
+                   perf_r=0.0, perf_phase=0.0, perf_period=60.0, text=(0.5, 2.1, -1.0, -1.0), rough=0.03),
+    "120_645": dict(film_w=61.5, pitch=45.0, img=(2.75, 58.75, 41.5, 0.3), perf=(-10.0, -1.0, 0.0, 0.0),
+                    perf_r=0.0, perf_phase=0.0, perf_period=45.0, text=(0.5, 2.1, -1.0, -1.0), rough=0.03),
 }
 GAUGE_SCAN = {"8mm": "super8", "super8": "super8", "16mm": "16mm", "super16": "super16",
-              "35mm": "35mm", "65mm": "35mm", "imax": "35mm", "nenhuma": "35mm"}
+              "35mm": "35mm", "65mm": "35mm", "imax": "35mm", "nenhuma": "35mm",
+              "135": "135", "meio_quadro": "meio_quadro", "120": "120_66"}  # 1.6: foto
 EDGE_TEXTS = {
     "kodak_vision3": "KODAK  VISION3",
     "eastman": "EASTMAN  KODAK  SAFETY  FILM",
@@ -111,6 +129,9 @@ def edge_text(v: dict) -> str:
     if choice != "auto":
         return EDGE_TEXTS.get(choice, "")
     fmt = scan_format(v)
+    from . import scanformatos
+    if fmt in scanformatos.EDGE_TEXTS:  # 1.6: foto (135, meio quadro, 120)
+        return scanformatos.EDGE_TEXTS[fmt]
     if fmt == "super8" or fmt == "super16":
         return ""
     code = "5222" if v.get("pb") else _KODAK_35.get(int(v.get("iso", 250)), "5207")
@@ -300,7 +321,8 @@ GC_POWER = 1.2
 # Uniforms da 1.6 que só vão no plano com o efeito ligado (o plano de um projeto antigo continua o mesmo,
 # `tests/test_project_migration.py`). Um programa guarda o último valor de cada uniform: o Engine manda estes
 # valores neutros antes do plano (passos "base" e "bake"), então desligar o efeito volta à cor de sempre.
-SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0}
+SPARSE_UNIFORMS: dict[str, Any] = {"u_gc_amt": 0.0,
+                                   "u_anam": (1.0, 0.0, 0.0, 0.0), "u_date_on": 0}  # 1.6: anamórfico e data
 
 
 @lru_cache(maxsize=None)
@@ -887,7 +909,7 @@ def aspect_target(v: dict, gauge: dict) -> float:
 
 def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: float,
                lut_info: tuple | None = None, dither: bool = True, *, legal: bool = True,
-               net_grain: float = 0.0) -> Plan:
+               net_grain: float = 0.0, edit=None) -> Plan:
     """Monta todos os valores do quadro `frame` para uma imagem width x height.
 
     `legal`: a imagem de entrada veio de vídeo em faixa legal que o decodificador expandiu para 0–1
@@ -898,6 +920,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     `net_grain`: "Grão para redes" da exportação. 0 (padrão) = desligado, o plano é o de sempre. Maior que 0
     = quantos pixels desta imagem valem um pixel do arquivo exportado (1 na exportação; menos na prévia
     reduzida): o grão fica com pelo menos `NET_GRAIN_MIN_PX` pixels da saída e um pouco mais forte.
+
+    `edit` (1.6): onde o quadro está em relação aos cortes da montagem (`montagem_filme.EditInfo`, de
+    `frame.Recipe.plan`); None = sem montagem. Só a seção "A montagem na película" usa.
     """
     scale = height / 1080.0
     fps = fps or 24.0
@@ -976,6 +1001,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     if v.get("planos_on"):  # 1.6: Cor por planos no passo base (programa `planes.BASE_CP`; {} = nada a fazer)
         from . import planes
         U.update(planes.uniforms(v))
+    from . import anamorfico, data_impressa  # 1.6: só com o efeito ligado (SPARSE_UNIFORMS desliga)
+    anamorfico.base_uniforms(U, v)
+    data_impressa.uniforms(U, v, width, height)
 
     plan = Plan(U)
 
@@ -1019,6 +1047,7 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
         plan.chains.append(Chain("mist", 0.0, v["nevoa_raio"] * scale, 3.0, False))
         U["u_mist_on"] = 1
         U["u_mist_amt"] = v["nevoa_forca"]
+    anamorfico.streak(plan, U, v, scale)  # 1.6: risco horizontal (nada desligado)
 
     # ---- Vazamento de luz
     U["u_leak_on"] = 0
@@ -1160,6 +1189,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
                 U["u_splice"] = (1.0, 0.15 + 0.7 * _hash(ep, sd + 503))
     U["u_dmg_on"] = 1 if (U["u_dust"] > 0 or U["u_scratch"] > 0 or U["u_hair"][0] > 0 or U["u_stain"][0] > 0
                           or U["u_cue"] > 0 or U["u_splice"][0] > 0) else 0
+    if v.get("mfilme_on"):  # 1.6: emendas nos cortes e rolos de Super 8 (`montagem_filme.py`)
+        from . import montagem_filme
+        montagem_filme.apply(U, v, edit, frame, fps, scale)
     U["u_frame"] = int(frame)
     U["u_seed_d"] = sd
 
@@ -1195,6 +1227,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
             U["u_scan_outside"] = tuple(c * luz for c in (1.9, 1.85, 1.75))
             U["u_scan_textcol"] = display_to_lin((0.42, 0.24, 0.07))
         plan.edge_text = edge_text(v)
+        from . import scanformatos
+        if scanformatos.is_rotated(v):  # 1.6: tira deitada (outra variante do BASE, `Engine._base_program`)
+            U["u_scan_rot"] = 1
 
     # ---- Moldura
     asp = aspect_target(v, gauge)
