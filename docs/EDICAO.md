@@ -309,6 +309,11 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
 - Sem película na prévia (o botão do filme desligado), a montagem aparece no perfil do look: num look em log,
   os clipes convertidos também aparecem em log, como os da câmera principal.
 - **Proteger cores saturadas** (no look) vale para a montagem inteira, no espaço do look.
+- **Clipes novos já vêm com o perfil** quando os metadados do arquivo indicam um diferente do look (HDR marcado,
+  o XML da Sony, Apple Log, etiquetas de curva; veja *Sugestão pelos metadados* no guia dos efeitos). O primeiro
+  vídeo de uma montagem vazia não: ele mostra a sugestão para o próprio look, como no modo Película. Num look
+  HLG/PQ, um vídeo marcado como comum (BT.709/sRGB) entra como Rec.709. Clipes que já estão na montagem e
+  projetos reabertos nunca mudam.
 - Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
 ### Animar com chaves (losangos)

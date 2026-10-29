@@ -142,6 +142,23 @@ outros perfis, seguindo os níveis de referência da ITU-R BT.2408:
   HDR, volta para Rec.709. Um perfil log escolhido à mão nunca muda, e reabrir um projeto salvo não muda nada.
   A troca entra no desfazer (Ctrl+Z).
 
+**Sugestão pelos metadados (1.6).** Ao abrir um arquivo (ou pôr o primeiro clipe numa montagem vazia), se os
+metadados indicam outro perfil, uma faixa abaixo da barra do topo diz qual ("Pelos metadados, este arquivo
+parece gravado em…") com o botão **Usar este perfil**; o *Perfil do vídeo* só muda com o clique (e entra no
+desfazer). Fechar a faixa mantém o perfil; reabrir um projeto salvo nunca mostra a sugestão. O que é reconhecido:
+
+- HDR marcado (HLG e PQ), também quando o perfil está num log escolhido à mão;
+- EXR (e a transferência `linear`) → *Linear*;
+- o nome da curva numa etiqueta de gamma/curva do arquivo (como as que câmeras ARRI em ProRes e gravadores
+  externos podem gravar) e o XML que as câmeras da **Sony** gravam ao lado do vídeo (`C0001M01.XML`,
+  *CaptureGammaEquation*: S-Log3, S-Log2, HLG);
+- iPhone em **Apple Log**: marca Apple com primárias BT.2020 e sem transferência HDR (uma dedução: a Apple não
+  marca a curva no arquivo).
+
+Nunca sugere Rec.709 por uma etiqueta BT.709 (muitas câmeras marcam o log assim). Sony em MP4 sem o XML,
+Panasonic, Canon, Fujifilm, Nikon e DJI não gravam a curva onde o ffprobe a mostra: escolha o perfil à mão.
+No modo Edição, a sugestão preenche o cartão **Câmera** dos clipes novos (veja o guia da Edição).
+
 **Faixa do vídeo e curvas em código de 10 bits.** Vídeo comum (YUV) usa a *faixa legal*: o preto é o código
 64 e o branco o 940 (em 10 bits). O app expande essa faixa ao decodificar (64 → 0, 940 → 1), como o DaVinci
 Resolve faz com um clipe em *Video levels*. A maioria das curvas é definida sobre esse sinal (LogC3, LogC4,

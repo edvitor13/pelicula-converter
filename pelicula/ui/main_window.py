@@ -37,6 +37,7 @@ from .widgets import FilmSlider, SectionCard, Segmented, Timeline, ToggleSwitch,
 from .flow import AdaptiveBar, ElideLabel, FlowLayout
 from .labcurve import CurveGraph
 from .module_notice import ModuleNotice, module_names
+from .input_notice import InputNotice, profile_name
 from .edit_model import TimelineModel
 from .edit_panels import ClipInspector, MediaBin
 from .keyframes_ui import KeyRows, KeyStrip
@@ -332,6 +333,8 @@ class MainWindow(QMainWindow):
         self.cur_neutral_q: QImage | None = None
         self.edit_film = str(self.settings.value("edit_film", "false")) == "true"
         self._sources: dict[str, timeline.Source] = {}
+        self._file_infos: dict[str, media.MediaInfo] = {}  # 1.6: metadados de câmera (`media.suggest_input`)
+        self.model.clip_profile_for = self._clip_profile_for
         self._loading = False
         self._audio_src = ("", "")
         self._mix_key = ""
@@ -451,6 +454,9 @@ class MainWindow(QMainWindow):
         self.module_notice.enableRequested.connect(self.enable_modules)
         self.module_notice.dismissed.connect(lambda ids: self._notice_muted.update(ids))
         root.addWidget(self.module_notice)
+        self.input_notice = InputNotice()  # 1.6: perfil sugerido pelos metadados do arquivo
+        self.input_notice.accepted.connect(self._accept_input_suggestion)
+        root.addWidget(self.input_notice)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
@@ -982,6 +988,7 @@ class MainWindow(QMainWindow):
         for wdg in (self.top_bar, self.left_stack, self.right_panel, self.statusBar()):
             wdg.setVisible(not entering)
         self._check_modules()  # o aviso de recurso desligado some na tela cheia e volta ao sair
+        self.input_notice.set_suppressed(entering)
         self.tl_editor.setVisible(not entering and self.mode == "edicao")
         self.viewer.set_fullscreen(entering)
         self.btn_full.setIcon(icons.icon("fullscreen_exit" if entering else "fullscreen", theme.TEXT, 18))
@@ -1078,9 +1085,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
+        self._file_infos[info.path] = info
         if detect:
             self._detect_profile(info)
             self.store.clear_keys()  # as chaves do look estão no tempo do arquivo anterior
+        self._offer_input(info if detect else None)
         self.file_info = info
         self.cur = None
         self._media_label = label or (media.sequence_label(path, info.seq_start, info.frames) if info.is_sequence
@@ -1112,6 +1121,34 @@ class MainWindow(QMainWindow):
         self.store.set("entrada", prof)
         self.store.commit()
         self.statusBar().showMessage(self._profile_message(prof), 8000)
+
+    def _offer_input(self, info) -> None:
+        """1.6: os metadados de `info` indicam outro perfil de entrada (`media.suggest_input`)? Mostra o aviso com um
+        botão (`InputNotice`); o look nunca muda sozinho. None (projeto reaberto, outro arquivo) esconde o aviso."""
+        sug = media.suggest_input(info) if info is not None else None
+        cur = self.store.get("entrada")
+        self.input_notice.offer(sug if sug in dict(params.ENTRADAS) and sug != cur else None, cur)
+
+    def _accept_input_suggestion(self, prof: str) -> None:
+        """"Usar este perfil" do aviso: troca o Perfil do vídeo do look (entra no desfazer)."""
+        if prof not in dict(params.ENTRADAS) or prof == self.store.get("entrada"):
+            return
+        self.store.set("entrada", prof)
+        self.store.commit()
+        self.statusBar().showMessage(_("Perfil do vídeo ajustado para {perfil}, pelos metadados do arquivo.")
+                                     .format(perfil=profile_name(prof)), 8000)
+
+    def _clip_profile_for(self, src: timeline.Source) -> str | None:
+        """1.6: perfil de câmera de um clipe novo do modo Edição (`TimelineModel.clip_profile_for`): o sugerido pelos
+        metadados quando difere da entrada do look (`camera.prefill`). O primeiro arquivo de uma montagem vazia fica
+        em "Igual ao do look": o look é que se ajusta a ele (`_adopt_format`, como ao abrir no modo Película)."""
+        from .. import camera
+        if not src.is_file or not src.has_video:
+            return None
+        if all(c.src == src.path for c in self.model.seq.clips if c.kind == timeline.VIDEO):
+            return None
+        info = self._file_infos.get(src.path)
+        return camera.prefill(media.suggest_input(info), self.store.values, info)
 
     @staticmethod
     def _profile_message(prof: str) -> str:
@@ -1540,7 +1577,7 @@ class MainWindow(QMainWindow):
         if src is None:
             self._recovery_point()
             try:
-                src = media.probe_source(path)
+                src = media.probe_source(path, self._file_infos)
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir {nome}.\n\n{erro}").format(
                     nome=Path(path).name, erro=exc))
@@ -1635,6 +1672,7 @@ class MainWindow(QMainWindow):
         self.model.set_settings(ref.width, ref.height, ref.fps_str)
         if not src.is_image and src.is_file:  # clipe sem arquivo não tem metadados de câmera
             self._detect_profile(src)
+            self._offer_input(self._file_infos.get(src.path))  # 1.6: só sugere (aviso com um botão)
 
     def _insert(self, src: timeline.Source, at: int | None = None, kind: str = timeline.VIDEO, track: int = 0,
                 insert: bool = False):
@@ -1936,6 +1974,9 @@ class MainWindow(QMainWindow):
                 c.refresh(key)
         self._sync_look_strips()
         self.schedule_render()
+        notice = getattr(self, "input_notice", None)
+        if notice is not None and key in ("entrada", "*"):
+            notice.sync(self.store.get("entrada"))  # 1.6: o perfil sugerido já está no look
         timer = getattr(self, "thumb_timer", None)
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
             timer.start()  # as miniaturas dos presets usam o perfil do arquivo
@@ -2842,6 +2883,7 @@ class MainWindow(QMainWindow):
         self.cur_q = None
         self.inp = self.outp = None
         self._sources = {}
+        self.input_notice.offer(None)
         self.bin.clear()
         self._loading = True
         try:
@@ -2873,6 +2915,7 @@ class MainWindow(QMainWindow):
     def show_project(self, p: project.Project, remember: bool = True) -> None:
         """Mostra um projeto já lido (de um .plc ou de uma cópia da recuperação automática, sem `p.path`).
         `remember`: entra nos projetos recentes."""
+        self.input_notice.offer(None)  # 1.6: um projeto salvo nunca recebe sugestão de perfil
         if p.sequence:
             self._open_sequence_project(p, remember)
             return

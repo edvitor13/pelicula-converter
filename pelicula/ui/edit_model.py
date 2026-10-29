@@ -61,6 +61,9 @@ class TimelineModel(QObject):
         self.marker_sel: str | None = None   # marcador selecionado (id)
         self.clipboard: dict[str, Any] | None = None
         self.clipboard_keys: dict[str, list] = {}  # chaves da cor copiadas (tempo a partir do começo do clipe)
+        # 1.6: perfil de câmera dos clipes de vídeo NOVOS (`insert_media`): fonte → chave de `params.ENTRADAS`, ou
+        # None para "Igual ao do look" (a janela usa `camera.prefill` com `media.suggest_input`).
+        self.clip_profile_for = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(400)
@@ -168,6 +171,10 @@ class TimelineModel(QObject):
         """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o resto em vez de sobrescrever."""
         with self.seq.keep_main():
             made = self.seq.insert_media(src, at, vtrack, atrack, insert=insert)
+        prof = self.clip_profile_for(src) if made and self.clip_profile_for is not None else None
+        for c in made if prof else []:  # 1.6: no mesmo passo do desfazer
+            if c.kind == VIDEO:
+                self.seq.set_values(c.id, {**c.values, "camera_entrada": prof})
         if made:
             self.selection = [c.id for c in made]
             self.selectionChanged.emit()

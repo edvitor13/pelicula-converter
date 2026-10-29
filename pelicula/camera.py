@@ -89,3 +89,23 @@ def uniforms(values: dict[str, Any], source, target: Target) -> dict[str, Any] |
         "u_cam_out_cv": 1 if target.cv else 0,
         "u_lut_gamut": look.mat3_uniform(to_look),
     }
+
+
+# Transferências de vídeo comum no ffprobe (`color_transfer`). Fora o "bt2020-10": câmeras gravam HLG marcado assim
+# (com a transferência HLG só numa mensagem à parte, para TVs antigas).
+SDR_TRANSFERS = ("bt709", "smpte170m", "bt470bg", "bt470m", "iec61966-2-1", "gamma22", "gamma28")
+
+
+def prefill(suggestion: str | None, look_values: dict[str, Any] | None, info=None) -> str | None:
+    """O perfil para preencher um clipe NOVO no modo Edição, ou None para deixá-lo em "Igual ao do look".
+
+    `suggestion` é o de `media.suggest_input(info)`: vale quando difere da entrada do look (igual a ela, o clipe já
+    é lido certo). Sem sugestão, com o look num perfil HDR (HLG/PQ), um arquivo marcado como vídeo comum vai como
+    Rec.709. Nunca muda um clipe que já está na montagem (quem chama só usa ao criar o clipe)."""
+    entrada = (look_values or {}).get("entrada", "rec709")
+    if suggestion:
+        return None if suggestion == entrada else str(suggestion)
+    transfer = str(getattr(info, "color_transfer", "") or "").strip().lower()
+    if entrada in ("hlg", "pq") and transfer in SDR_TRANSFERS:
+        return "rec709"
+    return None

@@ -54,7 +54,10 @@ pelicula/
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
                              transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
-                             sequências de imagens: find_sequence, probe_sequence, sequence_input (image2)
+                             sequências de imagens: find_sequence, probe_sequence, sequence_input (image2);
+                             1.6: log em float com os super-brancos (float_input), 16 bits exatos da faixa legal
+                             (_legal16), perfil sugerido pelos metadados (suggest_input, SUGGEST_RULES, camera_tags,
+                             sidecar_tags do XML da Sony)
   export.py                  CODECS, qualidades prontas, output_size() (lado menor), build_encoder_cmd(), ExportQueue,
                              run_job() (grava num parcial e troca no fim; volume alvo; duas passadas do tamanho
                              alvo), frame_pipeline()/preview_frame() (a receita de `frame.py` com os ajustes da
@@ -112,9 +115,13 @@ pelicula/
   editparams.py              esquemas dos ajustes por clipe (VIDEO e AUDIO), HSL_COLORS, QUICK_LOOKS
   compositor.py              ajustes do clipe + camada → uniforms do shader CLIP; auto_adjust() (cor automática)
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
-                             pré-multiplicada, alfa na cobertura) e a saída da tela
+                             pré-multiplicada, alfa na cobertura) e a saída da tela; CAMERA (perfil de câmera do
+                             clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32), da 1.6
   transitions.py             transições de película (sem GPU nem Qt): tipos novos, ajustes por tipo, luz do look
                              (light_of), semente por clipe e apply() → uniforms u_tr_* do shader CLIP_TR
+  camera.py                  perfil de câmera por clipe (1.6, sem GPU nem Qt): FOLLOW ("Igual ao do look"), Target
+                             (a entrada do look), uses_profiles(), read_profile(), uniforms() do CAMERA, prefill()
+                             (clipes novos pela sugestão dos metadados)
   alphashaders.py            GLSL da saída com transparência: PREMUL/CANVAS_OUT (tela RGBA de cor direta) e ALPHA
                              (alfa do look com a geometria do BASE, ALPHA_GEOMETRY)
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
@@ -154,7 +161,8 @@ pelicula/
                              settings_dialog (Configurações) + pages/ (geral, recursos, componentes: ffmpeg,
                              ferramentas e programas do sistema, placa de vídeo e bibliotecas...);
                              profile_dialog (perfil de recursos no 1º acesso), module_notice (aviso de
-                             recurso desligado em uso)
+                             recurso desligado em uso), input_notice (1.6: perfil sugerido pelos metadados, com
+                             um botão)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -368,6 +376,12 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab.py` | Laboratório: cinza neutro em toda combinação negativo × cópia × processo, luzes da copiadora, revelação forçada |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
 | `tests/test_entrada.py` | perfis de entrada: domínio de cada curva (código × sinal), pontos de referência dos fabricantes, faixa legal × cheia, ida e volta com o LUT, HLG/PQ e detecção do HDR |
+| `tests/test_entrada_base.py` | a entrada da 1.6 não muda os padrões: Película e Edição em 8/16 bits, LUT exportado e plugin iguais à BASE (`entrada_base.py` + `data/entrada_base.json`) |
+| `tests/test_entrada_leitura.py` | leitura de log com super-brancos (códigos acima de 940 sobrevivem, em float32) e 16 bits exatos da faixa legal (preto, cinza e branco) com o ffmpeg |
+| `tests/test_entrada_gamut.py` | "Proteger cores saturadas": a fórmula da ACES RGC em float64, a GPU contra ela, limites por gamut, continuidade varrendo a saturação, 0% = sem o ajuste (também no LUT) |
+| `tests/test_entrada_camera.py` | perfil de câmera por clipe: chaves esparsas, JSON e formato 4, clipe Rec.709 num look log, luz acima de 1,0 na tela, transparência e dois vídeos log de verdade (S-Log3 + V-Log) numa montagem |
+| `tests/test_entrada_sugestao.py` | perfil sugerido pelos metadados: tabela de dicionários do ffprobe, XML da Sony, etiquetas guardadas, preenchimento dos clipes novos |
+| `tests/test_entrada_ui.py` | casos de `entrada_ui_cases.py`: cartão "Câmera" do inspetor, aviso da sugestão (um clique, nunca ao reabrir), clipes novos preenchidos num passo do desfazer |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
@@ -697,6 +711,12 @@ renumere), `look.INPUT_GAMUT` (e `_PRIMARIES` se o gamut for novo), **`look.INPU
 (no fim da lista) e, se servir para LUTs, `params.LUT_ENTRADAS` e `luts.guess_input()`. No plugin do Resolve:
 a curva em `resolve.K_DECODE` (`pc_to_linear`), depois `python tools/gerar_ofx.py`. Pontos de referência do
 fabricante em `tests/test_entrada.py`. Documente em `docs/EFEITOS.md` e no README.
+
+O resto acompanha sozinho: o cartão "Câmera" dos clipes (`editparams` `camera_entrada` usa `params.ENTRADAS`),
+os limites de "Proteger cores saturadas" (`look.gamut_limits` pelo gamut; no plugin, a tabela `PC_GCL`) e a
+sugestão pelos metadados (`media.suggest_input` reconhece os nomes por `luts.guess_input`; acrescente lá o nome
+da curva e um caso em `tests/test_entrada_sugestao.py`). Se a curva é log de câmera, a leitura em float com os
+super-brancos vale para ela (`media.float_input`: todo perfil fora de `media.DISPLAY_PROFILES`).
 
 **Toda curva declara o seu domínio** em `look.INPUT_DOMAIN`, com a fonte (documento do fabricante) num
 comentário:

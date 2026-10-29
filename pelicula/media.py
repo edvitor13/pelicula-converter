@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 
@@ -120,6 +120,9 @@ class MediaInfo:
     has_alpha: bool = False  # imagem com transparência (`stream_has_alpha`; WebM com alpha_mode=1; PNG com paleta)
     # Sequência de imagens numeradas (`path` é o padrão do ffmpeg, plano_%04d.png): número do 1º quadro; -1 = não é.
     seq_start: int = -1
+    # 1.6: metadados de câmera para `suggest_input` (`camera_tags`): só a marca e as etiquetas de curva/gamma do
+    # arquivo e do XML da Sony ao lado dele; nada de local, data ou número de série.
+    tags: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def ext(self) -> str:
@@ -239,20 +242,28 @@ def probe(path: str, fps_str: str = "") -> MediaInfo:
     return _info_from(path, _probe_json(path))
 
 
-def probe_source(path: str):
+def probe_source(path: str, infos: dict | None = None):
     """Arquivo para o modo Edição: vídeo, imagem parada ou só áudio (música, narração).
 
-    Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`.
+    Devolve um `timeline.Source`; arquivos só de som têm `has_video=False`. `infos` (1.6): se dado, recebe
+    {caminho: MediaInfo} de um arquivo com imagem (as etiquetas de câmera de `suggest_input`, que a `Source` não
+    guarda).
     """
     from . import timeline
     if is_sequence_pattern(path):
-        return timeline.Source.from_info(probe(path))
+        info = probe(path)
+        if infos is not None:
+            infos[info.path] = info
+        return timeline.Source.from_info(info)
     data = _probe_json(path)
     streams = data.get("streams", [])
     has_video = any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
                     for s in streams)
     if has_video:
-        return timeline.Source.from_info(_info_from(path, data))
+        info = _info_from(path, data)
+        if infos is not None:
+            infos[path] = info
+        return timeline.Source.from_info(info)
     aus = next((s for s in streams if s.get("codec_type") == "audio"), None)
     if aus is None:
         raise RuntimeError(_("O arquivo não tem imagem nem som."))
@@ -303,6 +314,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         frames, dur = 1, 0.0
     pix = vs.get("pix_fmt", "")
     alpha = stream_has_alpha(vs) or (is_image and pix == "pal8" and _palette_alpha(path))
+    tags = camera_tags(fmt.get("tags"), vs.get("tags"), sidecar_tags(path) if not is_image else None)
     return MediaInfo(
         path=path, width=w, height=h, fps=float(fr), fps_str=f"{fr.numerator}/{fr.denominator}",
         frames=max(frames, 1), duration=dur, pix_fmt=pix, bit_depth=_depth(pix, vs.get("bits_per_raw_sample")),
@@ -311,7 +323,7 @@ def _info_from(path: str, data: dict) -> MediaInfo:
         color_space=vs.get("color_space", "") or "", color_range=vs.get("color_range", "") or "",
         color_transfer=vs.get("color_transfer", "") or "", color_primaries=vs.get("color_primaries", "") or "",
         has_audio=aus is not None, audio_codec=(aus or {}).get("codec_name", ""),
-        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha),
+        container=fmt.get("format_name", ""), is_image=is_image, has_alpha=bool(alpha), tags=tags,
     )
 
 
@@ -600,6 +612,122 @@ def auto_profile(current: str, info, default: str = "rec709") -> str | None:
         return None
     want = detect_profile(info) or default
     return None if want == current else want
+
+
+# ------------------------------------------------------------------ 1.6: perfil sugerido pelos metadados
+# `suggest_input(info)`: o perfil de entrada que os metadados do arquivo indicam, ou None. Só uma sugestão: no modo
+# Película a janela mostra um aviso com um botão (nunca muda o look sozinha, nem ao reabrir um projeto); no modo
+# Edição preenche o perfil de câmera dos clipes novos (`camera.prefill`). Regras em `SUGGEST_RULES`, em ordem: a
+# primeira que responde vale. Nunca sugere Rec.709 a partir de uma etiqueta BT.709: muitas câmeras marcam o log
+# assim, e o perfil padrão já é o Rec.709.
+
+# Chaves de etiqueta (format/stream do ffprobe e o XML da Sony) que dizem a curva: só as que têm uma destas palavras.
+_CURVE_KEY = re.compile(r"gamma|transfer|curve|colou?r_?space", re.IGNORECASE)
+_MAKE_KEYS = ("com.apple.quicktime.make", "make", "manufacturer", "com.android.manufacturer")
+_SIDECAR_MAX = 1 << 20  # o XML da Sony tem poucos KB
+
+
+def camera_tags(*groups) -> dict[str, str]:
+    """As etiquetas que interessam a `suggest_input`: a marca e as de curva/gamma (o resto, como local e data, fica
+    de fora). `groups`: dicionários de etiquetas (format, stream, XML ao lado), o primeiro com a chave vale."""
+    out: dict[str, str] = {}
+    for g in groups:
+        for k, v in (g or {}).items():
+            k, v = str(k), str(v).strip()
+            if not v or len(v) > 200 or k in out:
+                continue
+            if k.lower() in _MAKE_KEYS or _CURVE_KEY.search(k.rsplit(".", 1)[-1]):
+                out[k] = v
+    return out
+
+
+def sidecar_tags(path: str) -> dict[str, str]:
+    """Etiquetas de curva do XML que as câmeras da Sony gravam ao lado do vídeo (C0001.MP4 → C0001M01.XML,
+    `NonRealTimeMeta`: `<Item name="CaptureGammaEquation" value="s-log3-cine"/>`); vazio se não há."""
+    p = Path(str(path))
+    if not p.suffix or "%" in p.name:
+        return {}
+    for name in (p.stem + "M01.XML", p.stem + "M01.xml"):
+        x = p.with_name(name)
+        try:
+            if not x.is_file() or x.stat().st_size > _SIDECAR_MAX:
+                continue
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(x.read_bytes())
+        except (OSError, ValueError, SyntaxError):
+            continue
+        out: dict[str, str] = {}
+        for el in root.iter():
+            k, v = el.get("name"), el.get("value")
+            if k and v and _CURVE_KEY.search(k):
+                out.setdefault("sony." + k, v)
+        dev = next((el for el in root.iter() if el.tag.rsplit("}", 1)[-1] == "Device"), None)
+        if dev is not None and dev.get("manufacturer"):
+            out.setdefault("manufacturer", dev.get("manufacturer"))
+        return out
+    return {}
+
+
+def _curve_in_text(text: str) -> str | None:
+    """Um perfil log pelo nome escrito numa etiqueta ("s-log3-cine", "LOG-C", "Canon Log 3"…), pelo mesmo
+    reconhecimento dos nomes de LUT (`luts.guess_input`); None para Rec.709/nada reconhecido."""
+    from . import luts
+    t = re.sub(r"[\\/]+", " ", str(text)).strip()
+    for cand in (t, re.sub(r"[^A-Za-z0-9]+", "", t)):
+        g = luts.guess_input(cand) if cand else "rec709"
+        if g not in ("rec709", "cineon"):
+            return g
+    return None
+
+
+def _rule_hdr(info) -> str | None:
+    """Vídeo HDR marcado: HLG ou PQ (`color_transfer`), como `detect_profile`."""
+    return detect_profile(info)
+
+
+def _rule_linear(info) -> str | None:
+    """Luz linear: EXR (sempre linear de cena) ou `color_transfer` "linear"."""
+    path = str(getattr(info, "path", ""))
+    if str(getattr(info, "codec", "")).lower() == "exr" or Path(path).suffix.lower() == ".exr":
+        return "linear"
+    return "linear" if str(getattr(info, "color_transfer", "")).strip().lower() == "linear" else None
+
+
+def _rule_tags(info) -> str | None:
+    """Etiqueta de curva com o nome de um perfil log (ARRI, a Sony pelo XML, gravadores que marcam a curva)."""
+    tags = getattr(info, "tags", None) or {}
+    for k, v in tags.items():
+        if _CURVE_KEY.search(k.rsplit(".", 1)[-1]):
+            found = _curve_in_text(v)
+            if found:
+                return found
+    return None
+
+
+def _rule_apple_log(info) -> str | None:
+    """iPhone em Apple Log: marca Apple e primárias BT.2020 sem transferência HDR (o HDR do iPhone vem marcado como
+    HLG; o vídeo comum, como BT.709). É uma dedução: a Apple não marca a curva Apple Log no arquivo."""
+    tags = {k.lower(): v for k, v in (getattr(info, "tags", None) or {}).items()}
+    make = next((tags[k] for k in _MAKE_KEYS if k in tags), "")
+    if make.strip().lower() != "apple" or str(getattr(info, "color_primaries", "")).lower() != "bt2020":
+        return None
+    return "applelog" if detect_profile(info) is None else None
+
+
+SUGGEST_RULES = (_rule_hdr, _rule_linear, _rule_tags, _rule_apple_log)
+
+
+def suggest_input(info) -> str | None:
+    """Perfil de entrada (chave de `params.ENTRADAS`) que os metadados de `info` (`MediaInfo`) indicam, ou None.
+
+    Função pura: não abre arquivos (as etiquetas já vêm em `info.tags`, lidas pelo `probe`)."""
+    if info is None:
+        return None
+    for rule in SUGGEST_RULES:
+        found = rule(info)
+        if found:
+            return found
+    return None
 
 
 PRIORITY = {"baixa": 0x00004000, "normal": 0, "alta": 0x00008000}

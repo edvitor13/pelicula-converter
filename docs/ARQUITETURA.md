@@ -490,7 +490,8 @@ ffmpeg -v error -nostdin [-hwaccel X] [-threads N] [-ss (quadro−0,45)/fps]
   BT.709 a partir de 720 linhas); a faixa vem de `color_range`/`yuvj` (`_in_range`). `media.legal_range(info)`
   diz se o leitor expandiu a faixa legal — é o `legal` do `build_plan` (seção 5.1).
 - `MediaInfo.color_transfer` (`arib-std-b67` = HLG, `smpte2084` = PQ) sugere o perfil de entrada
-  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso.
+  (`media.detect_profile`/`auto_profile`) ao abrir um arquivo; nada no leitor muda com isso. Na 1.6,
+  `media.suggest_input` (§29.6) sugere também os perfis log pelas etiquetas (`MediaInfo.tags`).
 - Prévia: `bicubic+full_chroma_int`. Exportação e "Salvar quadro": `lanczos+accurate_rnd+full_chroma_int`.
 - 8 bits → `rgb24`; 16 bits → `rgb48le` (textura `nu2`).
 - Log de câmera num vídeo de faixa legal (`profile=` o perfil do look; `media.float_input`), em qualquer
@@ -2883,3 +2884,41 @@ pede o formato 4.
   dois vídeos de verdade (S-Log3 e V-Log em 10 bits 4:4:4 de faixa legal, com super-brancos) numa montagem com o
   look em S-Log3: cada um sai igual ao look lendo o arquivo dele com o próprio perfil, na prévia e na leitura
   em sequência da exportação. `tests/entrada_ui_cases.py`: o cartão no inspetor e a escolha num clipe só.
+
+### 29.6 Perfil sugerido pelos metadados
+
+`media.suggest_input(info) -> id | None`, função pura sobre o `MediaInfo`: regras em ordem (`media.SUGGEST_RULES`),
+a primeira que responde vale.
+
+1. `_rule_hdr`: `color_transfer` HLG/PQ (`detect_profile`).
+2. `_rule_linear`: EXR (codec ou extensão) ou `color_transfer` = `linear` → `linear`.
+3. `_rule_tags`: etiqueta cuja chave (a última parte, depois do ponto) tem *gamma*, *transfer*, *curve* ou
+   *color space*, com o nome de um perfil reconhecido por `luts.guess_input` (o texto como está e sem separadores:
+   "LOG-C" → LogC3; D-Log M fica de fora, como nos LUTs). Rec.709 e Cineon não contam.
+4. `_rule_apple_log`: marca Apple, primárias BT.2020 e transferência que não é HDR → `applelog` (dedução: o HDR do
+   iPhone vem marcado HLG e o vídeo comum BT.709; a Apple não marca o Apple Log).
+
+Nunca devolve `rec709`: muitas câmeras marcam o log como BT.709 e o padrão já é o Rec.709.
+
+- **Etiquetas** (`MediaInfo.tags`, último campo, `compare=False`; preenchido em `_info_from` por
+  `media.camera_tags`): só a marca e as etiquetas de curva das tags do format e do fluxo de vídeo, mais as do
+  XML da Sony (`media.sidecar_tags`: `<nome>M01.XML` ao lado do vídeo, até 1 MB, `Item name=… value=…` cuja
+  chave tem uma das palavras acima, e o `manufacturer` do `Device`). Local, datas, número de série e título
+  ficam de fora (a fila da exportação guarda o `MediaInfo` inteiro). `Source.to_info()` dá tags vazias.
+- **Película** (`MainWindow._offer_input`, `ui/input_notice.py` `InputNotice`): ao abrir um arquivo novo
+  (`load_media(detect=True)`, depois do `_detect_profile` da 1.4) e no primeiro vídeo de uma montagem vazia
+  (`_adopt_format`), se a sugestão difere do perfil do look, a faixa abaixo da barra do topo oferece "Usar este
+  perfil" (`store.set` + `commit`: entra no desfazer). Some ao fechar, ao abrir outro arquivo ou projeto
+  (`show_project`, `new_project`, `load_media` sem `detect`), quando o perfil do look passa a ser o sugerido
+  (`_on_param`) e na prévia em tela cheia (volta ao sair). O look nunca muda sozinho.
+- **Edição** (`TimelineModel.clip_profile_for`, chamado em `insert_media` no mesmo passo do desfazer; a janela
+  liga `MainWindow._clip_profile_for`): os clipes de vídeo novos de um arquivo recebem `camera_entrada` =
+  `camera.prefill(sugestão, ajustes do look, info)`: a sugestão quando difere da entrada do look; sem sugestão,
+  num look HLG/PQ, um arquivo de transferência SDR (`camera.SDR_TRANSFERS`; o `bt2020-10` não entra, porque
+  câmeras gravam HLG marcado assim) entra como `rec709`. O primeiro vídeo de uma montagem vazia fica em "Igual
+  ao do look" (o look se ajusta a ele). O `MediaInfo` vem de `media.probe_source(path, infos)` (o dicionário
+  `MainWindow._file_infos`), porque a `Source` não guarda etiquetas. Projetos reabertos, colar e duplicar não
+  passam por aí.
+- **Testes**: `tests/test_entrada_sugestao.py` (tabela de dicionários do ffprobe por `media._info_from`, o XML da
+  Sony, as etiquetas guardadas, `camera.prefill`) e `tests/entrada_ui_cases.py` (a faixa, o preenchimento num
+  passo do desfazer e a janela nos dois modos, com `media.suggest_input` falso).
