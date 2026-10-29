@@ -1419,8 +1419,10 @@ parte deste repositório com o programa compilado do código oficial, sem mudan�
   São **aproximações artísticas**, feitas com os controles do app, **sem relação, parceria ou
   endosso** dos fabricantes. Nenhum perfil ou LUT deles é distribuído. Alguns modelos usam números
   de publicações **públicas**: o grão no negativo e a diferença de nitidez entre camadas vêm dos
-  datasheets da Kodak (Vision3 250D H-1-5207 e cópia 2383 H-1-2383; os pontos lidos e a fonte ficam
-  em `pelicula/data/datasheets/`, sem copiar os PDFs nem os gráficos), e as curvas dos perfis de
+  datasheets da Kodak (Vision3 250D H-1-5207 e cópia 2383 H-1-2383; os filmes "(datasheet)" do
+  Laboratório, Vision3 250D, 500T H-1-5219 e 200T H-1-5213 e a cópia 2383, têm as curvas ajustadas às
+  publicadas; os pontos lidos e a fonte ficam em `pelicula/data/datasheets/`, sem copiar os PDFs nem os
+  gráficos), e as curvas dos perfis de
   câmera seguem as fórmulas que cada fabricante publica. Nada disso é apresentado como oficial.
   Todas as marcas pertencem aos seus donos. O texto de borda do *Scan da película* é decorativo.
 - **LUTs da Adobe e da Blackmagic Design não são distribuídos.** O PeliculaConverter apenas
