@@ -396,6 +396,8 @@ class ClipInspector(QWidget):
         self.astore.changed.connect(lambda key: self._store_changed(self.astore, self.acards, key))
         from . import transitions_ui  # 1.5: ícones dos tipos de transição e só os ajustes do tipo escolhido
         self.transitions = transitions_ui.InspectorTransitions(self.vstore, self.vcards, model)
+        from . import geometria_ui  # 1.7: taxa manual e aviso do desespremer no cartão de enquadramento
+        self.geometry = geometria_ui.InspectorGeometry(self.vstore, self.vcards)
         self.playhead = 0
         target = ClipKeys(model, lambda: self.clip_id)
         self.vkeys = KeyRows(self.vstore, target, self.vcards, self)

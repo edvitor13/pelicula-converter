@@ -257,7 +257,7 @@ Um clique resolve o mais comum:
 | **Pele natural** *(cor simples)* | A pele não acompanha as mudanças de cor do clipe e fica com a cor mais uniforme (veja *Cor simples*, abaixo) |
 | **Cor escolhida** *(cor simples)* | Uma cor só (a que você clicou): matiz, saturação e luminância |
 | **Degradê** *(cor simples)* | Céu ou chão com luz e cor próprias |
-| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala (também só na horizontal ou só na vertical: veja *Escala por eixo*, abaixo), posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
+| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), desespremer (veja *Desespremer o clipe*, abaixo), escala (também só na horizontal ou só na vertical: veja *Escala por eixo*, abaixo), posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
 | **Câmera** (1.6) | O **perfil do clipe**: como ele foi gravado (S-Log3, V-Log, Canon Log 3, HLG do celular, Rec.709…), para misturar câmeras diferentes numa montagem. O padrão, **Igual ao do look**, deixa o clipe como sempre. Avançado: *Log reescalado* e *EI do ARRI LogC3*, como no look (veja *Câmeras diferentes na mesma montagem*, abaixo) |
@@ -362,6 +362,22 @@ No cartão **Enquadrar e posicionar**, **Escala horizontal** e **Escala vertical
 10% a 400%, com 100% de padrão. O tamanho final de cada lado é a **Escala** vezes a escala daquele eixo, sempre nos
 eixos do próprio clipe: com rotação, primeiro a escala, depois o giro. Os dois aceitam chaves de animação, como a
 Escala. Não há um cadeado "proporcional": a própria **Escala** já é esse controle.
+
+### Desespremer o clipe
+
+Vídeo filmado com lente ou adaptador anamórfico chega espremido na horizontal. **Desespremer**, no cartão
+**Enquadrar e posicionar**, deixa o clipe mais largo **antes** de ele se encaixar no quadro: Não, 1,33×, 1,5×, 1,55×,
+1,8×, 2× ou **Taxa manual** (de 1,00× a 2,50×, de 0,01 em 0,01). A ordem é sempre desespremer, depois a sua escala,
+depois a rotação.
+
+- **Mostrar inteiro** e **Preencher** usam a proporção já desespremida: um clipe 16:9 com 2× num quadro 16:9 ganha
+  faixas em cima e embaixo; com *Preencher*, as laterais ficam de fora.
+- **Esticar** ocupa o quadro e ignora o desespremer.
+- Fica preso ao clipe e não aceita chaves de animação (a lente não muda no meio do plano).
+
+Ele não tem nada a ver com a **Lente anamórfica** do modo Película (*Efeitos*), que continua igual e vale para a
+imagem inteira da montagem. Se o clipe está desespremido e a lente do look também está comprimindo, os dois valem e o
+cartão mostra um aviso: quase sempre você quer só um deles.
 
 ### Animar com chaves (losangos)
 

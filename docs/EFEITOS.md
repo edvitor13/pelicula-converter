@@ -734,7 +734,7 @@ lenta (e num clipe acelerado). Fica mais lento: lê e mistura 2 a 6 quadros por 
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. |
+| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. Para desespremer um clipe só, na montagem, use o *Desespremer* do clipe no modo Edição (`docs/EDICAO.md`). |
 | **Risco de luz** | 0–100% | 50% | A linha horizontal comprida das luzes fortes (só na horizontal). |
 | **Limiar do risco** | 0–5 stops | 2 | Quanto acima do cinza médio a luz precisa estar para riscar. |
 | **Comprimento do risco** | 40–1200 px | 420 | Em px de um quadro de 1080 linhas. |

@@ -18,8 +18,8 @@ Como cada ajuste é interpretado (valores de vídeo Rec.709 de 0 a 1, chamados "
   HSL de 8 faixas (partição suave entre as faixas vizinhas, sem efeito em cinzas).
 - **Detalhe**: redução de ruído bilateral 5×5, desfoque por mipmap, nitidez (máscara de nitidez) e
   clareza (contraste local contra um mipmap bem desfocado). Raios proporcionais à altura do clipe.
-- **Enquadramento**: encaixe (mostrar inteiro, preencher, esticar), escala (e por eixo: `axis_scale`), posição
-  (fração da tela, y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
+- **Enquadramento**: desespremer (`desqueeze`), encaixe (mostrar inteiro, preencher, esticar), escala (e por eixo:
+  `axis_scale`), posição (fração da tela, y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
 """
 
 from __future__ import annotations
@@ -38,6 +38,8 @@ W709 = (0.2126, 0.7152, 0.0722)
 
 _DEFAULTS = editparams.VIDEO.defaults()
 _COLOR_KEYS = [k for k in editparams.color_keys() if k not in DETAIL_KEYS]
+# Taxas do desespremer do clipe. Tabela própria: a da Lente anamórfica do look (`anamorfico.SQUEEZES`) não tem 1,55.
+DESQUEEZE = {"nao": 1.0, "1.33": 1.33, "1.5": 1.5, "1.55": 1.55, "1.8": 1.8, "2.0": 2.0}
 
 
 def mat3_uniform(m: np.ndarray) -> tuple:
@@ -87,16 +89,27 @@ def detail_active(v: dict[str, Any]) -> bool:
     return any(v.get(k) != _DEFAULTS[k] for k in DETAIL_KEYS)
 
 
+def desqueeze(v: dict[str, Any]) -> float:
+    """Quanto o clipe fica mais largo antes do encaixe (1 = sem desespremer); a taxa manual só vale com "manual"."""
+    kind = v.get("desespremer", "nao")
+    if kind == "manual":
+        return min(max(float(v.get("desespremer_taxa", 1.0)), 1.0), 2.5)
+    return DESQUEEZE.get(kind, 1.0)
+
+
 def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
             values: dict[str, Any] | None = None) -> tuple[float, float]:
-    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe. `values`: os ajustes no quadro
-    (`Layer.values`, com as chaves de animação); None = os do clipe."""
+    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe e na proporção já desespremida ("Esticar"
+    ocupa a tela e ignora o desespremer). `values`: os ajustes no quadro (`Layer.values`, com as chaves de animação);
+    None = os do clipe."""
     src = seq.sources.get(clip.src)
     sw = float(src.width if src and src.width else canvas_w)
     sh = float(src.height if src and src.height else canvas_h)
-    mode = (values if values is not None else clip.values).get("encaixe", "ajustar")
+    v = values if values is not None else clip.values
+    mode = v.get("encaixe", "ajustar")
     if mode == "esticar":
         return float(canvas_w), float(canvas_h)
+    sw *= desqueeze(v)
     f = min(canvas_w / sw, canvas_h / sh) if mode == "ajustar" else max(canvas_w / sw, canvas_h / sh)
     return sw * f, sh * f
 
