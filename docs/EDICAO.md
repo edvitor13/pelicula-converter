@@ -294,7 +294,7 @@ Um clique resolve o mais comum:
 | **Pele natural** *(cor simples)* | A pele não acompanha as mudanças de cor do clipe e fica com a cor mais uniforme (veja *Cor simples*, abaixo) |
 | **Cor escolhida** *(cor simples)* | Uma cor só (a que você clicou): matiz, saturação e luminância |
 | **Degradê** *(cor simples)* | Céu ou chão com luz e cor próprias |
-| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
+| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), desespremer (veja *Desespremer o clipe*, abaixo), escala (também só na horizontal ou só na vertical: veja *Escala por eixo*, abaixo), posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
 | **Câmera** (1.6) | O **perfil do clipe**: como ele foi gravado (S-Log3, V-Log, Canon Log 3, HLG do celular, Rec.709…), para misturar câmeras diferentes numa montagem. O padrão, **Igual ao do look**, deixa o clipe como sempre. Avançado: *Log reescalado* e *EI do ARRI LogC3*, como no look (veja *Câmeras diferentes na mesma montagem*, abaixo) |
@@ -393,6 +393,29 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
   projetos reabertos nunca mudam.
 - Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
+### Escala por eixo
+
+No cartão **Enquadrar e posicionar**, **Escala horizontal** e **Escala vertical** esticam o clipe só em um eixo, de
+10% a 400%, com 100% de padrão. O tamanho final de cada lado é a **Escala** vezes a escala daquele eixo, sempre nos
+eixos do próprio clipe: com rotação, primeiro a escala, depois o giro. Os dois aceitam chaves de animação, como a
+Escala. Não há um cadeado "proporcional": a própria **Escala** já é esse controle.
+
+### Desespremer o clipe
+
+Vídeo filmado com lente ou adaptador anamórfico chega espremido na horizontal. **Desespremer**, no cartão
+**Enquadrar e posicionar**, deixa o clipe mais largo **antes** de ele se encaixar no quadro: Não, 1,33×, 1,5×, 1,55×,
+1,8×, 2× ou **Taxa manual** (de 1,00× a 2,50×, de 0,01 em 0,01). A ordem é sempre desespremer, depois a sua escala,
+depois a rotação.
+
+- **Mostrar inteiro** e **Preencher** usam a proporção já desespremida: um clipe 16:9 com 2× num quadro 16:9 ganha
+  faixas em cima e embaixo; com *Preencher*, as laterais ficam de fora.
+- **Esticar** ocupa o quadro e ignora o desespremer.
+- Fica preso ao clipe e não aceita chaves de animação (a lente não muda no meio do plano).
+
+Ele não tem nada a ver com a **Lente anamórfica** do modo Película (*Efeitos*), que continua igual e vale para a
+imagem inteira da montagem. Se o clipe está desespremido e a lente do look também está comprimindo, os dois valem e o
+cartão mostra um aviso: quase sempre você quer só um deles.
+
 ### Animar com chaves (losangos)
 
 Todo ajuste que pode mudar ao longo do clipe (luz, cor, rodas, enquadramento, opacidade, volume…) tem um
@@ -490,6 +513,7 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 
 - **Resolução**: 4K, 2K, Full HD, HD, **vertical 1080 × 1920** (Reels, TikTok, Shorts), quadrado, retrato 4:5,
   igual ao primeiro clipe ou personalizada;
+- **Proporção** e **Como aplicar**: veja *Proporção da sequência*, abaixo;
 - **Quadros por segundo**: 23,976 / 24 / 25 / 29,97 / 30 / 50 / 59,94 / 60 — mudar mantém o tempo dos cortes;
 - **Cor do fundo**: o que aparece onde não há imagem (barras, clipes menores que o quadro);
 - **Fades curtos nas emendas de som**: veja *Som*, acima;
@@ -497,6 +521,33 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 - **Fundo transparente**: onde nada cobre a tela, a montagem fica transparente em vez da cor do fundo. A
   prévia mostra um xadrez nesses lugares; para gravar a transparência, exporte em um formato com alfa (veja
   *Depois da edição*).
+
+### Proporção da sequência
+
+**Proporção** muda o formato da imagem do vídeo montado para cinema: *Do tamanho escolhido* (o padrão, nada muda), 1,33,
+1,37, 1,43, 1,78, 1,85, 2,00, 2,20, 2,39 (Scope), 2,76 ou **Personalizada** (um número de 1,00 a 4,00). **Como aplicar**
+decide como ela sai, e a janela mostra na hora o tamanho que vai dar:
+
+- **Quadro real**: o arquivo muda de tamanho e sai sem faixas; quem toca o vídeo põe as faixas. A largura fica e a altura
+  muda (1920 × 1080 a 2,39 dá 1920 × 804); numa proporção mais estreita que o quadro, a altura fica e a largura muda.
+  Sempre em tamanhos pares. Isso só preenche largura × altura: nada novo fica no projeto, que continua abrindo nas
+  versões anteriores.
+- **Faixas pretas no quadro**: o tamanho do quadro não muda e as faixas são gravadas na imagem, em cima e embaixo
+  (proporção mais larga que o quadro) ou nas laterais (mais estreita). Bom para quem espera 16:9, como as redes. O que
+  sobra é a **janela útil**:
+  - o **Encaixe**, a **Escala** e a **Posição** dos clipes valem dentro da janela: a posição é uma fração dela e o meio
+    dela é o centro, então dá para subir e descer o plano dentro do Scope;
+  - as faixas ficam sempre em **preto exato**, por cima de tudo: o look (grão, halação, tremor) não passa nelas, e a cor
+    do fundo só aparece dentro da janela. Com **Fundo transparente**, as faixas continuam pretas e opacas: só o que está
+    dentro da janela pode ser transparente;
+  - **títulos** e clipes sem arquivo (cor, degradê, ponta) ocupam a janela, e **legendas gravadas** ficam dentro dela. O
+    tamanho do texto segue a altura da janela, como aconteceria num quadro real do mesmo formato;
+  - a **área segura** das plataformas, na prévia, fica dentro da janela;
+  - o **Encaixe** da exportação (cortar, bordas, fundo desfocado) trata o quadro inteiro: as faixas fazem parte dele.
+
+A proporção da sequência é diferente de **Moldura e proporção** do modo Película: a moldura desenha barras no look, por
+cima da imagem, sem reenquadrar nada, e continua igual e independente. A janela útil é da montagem: os clipes se
+encaixam nela. Dá para usar as duas, embora quase sempre baste uma.
 
 ## 5. Monitores
 

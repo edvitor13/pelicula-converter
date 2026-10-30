@@ -532,13 +532,15 @@ class TimelineModel(QObject):
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,
                      micro_fade: bool | None = None, magnetic: bool | None = None,
-                     transparent: bool | None = None) -> None:
+                     transparent: bool | None = None, window: float | None = None) -> None:
         """Resolução, fps, fundo, fades curtos nas emendas de som e faixa principal magnética. Ao mudar o fps,
         os clipes mantêm o tempo (em segundos); ao ligar a faixa magnética, a V1 se fecha na hora.
-        `transparent`: "Fundo transparente" (None = como está)."""
+        `transparent`: "Fundo transparente"; `window`: proporção da janela útil (0 = sem janela). None = como está."""
         seq = self.seq
         if transparent is not None:
             seq.transparent = bool(transparent)
+        if window is not None:
+            seq.window = timeline.clean_window(window)
         if micro_fade is not None:
             seq.micro_fade = bool(micro_fade)
         if magnetic is not None:

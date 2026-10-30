@@ -537,7 +537,7 @@ aparecem igualzinho na prévia e na exportação.
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Proporção** | Original do vídeo, Da bitola escolhida, 1,33 (4:3), 1,37 (Academy), 1,43 (IMAX), 1,66 (europeu), 1,78 (16:9), 1,85 (widescreen), 1,90 (IMAX digital), 2,00 (Univisium), 2,20 (70 mm), 2,39 (Scope), 2,76 (Ultra Panavision) | Original do vídeo | Coloca barras (em cima/embaixo ou nas laterais) para chegar à proporção. O tamanho do arquivo não muda. |
+| **Proporção** | Original do vídeo, Da bitola escolhida, 1,33 (4:3), 1,37 (Academy), 1,43 (IMAX), 1,66 (europeu), 1,78 (16:9), 1,85 (widescreen), 1,90 (IMAX digital), 2,00 (Univisium), 2,20 (70 mm), 2,39 (Scope), 2,76 (Ultra Panavision) | Original do vídeo | Coloca barras (em cima/embaixo ou nas laterais) para chegar à proporção. O tamanho do arquivo não muda. Os clipes não se reenquadram: para isso, use a *Proporção* da sequência no modo Edição (`docs/EDICAO.md`), que é independente desta. |
 | **Cantos arredondados** | 0,000–0,250 | 0,000 | Cantos da janela do projetor, típico de 8 e 16 mm. |
 | **Suavidade da borda** | 0,0000–0,0500 | 0,0020 | Desfoque da borda (fração da altura). |
 | **Borda irregular** | 0–100% | 0% | Borda tremida e irregular, como uma janela de projetor gasta. |
@@ -746,7 +746,7 @@ lenta (e num clipe acelerado). Fica mais lento: lê e mistura 2 a 6 quadros por 
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. |
+| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. Para desespremer um clipe só, na montagem, use o *Desespremer* do clipe no modo Edição (`docs/EDICAO.md`). |
 | **Risco de luz** | 0–100% | 50% | A linha horizontal comprida das luzes fortes (só na horizontal). |
 | **Limiar do risco** | 0–5 stops | 2 | Quanto acima do cinza médio a luz precisa estar para riscar. |
 | **Comprimento do risco** | 40–1200 px | 420 | Em px de um quadro de 1080 linhas. |

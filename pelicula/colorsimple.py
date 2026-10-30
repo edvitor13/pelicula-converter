@@ -245,6 +245,9 @@ def clip_point(seq, layer, canvas_w: int, canvas_h: int, fx: float, fy: float) -
     v = layer.values if layer.values is not None else layer.clip.values
     m = compositor.transform(seq, layer.clip, canvas_w, canvas_h, v)
     x, y = fx * canvas_w, fy * canvas_h
+    ax, ay, aw, ah = seq.window_rect(canvas_w, canvas_h)
+    if not (ax <= x <= ax + aw and ay <= y <= ay + ah):  # 1.7: nas faixas da janela útil não há clipe
+        return None
     u, w, _ = m @ np.array([x, y, 1.0])
     if not (v["corte_esq"] <= u <= 1.0 - v["corte_dir"] and v["corte_topo"] <= w <= 1.0 - v["corte_base"]):
         return None

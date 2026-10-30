@@ -120,7 +120,8 @@ pelicula/
   testimage.py               cena de teste
   pastas.py                  1.7, pastas da Mídia (sem Qt nem timeline): Folder/Folders (criar, renomear, cor, mover sem
                              ciclo, apagar, itens por chave, JSON tolerante); Sequence.folders e o bloco "pastas" (§39)
-  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
+  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, janela útil:
+                             window, window_rect, aspect_size; marcadores, emendas
                              de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
                              split_edit, faixa magnética keep_main/settle_main; tempo: time_map, retime (rampa e
                              reverso), freeze_frame; sem Qt), History; Source.virtual
@@ -218,6 +219,8 @@ pelicula/
                              Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
                              1.7, busca: filtro_ajustes (campo "Filtrar ajustes…" do painel de ajustes e do inspetor,
                              Ctrl+F e /; SectionCard.set_filter)
+                             1.7, geometria_ui (taxa manual e aviso do desespremer no cartão de enquadramento, janela
+                             útil na área segura da prévia)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -420,6 +423,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_tempo_ui.py` | casos de `tempo_ui_cases.py`: seção da rampa no cartão Velocidade, aplicar/tirar com desfazer, menu do clipe, Reverso (caixa e menu), congelado sem rampa, "Congelar este quadro…" (duração, inserir/sobrescrever) e Shift+F na janela |
 | `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
+| `tests/test_geometria.py` | geometria da 1.7: escala por eixo (largura e altura medidas no quadro, antes da rotação), desespremer (tabela, faixas, preencher, esticar, ordem), janela útil (tamanhos pares, retângulo na prévia e na exportação, encaixe e posição, faixas pretas em 8/16 bits com o look por cima, transparência, encaixe da exportação, títulos, legendas, transições), `grab` = `SequenceReader`, exportação = prévia, JSON esparso e formato 5 |
+| `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |

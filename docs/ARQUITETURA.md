@@ -43,6 +43,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 36. [Base da 1.7: formato 5](#36-base-da-17-formato-5)
+37. [Geometria do clipe e da sequência](#37-geometria-do-clipe-e-da-sequência)
 38. [Filtro de busca nos ajustes (1.7)](#38-filtro-de-busca-nos-ajustes-17)
 39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
 
@@ -3841,6 +3842,67 @@ projeto usa algo dela, e a 1.6 recusa com "O projeto foi salvo por uma versão m
 - **Projetos gravados pela 1.6** (`tests/data/projetos_1_6/`): os dois projetos da referência da 1.4 com recursos da
   1.6 por cima, gravados pela 1.6.0 com `gerar.py`, junto do que ela fez ao abri-los (`referencia.json`).
   `tests/test_project_migration.py` roda as mesmas conferências nas duas pastas.
+
+## 37. Geometria do clipe e da sequência
+
+Três pedidos que mexem na mesma conta (#54, #52, #55). Sem usar nenhum, todo número é o de antes, bit a bit: as
+referências (`cor_base`, `grao_base`, `entrada_base`, `transicoes_base`, projetos da 1.4 e da 1.6) passam sem regravar.
+
+**Ordem no clipe:** desespremer → encaixe → escala do usuário → rotação → posição.
+
+| Ajuste | Onde | Conta |
+|---|---|---|
+| `desespremer`, `desespremer_taxa` | `compositor.desqueeze`, `fit_box` | a largura da fonte é multiplicada pela taxa **antes** do encaixe, e por isso "Mostrar inteiro" e "Preencher" usam a proporção desespremida. "Esticar" ocupa a área e ignora. Tabela própria (`DESQUEEZE`, com 1,55): `anamorfico.SQUEEZES` é do look e não muda. Não anima (a lente não muda). |
+| `escala_x`, `escala_y` | `compositor.axis_scale`, `transform`, `u_px_per_uv` | `escala × escala_x` e `escala × escala_y`, nos eixos do clipe (a matriz gira depois). Animáveis. Sem cadeado: a própria `escala` é o controle proporcional. |
+| `decode_size` | `sequence.py` | um fator por eixo, com a maior chave de `escala` vezes a maior chave do eixo (um limite de cima: `keyframes.max_value`), e continua limitado ao tamanho do arquivo. |
+
+Com os padrões, `sw *= 1.0` e `s * 1.0` não mudam nenhum bit, e as quatro chaves ficam fora do JSON (`SPARSE_KEYS`). Fora
+do padrão, o retrato da 1.6 (seção 36) leva o projeto ao formato 5 (recurso `ajustes_clipe_1_7`), sem registro novo.
+
+### 37.1 Proporção da sequência
+
+"Quadro real" (`ui/sequence_dialog.py`) só preenche largura × altura com `timeline.aspect_size`: nada novo é guardado e
+o projeto abre na 1.6. `aspect_size` arredonda o lado calculado para par e trata como igual ao quadro uma proporção a
+menos de `RATIO_TOLERANCE` = 0,005 (1,78 em 1920 × 1080 continua 1920 × 1080, sem uma faixa de um pixel; o mesmo para
+1,33 em 4:3).
+
+"Faixas pretas no quadro" guarda `Sequence.window` (a proporção; 0 = sem janela), campo `"janela"` do bloco `"edicao"`
+só quando usado, recurso `"janela_util"` em `timeline.FEATURES_V5`. `Sequence.is_trivial()` devolve None com janela (as
+faixas só existem na montagem). É um campo comum da sequência, de propósito: várias sequências com proporções próprias
+(#57) só herdam o campo.
+
+**Uma conta só:** `Sequence.window_rect(canvas_w, canvas_h)` dá o retângulo em px da tela. Quem decide entre letterbox e
+pillarbox é a proporção do quadro da sequência (não a da tela), para a prévia reduzida e a exportação concordarem mesmo
+quando o arredondamento da tela muda a proporção dela. Sem janela, devolve a tela como veio, sem converter.
+
+| Quem usa | Como |
+|---|---|
+| `compositor.fit_box`, `transform` | o encaixe é na janela; `pos_x`/`pos_y` são frações dela e o centro é o dela. |
+| clipes sem arquivo | com janela, a caixa é a janela (a fonte virtual guarda o tamanho do quadro de quando foi criada, que não é a proporção do conteúdo); `decode_size` reduz os dois lados juntos se passar da fonte, para não deformar. Sem janela, nada muda. |
+| `transitions.apply` | centros, percursos de cortina e empurrar, emenda e ponta na janela. `u_tr_scale` continua pela altura da tela (px@1080). |
+| `Engine.compose` | desenha as camadas como sempre e, no fim, `_window_bars` limpa com preto opaco o que está fora da janela (`clear` com `viewport`). Assim camadas e fundo ficam limitados sem tocar nos shaders. |
+| `frame.Recipe` | `window_area` converte a janela para a imagem montada (descontando o recorte de "cortar"); no fim de `look`, `window_bars` pinta as faixas de novo, em preto exato, por cima do quadro final. |
+| `subtitles.Burn.apply(area=)` | a legenda é medida e posicionada na janela. |
+| `colorsimple.clip_point` | um clique nas faixas não acha clipe. |
+| `ui/viewer.safe_geometry` | a área segura fica na janela (`geometria_ui.sync_safe_window`, só na tela). |
+
+**Por que as faixas são pintadas duas vezes.** O look roda sobre o quadro inteiro, e cópia, grão e halação levantam o
+preto (com `vision3_500t` a faixa chega a 12/255 sem o último passo). Pintar só no fim deixaria o clipe de fora da janela
+entrar na halação e no desfoque; pintar só na montagem deixaria o look sujar a faixa. O look lê a montagem já com as
+faixas, e a receita, que é o caminho único de prévia e exportação, fecha com preto exato.
+
+**Decisões:**
+
+- Com "Fundo transparente" as faixas continuam pretas e **opacas** (alfa cheio, nos dois passos): são parte da imagem e
+  a escolha conservadora; só o que está dentro da janela fica transparente.
+- `fit.py` trata o quadro inteiro, com as faixas dentro dele: "cortar" corta as faixas junto, "bordas" e "desfocado"
+  põem o quadro com faixas na caixa (`Fit.box`), e o fundo desfocado sai da imagem com as faixas.
+- O tamanho de títulos e legendas segue a altura da janela (é a altura que `decode_size` e `Burn.apply` passam), como num
+  quadro real do mesmo formato: o mesmo projeto dá o mesmo texto nos dois jeitos de aplicar.
+- A *Moldura e proporção* do look é outra coisa: barras por cima do look, sem reenquadrar. Continua independente.
+
+**Fora desta versão:** legenda na faixa preta, guia da janela na prévia (as faixas são de verdade) e uma opção da janela
+na linha de comando (o projeto já leva o campo).
 
 ## 38. Filtro de busca nos ajustes (1.7)
 

@@ -106,7 +106,19 @@ VIDEO_SECTIONS: list[Section] = [
         C("encaixe", "Encaixe no quadro", "ajustar", [
             ("ajustar", N_("Mostrar inteiro (com barras)")), ("preencher", N_("Preencher (corta as sobras)")),
             ("esticar", N_("Esticar"))]),
+        # 1.7: desespremer do clipe (`compositor.desqueeze`), antes do encaixe; a Lente anamórfica do look é outra coisa.
+        C("desespremer", "Desespremer", "nao", [
+            ("nao", N_("Não")), ("1.33", N_("1,33×")), ("1.5", N_("1,5×")), ("1.55", N_("1,55×")), ("1.8", N_("1,8×")),
+            ("2.0", N_("2×")), ("manual", N_("Taxa manual"))],
+          "Para vídeo filmado com lente ou adaptador anamórfico: o clipe fica mais largo antes de se encaixar no "
+          "quadro. \"Esticar\" ignora este ajuste."),
+        F("desespremer_taxa", "Taxa manual", 1.0, 1.0, 2.5, 0.01, 2, "×", "A compressão da lente, se não está na lista."),
         F("escala", "Escala", 1.0, 0.1, 4.0, 0.01, 2, "×"),
+        # 1.7: escala por eixo (multiplica a "Escala", que é o controle proporcional); a rotação vem depois.
+        F("escala_x", "Escala horizontal", 1.0, 0.1, 4.0, 0.01, 2, "×",
+          "Só a largura do clipe, antes da rotação; multiplica a Escala."),
+        F("escala_y", "Escala vertical", 1.0, 0.1, 4.0, 0.01, 2, "×",
+          "Só a altura do clipe, antes da rotação; multiplica a Escala."),
         _pct("pos_x", "Posição horizontal", tip="Fração da largura do quadro."),
         _pct("pos_y", "Posição vertical", tip="Fração da altura do quadro. Positivo desce."),
         F("rotacao", "Rotação", 0.0, -180, 180, 0.5, 1, "°"),
@@ -296,7 +308,7 @@ COLOR_SECTIONS = ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos",
 # Ajustes que aceitam chaves de animação (`keyframes.py`, `Clip.keys`): enquadramento e opacidade, todo ajuste
 # numérico de cor, luz, detalhe e efeitos (e as rodas) e o volume do som. Escolhas, liga/desliga, corte,
 # velocidade e transições ficam de fora. Receita "Tornar um ajuste animável" no AGENTS.md.
-ANIMATABLE_VIDEO = ("pos_x", "pos_y", "escala", "rotacao", "opacidade",
+ANIMATABLE_VIDEO = ("pos_x", "pos_y", "escala", "rotacao", "opacidade", "escala_x", "escala_y",
                     *(p.key for s in VIDEO_SECTIONS if s.key in COLOR_SECTIONS for p in s.params
                       if p.kind in ("float", "int", "wheel")))
 ANIMATABLE_AUDIO = ("volume",)
@@ -359,6 +371,8 @@ SPARSE_KEYS: set[str] = {
 }
 SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degrade") for p in s.params}  # 1.6
 SPARSE_KEYS |= {"luz_r", "luz_g", "luz_b", "luz_densidade"}  # 1.6: marcação de luz por plano (`luz_plano.py`)
+SPARSE_KEYS |= {"escala_x", "escala_y"}  # 1.7: escala por eixo (`compositor.axis_scale`)
+SPARSE_KEYS |= {"desespremer", "desespremer_taxa"}  # 1.7: desespremer do clipe (`compositor.desqueeze`)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

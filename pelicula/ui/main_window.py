@@ -48,7 +48,7 @@ from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
-from . import luz_fotometro_ui
+from . import geometria_ui, luz_fotometro_ui
 from . import filtro_ajustes
 from . import pastas_ui
 
@@ -379,6 +379,7 @@ class MainWindow(QMainWindow):
         cor_ui.install(self)  # 1.6: ferramentas de cor (planos, cor simples, zebra, falsa cor e referência)
         filme_ui.install(self)  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
         luz_fotometro_ui.install(self)  # 1.6: luz por plano e fotômetro da película (`ui/luz_fotometro_ui.py`)
+        geometria_ui.install(self)  # 1.7: desespremer do clipe e janela útil da sequência (`ui/geometria_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1387,6 +1388,7 @@ class MainWindow(QMainWindow):
         else:
             self.src_seq = None
             info = self.file_info if self.mode == "pelicula" else None
+        geometria_ui.sync_safe_window(self)
         if self.playing:
             self.stop_play()
         self.info = info
@@ -1933,7 +1935,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             w, h, fps, bg = dlg.values()
             self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic(),
-                                    transparent=dlg.transparent())
+                                    transparent=dlg.transparent(), window=dlg.window())
 
     def auto_adjust_clip(self, cid: str, whole: bool = True) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço.
