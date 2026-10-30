@@ -68,6 +68,8 @@ class SequenceTabs(QWidget):
 
     # -------------------------------------------------------- API
     def set_tabs(self, tabs: list[TabInfo], active: str) -> None:
+        if list(tabs) == self.tabs and active == self.active:
+            return  # nada mudou (a janela avisa a cada mudança da montagem): o nome em edição e a rolagem ficam
         self._cancel_edit()
         self.tabs = list(tabs)
         self.active = active

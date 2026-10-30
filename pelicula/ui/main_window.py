@@ -1428,6 +1428,9 @@ class MainWindow(QMainWindow):
             self._sync_film_markers()
             self.tl_editor.set_playhead(0)
             self.file_label.setText("")
+            self.time_label.setText("00:00:00:00")   # nada do que estava aberto (outra sequência, por exemplo) fica
+            self.st_prev.setText("")
+            self.st_render.setText("")
             self.st_file.setText(_("Nenhum arquivo aberto") if self.mode == "pelicula"
                                  else _("Importe vídeos, imagens ou músicas para começar a edição"))
             self._set_media_enabled(False)

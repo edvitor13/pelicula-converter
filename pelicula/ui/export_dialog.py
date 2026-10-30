@@ -432,7 +432,7 @@ class ExportDialog(QDialog):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if t.id == self._target_id else Qt.CheckState.Unchecked)
             self.multi_list.addItem(item)
-        self.multi_list.setMaximumHeight(min(160, 26 * max(1, len(self.targets)) + 8))
+        self.multi_list.setMaximumHeight(min(190, 34 * max(1, len(self.targets)) + 12))
         self.multi_list.setVisible(False)
         self.multi_list.itemChanged.connect(self._multi_changed)
         v.addWidget(self.multi_list)

@@ -196,7 +196,10 @@ pelicula/
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              transitions_ui (transições de película: inspetor, menu "Transição" do corte,
                              desenho na linha do tempo, módulo),
-                             sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             sequence_dialog (configurar a sequência e, com `name=`, criar uma nova); 1.7, várias
+                             sequências (ARQUITETURA §41.6): sequence_tabs (SequenceTabs, as abas sobre a linha do tempo),
+                             sequencias_ui (SequencesUI: ponto único de ligação, estado de cada aba, Mídia, alvos da
+                             exportação); resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
                              corridorkey_dialog (Recorte por IA, Beta);
@@ -415,7 +418,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_busca_ajustes.py` | a busca nos ajustes sem Qt: pt/en/es, sem acentos, termos em qualquer ordem, erro de digitação só quando a exata falha, sinônimos, chave interna, rótulo de opção, toda seção dos três esquemas indexada |
 | `tests/test_busca_ajustes_ui.py` | casos de `busca_ajustes_ui_cases.py`: filtro do painel da Película e do inspetor (cartões, destaque, avançados, apagar devolve o estado, mensagens, módulo desligado, `/`, Ctrl+F local, valores intactos) |
 | `tests/test_pastas.py` | pastas da Mídia sem Qt de interface: modelo (ciclos, apagar dos dois jeitos), JSON e JSON quebrado, bloco "pastas" e fonte solta que volta ao reabrir (`project.save`/`load`, caminho relativo), desfazer, formato 5 só com pastas, `is_trivial` |
-| `tests/test_sequencias.py` | várias sequências e sequência aninhada sem GPU (`SequenceSet`): sozinha grava o JSON de antes, Mídia comum, fonte que acompanha a sequência, tempo do clipe (velocidade, fps diferente, sequência encurtada, só som), ciclos e limite de níveis, arquivo mexido à mão, JSON e formato 5, relocalizar e caminho relativo em todos os blocos, desfazer entre abas |
+| `tests/test_sequencias.py` | várias sequências e sequência aninhada sem GPU (`SequenceSet`): sozinha grava o JSON de antes, Mídia comum, fonte que acompanha a sequência, tempo do clipe (velocidade, fps diferente, sequência encurtada, só som), ciclos e limite de níveis, arquivo mexido à mão, JSON e formato 5, relocalizar e caminho relativo em todos os blocos, desfazer entre abas, e as operações do modelo da interface (`TimelineModel`: criar, duplicar, renomear, apagar, mover e abrir aba, um passo cada; `"sequencias"` ao desfazer um nome) |
+| `tests/test_sequencias_ui.py` | casos de `sequencias_ui_cases.py`: as abas (clique, +, nome ali mesmo, arrastar, menu), a janela de criar (a partir da sequência aberta e de um vídeo), a troca entre vazia, só o arquivo, montagem, fps e tamanho diferentes nos dois modos (prévia, som, escopos), estado por aba, desfazer entre abas, "não salvas", reabrir e o aviso do arquivo mexido, apagar com pergunta, a Mídia (itens, pastas, dois cliques, recusar pôr na linha do tempo, menu), a exportação (linha da sequência, fila de várias, uma exportação real de duas) |
+| `tests/test_sequencias_cli.py` | `--sequencia` no terminal (nome, id, erro com a lista, `--trecho`), `info` de um projeto, exportação e quadro de verdade de duas sequências |
 | `tests/test_pastas_ui.py` | casos de `pastas_ui_cases.py`: criar, renomear, cor, arrastar para dentro e para fora, apagar, desfazer, ordenar, MIME do arrasto e seleção múltipla, painel sem pastas igual, reabrir projeto com mídia solta numa pasta e a janela |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
