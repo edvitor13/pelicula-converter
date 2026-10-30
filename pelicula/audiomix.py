@@ -19,6 +19,11 @@ muda, pedaços de 0,1 s numa transição), cada um com o seu `atempo` (o tom nã
 no lugar exato da saída — as pontas de cada pedaço caem no mapa, então nada se acumula e o som segue a imagem
 quadro a quadro. No reverso cada bloco do arquivo (até `GROUP_S`) entra por uma entrada própria e passa por
 `areverse`: a memória fica limitada ao bloco, não ao clipe. Veja `_retimed_chain`.
+
+Sequência aninhada (1.7, `Source.is_nested`): o som dela é mixado antes pela mesma `render_mix` (recursiva, em qualquer
+nível) num WAV de cache com o nome tirado de `mix_key` (`nested_mix_path`), e esse WAV é a entrada da cadeia do clipe de
+fora, como um arquivo: aparar, velocidade, rampa, reverso, equalização, fades e transições não têm regra nova. `Clip.src`
+continua `sequencia:<id>`; o caminho vai em `seg["path"]`.
 """
 
 from __future__ import annotations
@@ -97,7 +102,8 @@ def crossfades(seq: timeline.Sequence) -> tuple[dict[str, tuple[float, float]], 
 
 
 def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict]:
-    """Clipes de som que tocam no trecho [start, end) (quadros), com os tempos já calculados."""
+    """Clipes de som que tocam no trecho [start, end) (quadros), com os tempos já calculados. `path` é o que o ffmpeg lê:
+    o arquivo ou, num clipe de sequência, o WAV da mixagem dela (`render_mix` faz antes, `_render_nested`)."""
     a, b = _range(seq, start, end)
     fps = seq.fps
     heads, tails = crossfades(seq)
@@ -107,8 +113,15 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
     out = []
     for c in playing:
         src = seq.sources.get(c.src)
-        if src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
-            continue  # clipes sem arquivo (geradores) não têm som
+        inner = seq.nested(c)
+        if inner is not None:
+            if not has_audio(inner):
+                continue
+            path = nested_mix_path(inner)
+        elif src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
+            continue  # clipes gerados não têm som
+        else:
+            path = c.src
         head, tail = heads.get(c.id), tails.get(c.id)
         pre = head[0] if head else 0.0    # o clipe começa antes (transição com o anterior)
         post = tail[1] if tail else 0.0   # e termina depois (transição com o próximo)
@@ -135,6 +148,7 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
         tr = seq.track(timeline.AUDIO, c.track)
         out.append({
             "clip": c,
+            "path": path,
             "src_in": max(0.0, c.src_in - pre * c.speed),        # segundos no arquivo (início da cadeia)
             "src_len": (c.dur / fps + pre + post) * c.speed,     # segundos do arquivo usados
             "clip_len": c.dur / fps,                             # duração do clipe na sequência (s)
@@ -325,7 +339,7 @@ def _retimed_chain(seg: dict, k: int, inp: int) -> tuple[list[str], str]:
         g_hi = min(length, max(max(q[2], q[3]) for q in group) + pad) if length > 0 else \
             max(max(q[2], q[3]) for q in group) + pad
         g_hi = max(g_hi, g_lo + 1e-3)
-        inputs += ["-ss", _fmt(g_lo), "-t", _fmt(g_hi - g_lo), "-i", c.src]
+        inputs += ["-ss", _fmt(g_lo), "-t", _fmt(g_hi - g_lo), "-i", seg["path"]]
         head = [f"[{inp + gi}:a:0]aresample={RATE}", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
         if rev:
             head.append("areverse")  # o tempo do bloco corre do fim (g_hi) para o começo
@@ -408,7 +422,7 @@ def build_graph(seq: timeline.Sequence, start: int = 0, end: int = -1) -> tuple[
             inp += ins.count("-i")
             chains.append(chain)
             continue
-        inputs += ["-ss", _fmt(seg["src_in"]), "-t", _fmt(seg["src_len"]), "-i", seg["clip"].src]
+        inputs += ["-ss", _fmt(seg["src_in"]), "-t", _fmt(seg["src_len"]), "-i", seg["path"]]
         chains.append(_chain(seg, k, inp))
         inp += 1
     for k, tone in enumerate(tns):  # tons de clipes gerados (entradas depois dos arquivos)
@@ -461,9 +475,10 @@ def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: in
 
 def render_mix(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
                cancel: threading.Event | None = None, perf: media.Perf | None = None) -> bool:
-    """Grava o som do trecho num WAV. False se o trecho não tem som; erro do ffmpeg vira RuntimeError."""
+    """Grava o som do trecho num WAV. False se o trecho não tem som ou foi cancelado; erro do ffmpeg vira RuntimeError
+    (também o de uma sequência aninhada, que é mixada antes com o mesmo `cancel`)."""
     g = build_graph(seq, start, end)
-    if g is None:
+    if g is None or not _render_nested(seq, start, end, cancel, perf):
         return False
     script = None
     if len(g[1]) > SCRIPT_LIMIT:
@@ -526,7 +541,96 @@ def mix_key(seq: timeline.Sequence) -> str:
     tns = tones(seq)
     if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
         data["tons"] = sorted([t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns)
+    nested = {c.src: mix_key(inner) for c in clips if (inner := seq.nested(c)) is not None}
+    if nested:  # 1.7: o som de dentro, em qualquer nível
+        data["aninhadas"] = nested
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+# ------------------------------------------------------------------ som de uma sequência aninhada
+NEST_DIR = "pelicula_som_aninhado"   # pasta dos WAVs no temporário do sistema (`nested_dir`)
+NEST_MAX_BYTES = 2 * 1024 ** 3       # acima disso, os mais antigos saem a cada mixagem nova
+NEST_KEEP_S = 600.0                  # um WAV usado há menos que isso fica (outra mixagem pode estar para abri-lo)
+
+
+def nested_dir() -> Path:
+    """Pasta dos WAVs das sequências aninhadas, no temporário do sistema, como o WAV da prévia. Fica de uma sessão para a
+    outra (mixar de novo é o que custa) e o tamanho é limitado por `_prune_nested`."""
+    return Path(tempfile.gettempdir()) / NEST_DIR
+
+
+def _file_stamp(path: str) -> list:
+    try:
+        st = os.stat(path)
+        return [path, st.st_mtime, st.st_size]
+    except OSError:
+        return [path, 0, 0]
+
+
+def nested_mix_path(inner: timeline.Sequence) -> str:
+    """O WAV da mixagem da sequência `inner` (pode ainda não existir). O nome sai de `mix_key`, que muda com qualquer
+    edição em qualquer nível, mais o que `mix_key` não vê e o WAV guardado de outra sessão precisa ver: a versão do app, a
+    duração da sequência e o arquivo mexido no disco."""
+    from . import __version__
+    files = sorted(_file_stamp(s.path) for s in inner.deep_sources() if s.is_file and s.has_audio)
+    name = hashlib.sha1(json.dumps([__version__, mix_key(inner), inner.duration, files]).encode("utf-8")).hexdigest()
+    return str(nested_dir() / f"{name}.wav")
+
+
+def _prune_nested(keep: set[str]) -> None:
+    """Tira os WAVs mais antigos até caber em `NEST_MAX_BYTES`, menos os de `keep` e os usados há pouco."""
+    now = time.time()
+    found = []
+    try:
+        for e in os.scandir(nested_dir()):
+            if e.is_file() and e.name.endswith(".wav"):
+                st = e.stat()
+                found.append((st.st_mtime, st.st_size, e.path))
+    except OSError:
+        return
+    total = sum(f[1] for f in found)
+    for mtime, size, path in sorted(found):
+        if total <= NEST_MAX_BYTES:
+            break
+        if path in keep or now - mtime < NEST_KEEP_S:
+            continue
+        _remove(path)  # aberto por outro processo no Windows: fica para a próxima
+        if not os.path.exists(path):
+            total -= size
+
+
+def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threading.Event | None,
+                   perf: media.Perf | None) -> bool:
+    """Deixa prontos os WAVs das sequências que tocam no trecho (`segments`), em qualquer nível. O WAV inteiro de cada uma:
+    é ele que o nome identifica. Grava num parcial e troca no fim, então outra mixagem ao mesmo tempo nunca lê pela metade.
+    False se foi cancelado; erro do ffmpeg vira RuntimeError."""
+    wanted = {}
+    for seg in segments(seq, start, end):
+        inner = seq.nested(seg["clip"])
+        if inner is not None:
+            wanted[seg["path"]] = inner
+    if not wanted:
+        return True
+    nested_dir().mkdir(parents=True, exist_ok=True)
+    keep = {nested_mix_path(s) for root in wanted.values() for s in root.closure()}
+    _prune_nested(keep)
+    for path, inner in wanted.items():
+        if cancel is not None and cancel.is_set():
+            return False
+        if os.path.exists(path):
+            try:
+                os.utime(path)
+            except OSError:
+                pass
+            continue
+        part = f"{path[:-4]}.{os.getpid()}_{threading.get_ident()}.wav"
+        try:
+            if not render_mix(inner, part, cancel=cancel, perf=perf):
+                return False
+            os.replace(part, path)
+        finally:
+            _remove(part)
+    return True
 
 
 # ------------------------------------------------------------------ forma de onda
@@ -567,6 +671,15 @@ def peaks(path: str, rate: int = 100) -> np.ndarray | None:
     with _PEAKS_LOCK:
         _PEAKS[key] = (mtime, out)
     return out
+
+
+def source_peaks(seq: timeline.Sequence, key: str, rate: int = 100) -> np.ndarray | None:
+    """`peaks` de uma fonte da sequência: o arquivo ou, de uma sequência aninhada, o WAV da mixagem dela, se já existe."""
+    src = seq.sources.get(key)
+    if src is None or not src.is_nested:
+        return peaks(key, rate)
+    inner = seq.nested(src)
+    return peaks(nested_mix_path(inner), rate) if inner is not None else None
 
 
 # ------------------------------------------------------------------ som para o medidor

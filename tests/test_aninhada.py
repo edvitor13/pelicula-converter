@@ -967,3 +967,293 @@ def test_the_frame_cache_depends_on_every_parameter(gl_engine, renderer, monkeyp
     assert gl_engine.compose(small, outer, W // 2, H // 2).shape == (H // 2, W // 2, 3)
     assert len(calls) == 10
     assert np.array_equal(gl_engine.compose(fl, outer, W, H), plain)
+
+
+# ------------------------------------------------------------------ som
+@pytest.fixture
+def mix_dir(tmp_path, monkeypatch):
+    """Os WAVs das sequências aninhadas numa pasta do teste."""
+    d = tmp_path / "som_aninhado"
+    monkeypatch.setattr(audiomix, "nested_dir", lambda: d)
+    return d
+
+
+def _samples(path) -> np.ndarray:
+    r = audiomix.WavReader(str(path))
+    raw = r.read(0, r.frames)
+    return raw.astype(np.float64)
+
+
+def _mix(seq, path, **kw) -> np.ndarray:
+    assert audiomix.render_mix(seq, str(path), **kw) is True
+    return _samples(path)
+
+
+def _same_sound(a, b, tolerance=2.0 / 8388608.0) -> float:
+    """Amostra a amostra, com a tolerância em fração da escala cheia (o padrão: 2 passos de 24 bits); devolve o máximo."""
+    n = min(len(a), len(b))
+    assert abs(len(a) - len(b)) <= 2, (len(a), len(b))
+    worst = float(np.abs(a[:n] - b[:n]).max())
+    assert worst <= tolerance, f"diferença máxima {worst * 8388608.0:.1f} passos de 24 bits"
+    return worst
+
+
+def sound_montage(clips_media, micro=True) -> tl.Sequence:
+    """Som com cortes, velocidade, fades, volume, transição e clipes em duas faixas."""
+    longo, curto, _alfa = (media.probe_source(p) for p in clips_media)
+    seq = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=micro)
+    a = seq.insert_media(longo, at=0)
+    seq.trim_end(a[0].id, 30)
+    b = seq.insert_media(longo, at=30)
+    seq.trim_start(b[0].id, 42)
+    seq.move(b[0].id, 30)
+    seq.trim_end(b[0].id, 60)
+    ab = next(c for c in b if c.kind == tl.AUDIO)
+    seq.set_values(ab.id, {"transicao": 0.4, "volume": -3.0})
+    c = seq.insert_media(curto, at=60)
+    ac = next(x for x in c if x.kind == tl.AUDIO)
+    seq.set_values(ac.id, {"fade_in": 0.2, "fade_out": 0.3, "graves": 3.0})
+    d = seq.insert_media(curto, at=10, vtrack=1, atrack=1)
+    ad = next(x for x in d if x.kind == tl.AUDIO)
+    seq.set_speed(ad.id, 1.5)
+    seq.set_values(ad.id, {"volume": -6.0})
+    return seq
+
+
+@pytest.mark.ffmpeg
+def test_twin_mix_matches_the_flat_mix_sample_by_sample(clips_media, tmp_path, mix_dir):
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    assert audiomix.has_audio(twin)
+    a = _mix(flat, tmp_path / "plano.wav")
+    b = _mix(twin, tmp_path / "gemea.wav")
+    assert np.abs(a).max() > 0.01
+    assert _same_sound(a, b, 0.0) == 0.0  # exatamente as mesmas amostras de 24 bits
+    assert sorted(p.suffix for p in mix_dir.iterdir()) == [".wav"]  # sem parciais
+    # mais um nível
+    top = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    twin.siblings.add(top)
+    top.insert_media(nested_src(top, twin), at=0)
+    assert _same_sound(a, _mix(top, tmp_path / "topo.wav"), 0.0) == 0.0
+
+
+@pytest.mark.ffmpeg
+def test_only_a_part_of_the_twin(clips_media, tmp_path, mix_dir):
+    """Um trecho da gêmea é o recorte exato da mixagem inteira de dentro. (Sem aninhar, o `adelay` em ms de cada clipe
+    muda com o começo do trecho, então o trecho fora de uma sequência pode diferir até 0,5 ms do recorte: não é daqui.)"""
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    whole = _mix(flat, tmp_path / "a.wav")
+    b = _mix(twin, tmp_path / "b.wav", start=12, end=50)
+    assert len(b) == round(38 / 24 * 48000)
+    _same_sound(whole[24000:24000 + len(b)], b, 0.0)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("name", ["velocidade", "fades", "rampa", "reverso"])
+def test_nested_clip_chain_works_like_on_a_file(clips_media, tmp_path, mix_dir, name):
+    """Os ajustes no clipe de sequência = os mesmos no WAV da mixagem de dentro, tratado como um arquivo."""
+    flat = sound_montage(clips_media)
+    outer = twin_of(flat)
+    outer.clips = [c for c in outer.clips if c.kind == tl.AUDIO]  # a mixagem vai até o fim do som, como a referência
+    inner_wav = _mix(flat, tmp_path / "dentro.wav")
+    assert len(inner_wav) > 0
+    file_src = media.probe_source(str(tmp_path / "dentro.wav"))
+    ref = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    ref_clip = ref.insert_media(file_src, at=0)[0]
+    out_clip = next(c for c in outer.clips if c.kind == tl.AUDIO)
+    assert ref_clip.dur == out_clip.dur
+    for s, c in ((ref, ref_clip), (outer, out_clip)):
+        if name == "velocidade":
+            s.unlink(c.id)
+            s.set_speed(c.id, 2.0)
+        elif name == "fades":
+            s.set_values(c.id, {"fade_in": 0.25, "fade_out": 0.5, "volume": -4.0, "agudos": 2.0})
+        elif name == "rampa":
+            s.unlink(c.id)
+            s.retime(c.id, ramp=[[0.0, 1.0], [0.5, 2.0]])
+        else:
+            s.unlink(c.id)
+            s.retime(c.id, reverse=True)
+    g = audiomix.build_graph(outer)
+    assert any(x.endswith(".wav") and x.startswith(str(mix_dir)) for x in g[0])
+    assert not any("sequencia:" in x for x in g[0])
+    a, b = _mix(ref, tmp_path / "ref.wav"), _mix(outer, tmp_path / "fora.wav")
+    _same_sound(a, b, 16.0 / 8388608.0)
+
+
+@pytest.mark.ffmpeg
+def test_crossfade_between_two_nested_clips_works_like_on_two_files(clips_media, tmp_path, mix_dir):
+    flat = sound_montage(clips_media)
+    outer = twin_of(flat)
+    _mix(flat, tmp_path / "dentro.wav")
+    file_src = media.probe_source(str(tmp_path / "dentro.wav"))
+    ref = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+
+    def cut_pair(s, source):
+        a = next(c for c in s.insert_media(source, at=0) if c.kind == tl.AUDIO)
+        s.unlink(a.id)
+        s.trim_end(a.id, 30)
+        b = next(c for c in s.insert_media(source, at=30, atrack=0, vtrack=1) if c.kind == tl.AUDIO)
+        s.unlink(b.id)
+        s.trim_start(b.id, 40)
+        s.move(b.id, 30)
+        s.set_values(b.id, {"transicao": 0.5})
+        return a, b
+
+    outer.clips = []
+    pa = cut_pair(outer, nested_src(outer, outer.family()[1]))
+    outer.clips = [c for c in outer.clips if c.kind == tl.AUDIO]
+    pb = cut_pair(ref, file_src)
+    assert pa[1].src_in == pb[1].src_in and audiomix.crossfades(outer)[0]
+    a, b = _mix(ref, tmp_path / "ref.wav"), _mix(outer, tmp_path / "fora.wav")
+    _same_sound(a, b, 16.0 / 8388608.0)
+
+
+@pytest.mark.ffmpeg
+def test_mix_key_changes_with_an_edit_at_any_level(clips_media, mix_dir):
+    flat = sound_montage(clips_media)
+    outer = twin_of(flat)
+    inner = outer.family()[1]
+    top = tl.Sequence(width=W, height=H, fps_str="24/1")
+    outer.siblings.add(top)
+    top.insert_media(nested_src(top, outer), at=0)
+    before = audiomix.mix_key(top), audiomix.mix_key(outer), audiomix.nested_mix_path(outer), audiomix.nested_mix_path(inner)
+    c = next(x for x in inner.clips if x.kind == tl.AUDIO)
+    inner.set_values(c.id, {"volume": float(c.values["volume"]) - 1.0})
+    top.siblings.sync()
+    after = audiomix.mix_key(top), audiomix.mix_key(outer), audiomix.nested_mix_path(outer), audiomix.nested_mix_path(inner)
+    assert all(x != y for x, y in zip(before, after))
+    key = audiomix.mix_key(top)
+    assert audiomix.mix_key(top.copy()) == key  # a cópia que a prévia e a exportação usam dá a mesma chave
+
+
+@pytest.mark.ffmpeg
+def test_a_touched_file_changes_the_wav_of_the_cache_not_the_key(clips_media, tmp_path, mix_dir):
+    import os
+    outer = tl.Sequence(width=W, height=H, fps_str="24/1")
+    inner = outer.ensure_set().create(W, H, "24/1")
+    wav = tmp_path / "a.mp4"
+    wav.write_bytes(open(clips_media[0], "rb").read())
+    inner.insert_media(media.probe_source(str(wav)), at=0)
+    k, p = audiomix.mix_key(inner), audiomix.nested_mix_path(inner)
+    os.utime(wav, (1000000, 1000000))
+    assert audiomix.mix_key(inner) == k and audiomix.nested_mix_path(inner) != p
+
+
+@pytest.mark.ffmpeg
+def test_cancel_stops_the_inner_mix_and_leaves_nothing(clips_media, tmp_path, mix_dir):
+    import threading
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    cancel = threading.Event()
+    cancel.set()
+    out = tmp_path / "o.wav"
+    assert audiomix.render_mix(twin, str(out), cancel=cancel) is False
+    assert not out.exists() and not list(mix_dir.glob("*"))
+    # cancelado no meio da mixagem de dentro: o `cancel` chega lá
+    seen = []
+    real = audiomix.subprocess.Popen
+
+    def popen(cmd, **kw):
+        seen.append(cmd)
+        cancel_later.set()
+        return real(cmd, **kw)
+
+    cancel_later = threading.Event()
+    audiomix.subprocess.Popen, keep = popen, audiomix.subprocess.Popen
+    try:
+        assert audiomix.render_mix(twin, str(out), cancel=cancel_later) is False
+    finally:
+        audiomix.subprocess.Popen = keep
+    assert len(seen) == 1 and not out.exists() and not list(mix_dir.glob("*"))
+
+
+@pytest.mark.ffmpeg
+def test_a_failed_inner_mix_is_the_error_of_the_outer_mix(ffmpeg_ok, tmp_path, mix_dir):
+    bad = tmp_path / "ruim.mp4"
+    bad.write_bytes(b"isto nao e um video")
+    outer = tl.Sequence(width=W, height=H, fps_str="24/1")
+    inner = outer.ensure_set().create(W, H, "24/1")
+    inner.insert_media(fsrc(str(bad)), at=0)
+    outer.insert_media(nested_src(outer, inner), at=0)
+    out = tmp_path / "o.wav"
+    with pytest.raises(RuntimeError, match="Falha ao mixar"):
+        audiomix.render_mix(outer, str(out))
+    assert not out.exists() and not list(mix_dir.glob("*"))
+
+
+@pytest.mark.ffmpeg
+def test_inner_wav_is_reused_and_the_cache_does_not_grow_without_bound(clips_media, tmp_path, mix_dir, monkeypatch):
+    import os
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    _mix(twin, tmp_path / "1.wav")
+    wavs = list(mix_dir.glob("*.wav"))
+    assert len(wavs) == 1 and str(wavs[0]) == audiomix.nested_mix_path(twin.family()[1])
+    stamp = wavs[0].stat().st_mtime_ns
+    os.utime(wavs[0], (1000000, 1000000))
+    _mix(twin, tmp_path / "2.wav")  # não mixa de novo, só marca o uso
+    assert wavs[0].stat().st_mtime_ns != 1000000 * 10 ** 9 and wavs[0].stat().st_size > 0 and stamp
+    for k in range(3):
+        old = mix_dir / f"velho{k}.wav"
+        old.write_bytes(b"x" * 1000)
+        os.utime(old, (1000000 + k, 1000000 + k))
+    recent = mix_dir / "recente.wav"
+    recent.write_bytes(b"x" * 1000)
+    monkeypatch.setattr(audiomix, "NEST_MAX_BYTES", wavs[0].stat().st_size + 1500)
+    _mix(twin, tmp_path / "3.wav")
+    names = {p.name for p in mix_dir.glob("*.wav")}
+    assert wavs[0].name in names and "recente.wav" in names  # em uso e usado há pouco ficam
+    assert "velho0.wav" not in names and "velho1.wav" not in names and "velho2.wav" not in names
+
+
+@pytest.mark.ffmpeg
+def test_waveform_of_a_nested_clip_comes_from_its_wav(clips_media, tmp_path, mix_dir):
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    key = next(c.src for c in twin.clips if c.kind == tl.AUDIO)
+    assert audiomix.source_peaks(twin, key) is None
+    _mix(twin, tmp_path / "o.wav")
+    got = audiomix.source_peaks(twin, key)
+    assert got is not None and got.max() > 0 and abs(len(got) - flat.duration / 24 * 100) <= 2
+    longo = media.probe_source(clips_media[0])
+    assert audiomix.source_peaks(flat, longo.path) is not None  # um arquivo: o de sempre
+
+
+@pytest.mark.ffmpeg
+def test_montage_without_nested_clips_never_touches_the_cache(clips_media, tmp_path, mix_dir):
+    flat = sound_montage(clips_media)
+    g = audiomix.build_graph(flat)
+    assert all("sequencia:" not in x and str(mix_dir) not in x for x in g[0])
+    assert all(seg["path"] == seg["clip"].src for seg in audiomix.segments(flat))
+    _mix(flat, tmp_path / "o.wav")
+    assert not mix_dir.exists()
+    # sequência irmã sem relação com esta: a mesma coisa
+    flat.ensure_set().create(W, H, "24/1")
+    assert audiomix.build_graph(flat) == g
+
+
+@pytest.mark.ffmpeg
+def test_beep_inside_a_nested_clip_plays_at_the_same_sample(ffmpeg_ok, tmp_path, mix_dir, qapp):
+    from pelicula import generators
+    flat = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    flat.insert_media(generators.new_source(generators.LEADER, flat), at=0)
+    twin = twin_of(flat)
+    assert not flat.has_audio and twin.has_audio
+    assert len([c for c in twin.clips if c.kind == tl.AUDIO]) == 1
+    a, b = _mix(flat, tmp_path / "a.wav"), _mix(twin, tmp_path / "b.wav")
+    assert np.abs(a).max() > 0.01
+    _same_sound(a, b, 0.0)
+
+
+@pytest.mark.ffmpeg
+def test_nested_clip_with_a_muted_inner_sequence_is_silent(clips_media, tmp_path, mix_dir):
+    flat = sound_montage(clips_media)
+    twin = twin_of(flat)
+    inner = twin.family()[1]
+    for t in inner.kind_tracks(tl.AUDIO):
+        t.muted = True
+    assert not audiomix.has_audio(inner) and audiomix.segments(twin) == []
+    assert not audiomix.has_audio(twin)
+    assert audiomix.render_mix(twin, str(tmp_path / "o.wav")) is False
