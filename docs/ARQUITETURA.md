@@ -42,6 +42,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
+36. [Base da 1.7: formato 5](#36-base-da-17-formato-5)
 
 ---
 
@@ -3816,3 +3817,25 @@ Laboratorio deles é conferido em `test_laboratorio_node_matches_the_app`).
 `tests/test_luz_plano.py` (luz por plano: neutra no padrão, quadros certos, transições, V2, 12 pontos = 1 stop da
 cópia, JSON e formato 4, desfazer, prévia = exportação, GPU), `tests/test_fotometro.py` (latitude e zonas),
 `tests/test_presets_16.py` e os casos de janela em `tests/luz_fotometro_ui_cases.py` (`test_luz_fotometro_ui.py`).
+
+## 36. Base da 1.7: formato 5
+
+A 1.6 lê projetos até o formato 4 (bloco `"edicao"` até o 3) e descarta, sem avisar, o que não conhece, como a 1.5
+fazia. A regra é a da [seção 28](#28-base-da-16-formato-4), um degrau acima: a 1.7 grava o **formato 5** quando o
+projeto usa algo dela, e a 1.6 recusa com "O projeto foi salvo por uma versão mais nova do app".
+
+- **Retrato da 1.6** (`pelicula/data/conhecidos_1_6.json`, `params.known_1_6()`): gerado rodando o código da tag
+  `v1.6.0`. Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção dele sumiu do app e
+  que ele contém o da 1.5.
+- `params.beyond_1_6(schema, known, values, keys)`: a regra de `beyond_1_5` com esse retrato. Um ajuste da 1.7 também
+  está fora do retrato da 1.5, então `"recursos"` lista `ajustes_1_6` e `ajustes_1_7` juntos; é só informativo, e
+  quem decide o formato é o registro mais novo.
+- **Registros:** `project.FEATURES_V5` (do projeto; já tem `"ajustes_1_7"`) e `timeline.FEATURES_V5` (da montagem; já
+  tem `"ajustes_clipe_1_7"`). Uma **estrutura nova** no JSON ganha uma linha num deles, com o campo só quando usado.
+  Os da 1.6 continuam em `FEATURES_V4` nos dois módulos.
+- **Formatos:** projeto 5 (`project.FORMAT`; `FORMAT_16` = 4 para algo da 1.6); bloco `"edicao"` 4 (`timeline.FORMAT`;
+  `FORMAT_16` = 3), escolhido por `Sequence.block_format()`. Os passos `project._v4_to_v5` e `timeline._seq_v3_to_v4`
+  só trocam o número: a 1.7 só acrescenta campos.
+- **Projetos gravados pela 1.6** (`tests/data/projetos_1_6/`): os dois projetos da referência da 1.4 com recursos da
+  1.6 por cima, gravados pela 1.6.0 com `gerar.py`, junto do que ela fez ao abri-los (`referencia.json`).
+  `tests/test_project_migration.py` roda as mesmas conferências nas duas pastas.

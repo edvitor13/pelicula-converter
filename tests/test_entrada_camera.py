@@ -95,7 +95,7 @@ def test_json_round_trip_and_format_4():
     back = tl.Sequence.from_json(data)
     assert back.clips[0].values["camera_entrada"] == "clog3" and back.to_json() == data
     feats = seq.features()
-    assert "ajustes_clipe_1_6" in feats and project.needed_format(feats, True) == project.FORMAT == 4
+    assert "ajustes_clipe_1_6" in feats and project.needed_format(feats, True) == project.FORMAT_16 == 4
     # o retrato da 1.5 não tem as chaves: qualquer valor fora do padrão pede o formato 4
     for k, v in (("camera_reescalado", True), ("camera_ei", "1600")):
         s2, c2 = one_clip(**{k: v})

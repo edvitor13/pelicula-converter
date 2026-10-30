@@ -82,7 +82,7 @@ def test_new_values_go_to_json_and_to_format_4():
     assert d["valores"]["pele_natural"] == 0.4 and "alvo_matiz" not in d["valores"]
     back = tl.Clip.from_json(json.loads(json.dumps(d)))
     assert back.values == c.values
-    assert "ajustes_clipe_1_6" in seq.features() and seq.block_format() == tl.FORMAT
+    assert "ajustes_clipe_1_6" in seq.features() and seq.block_format() == tl.FORMAT_16
 
 
 # ------------------------------------------------------------------ grupos de cor
@@ -94,7 +94,7 @@ def test_color_group_json_only_when_used_and_round_trip():
     d = c.to_json()
     assert d["grupo"] == "g1"
     assert tl.Clip.from_json(json.loads(json.dumps(d))).color_group == "g1"
-    assert "grupos_cor" in seq.features() and seq.block_format() == tl.FORMAT
+    assert "grupos_cor" in seq.features() and seq.block_format() == tl.FORMAT_16
     seq2 = tl.Sequence.from_json(json.loads(json.dumps(seq.to_json())))
     assert seq2.clips[0].color_group == "g1"
     bad = dict(d, grupo=7)

@@ -817,3 +817,23 @@ def beyond_1_5(schema: Schema, known: dict[str, list[str] | None], values: dict[
             return True
     return any(k in schema.params and k not in known for k in (keys or {}))
 
+
+# ------------------------------------------------------------------ 1.7: o que a 1.6 lê (formato 5)
+# O mesmo retrato, um degrau acima: a 1.6 também descarta o que não conhece, então um projeto que usa um ajuste da
+# 1.7 vai para o formato 5, que a 1.6 recusa com aviso (`project.FEATURES_V5`, `timeline.FEATURES_V5`). Ajuste novo
+# não precisa de registro.
+KNOWN_1_6_FILE = Path(__file__).with_name("data") / "conhecidos_1_6.json"
+
+
+@lru_cache(maxsize=1)
+def known_1_6() -> dict[str, dict[str, list[str] | None]]:
+    """{"look"|"video"|"audio": {chave: opções da escolha, ou None}} como a 1.6.0 conhecia."""
+    data = json.loads(KNOWN_1_6_FILE.read_text(encoding="utf-8"))
+    return {k: data[k] for k in ("look", "video", "audio")}
+
+
+def beyond_1_6(schema: Schema, known: dict[str, list[str] | None], values: dict[str, Any] | None,
+               keys: dict[str, Any] | None = None) -> bool:
+    """Se os valores usam algo que a 1.6 não lê (a regra é a de `beyond_1_5`, com o retrato `known_1_6`)."""
+    return beyond_1_5(schema, known, values, keys)
+

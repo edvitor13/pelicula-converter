@@ -188,7 +188,7 @@ def test_json_is_sparse_and_goes_to_format_4():
     back = tl.Sequence.from_json(data)
     assert back.find(c.id).values["luz_r"] == 2.0 and back.to_json() == data
     feats = seq.features()
-    assert "ajustes_clipe_1_6" in feats and project.needed_format(feats, True) == project.FORMAT == 4
+    assert "ajustes_clipe_1_6" in feats and project.needed_format(feats, True) == project.FORMAT_16 == 4
 
 
 def test_trivial_file_with_lights_goes_through_the_montage():
