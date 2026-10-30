@@ -339,6 +339,9 @@ class _Dialog:
                                 settings=ExportSettings(no_effects=self.kw["no_effects"]),
                                 look_keys=self.kw["look_keys"])
 
+    def jobs(self):   # 1.7: a janela principal pede a lista (uma por sequência marcada)
+        return [self.job()]
+
 
 def _answer(monkeypatch, text: str | None) -> list:
     """A pergunta responde com o botão de texto `text`; devolve as perguntas feitas. None: nenhuma pode aparecer."""
