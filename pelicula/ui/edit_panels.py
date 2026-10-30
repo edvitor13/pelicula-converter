@@ -49,6 +49,8 @@ def fmt_seconds(sec: float) -> str:
 
 
 def source_kind(src: Source) -> str:
+    if src.is_nested:
+        return "sequencia"  # 1.7: outra sequência do projeto (só na Mídia com duas ou mais)
     if not src.is_file:
         return "gerado"  # clipe sem arquivo (título, cor, contagem…: `sequence.RENDERERS`)
     if src.is_image:
@@ -58,7 +60,8 @@ def source_kind(src: Source) -> str:
     return "video"
 
 
-KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem"), "gerado": N_("gerado")}
+KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("imagem"), "gerado": N_("gerado"),
+               "sequencia": N_("sequência")}
 
 
 # ------------------------------------------------------------------ mídia
@@ -83,7 +86,8 @@ def _kind_pixmap(kind: str, thumb: QImage | None) -> QPixmap:
         y = (img.height() - THUMB.height()) // 2
         p.drawImage(0, 0, img, x, y, THUMB.width(), THUMB.height())
     else:
-        name = {"video": "film_mode", "audio": "music", "imagem": "image", "gerado": "wand"}[kind]
+        name = {"video": "film_mode", "audio": "music", "imagem": "image", "gerado": "wand",
+                "sequencia": "sequence"}[kind]
         color = theme.CLIP_AUDIO_HI if kind == "audio" else theme.ACCENT
         ic = icons.icon(name, color, 22).pixmap(QSize(22, 22))
         p.drawPixmap((THUMB.width() - 22) // 2, (THUMB.height() - 22) // 2, ic)
@@ -100,12 +104,16 @@ class MediaBin(QWidget):
     filesDropped = Signal(list)
     placeRequested = Signal(list, bool)   # (caminhos, inserir): no cursor, empurrando (True) ou cobrindo (False)
     filesDroppedIn = Signal(list, str)    # (arquivos do sistema, id da pasta) soltos sobre uma pasta
+    openRequested = Signal(str)           # dois cliques numa sequência da Mídia: abrir a aba dela
 
     def __init__(self, parent=None, model: TimelineModel | None = None):
         super().__init__(parent)
         self.setObjectName("Panel")
         self.setMinimumWidth(220)
         self._sources: dict[str, Source] = {}
+        # 1.7: acrescenta ao menu de um item as ações das sequências (`sequencias_ui`): (menu, caminhos) → True se o
+        # menu é só delas (todos os itens escolhidos são sequências); a janela liga.
+        self.extra_menu = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 8, 8)
         lay.setSpacing(8)
@@ -190,7 +198,7 @@ class MediaBin(QWidget):
         else:
             dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
             item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
-        item.setToolTip(0, src.path)
+        item.setToolTip(0, f"{src.name}\n{src.width} × {src.height}" if src.is_nested else src.path)
         item.kind, item.name = kind, src.name
         item.mtime = _mtime(src.path) if src.is_file else 0.0
         item.setIcon(0, QIcon(_kind_pixmap(kind, thumb)))
@@ -237,9 +245,14 @@ class MediaBin(QWidget):
 
     def fill_media_menu(self, menu: QMenu) -> None:
         """As ações do menu de um item da Mídia (o `pastas_ui` acrescenta "Mover para" e "Nova pasta")."""
+        paths = self.selected_paths()
+        if self.extra_menu is not None and paths and self.extra_menu(menu, paths, True):
+            return  # só sequências escolhidas: o menu é o delas
         menu.addAction(_("Adicionar ao fim da linha do tempo"), self._add_current)
         menu.addAction(_("Inserir no cursor (,)"), lambda: self.place(True))
         menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.place(False))
+        if self.extra_menu is not None and paths:
+            self.extra_menu(menu, paths, False)  # "Nova sequência a partir deste vídeo"
         menu.addSeparator()
         menu.addAction(_("Tirar da lista"), self._remove_current)
 

@@ -362,3 +362,191 @@ def test_history_of_a_lone_sequence_is_as_before():
     assert h.push(seq)
     back = h.undo()
     assert not back.clips and back.siblings is None and not h.can_undo()
+
+
+# ------------------------------------------------------------------ operações do modelo da interface (sem GPU)
+def _model(frames=48):
+    pytest.importorskip("PySide6.QtCore")
+    from pelicula.ui.edit_model import TimelineModel
+    seq = tl.Sequence(width=320, height=180, micro_fade=True)
+    seq.insert_media(_src(frames=frames), 0)
+    m = TimelineModel(seq)
+    kinds: list[str] = []
+    m.changed.connect(kinds.append)
+    return m, kinds
+
+
+def test_new_sequence_is_one_step_opens_the_tab_and_undo_goes_back():
+    m, kinds = _model()
+    first = m.seq
+    sid = m.new_sequence(1280, 720, "25/1")
+    assert m.seq.id == sid and m.seq is not first and [s.display_name for s in m.sequences()] == [
+        "Sequência 1", "Sequência 2"]
+    assert (m.seq.width, m.seq.height, m.seq.fps_str) == (1280, 720, "25/1") and not m.seq.clips and m.seq.micro_fade
+    assert kinds[-1] == "*" and m.history.can_undo()
+    m.undo()
+    assert len(m.sequences()) == 1 and m.seq.clips and m.seq.siblings is None and not m.history.can_undo()
+    m.redo()
+    assert len(m.sequences()) == 2 and m.seq.id == sid  # refazer volta para a aba da sequência criada
+
+
+def test_new_sequence_takes_the_dialog_settings_and_the_video_in_the_same_step():
+    m, _k = _model()
+    video = _src("C:/v/b.mp4", frames=96)
+    sid = m.new_sequence(640, 360, "30/1", name="Entrevista", background=(0.1, 0.2, 0.3), micro_fade=False,
+                         magnetic=True, transparent=True, window=2.39, source=video)
+    s = m.seq
+    assert s.id == sid and s.name == "Entrevista" and s.background == (0.1, 0.2, 0.3) and not s.micro_fade
+    assert s.magnetic and s.transparent and abs(s.window - 2.39) < 1e-9
+    assert [c.src for c in s.clips if c.kind == tl.VIDEO] == ["C:/v/b.mp4"] and s.duration == 120  # 4 s a 30 quadros/s
+    assert "C:/v/b.mp4" in m.sequences()[0].sources  # a Mídia é uma só
+    m.undo()
+    assert len(m.sequences()) == 1 and "C:/v/b.mp4" not in m.seq.sources  # um passo só: o vídeo também volta
+
+
+def test_new_sequence_names_are_free_and_unique():
+    m, _k = _model()
+    m.new_sequence(320, 180, "24/1")
+    m.new_sequence(320, 180, "24/1")
+    assert [s.display_name for s in m.sequences()] == ["Sequência 1", "Sequência 2", "Sequência 3"]
+    assert m.name_taken("sequência 2") and not m.name_taken("Sequência 2", m.seq.siblings.items[1].id)
+    assert not m.rename_sequence(m.seq.id, "Sequência 1")      # já é de outra
+    assert not m.rename_sequence(m.seq.id, "   ")              # vazio
+    assert m.rename_sequence(m.seq.id, "  Final ") and m.seq.name == "Final"
+    assert not m.rename_sequence(m.seq.id, "Final")            # igual: nada muda
+    m.new_sequence(320, 180, "24/1")
+    assert m.seq.display_name == "Sequência 3"  # o 3 ficou livre ao renomear
+
+
+def test_rename_is_a_step_that_does_not_reload_the_preview_when_undone():
+    m, kinds = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    other = m.seq.id
+    m.activate_sequence(a.id)
+    kinds.clear()
+    assert m.rename_sequence(other, "Créditos")
+    assert kinds == ["sequencias"] and m.seq.id == a.id  # renomear a outra aba não troca de aba
+    kinds.clear()
+    m.undo()
+    assert kinds == ["sequencias"] and m.sequence_by(other).display_name == "Sequência 2"
+    m.redo()
+    assert kinds == ["sequencias", "sequencias"] and m.sequence_by(other).display_name == "Créditos"
+
+
+def test_a_rename_with_a_nested_clip_is_also_only_the_tabs():
+    m, kinds = _model()
+    m.new_sequence(320, 180, "24/1")
+    inner = m.seq
+    m.activate_sequence(m.sequences()[0].id)
+    m.insert_media(m.seq.sources[f"sequencia:{inner.id}"], 100)
+    kinds.clear()
+    m.rename_sequence(inner.id, "Abertura")
+    m.undo()
+    assert kinds == ["sequencias", "sequencias"]
+
+
+def test_duplicate_goes_after_the_original_and_opens():
+    m, _k = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    dup = m.duplicate_sequence(a.id)
+    assert m.seq.id == dup and [s.display_name for s in m.sequences()] == [
+        "Sequência 1", "Sequência 1 (cópia)", "Sequência 2"]
+    assert {c.id for c in m.seq.clips} == {c.id for c in a.clips} and m.seq.clips is not a.clips
+    m.undo()
+    assert len(m.sequences()) == 2
+    assert m.duplicate_sequence("nao-existe") == ""
+
+
+def test_remove_is_one_step_takes_the_nested_clips_and_opens_the_neighbour():
+    m, kinds = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    m.activate_sequence(a.id)
+    made = m.insert_media(a.sources[f"sequencia:{b.id}"], 100)
+    assert m.sequence_users(b.id) == [(a, len(made))] and m.sequence_users(a.id) == []
+    assert m.remove_sequence(b.id) == len(made)
+    assert len(m.sequences()) == 1 and m.seq.siblings.items == [m.seq] and not m.can_remove_sequence()
+    assert not any(c.src.startswith("sequencia:") for c in m.seq.clips) and kinds[-1] == "*"
+    m.undo()  # os clipes e a sequência voltam, juntos
+    assert len(m.sequences()) == 2 and len(m.sequence_users(b.id)) == 1
+    assert m.remove_sequence("nao-existe") == -1
+
+
+def test_removing_the_open_sequence_opens_the_neighbour_and_the_last_one_stays():
+    m, _k = _model()
+    m.new_sequence(320, 180, "24/1")
+    m.new_sequence(320, 180, "24/1")
+    ids = [s.id for s in m.sequences()]
+    m.activate_sequence(ids[1])
+    assert m.remove_sequence() == 0 and m.seq.id == ids[2]      # a do meio: vai para a seguinte
+    assert m.remove_sequence() == 0 and m.seq.id == ids[0]      # a última da fila: a anterior
+    assert m.remove_sequence() == -1 and m.seq.id == ids[0]     # a última fica
+    assert "sequencias" not in m.seq.to_json()
+
+
+def test_move_sequence_reorders_in_one_step():
+    m, kinds = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    m.new_sequence(320, 180, "24/1")
+    c = m.seq
+    kinds.clear()
+    assert m.move_sequence(c.id, 0) and [s.id for s in m.sequences()] == [c.id, a.id, b.id] and kinds == ["sequencias"]
+    assert not m.move_sequence(c.id, 0)                          # já está lá
+    m.undo()
+    assert [s.id for s in m.sequences()] == [a.id, b.id, c.id] and kinds[-1] == "sequencias"
+    assert m.seq.id == c.id                                      # desfazer não troca a aba aberta
+
+
+def test_activating_a_sequence_is_not_a_step_and_clears_the_selection():
+    m, kinds = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    m.activate_sequence(a.id)
+    n = len(m.history._states)
+    m.select([a.clips[0].id])
+    assert m.selection
+    assert m.activate_sequence(b.id) and m.seq is b and m.selection == [] and kinds[-1] == "*"
+    assert not m.activate_sequence(b.id) and not m.activate_sequence("nao-existe")
+    assert len(m.history._states) == n and m.history.can_undo()
+
+
+def test_undo_after_working_in_another_tab_goes_back_to_that_tab():
+    m, kinds = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    m.insert_media(_src("C:/v/c.mp4"), 0)
+    m.activate_sequence(a.id)
+    assert m.seq is a
+    m.undo()                                   # a última edição foi na `b`
+    assert m.seq.id == b.id and not m.seq.clips and kinds[-1] == "*"
+    m.undo()                                   # desfaz a criação da `b`
+    assert len(m.sequences()) == 1
+
+
+def test_a_pending_edit_is_closed_before_leaving_the_tab():
+    m, _k = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    m.activate_sequence(a.id)
+    cid = a.clips[0].id
+    m.set_clip_values(cid, {**a.clips[0].values, "exposicao": 0.4}, record=False)   # agrupa em 400 ms
+    assert m._timer.isActive() or m.history.can_undo()
+    m.activate_sequence(m.sequences()[1].id)
+    assert not m._timer.isActive()             # o passo foi fechado antes de sair
+    m.undo()
+    assert m.seq.id == a.id and m.seq.clips[0].values.get("exposicao", 0.0) == 0.0
+
+
+def test_the_models_operations_leave_a_lone_project_as_it_was():
+    m, _k = _model()
+    before = json.dumps(m.seq.to_json(), sort_keys=True)
+    sid = m.new_sequence(320, 180, "24/1")
+    m.remove_sequence(sid)
+    assert json.dumps(m.seq.to_json(), sort_keys=True) == before

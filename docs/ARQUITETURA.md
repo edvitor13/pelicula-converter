@@ -4178,3 +4178,70 @@ continua `sequencia:<id>`; o caminho vai em `seg["path"]`.
   colocar de novo.
 - **Quem lê a imagem do clipe** (conta-gotas, ajuste automático) vê o quadradinho preto; **legendas automáticas e corte por texto**
   (`subauto.spans_for`, `subedit.items`) pulam clipes de sequência, porque olham só arquivos.
+
+### 41.6 Interface das várias sequências
+
+Frente "abas" da fase 3 (#57): criar, duplicar, renomear, apagar e trocar de sequência na janela, na exportação e no
+terminal. O formato e o `timeline` não mudam (nenhum recurso novo em `FEATURES_V5`); tudo abaixo é interface em volta do
+modelo da §41.
+
+- **Modelo** (`ui/edit_model.TimelineModel`): uma operação para cada coisa, cada uma um passo do desfazer (que é um só para o
+  projeto): `new_sequence` (com os valores da janela de criar e, opcionalmente, uma `source` que entra no mesmo passo),
+  `duplicate_sequence`, `rename_sequence` (recusa nome vazio e nome igual ao de outra: o terminal escolhe pelo nome),
+  `remove_sequence` (devolve os clipes que saíram das outras; a última fica: -1; apagando a aberta, abre a vizinha),
+  `move_sequence`. `activate_sequence(id)` **não é passo**: fecha o que estava pendente (`commit`), troca `self.seq`, limpa a
+  seleção e emite `"*"`. `sequence_users(id)` dá a quem usa a sequência (a pergunta antes de apagar) e `sequence_by(chave)`
+  acha por id ou nome. A primeira operação chama `ensure_set()`: a sequência de um projeto antigo ganha um id aí.
+- **Tipo de mudança novo**, `changed("sequencias")`: só nomes e ordem (abas e Mídia; a prévia e o som não recarregam). Desfazer
+  e refazer também o emitem quando só isso difere (`_without_tabs`: o projeto sem os nomes e a ordem, com a mesma aba
+  aberta); senão `"*"`. Criar, apagar e abrir uma aba emitem `"*"`.
+- **Abas** (`ui/sequence_tabs.SequenceTabs`): widget pintado à mão (tema do app), uma fileira acima da barra de ferramentas
+  da linha do tempo (`TimelineEditor.add_header`). Sinais `activated`, `addRequested`, `renamed`, `duplicateRequested`,
+  `settingsRequested`, `deleteRequested`, `moved`; não conhece o modelo. `set_tabs` não faz nada quando nada mudou (a janela
+  avisa a cada edição). Ícone `sequence` em `icons.py`.
+- **Ligação com a janela** (`ui/sequencias_ui.SequencesUI`, `MainWindow.seqs_ui`; padrão de `cor_ui`): cria as abas, os
+  atalhos Ctrl+Tab / Ctrl+Shift+Tab (só no modo Edição), os diálogos (criar, pergunta de apagar), a Mídia (`sync_bin`,
+  `bin_menu`) e os alvos da exportação (`export_targets`). Ganchos em `main_window.py`: `_model_changed` chama
+  `seqs_ui.model_changed(kind)` **antes** de recarregar a fonte da prévia; `reset()` depois de cada `set_sequence` com
+  `_loading` (novo projeto, abrir projeto, abrir arquivo); `problems()` depois de abrir.
+- **Estado por sequência**, só na sessão (`View`: quadro do cursor, entrada e saída, zoom e rolagem da linha do tempo), por id.
+  `model_changed` percebe que a sequência aberta é outra (`seq.id` diferente: aba escolhida **ou** um desfazer que voltou a
+  outra), guarda a vista da que saiu e põe a da que entrou, uma aba nova com o zoom de agora. Uma sequência só usa a vaga
+  `LONE` (o id dela some do JSON). Fonte da prévia, som (a mixagem da aba nova sai na hora, `_schedule_mix(immediate=True)`)
+  e escopos seguem o caminho de sempre de `_refresh_source`.
+- **Sequência vazia aberta**: `info` None, como num projeto vazio (texto de boas-vindas, sem prévia, som nem escopos; a hora e
+  a barra de status voltam ao zero). No modo Película, `_film_info()` não mostra o arquivo de antes: com várias sequências, a
+  aberta vazia é uma edição vazia. Uma sequência trivial com `file_info` igual segue lendo o arquivo direto. `_has_project()`
+  (algo aberto **ou** várias sequências) libera salvar e o "alterações não salvas" mesmo com a aberta vazia, e o botão
+  Exportar vale enquanto alguma sequência tem clipes.
+- **Alterações não salvas**: `_state()` compara o projeto a partir da **primeira** aba (`family()[0].to_json()`), não o bloco
+  da aberta (`_seq_json`, que é o que o `.plc` grava: a aberta ao salvar abre no topo). Assim trocar de aba não parece mudança.
+- **Mídia**: as fontes `sequencia:<id>` (que existem só com 2 ou mais sequências, `SequenceSet.sync`) viram itens do tipo
+  `"sequencia"` (`edit_panels.source_kind`), com o ícone e a duração; sem miniatura de imagem. `sync_bin` entra e tira os
+  itens e atualiza o texto a cada mudança. Dois cliques emitem `MediaBin.openRequested` (abre a aba) em vez de `addRequested`;
+  podem ir para pastas (a chave `sequencia:<id>` já vale em `Folders`); o botão de tirar da lista apaga a sequência (com a
+  pergunta). `MIME_SOURCE` não mudou. **Pôr uma sequência na linha do tempo é recusado** em `MainWindow._insert`, com uma
+  mensagem curta (a interface do aninhar é da frente seguinte). O menu de um item ganha **Nova sequência a partir deste
+  vídeo** (`MediaBin.extra_menu`; vale o primeiro vídeo dos escolhidos e `Sequence.for_source`).
+- **Janela de criar** (`ui/sequence_dialog.SequenceDialog(parent, seq, name=…, reference=…, taken=…)`): a de configurar, com o
+  campo do nome, sem as referências aos clipes e, com `reference`, a opção "Igual ao vídeo". Os valores de partida são os da
+  sequência aberta (com os fades curtos ligados, como toda sequência nova) ou os de `Sequence.for_source`.
+- **Exportar** (`ui/export_dialog`): `ExportTarget` (id, nome, `info`, a cópia da sequência, entrada e saída, capítulos,
+  legendas e quadro da prévia) é o que a janela entrega por sequência (`SequencesUI.export_targets`; as vazias não saem). Com
+  duas ou mais, a linha **Sequência** escolhe a que sai (`_set_target` refaz título, duração, trecho, capítulos, legendas,
+  transparência, qualidades prontas, rótulos de tamanho, nome proposto e prévia); o nome que a pessoa digitou fica. **Pôr várias
+  na fila**: `jobs()` devolve uma `ExportJob` por sequência marcada, com as mesmas opções, `sequence` = a cópia (`Sequence.copy`,
+  com as irmãs) e o nome `<nome da sequência>_pelicula.<ext>` na pasta do destino; o que já existe na fila ou no disco vira
+  `nome_2`. Uma sequência sozinha não muda: o nome proposto continua `<arquivo>_edicao_pelicula`. `Project.problems`
+  (avisos de `SequenceSet.validate`, que o `project.load` já não repassava) chega à janela por `seqs_ui.problems`.
+- **Terminal** (`cli.py`): `--sequencia NOME` em `exportar` e `quadro` (`pick_sequence`: id ou nome sem maiúsculas e minúsculas;
+  padrão, a aberta ao salvar; nome errado: erro com a lista), `info projeto.plc` (`project_info`). `--trecho`, a entrada e a
+  saída e o quadro padrão do projeto são da sequência aberta ao salvar: com outra, `--trecho` é recusado e o quadro padrão é o 0.
+- **Testes**: `tests/test_sequencias.py` (operações do modelo, sem GPU), `tests/sequencias_ui_cases.py` +
+  `tests/test_sequencias_ui.py` (abas, janela de criar, trocas entre vazia/só o arquivo/montagem/fps e tamanho diferentes nos
+  dois modos, estado por aba, desfazer entre abas, "não salvas", reabrir, Mídia, exportação em fila e uma exportação real de
+  duas sequências), `tests/test_sequencias_cli.py` (terminal, com exportação e quadro de verdade).
+- **Limites**: sequência da Mídia na linha do tempo, duplo clique num clipe aninhado e "Aninhar seleção" ficam para a frente
+  C; a miniatura da sequência na Mídia é só o ícone; o estado das abas (cursor, zoom) não vai para o `.plc`; sem arrastar
+  uma aba para fora; "Pôr várias na fila" usa o trecho inteiro de cada sequência (entrada e saída marcadas valem só para a
+  aberta, quando é a única escolhida).

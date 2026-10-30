@@ -522,6 +522,42 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
   prévia mostra um xadrez nesses lugares; para gravar a transparência, exporte em um formato com alfa (veja
   *Depois da edição*).
 
+### Várias sequências (1.7)
+
+Um projeto pode ter mais de uma **sequência**: uma abertura e um corte final, as versões vertical e horizontal do mesmo
+vídeo, cenas para montar à parte. Cada uma tem o seu tamanho, os seus quadros por segundo, a sua proporção, as suas
+faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são uma só para o projeto todo.
+
+- **As abas** ficam logo acima da linha do tempo, sempre à vista no modo Edição, também com uma sequência só. O **+** no
+  fim cria uma sequência nova; **clique** abre uma, **dois cliques** (ou *Renomear*) trocam o nome ali mesmo, e
+  **arrastar** muda a ordem. O **botão direito** abre *Renomear*, *Duplicar*, *Configurar…* (a janela de sempre, para
+  aquela sequência) e *Apagar*. Nomes compridos se cortam com "…" e a dica da aba mostra o nome inteiro, o tamanho e os
+  quadros por segundo. **Ctrl+Tab** e **Ctrl+Shift+Tab** passam para a aba seguinte e a anterior.
+- **Criar**: no **+** a janela já vem com os valores da sequência aberta (nome, resolução, quadros por segundo, fundo…).
+  Na **Mídia**, o botão direito num vídeo ou imagem tem **Nova sequência a partir deste vídeo**: a janela vem com a
+  resolução e os quadros por segundo dele (uma imagem fica com o tamanho dela e 24 quadros/s), o vídeo entra na
+  sequência nova ao confirmar, e dá para mudar qualquer coisa antes. Escolhidos vários itens, vale o primeiro vídeo.
+- **Apagar** pergunta antes e se desfaz com **Ctrl+Z**. Se outras sequências usam a que vai embora como clipe, a pergunta diz
+  em quais e quantos clipes saem junto. A última sequência do projeto não se apaga.
+- **A que está aberta** é a que o modo Película usa e a que a exportação oferece primeiro. Cada sequência guarda a posição do
+  cursor, a entrada e a saída e o zoom da linha do tempo enquanto o app está aberto; uma aba aberta pela primeira vez
+  começa no quadro 0. O projeto grava a que estava aberta ao salvar. **Trocar de aba não é uma mudança** (não pede para
+  salvar nem entra no desfazer); **Ctrl+Z** é um só para o projeto inteiro e, se a última mudança foi em outra aba,
+  volta para ela.
+- **Sequência vazia**: uma sequência nova não tem clipes, e a janela fica como num projeto vazio do modo Edição (sem
+  prévia nem som). Dá para salvar o projeto assim e exportar outra sequência.
+- **Na Mídia** as sequências aparecem, com um ícone próprio, quando o projeto tem **duas ou mais**: dois cliques abrem a aba
+  e elas podem ir para pastas como qualquer item. Por enquanto uma sequência da Mídia **não** pode ser posta na linha do
+  tempo de outra (a janela avisa); isso vem depois.
+- **Exportar**: com duas ou mais sequências a janela ganha a linha **Sequência**, com a aberta escolhida. Trocar de sequência
+  refaz o que depende dela: a duração, o trecho (volta para a sequência inteira), os capítulos, as legendas, a transparência,
+  o nome e o tamanho do arquivo e a prévia. **Pôr várias sequências na fila** deixa marcar quais saem: uma tarefa para
+  cada, com as mesmas opções, cada arquivo com o nome da sequência na pasta do destino (sem sobrescrever nada: se já
+  existe, vira `nome_2`). Uma sequência sozinha exporta como sempre, inclusive o nome do arquivo.
+- **No terminal**, `pelicula-cli info projeto.plc` lista as sequências (a aberta ao salvar vem marcada) e `exportar` e
+  `quadro` aceitam `--sequencia NOME` (o nome ou o id; sem ela vale a que estava aberta ao salvar). Um nome que não existe
+  é um erro que lista os válidos.
+
 ### Proporção da sequência
 
 **Proporção** muda o formato da imagem do vídeo montado para cinema: *Do tamanho escolhido* (o padrão, nada muda), 1,33,
@@ -631,6 +667,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl+I | Importar mídia |
 | Ctrl+F (no painel) / / | Filtrar ajustes do clipe (Esc limpa) |
 | Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
+| Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

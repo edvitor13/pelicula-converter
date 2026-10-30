@@ -10,9 +10,14 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
   inclusive ao desfazer/refazer uma mudança só de marcadores;
 - "pastas": só as pastas do painel de mídia (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer;
+- "sequencias": só os nomes ou a ordem das sequências do projeto (abas e Mídia; a imagem e o som não mudam),
+  inclusive ao desfazer/refazer;
 - "subtitles": só as legendas mudaram (`edit_subtitles`; a montagem e o som não mudam, só o desenho das
   legendas gravadas no vídeo), inclusive ao desfazer/refazer;
-- "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
+- "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer, criar, apagar ou trocar de sequência).
+
+Várias sequências (#57): o histórico é um só para o projeto inteiro (`timeline.History`); criar, duplicar, renomear,
+apagar e mover sequências são um passo cada, e `activate_sequence` (trocar de aba) não é passo.
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
 outro, e "Excluir" apaga o que estiver selecionado.
@@ -48,6 +53,25 @@ def _without_folders(seq: Sequence) -> dict[str, Any]:
     d.pop("pastas", None)
     d.pop("formato", None)  # o recurso "pastas" muda o formato do bloco
     return d
+
+
+def _without_tabs(seq: Sequence) -> dict[str, Any] | None:
+    """O projeto sem os nomes e a ordem das sequências (None: uma sequência só). Dois estados iguais assim diferem só
+    no que as abas e a Mídia mostram."""
+    group = seq.family()
+    if len(group) < 2:
+        return None
+    group[0].siblings.sync()
+    fmt = seq.block_format()
+    blocks = {}
+    for s in group:
+        b = s._block_json(fmt, False)
+        b["nome"] = ""
+        for src in b.get("fontes", []):
+            if src.get("tipo") == timeline.SOURCE_SEQUENCE:
+                src.get("dados", {}).pop("nome", None)
+        blocks[s.id] = b
+    return {"blocos": blocks, "pastas": seq.folders.to_json(), "aberta": seq.id}
 
 
 def _without_subtitles(seq: Sequence) -> dict[str, Any]:
@@ -107,11 +131,13 @@ class TimelineModel(QObject):
         only_markers = _without_markers(seq) == _without_markers(self.seq)
         only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
         only_folders = not (only_markers or only_subtitles) and _without_folders(seq) == _without_folders(self.seq)
+        tabs = _without_tabs(seq)
+        only_tabs = not (only_markers or only_subtitles or only_folders) and tabs is not None             and tabs == _without_tabs(self.seq)
         self.seq = seq
         self._filter_selection()
-        # Desfazer um marcador ou uma legenda não recarrega a prévia.
+        # Desfazer um marcador, uma legenda, uma pasta ou o nome de uma sequência não recarrega a prévia.
         self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles
-                          else "pastas" if only_folders else "*")
+                          else "pastas" if only_folders else "sequencias" if only_tabs else "*")
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -710,6 +736,138 @@ class TimelineModel(QObject):
         """O item saiu da Mídia: sai também da pasta (sem passo do desfazer quando não estava em nenhuma)."""
         if self.seq.folders.unassign(path):
             self._done("pastas")
+
+    # ------------------------------------------------------------ várias sequências do projeto (#57)
+    # Cada operação é um passo do desfazer (que é um só para o projeto: `timeline.History`). Trocar de aba não é passo.
+    def sequences(self) -> list[Sequence]:
+        """As sequências do projeto, na ordem das abas (uma só: a lista de um item)."""
+        return self.seq.family()
+
+    def sequence_by(self, key: str) -> Sequence | None:
+        """A sequência pelo id ou pelo nome mostrado (sem maiúsculas e minúsculas)."""
+        group = self.seq.family()
+        hit = next((s for s in group if s.id and s.id == key), None)
+        if hit is None:
+            low = str(key).strip().casefold()
+            hit = next((s for s in group if s.display_name.casefold() == low), None)
+        return hit
+
+    def name_taken(self, name: str, sid: str = "") -> bool:
+        """Outra sequência (que não a `sid`) já usa o nome? Nomes iguais atrapalhariam a escolha no terminal."""
+        low = name.strip().casefold()
+        return any(s.display_name.casefold() == low for s in self.seq.family() if not (sid and s.id == sid))
+
+    def _switch_to(self, seq: Sequence) -> None:
+        self.seq = seq
+        self.selection = []
+        self.marker_sel = None
+
+    def activate_sequence(self, sid: str) -> bool:
+        """Abre a aba da sequência: não é um passo do desfazer (o que estava pendente é fechado antes) e a seleção
+        de clipes some. Devolve False se ela já estava aberta ou não existe."""
+        target = next((s for s in self.seq.family() if s.id == sid), None)
+        if target is None or target is self.seq:
+            return False
+        self.commit()
+        self._switch_to(target)
+        self.changed.emit("*")
+        self.selectionChanged.emit()
+        self.historyChanged.emit()
+        return True
+
+    def new_sequence(self, width: int, height: int, fps_str: str, name: str = "", background=None,
+                     micro_fade: bool | None = None, magnetic: bool | None = None, transparent: bool | None = None,
+                     window: float | None = None, source: Source | None = None) -> str:
+        """Sequência nova, vazia (ou só com `source` no começo, no mesmo passo), no fim das abas e já aberta.
+        Devolve o id. `name` vazio = o primeiro "Sequência N" livre."""
+        self.commit()
+        group = self.seq.ensure_set()
+        new = group.create(width, height, fps_str, name.strip())
+        if background is not None:
+            new.background = tuple(min(max(float(x), 0.0), 1.0) for x in list(background)[:3])
+        if micro_fade is not None:
+            new.micro_fade = bool(micro_fade)
+        if magnetic is not None:
+            new.magnetic = bool(magnetic)
+        if transparent is not None:
+            new.transparent = bool(transparent)
+        if window is not None:
+            new.window = timeline.clean_window(window)
+        if source is not None:
+            with new.keep_main():
+                new.insert_media(source, 0)
+        self._switch_to(new)
+        self._done("*")
+        self.selectionChanged.emit()
+        return new.id
+
+    def duplicate_sequence(self, sid: str = "", name: str = "") -> str:
+        """Cópia da sequência (a da aba aberta, sem `sid`) logo depois dela, já aberta. Devolve o id ("" = nada)."""
+        src = next((s for s in self.seq.family() if s.id == sid), None) if sid else self.seq
+        if src is None:
+            return ""
+        self.commit()
+        dup = src.ensure_set().duplicate(src, name.strip())
+        self._switch_to(dup)
+        self._done("*")
+        self.selectionChanged.emit()
+        return dup.id
+
+    def rename_sequence(self, sid: str, name: str) -> bool:
+        """Dá o nome à sequência. Vazio ou igual ao de outra: nada (False). Só as abas e a Mídia mudam."""
+        target = next((s for s in self.seq.family() if s.id == sid), None) if sid else self.seq
+        name = name.strip()
+        if target is None or not name or name == target.display_name or self.name_taken(name, target.id):
+            return False
+        self.commit()
+        target.name = name
+        self._done("sequencias")
+        return True
+
+    def sequence_users(self, sid: str) -> list[tuple[Sequence, int]]:
+        """Quem usa a sequência como clipe: [(sequência, número de clipes)] (apagá-la tira esses clipes)."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None)
+        if target is None or len(group) < 2:
+            return []
+        key = Source.for_sequence(target).path
+        return [(s, sum(1 for c in s.clips if c.src == key)) for s in target.siblings.users(target)]
+
+    def can_remove_sequence(self) -> bool:
+        return len(self.seq.family()) > 1
+
+    def remove_sequence(self, sid: str = "") -> int:
+        """Apaga a sequência (a aberta, sem `sid`) com os clipes dela nas outras: um passo do desfazer. Devolve quantos
+        clipes saíram; -1 se não dá (a última fica). Apagando a aberta, abre a vizinha."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None) if sid else self.seq
+        if target is None or len(group) < 2:
+            return -1
+        self.commit()
+        at = next(i for i, s in enumerate(group) if s is target)
+        gone = target.siblings.remove(target)
+        for s in target.siblings.items:
+            if s.magnetic and gone:
+                s.settle_main()
+        if target is self.seq:
+            rest = target.siblings.items
+            self._switch_to(rest[min(at, len(rest) - 1)])
+        self._done("*")
+        self.selectionChanged.emit()
+        return gone
+
+    def move_sequence(self, sid: str, to: int) -> bool:
+        """Muda a sequência de aba (`to` = a posição nova, de 0)."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None)
+        if target is None or len(group) < 2:
+            return False
+        before = [s.id for s in group]
+        target.siblings.move(target, to)
+        if [s.id for s in target.siblings.items] == before:
+            return False
+        self._done("sequencias")
+        return True
 
     # ------------------------------------------------------------ chaves de animação (keyframes.py)
     # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo

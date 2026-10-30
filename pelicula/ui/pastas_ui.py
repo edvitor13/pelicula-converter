@@ -25,7 +25,7 @@ MIME_FOLDERS = "application/x-pelicula-pastas"   # ids das pastas arrastadas (s�
 FOLDER_ICON = 28
 FOLDER_ROW = 36
 SORTS = [("ordem", N_("Ordem de importação")), ("nome", N_("Nome")), ("tipo", N_("Tipo")), ("data", N_("Data"))]
-KIND_ORDER = {"video": 0, "imagem": 1, "audio": 2, "gerado": 3}
+KIND_ORDER = {"video": 0, "imagem": 1, "audio": 2, "gerado": 3, "sequencia": 4}
 DEFAULT_COLOR = "#a39684"   # pasta sem cor escolhida
 
 
@@ -575,7 +575,7 @@ class FolderActions:
         if isinstance(it, FolderItem):
             self.tree.edit_folder(it.fid)
         elif isinstance(it, MediaItem):
-            self.bin.addRequested.emit(it.path)
+            (self.bin.openRequested if it.kind == "sequencia" else self.bin.addRequested).emit(it.path)
 
     # -------------------------------------------------------- menus
     def menu(self, pos) -> None:

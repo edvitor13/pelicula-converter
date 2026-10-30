@@ -5,15 +5,18 @@ from __future__ import annotations
 import math
 import os
 import queue
+import re
 import threading
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+                               QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMessageBox, QPushButton, QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import chapters as chapters_mod, export, media, platforms, subtitles as subs_mod, system
 from .. import fit as fitmod
@@ -48,6 +51,27 @@ SUBTITLE_LABELS = {"nao": N_("Sem legendas"), "faixa": N_("Faixa de legenda no a
                    "copia": N_("Gravada na cópia (antes do look: com grão, halação e tremor)"),
                    "digital": N_("Digital (gravada depois do look, nítida)"), "srt": N_("Arquivo .srt ao lado do vídeo"),
                    "vtt": N_("Arquivo .vtt ao lado do vídeo")}
+
+@dataclass
+class ExportTarget:
+    """Uma sequência do projeto que pode sair na exportação (#57), com o que a janela principal entrega pronto: o que
+    depende dela (`info`, a montagem, capítulos, legendas, entrada e saída) muda junto quando ela é escolhida."""
+
+    id: str
+    name: str
+    info: media.MediaInfo
+    sequence: Any = None          # timeline.Sequence (uma cópia; None = o arquivo de `info`, lido direto)
+    in_out: tuple[int, int] | None = None
+    chapters: list = field(default_factory=list)
+    subtitles: Any = None
+    cues: list = field(default_factory=list)
+    frame: int = 0                # o quadro da prévia do resultado
+
+
+def safe_name(name: str) -> str:
+    """O nome de uma sequência como parte do nome de um arquivo."""
+    return re.sub(r'[<>:"/\\|?*]', "-", name).strip(" .") or "sequencia"
+
 
 def fmt_dur(sec: float) -> str:
     sec = int(round(max(sec, 1)))
@@ -115,9 +139,14 @@ class ExportDialog(QDialog):
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
                  last_platform: str = "", chapters=None, look_keys: dict | None = None, subtitles=None,
-                 subtitle_cues=None, queue_jobs=(), no_effects: bool = False):
+                 subtitle_cues=None, queue_jobs=(), no_effects: bool = False, targets=None, target_id: str = ""):
         super().__init__(parent)
         self.info = info
+        # 1.7, várias sequências: com duas ou mais, uma linha "Sequência" escolhe qual sai (a aberta, para começar) e
+        # dá para pôr várias na fila, uma tarefa para cada, com as mesmas opções (`ExportTarget`, `jobs`).
+        self.targets: dict[str, ExportTarget] = {t.id: t for t in (targets or [])} if len(targets or []) > 1 else {}
+        self._target_id = target_id
+        self._auto_stem = ""   # o nome que a janela propôs para o arquivo (enquanto a pessoa não muda)
         self.no_effects = bool(no_effects)  # 1.7: "Desligar todos os efeitos" (`ExportSettings.no_effects`)
         self.queue_jobs = queue_jobs  # o que já está na fila: outro trabalho com o mesmo destino pede outro nome
         # legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência
@@ -151,7 +180,7 @@ class ExportDialog(QDialog):
         k = QLabel(_("EXPORTAR"))
         k.setObjectName("Kicker")
         lay.addWidget(k)
-        t = QLabel((sequence.name or _("Montagem da edição")) if sequence is not None else Path(info.path).name)
+        t = QLabel(self._title_of(sequence, info))
         t.setObjectName("PanelTitle")
         t.setStyleSheet("font-size: 14pt;")
         lay.addWidget(t)
@@ -159,6 +188,10 @@ class ExportDialog(QDialog):
         sub.setObjectName("Muted")
         sub.setWordWrap(True)
         lay.addWidget(sub)
+        self.title_label, self.sub_label = t, sub
+        self.seq_group = self._sequence_group()
+        lay.addWidget(self.seq_group)
+        self.seq_group.setVisible(bool(self.targets))
 
         # destino
         row = QHBoxLayout()
@@ -321,6 +354,7 @@ class ExportDialog(QDialog):
         ok.setObjectName("Primary")
         ok.setIcon(icons.icon("export", "#1b1205", 16))
         ok.clicked.connect(self._accept)
+        self.ok_button = ok
         btns.addWidget(cancel)
         btns.addWidget(ok)
         fl.addLayout(btns)
@@ -358,6 +392,207 @@ class ExportDialog(QDialog):
         self._update_mem()
         self._sync_chapters()
         self._init_subtitles()
+
+    # ------------------------------------------------------------ várias sequências
+    def _title_of(self, sequence, info) -> str:
+        if self.targets and self._target_id in self.targets:
+            return self.targets[self._target_id].name
+        return (sequence.name or _("Montagem da edição")) if sequence is not None else Path(info.path).name
+
+    def _stem(self, tid: str = "") -> str:
+        """O nome proposto para o arquivo (sem a extensão). Com várias sequências, o da sequência; sozinha, como sempre."""
+        t = self.targets.get(tid or self._target_id)
+        if t is not None:
+            return safe_name(t.name) + "_pelicula"
+        return media.sequence_stem(self.info.path) + "_pelicula"
+
+    def _sequence_group(self) -> QGroupBox:
+        """A linha "Sequência": qual sai e, marcando "Pôr várias na fila", quais (uma tarefa para cada)."""
+        g = QGroupBox(_("Sequência"))
+        v = QVBoxLayout(g)
+        self.seq_box = compact(QComboBox(), 20)
+        for t in self.targets.values():
+            self.seq_box.addItem(t.name, t.id)
+        self.seq_box.setCurrentIndex(max(0, self.seq_box.findData(self._target_id)))
+        self._target_id = str(self.seq_box.currentData() or self._target_id)
+        self.seq_box.setToolTip(_("Qual sequência do projeto sai. Escolher outra troca o que depende dela: duração, "
+                                  "trecho (volta para a sequência inteira), capítulos, legendas, nome e tamanho."))
+        v.addWidget(self.seq_box)
+        self.seq_info = QLabel()
+        self.seq_info.setObjectName("Muted")
+        v.addWidget(self.seq_info)
+        self.multi_box = QCheckBox(_("Pôr várias sequências na fila"))
+        self.multi_box.setToolTip(_("Uma tarefa para cada sequência marcada, com as mesmas opções abaixo. Cada arquivo "
+                                    "leva o nome da sequência, na pasta do destino."))
+        v.addWidget(self.multi_box)
+        self.multi_list = QListWidget()
+        for t in self.targets.values():
+            item = QListWidgetItem(t.name)
+            item.setData(Qt.ItemDataRole.UserRole, t.id)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if t.id == self._target_id else Qt.CheckState.Unchecked)
+            self.multi_list.addItem(item)
+        self.multi_list.setMaximumHeight(min(190, 34 * max(1, len(self.targets)) + 12))
+        self.multi_list.setVisible(False)
+        self.multi_list.itemChanged.connect(self._multi_changed)
+        v.addWidget(self.multi_list)
+        self.multi_box.toggled.connect(self._multi_toggled)
+        self.seq_box.currentIndexChanged.connect(self._sequence_changed)
+        self._sync_seq_info()
+        return g
+
+    def _sync_seq_info(self) -> None:
+        if not self.targets:
+            return
+        i = self.info
+        self.seq_info.setText(_("{w} × {h} • {fps} quadros/s • {dur}").format(
+            w=i.width, h=i.height, fps=fmt_decimal(i.fps, 3), dur=fmt_dur(i.frames / max(i.fps, 1e-6))))
+
+    def multi_on(self) -> bool:
+        return bool(self.targets) and self.multi_box.isChecked()
+
+    def checked_ids(self) -> list[str]:
+        """As sequências marcadas para a fila, na ordem das abas."""
+        out = []
+        for i in range(self.multi_list.count()):
+            it = self.multi_list.item(i)
+            if it.checkState() == Qt.CheckState.Checked:
+                out.append(str(it.data(Qt.ItemDataRole.UserRole)))
+        return out
+
+    def _multi_toggled(self, on: bool) -> None:
+        self.multi_list.setVisible(on)
+        self._multi_changed()
+
+    def _multi_changed(self, *_args) -> None:
+        n = len(self.checked_ids()) if self.multi_on() else 1
+        self.ok_button.setText("  " + (_("Pôr {n} na fila").format(n=n) if self.multi_on()
+                                       else _("Adicionar à fila e exportar")))
+        self.ok_button.setEnabled(n > 0)
+        self.path.setToolTip(_("O arquivo da sequência escolhida; as outras vão para esta pasta, com o nome de cada "
+                               "uma.") if self.multi_on() else "")
+
+    def _sequence_changed(self, *_args) -> None:
+        tid = str(self.seq_box.currentData() or "")
+        if tid and tid != self._target_id:
+            self._set_target(tid)
+
+    def _set_target(self, tid: str) -> None:
+        """Outra sequência escolhida: tudo o que depende dela é refeito (duração, trecho de volta para a sequência
+        inteira, capítulos, legendas, transparência, qualidades prontas, tamanhos, nome do arquivo e a prévia)."""
+        t = self.targets.get(tid)
+        if t is None:
+            return
+        old_stem = self._auto_stem
+        self._target_id = tid
+        self.info, self.sequence = t.info, t.sequence
+        self.chapters, self.subs_doc, self.subs_cues = list(t.chapters), t.subtitles, list(t.cues)
+        self.in_out, self.frame_index = t.in_out, int(t.frame)
+        self.title_label.setText(t.name)
+        self.sub_label.setText(_("Look: {look}  •  {resumo}").format(look=self.preset_name, resumo=t.info.summary()))
+        self._sync_seq_info()
+        if self.multi_on():  # a escolhida entra na fila junto
+            for i in range(self.multi_list.count()):
+                if self.multi_list.item(i).data(Qt.ItemDataRole.UserRole) == tid:
+                    self.multi_list.item(i).setCheckState(Qt.CheckState.Checked)
+        self._building = True
+        try:
+            self.r_all.setChecked(True)
+            if self.in_out:
+                a, b = self.in_out
+                self.r_sel.setText(_("Só o trecho marcado ({inicio} – {fim})").format(
+                    inicio=timecode(a, self.info.fps), fim=timecode(b, self.info.fps)))
+                self.r_sel.setEnabled(True)
+                self.r_sel.setToolTip("")
+            else:
+                self.r_sel.setText(_("Só o trecho marcado"))
+                self.r_sel.setEnabled(False)
+                self.r_sel.setToolTip(_("Marque entrada (I) e saída (O) na linha do tempo."))
+            self._reload_presets()
+            self._res_labels(self.codec.currentData())
+            self.alpha_box.setChecked(bool(getattr(self.sequence, "transparent", False)))
+            self.chapters_box.setText(_("Incluir capítulos ({n}) — dos marcadores marcados como capítulo").format(
+                n=len(self.chapters)))
+            self.chapters_box.setVisible(bool(self.chapters) and not self.info.is_image)
+            self.subs_row.setVisible(bool(self.subs_cues) and self.subs_doc is not None)
+        finally:
+            self._building = False
+        self._sync_alpha()
+        self._init_subtitles()
+        cur = self.path.text().strip()
+        if cur and old_stem and Path(cur).stem == old_stem:  # o nome era o proposto: acompanha a sequência
+            stem = self._stem()
+            self._auto_stem = stem
+            self.path.setText(str(Path(cur).with_name(stem + Path(cur).suffix)))
+        self._preview_key = None
+        self._summary()
+        self._update_mem()
+
+    def _reload_presets(self) -> None:
+        """As qualidades prontas de outra sequência: só a "Original" depende do arquivo (formato do primeiro vídeo)."""
+        new = export.quality_presets(self.info)
+        if [(k, s.to_dict()) for k, _l, s in new] == [(k, s.to_dict()) for k, _l, s in self.presets]:
+            return
+        cur = self.quality.currentData()
+        self.presets = new
+        self.quality.blockSignals(True)
+        self.quality.clear()
+        for key, label, _s in new:
+            self.quality.addItem(label, key)
+        self.quality.addItem(_("Personalizado"), "custom")
+        i = self.quality.findData(cur)
+        self.quality.setCurrentIndex(i if i >= 0 else self.quality.count() - 1)
+        self.quality.blockSignals(False)
+        if cur == "original":
+            self._building = False
+            self._quality_changed()
+
+    def jobs(self) -> list[export.ExportJob]:
+        """As tarefas da fila: uma para a sequência escolhida (`job`) ou, em "Pôr várias sequências na fila", uma para
+        cada marcada, com as mesmas opções. A escolhida usa o destino digitado; as outras, o nome da sequência na mesma
+        pasta (sem sobrescrever nada: se o nome já existe, vira `nome_2`)."""
+        if not self.multi_on():
+            return [self.job()]
+        base = self.settings()
+        typed = self.path.text().strip()
+        made: dict[str, export.ExportJob] = {}
+        taken = list(self.queue_jobs)
+        wanted = self.checked_ids()
+        order = ([self._target_id] if self._target_id in wanted else []) + [i for i in wanted if i != self._target_id]
+        for tid in order:
+            if tid == self._target_id:
+                job = self.job()
+            else:
+                t = self.targets[tid]
+                s = export.ExportSettings.from_dict(base.to_dict())
+                if media.pix_has_alpha(s.pix) and not getattr(t.sequence, "transparent", False):
+                    s.pix = export.opaque_pix(s.codec, s.pix)  # esta sequência não tem fundo transparente
+                path = str(Path(typed).with_name(self._stem(tid) + Path(typed).suffix))
+                if (export.queue_clash(path, s, taken) or export.output_exists(path, s)
+                        or export.partial_clash(path, s, export.job_inputs(t.info, t.sequence))):
+                    path = export.free_output(path, s, taken)
+                a, b = self._range_for(t)
+                job = export.ExportJob(
+                    info=t.info, values=dict(self.values), settings=s, out_path=path, start_frame=a, end_frame=b,
+                    name=f"{Path(path).name}  •  {self.preset_name}", sequence=t.sequence,
+                    chapters=self._chapters_of(t.chapters), look_keys=dict(self.look_keys),
+                    **subs_mod.delivery_fields(self.subtitle_choice() if t.cues and t.subtitles is not None else "nao",
+                                               t.subtitles, t.cues, self.container.currentData()))
+            made[tid] = job
+            taken.append(job)
+        return [made[i] for i in wanted]
+
+    def _range_for(self, t: ExportTarget) -> tuple[int, int]:
+        """O trecho de outra sequência: inteira, com o corte na duração máxima da plataforma (se marcado)."""
+        p = self.current_platform()
+        if p is not None and p.max_s and not self.trim_max.isHidden() and self.trim_max.isChecked():
+            return 0, max(0, min(t.info.frames, int(math.floor(p.max_s * t.info.fps + 1e-6))) - 1)
+        return 0, -1
+
+    def _chapters_of(self, points) -> list[tuple[int, str]]:
+        if not points or self.chapters_box.isHidden() or not self.chapters_box.isChecked():
+            return []
+        return list(points) if self.container.currentData() in chapters_mod.CONTAINERS else []
 
     # ------------------------------------------------------------ plataforma
     def _platform_group(self) -> QGroupBox:
@@ -803,7 +1038,8 @@ class ExportDialog(QDialog):
         ext = self.container.currentData() or "mp4"
         cur = self.path.text().strip()
         if not cur:
-            stem = media.sequence_stem(self.info.path) + "_pelicula"
+            stem = self._stem()
+            self._auto_stem = stem
             cur = str(Path(self.out_dir) / f"{stem}.{ext}")
         else:
             cur = str(Path(cur).with_suffix("." + ext))
