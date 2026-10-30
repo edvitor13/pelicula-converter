@@ -20,6 +20,18 @@ Dicas de uso dos controles: clique no número para digitar (aceita vírgula, `%`
 **duplo clique** no slider volta ao padrão, **Shift + arrastar** faz ajuste fino, o botão ↺ do
 título restaura a seção inteira e o dado (*Sortear*) troca as sementes aleatórias.
 
+**Filtrar ajustes (1.7).** O campo **Filtrar ajustes…** no alto do painel Ajustes (e do painel Clipe, no modo Edição)
+procura em todos os cartões ao mesmo tempo: no título e no subtítulo de cada seção, no nome e na dica de cada controle,
+nos nomes das opções dos menus e nas palavras que as pessoas costumam usar (por exemplo "chromatic", "fringe" ou
+"franja" para a aberração cromática, "denoise" para o ruído). Digite em **português, inglês ou espanhol**, seja qual for
+o idioma do app, sem se preocupar com maiúsculas nem acentos ("aberracao" acha "aberração"). Cada palavra digitada
+precisa aparecer, em qualquer ordem; só quando nada é encontrado o filtro perdoa uma letra errada em palavras de 5
+letras ou mais. Os cartões sem relação somem; os que ficam se abrem e **destacam** o controle que bateu, mostrando até
+os ajustes avançados que estavam escondidos. Se o ajuste está num **módulo desligado**, o painel diz em qual módulo ele
+está e que dá para ligar em Configurações › Recursos. **Ctrl+F** (com o foco no painel) ou **/** levam ao campo; **Esc**
+limpa. Apagar o texto devolve o painel exatamente como estava (cartões abertos, avançados, posição da rolagem). O filtro
+só muda o que você vê: não altera nenhum valor, não vai para o projeto e não é lembrado ao fechar o app.
+
 **Animar o look (chaves).** Os ajustes de número, cor e rodas têm um **losango** ao lado do nome: clique para
 gravar uma chave no cursor; com o ajuste animado, mexer no controle grava a chave ali (chave automática); as
 setas ◀ ▶ vão à chave anterior / seguinte e o botão direito escolhe a curva até a próxima chave, apaga a chave

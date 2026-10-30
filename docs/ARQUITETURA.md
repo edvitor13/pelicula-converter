@@ -43,6 +43,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 36. [Base da 1.7: formato 5](#36-base-da-17-formato-5)
+38. [Filtro de busca nos ajustes (1.7)](#38-filtro-de-busca-nos-ajustes-17)
 
 ---
 
@@ -3839,3 +3840,61 @@ projeto usa algo dela, e a 1.6 recusa com "O projeto foi salvo por uma versão m
 - **Projetos gravados pela 1.6** (`tests/data/projetos_1_6/`): os dois projetos da referência da 1.4 com recursos da
   1.6 por cima, gravados pela 1.6.0 com `gerar.py`, junto do que ela fez ao abri-los (`referencia.json`).
   `tests/test_project_migration.py` roda as mesmas conferências nas duas pastas.
+
+## 38. Filtro de busca nos ajustes (1.7)
+
+Um campo "Filtrar ajustes…" no alto do painel de ajustes (Película) e do inspetor do clipe (Edição, páginas de imagem
+e de som). A busca é pura (`pelicula/busca_ajustes.py`, sem Qt); a interface é `pelicula/ui/filtro_ajustes.py`, com uma
+API pequena em `SectionCard`. O filtro só muda o que aparece: não toca valores, render, `look`, `compositor`, formato do
+projeto nem catálogos, e não é gravado em lugar nenhum (nem em `QSettings`).
+
+### 38.1 Índice e busca (`busca_ajustes.py`)
+
+- **Índice por seção** (`build_index`/`index_of`, guardado por lista de seções e montado no primeiro uso): o texto da
+  **seção** = título, subtítulo, `KEYWORDS[chave]` e os textos do parâmetro que liga a seção (`Section.toggle`, que não
+  tem linha); o texto de cada **controle** = rótulo, dica (`tip`), rótulos das opções (`choices`) e a chave interna
+  (também com `_` trocado por espaço). `Section` e `Param` não mudam.
+- **Idiomas:** cada texto entra em pt_BR (o texto-fonte) e nas traduções de `en` e `es` lidas com `i18n.load_catalog`
+  (guardadas no módulo; o idioma ativo da interface não muda e não importa). Texto sem tradução entra só em português.
+- **Normalização:** minúsculas e sem acentos (`norm`, a mesma de `ui/looks._norm`).
+- **Termos:** o texto digitado vira palavras; cada uma precisa aparecer, em qualquer ordem, como pedaço do texto da
+  seção **ou** de algum controle (uma palavra pode bater no título e outra num controle). `search(query, sections)` devolve
+  `{chave da seção: Match(section, keys)}`: `section` = todas as palavras bateram no texto da seção (todas as linhas
+  ficam, nada é destacado); `keys` = chaves dos controles que bateram as palavras que a seção não cobriu (só esses são
+  destacados).
+- **Tolerância:** só se a busca exata não achou **nada**, repete com um erro de digitação (Levenshtein ≤ 1, `within_one`,
+  sem dependência) em palavras de 5 letras ou mais, comparadas com as palavras do texto e com o começo delas; assim
+  o resultado exato nunca ganha ruído.
+- **Sinônimos:** `KEYWORDS = {chave da seção: (termos…)}` (tabela no fim da lista de constantes; um teste confere que as
+  chaves existem). Palavra-chave nova de uma seção nova: acrescente à tabela.
+
+### 38.2 Cartões (`SectionCard.set_filter`)
+
+`set_filter(keys)`: `None` desliga; um conjunto (vazio = a seção inteira bateu) abre o cartão, destaca as linhas de `keys`
+(`objectName` "FiltroHit" com folha de estilo própria na linha, desfeitos ao desligar), mostra as linhas avançadas
+escondidas que bateram e, na cor por faixa (`layout == "hsl"`), escolhe a faixa do primeiro controle que bateu.
+Ao ligar o primeiro filtro o cartão guarda o que a pessoa tinha (aberto/fechado, faixa de cor); ao desligar devolve tudo.
+`set_advanced` guarda o último valor (`_advanced`) e, com filtro, volta a mostrar as linhas que bateram.
+
+### 38.3 Campo e painéis (`ui/filtro_ajustes.py`)
+
+- `install(layout, painel, [cartões…], index=None)` põe um `FiltroAjustes` no layout e liga **Ctrl+F**
+  (`WidgetWithChildrenShortcut`, no painel inteiro: não briga com o Ctrl+F do painel de legendas, que fica no dock
+  dele). Cada lista de cartões é uma página (o look; imagem e som do inspetor); o campo do inspetor é um só e vale para
+  as duas páginas, então o filtro sobrevive à troca de clipe (os cartões do inspetor são fixos; só os valores
+  mudam). O inspetor esconde o campo quando não há clipe (`_show`).
+- **Resultado:** cartões sem relação ficam escondidos (`setVisible(False)`), os que batem aparecem com `set_filter`. Ao
+  começar o filtro a página guarda a visibilidade natural de cada cartão e a posição da rolagem; ao apagar o texto, volta
+  tudo (rolagem também num `QTimer.singleShot(0)`, depois do layout).
+- **Módulos desligados:** o filtro não tem tabela própria: pergunta à janela (`MainWindow._module_tools()` e
+  `modules.enabled_ids`, mais o cartão `lights_card`) quais cartões e linhas são de módulo desligado. Eles nunca
+  reaparecem; se a busca só bate neles, a mensagem é "Está no módulo {nome}: ligue em Configurações › Recursos" (nomes
+  por `module_notice.module_names`); sem nada, "Nenhum ajuste encontrado". Fora da janela principal (testes do
+  inspetor sozinho) não há módulos. `MainWindow.apply_modules` chama `reapply()` no fim, porque ele mexe na
+  visibilidade dos mesmos cartões.
+- **Tecla `/`:** `MainWindow.keyPressEvent` chama `filtro_ajustes.focus_current(win, focusWidget)`, que ignora a tecla
+  quando o foco está num campo de texto (`typing_in_text`) e leva ao filtro do painel do modo atual.
+- **Ganchos fora do módulo novo:** `main_window._right_panel` (`self.look_filter`), `main_window.apply_modules` (`reapply`),
+  `keyPressEvent` (`/`), `show_shortcuts` (uma linha); `edit_panels.ClipInspector.__init__` (`self.filtro`) e `_show`.
+- **Testes:** `tests/test_busca_ajustes.py` (busca, sem Qt) e `tests/busca_ajustes_ui_cases.py` + `tests/test_busca_ajustes_ui.py`
+  (cartões, destaque, avançados, restauração, mensagens, módulo desligado, inspetor, atalhos, valores intactos).

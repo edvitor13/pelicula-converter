@@ -34,6 +34,9 @@ pelicula/
   cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
   i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
   modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
+  busca_ajustes.py           1.7, busca nos ajustes (sem Qt; ARQUITETURA §38): índice das seções/controles em pt, en e es
+                             (títulos, dicas, opções, chave, sinônimos em KEYWORDS), search() sem acentos, por termos,
+                             com tolerância a um erro só quando a busca exata não acha nada
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
@@ -210,6 +213,8 @@ pelicula/
                              1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
                              "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D), fotometro_ui (botão
                              Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
+                             1.7, busca: filtro_ajustes (campo "Filtrar ajustes…" do painel de ajustes e do inspetor,
+                             Ctrl+F e /; SectionCard.set_filter)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -399,6 +404,8 @@ Testes do modo Edição, do plugin e dos módulos:
 |---|---|
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
+| `tests/test_busca_ajustes.py` | a busca nos ajustes sem Qt: pt/en/es, sem acentos, termos em qualquer ordem, erro de digitação só quando a exata falha, sinônimos, chave interna, rótulo de opção, toda seção dos três esquemas indexada |
+| `tests/test_busca_ajustes_ui.py` | casos de `busca_ajustes_ui_cases.py`: filtro do painel da Película e do inspetor (cartões, destaque, avançados, apagar devolve o estado, mensagens, módulo desligado, `/`, Ctrl+F local, valores intactos) |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
 | `tests/test_chaves_ui.py` | casos de `chaves_ui_cases.py`: losangos do inspetor (estados, chave no cursor, chave automática, arrastar = um passo do desfazer, setas, menu de curvas, apagar/limpar), do look, da linha do tempo (juntos, dica, clique vai até a chave, arrastar com ímã no cursor, Shift, Delete, desfazer), `KeyStrip` e a janela (faixas sob a barra e "Look" na Edição) |
