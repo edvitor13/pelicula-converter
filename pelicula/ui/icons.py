@@ -598,6 +598,12 @@ def _draw_color(name: str, p: QPainter, c: QColor) -> None:
         p.drawRoundedRect(QRectF(3, 6, 8, 12), 1.5, 1.5)
         p.drawRoundedRect(QRectF(13, 6, 8, 12), 1.5, 1.5)
         p.drawLine(QPointF(12, 3.5), QPointF(12, 20.5))
+    elif name == "sequence":
+        # Sequência: o quadro com duas faixas de clipes dentro.
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(3.5, 5.5, 17, 13), 2, 2)
+        p.drawLine(QPointF(7, 10), QPointF(13, 10))
+        p.drawLine(QPointF(10, 14), QPointF(17, 14))
     elif name == "fx_off":
         # O brilho de "efeito" riscado: desligar todos os efeitos.
         _pen(p, c, 1.6)

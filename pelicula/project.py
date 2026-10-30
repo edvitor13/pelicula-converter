@@ -60,6 +60,8 @@ class Project:
     # arquivo (modo Película) ou da montagem; {} = look fixo. No JSON, "chaves" (só quando há).
     look_keys: dict[str, list] = field(default_factory=dict)
     path: str = ""  # onde o projeto está salvo (não vai para o arquivo)
+    # Avisos de ao abrir (não vão para o arquivo): o que `timeline.SequenceSet.validate` precisou tirar das sequências.
+    problems: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         base = Path(self.path).parent if self.path else None
@@ -226,13 +228,16 @@ def _block_sources(block: dict[str, Any]) -> list[Any]:
     return out
 
 
-def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
-    """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu."""
+def _relink_sequence(data: Any, project_path: str, problems: list[str] | None = None) -> dict[str, Any] | None:
+    """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu. `problems` recebe o
+    que a leitura precisou tirar das sequências (a janela mostra: o JSON devolvido já vem limpo)."""
     if not isinstance(data, dict):
         return None
     from . import timeline
     from .media import path_exists  # sequência de imagens: o primeiro quadro dela
     seq = timeline.Sequence.from_json(data)
+    if problems is not None and seq.siblings is not None:
+        problems.extend(seq.siblings.problems)
     if not project_path:
         return seq.to_json()
     folder = os.path.dirname(os.path.abspath(project_path))
@@ -304,8 +309,9 @@ def from_json(data: Any, path: str = "") -> Project:
         return int(v) if isinstance(v, (int, float)) else None
 
     from . import timeline
+    problems: list[str] = []
     try:
-        sequence = _relink_sequence(data.get("edicao"), path)
+        sequence = _relink_sequence(data.get("edicao"), path, problems)
     except timeline.FormatError as exc:
         raise ProjectError(str(exc)) from exc
     return Project(
@@ -326,6 +332,7 @@ def from_json(data: Any, path: str = "") -> Project:
         mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
         look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, data.get("chaves"))),
         path=str(Path(path).resolve()) if path else "",
+        problems=problems,
     )
 
 

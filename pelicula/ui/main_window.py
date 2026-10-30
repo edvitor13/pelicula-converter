@@ -51,6 +51,7 @@ from . import filme_ui
 from . import geometria_ui, luz_fotometro_ui
 from . import filtro_ajustes
 from . import pastas_ui
+from . import sequencias_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
 
@@ -385,6 +386,7 @@ class MainWindow(QMainWindow):
         filme_ui.install(self)  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
         luz_fotometro_ui.install(self)  # 1.6: luz por plano e fotômetro da película (`ui/luz_fotometro_ui.py`)
         geometria_ui.install(self)  # 1.7: desespremer do clipe e janela útil da sequência (`ui/geometria_ui.py`)
+        self.seqs_ui = sequencias_ui.install(self)  # 1.7: abas das sequências do projeto (`ui/sequencias_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -480,6 +482,7 @@ class MainWindow(QMainWindow):
         self.bin = MediaBin(model=self.model)
         self.bin.importRequested.connect(self.import_dialog)
         self.bin.addRequested.connect(self.add_to_timeline)
+        self.bin.openRequested.connect(self._open_sequence_entry)
         self.bin.removeRequested.connect(self._bin_remove)
         self.bin.filesDropped.connect(self._bin_files)
         self.bin.filesDroppedIn.connect(lambda paths, folder: self._bin_files(paths, folder))
@@ -1129,6 +1132,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(timeline.Sequence.for_source(src))
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         self._refresh_source(reset=True)
 
     def _detect_profile(self, info) -> None:
@@ -1192,7 +1196,8 @@ class MainWindow(QMainWindow):
         for b in (self.btn_back, self.btn_play, self.btn_fwd, self.btn_in, self.btn_out, self.btn_clear, self.btn_loop):
             b.setEnabled(video)
         self.timeline.setEnabled(video)
-        self.btn_export.setEnabled(on)
+        seqs = getattr(self, "seqs_ui", None)  # 1.7: com a aberta vazia, outra sequência ainda pode sair
+        self.btn_export.setEnabled(on or (seqs is not None and seqs.can_export_other()))
         self.btn_frame.setEnabled(on)
         for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full, self.btn_no_effects):
             b.setEnabled(on)
@@ -1391,6 +1396,13 @@ class MainWindow(QMainWindow):
             return True
         return seq.direct_file() != self.file_info.path  # arquivo com transparência: sempre pela montagem
 
+    def _film_info(self) -> media.MediaInfo | None:
+        """O arquivo que o modo Película mostra quando não há montagem para mostrar. Com várias sequências, a aberta
+        estar vazia é uma edição vazia (não o arquivo que estava aberto antes)."""
+        if self.mode != "pelicula" or (not self.model.seq.clips and len(self.model.seq.family()) > 1):
+            return None
+        return self.file_info
+
     def _refresh_source(self, reset: bool = False) -> None:
         """Escolhe a fonte da prévia (arquivo ou montagem) e atualiza linha do tempo, rótulos e som."""
         was_seq = self.src_seq is not None
@@ -1399,7 +1411,7 @@ class MainWindow(QMainWindow):
             info = sequence.media_info(self.src_seq)
         else:
             self.src_seq = None
-            info = self.file_info if self.mode == "pelicula" else None
+            info = self._film_info()
         geometria_ui.sync_safe_window(self)
         if self.playing:
             self.stop_play()
@@ -1455,7 +1467,11 @@ class MainWindow(QMainWindow):
         """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
         if self._loading:
             return
-        if kind == "pastas":
+        switched = self.seqs_ui.model_changed(kind)  # outra sequência aberta: o estado dela entra antes da prévia
+        if kind == "sequencias":
+            # Nomes e ordem das sequências: só as abas e a Mídia mudam (nada de recarregar a prévia).
+            self._adopt_folder_sources()
+        elif kind == "pastas":
             # Pastas da Mídia são só organização: a prévia e o som não mudam (a Mídia se refaz sozinha).
             self._adopt_folder_sources()
         elif kind == "markers":
@@ -1475,6 +1491,8 @@ class MainWindow(QMainWindow):
         else:
             self._adopt_folder_sources()
             self._refresh_source()
+            if switched:
+                self._schedule_mix(immediate=True)  # o som da aba nova, sem esperar
         self._update_title()
         self._update_history()
         self._generated_timer.start()  # clipe sem arquivo mudado (ou desfeito): nome e miniatura na Mídia
@@ -1686,7 +1704,7 @@ class MainWindow(QMainWindow):
     def _sync_generated_sources(self) -> None:
         """Clipes sem arquivo mudados no inspetor (ou num desfazer): a Mídia mostra o nome e a miniatura novos."""
         for path, src in self.model.seq.sources.items():
-            if src.is_file or path not in self._sources:
+            if src.is_file or src.is_nested or path not in self._sources:
                 continue
             data = json.dumps(src.data, sort_keys=True)
             if self._generated_seen.get(path) == data:
@@ -1697,7 +1715,7 @@ class MainWindow(QMainWindow):
             self._request_thumb(src)
 
     def _request_thumb(self, src: timeline.Source) -> None:
-        if not src.has_video:
+        if not src.has_video or src.is_nested:  # uma sequência na Mídia mostra o ícone dela
             return
 
         def run():
@@ -1733,6 +1751,9 @@ class MainWindow(QMainWindow):
                 insert: bool = False):
         """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o que vem depois em vez de cobrir."""
         seq = self.model.seq
+        if src.is_nested:  # 1.7: uma sequência ainda não entra como clipe pela Mídia (a interface do aninhar vem depois)
+            self.statusBar().showMessage(_("Ainda não dá para pôr uma sequência dentro de outra pela Mídia."), 6000)
+            return []
         self._adopt_format(src)
         if not src.has_video:
             if at is None:
@@ -1932,7 +1953,17 @@ class MainWindow(QMainWindow):
             return
         seq.relink(path, new)
 
+    def _open_sequence_entry(self, path: str) -> None:
+        """Dois cliques numa sequência da Mídia: abre a aba dela."""
+        src = self._sources.get(path)
+        if src is not None and src.is_nested:
+            self.seqs_ui.activate(src.nested_id)
+
     def _bin_remove(self, path: str) -> None:
+        src = self._sources.get(path)
+        if src is not None and src.is_nested:  # 1.7: tirar uma sequência da Mídia é apagá-la (pergunta antes)
+            self.seqs_ui.delete(src.nested_id)
+            return
         if any(c.src == path for c in self.model.seq.clips):
             QMessageBox.information(self, _("Mídia"), _("Este arquivo está na linha do tempo. Apague os clipes dele "
                                                        "antes de tirá-lo da Mídia."))
@@ -2728,36 +2759,49 @@ class MainWindow(QMainWindow):
         self.new_export()
 
     def new_export(self) -> None:
-        if self.info is None:
+        # 1.7, várias sequências: a aberta é a que sai, e a janela deixa escolher outra (ou várias, na fila). Com a
+        # aberta vazia, abre pela primeira que tem o que exportar.
+        targets = self.seqs_ui.export_targets()
+        first = targets[0] if (self.info is None and targets) else None
+        if self.info is None and first is None:
             self.open_dialog()
             return
         if not sem_efeitos_ui.confirm_export(self):
             return
         self.store.commit()
         inout = None
-        if self.inp is not None or self.outp is not None:
-            inout = (self.inp or 0, self.outp if self.outp is not None else self.info.frames - 1)
+        if first is not None:
+            info, inout, seq, frame, chapters_, subs, cues = (first.info, first.in_out, first.sequence, first.frame,
+                                                              first.chapters, first.subtitles, first.cues)
+        else:
+            info = self.info
+            if self.inp is not None or self.outp is not None:
+                inout = (self.inp or 0, self.outp if self.outp is not None else self.info.frames - 1)
+            seq = self.src_seq.copy() if self.src_seq is not None else None
+            frame, chapters_ = self.frame_idx, self._export_chapters()
+            subs, cues = self.model.seq.subtitles, self.subs_ui.ctl.cues()
         try:
             perf = json.loads(self.settings.value("export_perf", "") or "{}")
         except ValueError:
             perf = {}
         values, look_name = self._export_look()
-        seq = self.src_seq.copy() if self.src_seq is not None else None
-        dlg = ExportDialog(self, self.info, values, look_name, inout,
+        dlg = ExportDialog(self, info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
-                           perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
+                           perf, self.engine.renderer.split("/")[0], sequence=seq, frame=frame,
                            last_platform=str(self.settings.value("export_platform", "")),
-                           chapters=self._export_chapters(), look_keys=self._export_keys(),
-                           subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues(),
-                           queue_jobs=list(self.queue.jobs), no_effects=self.no_effects)
+                           chapters=chapters_, look_keys=self._export_keys(),
+                           subtitles=subs, subtitle_cues=cues,
+                           queue_jobs=list(self.queue.jobs), no_effects=self.no_effects, targets=targets,
+                           target_id=first.id if first is not None else self.model.seq.id)
         if not dlg.exec():
             return
-        job = dlg.job()
-        self.settings.setValue("export_dir", str(Path(job.out_path).parent))
+        jobs = dlg.jobs()
+        self.settings.setValue("export_dir", str(Path(jobs[0].out_path).parent))
         self.settings.setValue("export_quality", dlg.quality.currentData())
         self.settings.setValue("export_platform", dlg.platform_id())
         self.settings.setValue("export_perf", json.dumps(dlg.perf_dict()))
-        self.queue.add(job)
+        for job in jobs:
+            self.queue.add(job)
         self._recovery_point()
         self.show_queue()
 
@@ -2871,13 +2915,18 @@ class MainWindow(QMainWindow):
         return seq.to_json()
 
     def _state(self) -> dict:
-        seq = self._seq_json()
+        # Várias sequências: o estado é o do projeto a partir da primeira aba, para trocar de aba não parecer mudança.
+        seq = self.model.seq.family()[0].to_json() if len(self.model.seq.family()) > 1 else self._seq_json()
         return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
                 "keys": self.store.keys_json(), "preset": self.preset_id, "in": self.inp, "out": self.outp,
                 "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
+    def _has_project(self) -> bool:
+        """Há o que salvar: algo aberto ou, com várias sequências, mesmo com a aberta vazia."""
+        return self.info is not None or len(self.model.seq.family()) > 1
+
     def is_dirty(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             return False
         return self._state() != self._saved_state
 
@@ -2941,7 +2990,7 @@ class MainWindow(QMainWindow):
             look_keys=self.store.keys_json())
 
     def save_project(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
             return False
         if not self.project_path:
@@ -2949,10 +2998,11 @@ class MainWindow(QMainWindow):
         return self._write_project(self.project_path)
 
     def save_project_as(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
             return False
-        start = self.project_path or str(Path(self.info.path).with_suffix(project.EXT))
+        start = self.project_path or str(Path(self.info.path if self.info is not None
+                                              else Path.home() / "projeto").with_suffix(project.EXT))
         path, _f = QFileDialog.getSaveFileName(self, _("Salvar projeto"), start,
                                                _("Projeto do PeliculaConverter (*.plc)"))
         if not path:
@@ -2992,6 +3042,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(timeline.Sequence(micro_fade=True))
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         self._refresh_source(reset=True)
         self.apply_preset(presets.DEFAULT_ID, keep_source=False)
         self._saved_state = self._state()
@@ -3097,6 +3148,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(seq)
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
         self.store.set_all(p.values, keys=p.look_keys)
@@ -3123,6 +3175,7 @@ class MainWindow(QMainWindow):
             welcome.add_recent(self.settings, p.path)
         self._update_title()
         self._check_modules()
+        self.seqs_ui.problems(p.problems)  # 1.7: o que não coube ao abrir (uma sequência que sumiu ou fecharia um ciclo)
 
     def _fill_project_menu(self) -> None:
         m = self.project_menu
@@ -3452,7 +3505,10 @@ class MainWindow(QMainWindow):
             "Ctrl+F (com o foco nos ajustes) ou / — filtrar ajustes (Esc limpa o filtro)") + "\n\n" + _(
             "Edição, Mídia: Ctrl+Shift+N pasta nova • F2 (ou dois cliques no nome) renomeia a pasta • "
             "arrastar leva itens e pastas para dentro e para fora das pastas") + "\n\n" + _(
-            "Shift+D — desligar / religar todos os efeitos"))
+            "Shift+D — desligar / religar todos os efeitos") + "\n\n" + _(
+            "Edição, sequências: Ctrl+Tab / Ctrl+Shift+Tab — próxima / anterior sequência (abas sobre a linha do tempo; "
+            "\"+\" cria uma, dois cliques na aba renomeiam, arrastar muda a ordem, botão direito duplica, "
+            "configura ou apaga)"))
 
     def about(self) -> None:
         try:

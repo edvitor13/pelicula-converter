@@ -1507,6 +1507,10 @@ class TimelineEditor(QWidget):
         self._sync_actions()
         self._sync_tools(c.tool)
 
+    def add_header(self, widget: QWidget) -> None:
+        """Uma fileira no topo, acima da barra de ferramentas (as abas das sequências: `sequence_tabs.SequenceTabs`)."""
+        self.layout().insertWidget(0, widget)
+
     def add_lane(self, widget: QWidget) -> None:
         """Uma faixa fina entre a barra de ferramentas e as faixas, alinhada com elas pelo `canvas.frame_to_x`
         (a linha "Look" das chaves do look: `keyframes_ui.KeyStrip`)."""

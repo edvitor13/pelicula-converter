@@ -1,11 +1,12 @@
 """Janela "Configurar a sequência": resolução, proporção, quadros por segundo, cor do fundo, emendas de som e faixa
-principal magnética."""
+principal magnética. A mesma janela cria uma sequência nova (#57): com `name`, ganha o campo do nome, sem as
+referências aos clipes de uma sequência que já existe (`reference` traz o tamanho do vídeo de onde ela nasce)."""
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import params, timeline
 from ..i18n import N_, _, fmt_decimal
@@ -46,27 +47,41 @@ def first_video_size(seq: Sequence) -> tuple[int, int] | None:
 
 
 class SequenceDialog(QDialog):
-    def __init__(self, parent, seq: Sequence):
+    def __init__(self, parent, seq: Sequence, name: str | None = None, reference: tuple[int, int] | None = None,
+                 taken=()):
+        """`name` (texto, pode ser vazio): cria uma sequência nova, e `seq` só dá os valores de partida (tamanho, fps,
+        fundo…) — sem as referências aos clipes dela. `reference`: o tamanho do vídeo de onde a nova nasce, como
+        opção "Igual ao vídeo". `taken`: nomes que outras sequências já usam."""
         super().__init__(parent)
-        self.setWindowTitle(_("Configurar a sequência"))
+        self.creating = name is not None
+        self.setWindowTitle(_("Nova sequência") if self.creating else _("Configurar a sequência"))
         self.setMinimumWidth(460)
         self.seq = seq
+        self._taken = {str(t).strip().casefold() for t in taken}
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
-        intro = QLabel(_("Tamanho e ritmo do vídeo montado. Os clipes se encaixam no quadro conforme o "
-                         "\"Encaixe\" de cada um; mudar os quadros por segundo mantém o tempo dos cortes."))
+        if self.creating:
+            intro = QLabel(_("Escolha o tamanho e os quadros por segundo da sequência nova. Dá para mudar depois em "
+                             "\"Configurar a sequência\"."))
+        else:
+            intro = QLabel(_("Tamanho e ritmo do vídeo montado. Os clipes se encaixam no quadro conforme o "
+                             "\"Encaixe\" de cada um; mudar os quadros por segundo mantém o tempo dos cortes."))
         intro.setObjectName("Muted")
         intro.setWordWrap(True)
         lay.addWidget(intro)
         form = QFormLayout()
         form.setSpacing(8)
+        if self.creating:
+            self.name_edit = QLineEdit(name)
+            self.name_edit.setPlaceholderText(_("Nome da sequência"))
+            form.addRow(_("Nome"), self.name_edit)
         self.res = QComboBox()
-        self._first = first_video_size(seq)
+        self._first = reference if self.creating else first_video_size(seq)
         for key, label, w, h in RESOLUTIONS:
             self.res.addItem(_(label), key)
         if self._first:
-            self.res.addItem(_("Igual ao primeiro clipe — {w} × {h}").format(w=self._first[0], h=self._first[1]),
-                             "primeiro")
+            same = _("Igual ao vídeo — {w} × {h}") if self.creating else _("Igual ao primeiro clipe — {w} × {h}")
+            self.res.addItem(same.format(w=self._first[0], h=self._first[1]), "primeiro")
         self.res.addItem(_("Personalizado"), "custom")
         form.addRow(_("Resolução"), self.res)
         size = QWidget()
@@ -145,10 +160,10 @@ class SequenceDialog(QDialog):
         form.addRow(_("Montagem"), self.magnet)
         lay.addLayout(form)
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText(_("Aplicar"))
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText(_("Criar") if self.creating else _("Aplicar"))
         btns.button(QDialogButtonBox.StandardButton.Ok).setObjectName("Primary")
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Cancelar"))
-        btns.accepted.connect(self.accept)
+        btns.accepted.connect(self._ok)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
         self.w.setValue(seq.width)
@@ -165,6 +180,17 @@ class SequenceDialog(QDialog):
             sig.connect(self._ratio_changed)
         self._res_changed()
         self._ratio_changed()
+
+    def name_value(self) -> str:
+        """O nome escolhido para a sequência nova ("" = deixa o app dar o próximo "Sequência N")."""
+        return self.name_edit.text().strip() if self.creating else ""
+
+    def _ok(self) -> None:
+        if self.creating and self.name_value().casefold() in self._taken:
+            QMessageBox.warning(self, _("Nova sequência"), _("Já existe uma sequência com o nome \"{nome}\". "
+                                                              "Escolha outro.").format(nome=self.name_value()))
+            return
+        self.accept()
 
     def _match(self, w: int, h: int) -> str:
         for key, _label, rw, rh in RESOLUTIONS:
