@@ -532,6 +532,7 @@ class Engine:
         com uma delas são desenhadas por `editshaders.CLIP_TR`.
         `alpha`: (h, w, 4) RGBA de cor direta; com o "Fundo transparente" da sequência a tela começa transparente
         (`_canvas_alpha`). Sem `alpha`, a tela é sempre opaca, exatamente como antes.
+        A janela útil da sequência (1.7, `Sequence.window`) limita tudo: fora dela a tela é preta e opaca.
         `camera` (1.6, `camera.Target`, a entrada do look): os clipes com perfil de câmera próprio passam antes pelo
         `editshaders.CAMERA` (`_camera_pass`). `float_out`: devolve a tela em float32 (h, w, 3), sem cortar em 0–1
         nem arredondar (a montagem com perfis de clipe vai assim ao look). Sem os dois, tudo como antes.
@@ -565,6 +566,8 @@ class Engine:
                 self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
             self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
+        if seq.window:  # 1.7, "Faixas pretas no quadro": camadas e fundo só dentro da janela útil
+            self._window_bars(src, seq.window_rect(*size), size)
         out_dtype = "u1" if depth == 8 else "u2"
         osize, offset = size, (0, 0)
         if crop is not None:
@@ -583,6 +586,14 @@ class Engine:
         data = out[1].read(components=3, alignment=1, dtype=out_dtype)
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
         return arr.reshape(osize[1], osize[0], 3)
+
+    def _window_bars(self, canvas, rect: tuple[int, int, int, int], size: tuple[int, int]) -> None:
+        """Fora da janela útil a tela fica preta e opaca (também com o "Fundo transparente": as faixas são imagem)."""
+        x, y, w, h = rect
+        for box in ((0, 0, size[0], y), (0, y + h, size[0], size[1] - y - h), (0, y, x, h),
+                    (x + w, y, size[0] - x - w, h)):
+            if box[2] > 0 and box[3] > 0:
+                canvas[1].clear(0.0, 0.0, 0.0, 1.0, viewport=box)
 
     def _camera_pass(self, slot: int, tex, seq, layer, target):
         """1.6: a imagem de um clipe com perfil de câmera próprio convertida para a entrada do look (textura f4 do

@@ -1,11 +1,13 @@
-"""Geometria do clipe na janela (1.7, ARQUITETURA §37): o que o cartão "Enquadrar e posicionar" tem além das linhas
-do esquema.
+"""Geometria do clipe e da sequência na janela (1.7, ARQUITETURA §37): o que o cartão "Enquadrar e posicionar" tem além
+das linhas do esquema, e a janela útil na área segura da prévia.
 
 - A linha "Taxa manual" só aparece com o desespremer em "Taxa manual".
 - O aviso quando o clipe é desespremido e a Lente anamórfica do look também está comprimindo: os dois valem (nada é
   bloqueado) e a pessoa fica sabendo. O aviso é só da tela: quem desenha é `compositor.fit_box` e `anamorfico.py`.
+- A área segura das plataformas fica dentro da janela útil (`sync_safe_window`, só na tela).
 
-Dois ganchos pequenos: `ClipInspector` cria o `InspectorGeometry` e a janela chama `install` para ele enxergar o look.
+Três ganchos pequenos: `ClipInspector` cria o `InspectorGeometry`, a janela chama `install` para ele enxergar o look
+e `MainWindow._refresh_source` chama `sync_safe_window`.
 """
 
 from __future__ import annotations
@@ -56,6 +58,19 @@ class InspectorGeometry:
         text = self.warning_text()
         self.warning.setText(text)
         self.warning.setVisible(bool(text))
+
+
+def safe_window(seq) -> tuple[float, float, float, float] | None:
+    """A janela útil da sequência em frações do quadro; None sem sequência ou sem janela."""
+    if seq is None or not seq.window:
+        return None
+    x, y, w, h = seq.window_rect(seq.width, seq.height)
+    return x / seq.width, y / seq.height, w / seq.width, h / seq.height
+
+
+def sync_safe_window(win) -> None:
+    """A prévia mostra a montagem (`src_seq`): a área segura segue a janela útil dela."""
+    win.viewer.set_safe_window(safe_window(win.src_seq))
 
 
 def install(win) -> None:

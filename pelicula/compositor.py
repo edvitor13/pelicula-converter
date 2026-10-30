@@ -100,17 +100,21 @@ def desqueeze(v: dict[str, Any]) -> float:
 def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
             values: dict[str, Any] | None = None) -> tuple[float, float]:
     """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe e na proporção já desespremida ("Esticar"
-    ocupa a tela e ignora o desespremer). `values`: os ajustes no quadro (`Layer.values`, com as chaves de animação);
-    None = os do clipe."""
+    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe sem arquivo
+    (título, cor…) não tem proporção própria: com janela, ele nasce do tamanho dela. `values`: os ajustes no quadro
+    (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
-    sw = float(src.width if src and src.width else canvas_w)
-    sh = float(src.height if src and src.height else canvas_h)
+    _x, _y, aw, ah = seq.window_rect(canvas_w, canvas_h)
+    sw = float(src.width if src and src.width else aw)
+    sh = float(src.height if src and src.height else ah)
+    if seq.window and src is not None and not src.is_file:
+        sw, sh = float(aw), float(ah)
     v = values if values is not None else clip.values
     mode = v.get("encaixe", "ajustar")
     if mode == "esticar":
-        return float(canvas_w), float(canvas_h)
+        return float(aw), float(ah)
     sw *= desqueeze(v)
-    f = min(canvas_w / sw, canvas_h / sh) if mode == "ajustar" else max(canvas_w / sw, canvas_h / sh)
+    f = min(aw / sw, ah / sh) if mode == "ajustar" else max(aw / sw, ah / sh)
     return sw * f, sh * f
 
 
@@ -128,8 +132,9 @@ def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas
     sx, sy = axis_scale(v)
     th = math.radians(float(v["rotacao"]))
     cs, sn = math.cos(th), math.sin(th)
-    cx = canvas_w / 2.0 + float(v["pos_x"]) * canvas_w
-    cy = canvas_h / 2.0 + float(v["pos_y"]) * canvas_h
+    ax0, ay0, aw, ah = seq.window_rect(canvas_w, canvas_h)  # a posição é fração da janela útil (sem janela, da tela)
+    cx = ax0 + aw / 2.0 + float(v["pos_x"]) * aw
+    cy = ay0 + ah / 2.0 + float(v["pos_y"]) * ah
     fx = -1.0 if v["espelhar_h"] else 1.0
     fy = -1.0 if v["espelhar_v"] else 1.0
     ax = fx / (sx * bw)

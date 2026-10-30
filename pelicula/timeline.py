@@ -470,6 +470,33 @@ class _Span:
         return self.src_in + (p - self.start) / fps * self.speed
 
 
+# ------------------------------------------------------------------ proporção da sequência (1.7)
+RATIO_TOLERANCE = 0.005  # 1,78 é o 16:9 (1,7778) e 1,33 é o 4:3 (1,3333): sem faixa de um pixel
+
+
+def clean_window(value: Any) -> float:
+    """A proporção da janela útil (`Sequence.window`): de 1,00 a 4,00; qualquer outra coisa = sem janela (0)."""
+    try:
+        r = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return r if 1.0 <= r <= 4.0 else 0.0
+
+
+def aspect_size(width: int, height: int, ratio: float, aspect: float | None = None) -> tuple[int, int]:
+    """O maior retângulo de proporção `ratio` dentro de `width` × `height`: mais larga que o quadro, a largura fica e
+    a altura vira par; mais estreita, a altura fica e a largura vira par. `aspect`: a proporção que decide isso (None =
+    a de `width` × `height`). Proporção igual à do quadro (`RATIO_TOLERANCE`) ou 0: o próprio quadro."""
+    w, h = int(width), int(height)
+    if aspect is None:
+        aspect = w / h
+    if ratio <= 0 or abs(aspect - ratio) < RATIO_TOLERANCE:
+        return w, h
+    if ratio > aspect:
+        return w, min(h, max(2, int(round(w / ratio / 2.0)) * 2))
+    return min(w, max(2, int(round(h * ratio / 2.0)) * 2)), h
+
+
 # ------------------------------------------------------------------ sequência
 @dataclass
 class Sequence:
@@ -488,18 +515,32 @@ class Sequence:
     # "Fundo transparente": a tela começa transparente em vez da cor do fundo; vale na prévia (xadrez), no "Salvar
     # quadro" em PNG/TIFF e nas exportações com alfa (`export.wants_alpha`). "fundo_transparente" no JSON, só ligado.
     transparent: bool = False
+    # 1.7, "Faixas pretas no quadro": a proporção da janela útil (0 = sem janela). Fora dela o quadro é preto opaco; o
+    # encaixe, a posição, títulos e legendas valem dentro dela (`window_rect`). "janela" no JSON, só quando usada.
+    window: float = 0.0
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
         self.fps_str = f"{fr.numerator}/{fr.denominator}"
         self.width = max(16, int(self.width))
         self.height = max(16, int(self.height))
+        self.window = clean_window(self.window)
         if not any(t.kind == VIDEO for t in self.tracks):
             self.tracks.insert(0, Track(VIDEO, "V1"))
         if not any(t.kind == AUDIO for t in self.tracks):
             self.tracks.append(Track(AUDIO, "A1"))
 
     # -------------------------------------------------------- básico
+    def window_rect(self, canvas_w: int, canvas_h: int) -> tuple[int, int, int, int]:
+        """A janela útil numa tela `canvas_w` × `canvas_h`, em px (x, y, largura, altura; y para baixo): centrada, com
+        o lado calculado par. Letterbox se a proporção é mais larga que o quadro da sequência, pillarbox se é mais
+        estreita (quem decide é o quadro da sequência: a prévia reduzida e a exportação concordam). Sem janela, a
+        tela inteira. É a única conta da janela: compositor, transições, `Engine.compose`, `frame.Recipe` e a tela."""
+        if not self.window:
+            return 0, 0, canvas_w, canvas_h
+        w, h = aspect_size(canvas_w, canvas_h, self.window, self.width / self.height)
+        return (int(canvas_w) - w) // 2, (int(canvas_h) - h) // 2, w, h
+
     @property
     def fps(self) -> float:
         return float(parse_fps(self.fps_str))
@@ -1915,6 +1956,8 @@ class Sequence:
             return None
         if self.transparent:  # "Fundo transparente" é uma escolha da montagem (o projeto precisa guardá-la)
             return None
+        if self.window:  # a janela útil também (e as faixas só existem na montagem)
+            return None
         if src.width != self.width or src.height != self.height or abs(src.fps - self.fps) > 1e-6:
             return None
         if not src.is_image and v.dur != src.frames:
@@ -1987,6 +2030,8 @@ class Sequence:
             out["legendas"] = self.subtitles.to_json()  # presas aos arquivos: acompanham a montagem
         if self.transparent:
             out["fundo_transparente"] = True
+        if self.window:
+            out["janela"] = float(self.window)
         return out
 
     @classmethod
@@ -2007,7 +2052,8 @@ class Sequence:
         tracks = [t for t in (Track.from_json(x) for x in d.get("faixas") or [] if isinstance(x, dict)) if t]
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
                   background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True,
-                  magnetic=d.get("faixa_magnetica") is True, transparent=d.get("fundo_transparente") is True)
+                  magnetic=d.get("faixa_magnetica") is True, transparent=d.get("fundo_transparente") is True,
+                  window=d.get("janela", 0.0))
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)
@@ -2111,6 +2157,7 @@ def _clips_beyond_1_6(seq: Sequence) -> bool:
 # que a 1.6 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_7" pega tudo o que a 1.6 não lê.
 FEATURES_V5: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_7": _clips_beyond_1_6,
+    "janela_util": lambda seq: seq.window > 0,  # "Faixas pretas no quadro" (`Sequence.window`, "janela" no JSON)
 }
 
 

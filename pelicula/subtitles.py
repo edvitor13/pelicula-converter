@@ -983,9 +983,16 @@ class Burn:
         textrender.ensure_app()
         return draw(act, t, self.style, width, height, depth)
 
-    def apply(self, frame, t: float):
-        """O quadro com a legenda do instante t por cima; sem legenda nesse instante, o mesmo objeto."""
+    def apply(self, frame, t: float, area: tuple[int, int, int, int] | None = None):
+        """O quadro com a legenda do instante t por cima; sem legenda nesse instante, o mesmo objeto. `area` (x, y,
+        largura, altura): a legenda é medida e posicionada nessa parte do quadro, a janela útil da sequência
+        (`frame.Recipe.window_area`); None = o quadro inteiro."""
         import numpy as np
         h, w = frame.shape[:2]
+        x, y = 0, 0
+        if area is not None:
+            x, y, w, h = area
         ov = self.overlay(t, w, h, 8 if frame.dtype == np.uint8 else 16)
-        return frame if ov is None else composite(frame, ov)
+        if ov is None:
+            return frame
+        return composite(frame, ov if area is None else replace(ov, x=ov.x + x, y=ov.y + y))

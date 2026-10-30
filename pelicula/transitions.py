@@ -134,11 +134,11 @@ def _scale_about(cx: float, cy: float, s: float) -> np.ndarray:
     return np.array([[1.0 / s, 0.0, cx - cx / s], [0.0, 1.0 / s, cy - cy / s], [0.0, 0.0, 1.0]])
 
 
-def _center(vals: dict[str, Any], side: str, w: int, h: int) -> tuple[float, float, float]:
-    """Centro (px) e a maior distância dele até um canto da tela."""
-    cx = w / 2.0 + float(vals.get(f"{side}_centro_x", 0.0)) * w
-    cy = h / 2.0 + float(vals.get(f"{side}_centro_y", 0.0)) * h
-    rmax = max(math.hypot(x - cx, y - cy) for x in (0.0, float(w)) for y in (0.0, float(h)))
+def _center(vals: dict[str, Any], side: str, w: int, h: int, x0: int = 0, y0: int = 0) -> tuple[float, float, float]:
+    """Centro (px) e a maior distância dele até um canto da área (a tela ou a janela útil, com o canto em x0, y0)."""
+    cx = x0 + w / 2.0 + float(vals.get(f"{side}_centro_x", 0.0)) * w
+    cy = y0 + h / 2.0 + float(vals.get(f"{side}_centro_y", 0.0)) * h
+    rmax = max(math.hypot(x - cx, y - cy) for x in (float(x0), float(x0 + w)) for y in (float(y0), float(y0 + h)))
     return cx, cy, rmax
 
 
@@ -153,6 +153,7 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
     from .compositor import mat3_uniform
     w, h = int(canvas_w), int(canvas_h)
     sc = h / 1080.0
+    x0, y0, w, h = seq.window_rect(w, h)  # 1.7: posições e percursos na janela útil (sem janela, a tela)
     kinds, roles, prog, index, seeds = [0, 0], [0, 0], [0.0, 0.0], [0, 0], [0, 0]
     A = [(0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0)]
     B = [(0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0)]
@@ -172,7 +173,7 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
         index[i], seeds[i] = int(tr.index), seed
         soft = float(vals.get(f"{side}_suavidade", 24.0)) * sc
         if kind in ("queima", "iris"):
-            cx, cy, rmax = _center(vals, side, w, h)
+            cx, cy, rmax = _center(vals, side, w, h, x0, y0)
             A[i] = (cx, cy, rmax, soft)
             if kind == "iris":
                 B[i] = (float(vals.get(f"{side}_anel", 0.0)) * sc, 0.0, 0.0, 0.0)
@@ -181,7 +182,7 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
             length = float(w if dx else h)
             if kind == "cortina":
                 # pos = distância até a borda por onde o clipe entra: n·q + deslocamento
-                off = (w if dx > 0 else 0.0) if dx else (h if dy > 0 else 0.0)
+                off = (x0 + w if dx > 0 else -x0) if dx else (y0 + h if dy > 0 else -y0)
                 A[i] = (-dx, -dy, float(off), soft)
                 B[i] = (length, 0.0, 0.0, 0.0)
             else:
@@ -192,7 +193,7 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
                 if speed > 0.75:
                     blur = (1.0, dx * speed, dy * speed, 0.0)
         elif kind == "zoom":
-            cx, cy, _rmax = _center(vals, side, w, h)
+            cx, cy, _rmax = _center(vals, side, w, h, x0, y0)
             z = max(1.0, float(vals.get("entrada_zoom", 2.0)))
             e = ease(p)
             s = z ** (1.0 - e) if tr.role == "entra" else z ** e
@@ -206,7 +207,8 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
             f = EMENDA_FLASH[min(tr.index, len(EMENDA_FLASH) - 1)]
             ev = float(vals.get("entrada_clarao", 2.0)) * f
             veil = EMENDA_VEIL * f * float(vals.get("entrada_clarao", 2.0))
-            line_y = h * ((0.04 + 0.08 * _unit(seed, 1)) if _unit(seed, 0) < 0.5 else (0.88 + 0.08 * _unit(seed, 1)))
+            band = (0.04 + 0.08 * _unit(seed, 1)) if _unit(seed, 0) < 0.5 else (0.88 + 0.08 * _unit(seed, 1))
+            line_y = y0 + h * band
             side_sign = 1.0 if _unit(seed, 2) < 0.5 else -1.0
             A[i] = (float(2.0 ** ev), veil, line_y, 1.0 if tr.index == 0 else 0.0)
             B[i] = (side_sign, 0.0, 0.0, 0.0)
@@ -214,8 +216,8 @@ def apply(U: dict[str, Any], seq, layer, xf: np.ndarray, canvas_w: int, canvas_h
                 geo = geo @ _translate(0.0, EMENDA_JUMP[tr.index] * sc)
         elif kind == "ponta":
             clear = 1.0 if vals.get("entrada_ponta") == "clara" else 0.0
-            hx = w * (0.22 + 0.56 * _unit(seed, 3))
-            hy = h * (0.25 + 0.5 * _unit(seed, 4))
+            hx = x0 + w * (0.22 + 0.56 * _unit(seed, 3))
+            hy = y0 + h * (0.25 + 0.5 * _unit(seed, 4))
             A[i] = (clear, hx, hy, PONTA_HOLE * sc)
             B[i] = (1.0 if tr.index == n // 2 else 0.0, 0.0, 0.0, 0.0)
     U = dict(U)

@@ -44,6 +44,7 @@ class Viewer(QWidget):
         self._drop_hover = False
         self._hint = False
         self.safe_area = ""  # área segura desenhada por cima (platforms.SAFE_AREAS); "" = nenhuma
+        self.safe_window: tuple[float, float, float, float] | None = None  # 1.7: janela útil (frações do quadro)
         self.label_proc = _("PELÍCULA")
         # 1.6 (`ui/preview_tools.py`, `ui/planes_ui.py`): só na tela, a exportação nunca passa por aqui.
         self.overlay: QImage | None = None      # zebra, falsa cor ou "Ver planos" por cima da prévia
@@ -197,6 +198,12 @@ class Viewer(QWidget):
         self.safe_area = kind if kind in platforms.SAFE_BY_ID else ""
         self.update()
 
+    def set_safe_window(self, frac: tuple[float, float, float, float] | None) -> None:
+        """1.7: a janela útil da sequência (x, y, largura, altura em frações do quadro): a área segura fica dentro
+        dela. None = o quadro inteiro."""
+        self.safe_window = frac
+        self.update()
+
     def set_zoom(self, z: float | None) -> None:
         self.zoom = None if z is None else min(max(z, MIN_ZOOM), MAX_ZOOM)
         if z is None:
@@ -300,6 +307,9 @@ class Viewer(QWidget):
         area = platforms.SAFE_BY_ID.get(self.safe_area)
         if area is None:
             return QRectF(r), []
+        if self.safe_window is not None:
+            x, y, w, h = self.safe_window
+            r = QRectF(r.left() + x * r.width(), r.top() + y * r.height(), w * r.width(), h * r.height())
         f = QRectF(r)
         if area.aspect:
             if r.width() / max(r.height(), 1e-6) > area.aspect:

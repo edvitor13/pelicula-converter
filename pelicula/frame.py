@@ -20,6 +20,10 @@ Legendas gravadas no vídeo (`Recipe.burn`, um `subtitles.Burn`) entram no passo
 da imagem montada *antes* do look (no tamanho do conteúdo: grão, halação e tremor passam por elas) e "digital"
 por cima do quadro final *depois* do look (no tamanho da saída, com o encaixe). O instante é `index / fps`.
 
+Com a janela útil da sequência (1.7, `Sequence.window`) as legendas se medem pela janela e o último passo pinta as
+faixas de preto exato por cima do quadro final (`window_bars`): o look (grão, halação, tremor) nunca suja a faixa. A
+montagem já chega com as faixas pretas (`Engine.compose`), então o look não vê nada do clipe fora da janela.
+
 Com `alpha` (saída com transparência: a prévia e o "Salvar quadro" de uma montagem com "Fundo transparente", a
 exportação num formato com alfa, `export.wants_alpha`) a montagem sai RGBA de cor direta e o look devolve RGBA:
 a cor é a mesma de sempre e o alfa é a cobertura da montagem movida pela geometria do look (veja
@@ -174,13 +178,28 @@ class Recipe:
         return look.build_plan(values, w, h, index, self.fps, self.lut, dither=self.dither,
                                legal=self.legal, net_grain=self.net_grain, **kw)
 
+    def window_area(self, img) -> tuple[int, int, int, int] | None:
+        """1.7: a janela útil em px da imagem montada `img` (com o recorte de "cortar" já descontado e presa à imagem);
+        None sem janela."""
+        if self.seq is None or not self.seq.window:
+            return None
+        h, w = img.shape[:2]
+        cw, ch = (self.fit.dec_w, self.fit.dec_h) if self.fit is not None else (w, h)
+        x, y, rw, rh = self.seq.window_rect(cw, ch)
+        crop = self.fit.canvas_crop if self.fit is not None else None
+        if crop is not None:
+            x, y = x - crop[0], y - crop[1]
+        x0, y0 = max(x, 0), max(y, 0)
+        return x0, y0, min(x + rw, w) - x0, min(y + rh, h) - y0
+
     def look(self, engine, img, index: int, upload: bool = True):
         """Passo 5: aplica o look à imagem montada (e as legendas gravadas, antes ou depois dele). `upload=False`
         quando a imagem já está na entrada do `engine` (a prévia reaproveita o envio enquanto só os ajustes
         mudam; com legenda gravada na cópia neste quadro, a imagem é enviada de novo)."""
         burn = self.burn
+        area = self.window_area(img)
         if burn is not None and burn.mode == "copia":
-            burned = burn.apply(img, self.time(index))
+            burned = burn.apply(img, self.time(index), area)
             upload = upload or burned is not img
             img = burned
         if self.values is None:
@@ -197,9 +216,13 @@ class Recipe:
                 out = engine.render(plan, self.depth, **kw)
             if self.alpha:
                 out = opaque_alpha(out)
+        within = None
+        if area is not None and self.fit is not None and self.fit.composite:  # a montagem está na caixa do encaixe
+            within = self.fit.box
+            area = (area[0] + within[0], area[1] + within[1], area[2], area[3])
         if burn is not None and burn.mode == "digital":
-            out = burn.apply(out, self.time(index))
-        return out
+            out = burn.apply(out, self.time(index), area)
+        return out if area is None else window_bars(out, area, within)
 
     def time(self, index: int) -> float:
         """O instante (s) do quadro `index` da saída: o das legendas gravadas."""
@@ -208,6 +231,24 @@ class Recipe:
     def render(self, engine, img, index: int):
         """O quadro inteiro: montagem (se `img` são camadas) e look. `index` é o número do quadro na saída."""
         return self.look(engine, self.montage(engine, img), index)
+
+
+def window_bars(img, rect: tuple[int, int, int, int], within: tuple[int, int, int, int] | None = None):
+    """1.7: uma cópia do quadro com preto exato (e alfa opaco) fora da janela `rect`, dentro de `within` (a caixa da
+    montagem no quadro; None = o quadro inteiro)."""
+    import numpy as np
+    h, w = img.shape[:2]
+    wx, wy, ww, wh = within if within is not None else (0, 0, w, h)
+    x, y, rw, rh = rect
+    out = np.array(img, copy=True)
+    fill = np.zeros(img.shape[2], img.dtype)
+    if img.shape[2] == 4:
+        fill[3] = np.iinfo(img.dtype).max
+    for y0, y1, x0, x1 in ((wy, y, wx, wx + ww), (y + rh, wy + wh, wx, wx + ww), (y, y + rh, wx, x),
+                           (y, y + rh, x + rw, wx + ww)):
+        if y1 > y0 and x1 > x0:
+            out[y0:y1, x0:x1] = fill
+    return out
 
 
 def opaque_alpha(img):

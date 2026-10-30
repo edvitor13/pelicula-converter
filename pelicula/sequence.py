@@ -68,6 +68,9 @@ def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canv
     k = keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0)))
     kx = max(1.0, k * keyframes.max_value(clip.keys.get("escala_x"), float(clip.values.get("escala_x", 1.0))))
     ky = max(1.0, k * keyframes.max_value(clip.keys.get("escala_y"), float(clip.values.get("escala_y", 1.0))))
+    if seq.window and not src.is_file:  # clipe sem arquivo na janela útil: a proporção da janela, não a da fonte
+        c = min(1.0, sw / (bw * kx), sh / (bh * ky))
+        return max(2, int(round(bw * kx * c))), max(2, int(round(bh * ky * c)))
     w = min(int(round(bw * kx)), sw)
     h = min(int(round(bh * ky)), sh)
     return max(2, w), max(2, h)

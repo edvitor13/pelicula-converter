@@ -1383,6 +1383,7 @@ class MainWindow(QMainWindow):
         else:
             self.src_seq = None
             info = self.file_info if self.mode == "pelicula" else None
+        geometria_ui.sync_safe_window(self)
         if self.playing:
             self.stop_play()
         self.info = info
@@ -1903,7 +1904,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             w, h, fps, bg = dlg.values()
             self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic(),
-                                    transparent=dlg.transparent())
+                                    transparent=dlg.transparent(), window=dlg.window())
 
     def auto_adjust_clip(self, cid: str, whole: bool = True) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço.
