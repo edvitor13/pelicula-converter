@@ -67,12 +67,8 @@ class Project:
         edicao = None
         if self.sequence:
             edicao = json.loads(json.dumps(self.sequence))
-            for src in edicao.get("fontes") or []:
+            for src in _block_sources(edicao):
                 if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":  # sem arquivo: nada
-                    src["relativo"] = _relative(str(src.get("caminho") or ""), base)
-            pastas = edicao.get("pastas")  # 1.7: fontes numa pasta e fora da linha do tempo (mesmo tratamento)
-            for src in (pastas.get("fontes") or []) if isinstance(pastas, dict) else []:
-                if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":
                     src["relativo"] = _relative(str(src.get("caminho") or ""), base)
         feats = self.features()
         data = {
@@ -218,6 +214,18 @@ def _relative(path: str, base: Path | None) -> str:
         return ""
 
 
+def _block_sources(block: dict[str, Any]) -> list[Any]:
+    """Todas as fontes gravadas no bloco "edicao": as dos clipes, as que estão numa pasta e fora da linha do tempo
+    (1.7) e as das outras sequências do projeto (1.7)."""
+    out = list(block.get("fontes") or [])
+    pastas = block.get("pastas")
+    out += (pastas.get("fontes") or []) if isinstance(pastas, dict) else []
+    others = block.get("sequencias")
+    for other in others if isinstance(others, list) else []:
+        out += (other.get("fontes") or []) if isinstance(other, dict) else []
+    return out
+
+
 def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
     """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu."""
     if not isinstance(data, dict):
@@ -228,9 +236,8 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
     if not project_path:
         return seq.to_json()
     folder = os.path.dirname(os.path.abspath(project_path))
-    pastas = data.get("pastas")
-    listed = list(data.get("fontes") or []) + (list(pastas.get("fontes") or []) if isinstance(pastas, dict) else [])
-    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "") for s in listed if isinstance(s, dict)}
+    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "") for s in _block_sources(data)
+            if isinstance(s, dict)}
     for old in list(seq.sources):
         rel = rels.get(old, "")
         start = seq.sources[old].seq_start

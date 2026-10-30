@@ -47,6 +47,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 38. [Filtro de busca nos ajustes (1.7)](#38-filtro-de-busca-nos-ajustes-17)
 39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
+41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
 
 ---
 
@@ -4050,3 +4051,61 @@ e sem nada no `to_json`.
 Na mesma barra, o seletor de comparação (`Segmented(name="SegQuiet")`) tem a marca discreta e o rótulo "Resultado" (a chave
 continua `"proc"`, gravada nos projetos), e o âmbar fica para o seletor de modo (`name="SegMode"`, com `item_icons`, que
 usa `icons.two_state`; na janela estreita, só o ícone, pela `AdaptiveBar`).
+
+## 41. Várias sequências e sequência aninhada
+
+Issue #57. Um projeto pode ter mais de uma sequência, e uma pode entrar em outra como clipe. Esta seção descreve o formato e
+o modelo (`timeline.py`, sem Qt nem GPU; testes em `tests/test_sequencias.py`).
+
+### 41.1 Modelo
+
+- **`timeline.SequenceSet`**: as sequências do projeto, na ordem das abas. Todas apontam para o **mesmo** `sources` e o mesmo
+  `folders`: a Mídia é uma só, relocalizar um arquivo vale para todas (`Sequence.relink`) e uma pasta pode guardar sequências.
+- **`Sequence.siblings`** é o conjunto, e `None` é a sequência sozinha, como sempre foi. Um projeto de uma sequência nem
+  ganha conjunto: `Sequence.family()` devolve `[seq]`. A interface pede o conjunto com `ensure_set()` ao criar a segunda.
+- **`Sequence.name` continua vazio até alguém dar um nome**: é ele que nomeia a saída da exportação (`sequence.media_info`),
+  então um projeto antigo sai com o mesmo nome de arquivo. Na tela, `display_name` mostra "Sequência 1".
+- **Fonte de uma sequência** (`Source.for_sequence`): `kind = SOURCE_SEQUENCE`, chave `sequencia:<id>`, tamanho e fps da
+  sequência e `frames` até o fim do último clipe. Por isso o tempo do clipe não tem regra nova: entrada, velocidade, rampa,
+  reverso e fps diferente passam por `src_frame`, e o quadro que sai é um quadro da sequência interna. `SequenceSet.sync` atualiza
+  essas fontes no mesmo objeto e `Sequence.to_json` a chama, então cada passo do desfazer e cada cópia saem em dia. Uma
+  sequência sozinha não tem fonte, porque não há onde usá-la.
+- **`Source.is_file`, `is_nested` e `is_generated`**: uma fonte é exatamente uma das três. Antes da 1.7, "não é arquivo" queria
+  dizer "gerada"; quem precisa do gerador pergunta `is_generated`.
+
+### 41.2 Regras
+
+- **Sem ciclos:** `Sequence.can_contain(fonte)` recusa a própria sequência, uma que já a use em algum nível e o que passar de
+  `MAX_NEST` níveis (cada nível usa telas próprias na GPU). `insert_media` devolve `[]` nesses casos e nada muda; quem mostra o
+  aviso é a interface. Ao abrir, `SequenceSet.validate` tira os clipes de uma sequência que sumiu ou que fecharia um ciclo
+  (arquivo mexido à mão) e guarda o aviso em `problems`.
+- **Fundo:** a fonte tem `has_alpha = Sequence.transparent`. Com "Fundo transparente" desligado, as áreas sem clipe mostram o
+  fundo da sequência, como um vídeo opaco; ligado, o que está embaixo aparece.
+- **Sequência encurtada:** a fonte encolhe e o clipe de fora não muda; ele segura o último quadro, como um clipe cujo
+  arquivo é mais curto.
+- **Só som:** uma sequência sem clipe de vídeo tem `has_video = False` e vira só um clipe de áudio.
+- **`is_trivial()`** vale para a sequência aberta: um clipe de sequência nunca é trivial, e uma sequência trivial com irmãs
+  continua lendo o arquivo direto no modo Película. A janela grava o bloco mesmo assim (`MainWindow._seq_json`).
+
+### 41.3 Formato
+
+O bloco `"edicao"` continua sendo o bloco da sequência aberta. Com mais de uma sequência, ele ganha:
+
+```json
+{"formato": 4, "id": "a1b2", "sequencia_pos": 1, "...": "os campos de sempre",
+ "sequencias": [{"id": "c3d4", "formato": 4, "...": "o bloco de outra sequência, sem \"pastas\""}]}
+```
+
+- **As irmãs vão sempre juntas.** `to_json` leva todas, e não só as que a sequência usa: `copy()`, a exportação na fila, a
+  recuperação e o desfazer ficam completos sem ninguém precisar lembrar. Sozinha, a sequência grava o JSON de antes, byte a byte.
+- **`"pastas"` fica só no bloco de cima**, porque a Mídia é uma só. Os itens valem para fontes de qualquer sequência, inclusive
+  as `sequencia:<id>`, por isso `keep_items` roda depois de montar o conjunto, em `from_json`.
+- **Recursos** (`timeline.FEATURES_V5`): `"varias_sequencias"` e `"sequencia_aninhada"` levam o bloco ao formato 4 e o projeto
+  ao 5, que a 1.6 recusa. `features()` conta as irmãs.
+- **Caminhos relativos:** `project._block_sources` percorre as fontes de todos os blocos, ao gravar e ao abrir.
+
+### 41.4 Desfazer
+
+`History` guarda o projeto inteiro, porque "Aninhar seleção" mexe em duas sequências e é um passo só. O instantâneo sai sempre a
+partir da primeira aba, então trocar de aba não vira passo. Desfazer volta à sequência em que a mudança foi feita (`_active`) e,
+se ela ainda não existia naquele estado, à que estava aberta.

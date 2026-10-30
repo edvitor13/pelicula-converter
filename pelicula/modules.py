@@ -268,7 +268,7 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
     trivial = getattr(sequence, "is_trivial", lambda: True)
     if sequence is not None and getattr(sequence, "clips", True) and not trivial():
         used.add("edicao")
-        if any(not s.is_file for s in getattr(sequence, "used_sources", lambda: [])()):
+        if any(s.is_generated for s in getattr(sequence, "used_sources", lambda: [])()):
             used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
     if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
         used.add("transicoes")

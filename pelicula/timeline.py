@@ -20,6 +20,9 @@
   cortes J/L (pares ligados com entrada e saída diferentes: `trim_start_only`/`trim_end_only`,
   `split_edit`) e a **faixa principal magnética** (`Sequence.magnetic`: a V1 nunca fica com buracos e o
   resto acompanha a imagem dela; `keep_main`/`settle_main`).
+- **Várias sequências** (1.7, `SequenceSet`): as sequências de um projeto dividem a mesma Mídia, e uma pode entrar em
+  outra como clipe (fonte do tipo `SOURCE_SEQUENCE`, `Source.for_sequence`), sem ciclos. O JSON de uma sequência leva as
+  irmãs junto (`to_json`/`from_json`, "sequencias"): nenhum caminho que grava ou copia uma sequência perde as outras.
 
 Tudo aqui é determinístico e puro: o mesmo JSON gera sempre a mesma montagem, e a prévia e a
 exportação usam as mesmas funções (`src_frame`, `clips_at`, `layers_at`).
@@ -53,8 +56,11 @@ FORMAT_15 = 2
 FORMAT_16 = 3
 # Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
 # ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
+# "sequencia" (1.7): outra sequência do projeto usada como clipe; não é gerada: `Source.is_nested`.
 SOURCE_FILE = "arquivo"
-SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste")
+SOURCE_SEQUENCE = "sequencia"
+SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste", SOURCE_SEQUENCE)
+MAX_NEST = 8  # níveis de sequência dentro de sequência (cada nível usa as suas telas na GPU)
 IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
 EPS = 1e-6
@@ -129,6 +135,21 @@ class Source:
         """Sequência de imagens numeradas (um arquivo por quadro, lidos como um vídeo)."""
         return self.seq_start >= 0
 
+    @property
+    def is_nested(self) -> bool:
+        """Outra sequência do projeto usada como clipe (1.7). Não confundir com `is_sequence`."""
+        return self.kind == SOURCE_SEQUENCE
+
+    @property
+    def is_generated(self) -> bool:
+        """Clipe desenhado por um gerador (`sequence.RENDERERS`): nem arquivo nem outra sequência."""
+        return not self.is_file and not self.is_nested
+
+    @property
+    def nested_id(self) -> str:
+        """O id da sequência que esta fonte mostra ("" se não é uma sequência)."""
+        return str(self.data.get("sequencia") or "") if self.is_nested else ""
+
     @classmethod
     def virtual(cls, kind: str, width: int, height: int, fps_str: str = "24/1", seconds: float | None = None,
                 data: dict[str, Any] | None = None, alpha: bool = True) -> "Source":
@@ -138,7 +159,7 @@ class Source:
         `seconds=None` = sem fim (como uma imagem: entra com `IMAGE_SECONDS` e pode ser esticada até
         `MAX_HOLD_SECONDS`), mas o quadro anda com o tempo (`src_frame`), para geradores animados. `alpha`: o
         gerador desenha com transparência (RGBA); False = opaco. Sem som."""
-        if kind not in SOURCE_KINDS or kind == SOURCE_FILE:
+        if kind not in SOURCE_KINDS or kind in (SOURCE_FILE, SOURCE_SEQUENCE):
             raise ValueError(f"tipo de fonte sem arquivo desconhecido: {kind!r}")
         fr = parse_fps(fps_str)
         secs = MAX_HOLD_SECONDS if seconds is None else max(1.0 / float(fr), float(seconds))
@@ -149,10 +170,25 @@ class Source:
                    color_space="gbr", color_range="pc", color_transfer="iec61966-2-1", color_primaries="bt709",
                    has_alpha=bool(alpha), kind=kind, data=copy.deepcopy(dict(data or {})))
 
+    @classmethod
+    def for_sequence(cls, seq: "Sequence") -> "Source":
+        """A fonte de uma sequência usada como clipe: chave `sequencia:<id>`, o tamanho e o fps dela e o último quadro
+        no fim do último clipe (como um vídeo; `SequenceSet.sync` mantém isso em dia). `has_alpha` = "Fundo transparente"
+        da sequência: sem ele, as áreas sem clipe mostram o fundo dela, como um vídeo opaco."""
+        fr = parse_fps(seq.fps_str)
+        frames = max(1, seq.duration)
+        alpha = bool(seq.transparent)
+        return cls(path=f"{SOURCE_SEQUENCE}:{seq.id}", width=seq.width, height=seq.height, fps=float(fr),
+                   fps_str=f"{fr.numerator}/{fr.denominator}", frames=frames, duration=frames / float(fr),
+                   has_video=any(c.kind == VIDEO for c in seq.clips) or not seq.clips, has_audio=seq.has_audio,
+                   pix_fmt="rgba" if alpha else "rgb24", color_space="gbr", color_range="pc",
+                   color_transfer="iec61966-2-1", color_primaries="bt709", has_alpha=alpha, kind=SOURCE_SEQUENCE,
+                   data={SOURCE_SEQUENCE: seq.id, "nome": seq.display_name})
+
     @property
     def unbounded(self) -> bool:
         """Fonte sem fim natural: imagem parada ou gerador sem duração (`virtual(seconds=None)`)."""
-        return self.is_image or (not self.is_file and self.length >= MAX_HOLD_SECONDS - 1e-3)
+        return self.is_image or (self.is_generated and self.length >= MAX_HOLD_SECONDS - 1e-3)
 
     @property
     def length(self) -> float:
@@ -522,6 +558,10 @@ class Sequence:
     # 1.7, "Faixas pretas no quadro": a proporção da janela útil (0 = sem janela). Fora dela o quadro é preto opaco; o
     # encaixe, a posição, títulos e legendas valem dentro dela (`window_rect`). "janela" no JSON, só quando usada.
     window: float = 0.0
+    # 1.7, várias sequências no projeto: o id no conjunto ("" = sozinha; "id" no JSON só com mais de uma) e o conjunto
+    # (`SequenceSet`; None = sozinha, como sempre foi).
+    id: str = ""
+    siblings: "SequenceSet | None" = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -553,6 +593,69 @@ class Sequence:
     def duration(self) -> int:
         """Quadros da sequência (do 0 até o fim do último clipe)."""
         return max((c.end for c in self.clips), default=0)
+
+    # -------------------------------------------------------- várias sequências (1.7)
+    @property
+    def display_name(self) -> str:
+        """O nome mostrado: o dela ou, sem nome (a sequência de um projeto antigo), "Sequência 1". O nome guardado
+        fica vazio até alguém mudar: é ele que nomeia a saída da exportação (`sequence.media_info`)."""
+        return self.name or _("Sequência 1")
+
+    def family(self) -> "list[Sequence]":
+        """As sequências do projeto, na ordem das abas (sozinha: só ela)."""
+        return self.siblings.items if self.siblings is not None else [self]
+
+    def ensure_set(self) -> "SequenceSet":
+        """O conjunto desta sequência (o primeiro é criado ao acrescentar a segunda sequência do projeto)."""
+        if self.siblings is None:
+            SequenceSet([self], folders=self.folders)
+        return self.siblings
+
+    def nested(self, source: "Source | Clip") -> "Sequence | None":
+        """A sequência que a fonte (ou a fonte do clipe) mostra; None se ela não é uma sequência ou sumiu."""
+        src = self.sources.get(source.src) if isinstance(source, Clip) else source
+        if src is None or not src.is_nested or self.siblings is None:
+            return None
+        return self.siblings.get(src.nested_id)
+
+    def nested_children(self) -> "list[Sequence]":
+        """As sequências que esta usa diretamente (sem repetir, na ordem dos clipes)."""
+        out: list[Sequence] = []
+        for c in self.clips:
+            inner = self.nested(c)
+            if inner is not None and not any(inner is x for x in out):
+                out.append(inner)
+        return out
+
+    def closure(self) -> "list[Sequence]":
+        """Esta sequência e todas as que ela usa, em qualquer nível."""
+        out: list[Sequence] = []
+
+        def walk(s: Sequence) -> None:
+            if not any(s is x for x in out):
+                out.append(s)
+                for k in s.nested_children():
+                    walk(k)
+
+        walk(self)
+        return out
+
+    def deep_sources(self) -> "list[Source]":
+        """As fontes que a imagem e o som desta sequência usam de verdade, em qualquer nível, sem as de sequência."""
+        seen: dict[str, Source] = {}
+        for s in self.closure():
+            for src in s.used_sources():
+                if not src.is_nested:
+                    seen.setdefault(src.path, src)
+        return list(seen.values())
+
+    def can_contain(self, source: "Source") -> bool:
+        """Esta sequência pode ter um clipe desta fonte? Sempre, a não ser numa sequência que formaria um ciclo (ela
+        mesma, ou uma que já a usa em algum nível), que passaria de `MAX_NEST` níveis ou que não existe mais."""
+        if not source.is_nested:
+            return True
+        inner = self.siblings.get(source.nested_id) if self.siblings is not None else None
+        return inner is not None and self.siblings.allows(self, inner)
 
     def kind_tracks(self, kind: str) -> list[Track]:
         return [t for t in self.tracks if t.kind == kind]
@@ -901,7 +1004,10 @@ class Sequence:
         """Põe um arquivo na sequência (vídeo + som ligado). `at=None` coloca no fim da faixa.
 
         Por padrão sobrescreve o que estiver no lugar; com `insert` (e um ponto `at`) abre o espaço antes
-        (`open_space`): o que vem depois anda para a direita."""
+        (`open_space`): o que vem depois anda para a direita. Uma sequência que formaria um ciclo não entra: devolve
+        [] e nada muda (`can_contain`)."""
+        if not self.can_contain(src):
+            return []
         self.add_source(src)
         dur = self.default_dur(src)
         if insert and at is not None:
@@ -1994,8 +2100,10 @@ class Sequence:
 
     def features(self) -> set[str]:
         """Recursos que esta montagem usa: os da 1.5 (`FEATURES`, o projeto vai para o formato 3), os da 1.6
-        (`FEATURES_V4`, formato 4) e os da 1.7 (`FEATURES_V5`, formato 5)."""
-        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5) for fid, check in reg.items() if check(self)}
+        (`FEATURES_V4`, formato 4) e os da 1.7 (`FEATURES_V5`, formato 5). Vale para o projeto: conta as irmãs."""
+        seqs = self.family()
+        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5) for fid, check in reg.items()
+                if any(check(s) for s in seqs)}
 
     def block_format(self) -> int:
         """O formato do bloco "edicao": FORMAT com algo da 1.7, FORMAT_16 com algo da 1.6, FORMAT_15 com algo da
@@ -2013,9 +2121,22 @@ class Sequence:
         return [s for p, s in self.sources.items() if p in used]
 
     def to_json(self) -> dict[str, Any]:
+        """O bloco "edicao". Com mais de uma sequência no projeto, ele é o bloco desta com as irmãs em "sequencias" (a
+        posição desta nas abas em "sequencia_pos"): quem grava ou copia uma sequência nunca perde as outras. As pastas
+        ficam só no bloco de cima, porque a Mídia é uma só. Sozinha, o JSON de sempre."""
+        group = self.siblings
+        if group is None or len(group) < 2:
+            return self._block_json(self.block_format(), True)
+        group.sync()
+        fmt = self.block_format()
+        out = {**self._block_json(fmt, True), "id": self.id, "sequencia_pos": group.items.index(self)}
+        out["sequencias"] = [{**s._block_json(fmt, False), "id": s.id} for s in group if s is not self]
+        return out
+
+    def _block_json(self, fmt: int, folders: bool) -> dict[str, Any]:
         used = {c.src for c in self.clips}
         out = {
-            "formato": self.block_format(),
+            "formato": fmt,
             "largura": self.width, "altura": self.height, "fps": self.fps_str, "nome": self.name,
             "fundo": [float(x) for x in self.background],
             "faixas": [t.to_json() for t in self.tracks],
@@ -2036,8 +2157,8 @@ class Sequence:
             out["fundo_transparente"] = True
         if self.window:
             out["janela"] = float(self.window)
-        if self.folders.has_folders():
-            out["pastas"] = self._folders_json(used)
+        if folders and self.folders.has_folders():
+            out["pastas"] = self._folders_json({c.src for s in self.family() for c in s.clips})
         return out
 
     def _folders_json(self, used: set[str]) -> dict[str, Any]:
@@ -2053,9 +2174,27 @@ class Sequence:
 
     @classmethod
     def from_json(cls, d: dict[str, Any] | None) -> "Sequence":
-        """Montagem a partir do JSON de `to_json` (de qualquer formato até `FORMAT`: passa por `migrate`).
-        `FormatError` se o bloco foi gravado por uma versão mais nova."""
+        """Montagem a partir do JSON de `to_json` (de qualquer formato até `FORMAT`: passa por `migrate`), com as irmãs
+        que vierem nele (`SequenceSet`; clipes de uma sequência que sumiu ou que formaria um ciclo saem, veja
+        `SequenceSet.validate`). `FormatError` se o bloco foi gravado por uma versão mais nova."""
         d = migrate(d if isinstance(d, dict) else {})
+        seq = cls._from_block(d)
+        raw = d.get("sequencias")
+        others = [cls._from_block(migrate(x)) for x in (raw if isinstance(raw, list) else []) if isinstance(x, dict)]
+        if others:
+            try:
+                pos = min(max(int(d.get("sequencia_pos", 0)), 0), len(others))
+            except (TypeError, ValueError):
+                pos = 0
+            group = SequenceSet(others[:pos] + [seq] + others[pos:], folders=seq.folders)
+            group.validate()
+            group.sync()
+        seq.folders.keep_items(seq.sources)
+        return seq
+
+    @classmethod
+    def _from_block(cls, d: dict[str, Any]) -> "Sequence":
+        """Uma sequência a partir do bloco dela, já migrado (`keep_items` das pastas fica com quem conhece as irmãs)."""
         try:
             bg = tuple(min(max(float(x), 0.0), 1.0) for x in list(d.get("fundo") or (0, 0, 0))[:3])
             if len(bg) != 3:
@@ -2070,7 +2209,7 @@ class Sequence:
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
                   background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True,
                   magnetic=d.get("faixa_magnetica") is True, transparent=d.get("fundo_transparente") is True,
-                  window=d.get("janela", 0.0))
+                  window=d.get("janela", 0.0), id=str(d.get("id") or ""))
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)
@@ -2100,7 +2239,6 @@ class Sequence:
                     src = Source.from_json(sd)
                     seq.sources[src.path] = src
             seq.folders = Folders.from_json(d["pastas"])
-            seq.folders.keep_items(seq.sources)
         return seq
 
     def relink(self, old: str, new: str, seq_start: int | None = None) -> None:
@@ -2117,11 +2255,12 @@ class Sequence:
         src.path = new
         self.sources[new] = src
         self.folders.rename_item(old, new)
-        for c in self.clips:
-            if c.src == old:
-                c.src = new
-        if self.subtitles is not None:
-            self.subtitles.relink(old, new)
+        for s in self.family():
+            for c in s.clips:
+                if c.src == old:
+                    c.src = new
+            if s.subtitles is not None:
+                s.subtitles.relink(old, new)
 
     @classmethod
     def for_source(cls, src: Source, with_media: bool = True) -> "Sequence":
@@ -2132,6 +2271,139 @@ class Sequence:
         if with_media:
             seq.insert_media(src, 0)
         return seq
+
+
+# ------------------------------------------------------------------ várias sequências (1.7)
+class SequenceSet:
+    """As sequências de um projeto, na ordem das abas. Todas dividem a mesma Mídia (`sources` e `folders` são os mesmos
+    objetos em todas) e cada uma pode entrar nas outras como clipe, pela fonte `Source.for_sequence`. Sem Qt nem GPU."""
+
+    def __init__(self, items: "Iterable[Sequence]" = (), folders: Folders | None = None):
+        self.items: list[Sequence] = []
+        self.sources: dict[str, Source] = {}
+        self.folders = folders if folders is not None else Folders()
+        self.problems: list[str] = []  # o que `validate` precisou tirar ao abrir (a janela mostra)
+        for s in items:
+            self._adopt(s)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def get(self, sid: str) -> Sequence | None:
+        return next((s for s in self.items if s.id == sid), None)
+
+    def _adopt(self, seq: Sequence, at: int | None = None) -> None:
+        if not seq.id or self.get(seq.id) is not None:
+            seq.id = new_id()
+        for key, src in seq.sources.items():
+            self.sources.setdefault(key, src)
+        seq.sources, seq.folders, seq.siblings = self.sources, self.folders, self
+        self.items.insert(len(self.items) if at is None else min(max(int(at), 0), len(self.items)), seq)
+
+    def add(self, seq: Sequence, at: int | None = None) -> Sequence:
+        """Põe a sequência no conjunto (no fim, ou na aba `at`): ela ganha um id e passa a usar a Mídia comum."""
+        self._adopt(seq, at)
+        self.sync()
+        return seq
+
+    def free_name(self) -> str:
+        """O primeiro nome "Sequência N" que ninguém usa."""
+        taken = {s.display_name for s in self.items}
+        n = 1
+        while _("Sequência {n}").format(n=n) in taken:
+            n += 1
+        return _("Sequência {n}").format(n=n)
+
+    def create(self, width: int, height: int, fps_str: str, name: str = "", at: int | None = None) -> Sequence:
+        """Uma sequência nova e vazia (fades curtos nas emendas ligados, como toda sequência nova)."""
+        return self.add(Sequence(width=width, height=height, fps_str=fps_str, name=name or self.free_name(),
+                                 micro_fade=True), at)
+
+    def duplicate(self, seq: Sequence, name: str = "") -> Sequence:
+        """Cópia da sequência, logo depois dela. Os clipes mantêm os ids (a semente das transições vem deles)."""
+        dup = Sequence._from_block(seq._block_json(seq.block_format(), False))
+        dup.id, dup.name = "", name or _("{nome} (cópia)").format(nome=seq.display_name)
+        return self.add(dup, self.items.index(seq) + 1)
+
+    def remove(self, seq: Sequence) -> int:
+        """Tira a sequência do projeto, com os clipes dela nas outras (devolve quantos saíram). A última fica: -1."""
+        if len(self.items) < 2 or not any(s is seq for s in self.items):
+            return -1
+        key = Source.for_sequence(seq).path
+        self.items = [s for s in self.items if s is not seq]
+        gone = 0
+        for s in self.items:
+            kept = [c for c in s.clips if c.src != key]
+            gone += len(s.clips) - len(kept)
+            s.clips = kept
+        self.folders.items.pop(key, None)
+        self.sync()
+        return gone
+
+    def move(self, seq: Sequence, at: int) -> None:
+        """Muda a sequência de aba."""
+        rest = [s for s in self.items if s is not seq]
+        rest.insert(min(max(int(at), 0), len(rest)), seq)
+        self.items = rest
+
+    # -------------------------------------------------------- sequência dentro de sequência
+    def users(self, seq: Sequence) -> list[Sequence]:
+        """As sequências que usam esta diretamente."""
+        return [s for s in self.items if any(k is seq for k in s.nested_children())]
+
+    def _levels_below(self, seq: Sequence) -> int:
+        return 1 + max((self._levels_below(k) for k in seq.nested_children()), default=0)
+
+    def _levels_above(self, seq: Sequence) -> int:
+        return max((1 + self._levels_above(u) for u in self.users(seq)), default=0)
+
+    def allows(self, outer: Sequence, inner: Sequence) -> bool:
+        """`outer` pode ter um clipe de `inner`? Não se formaria um ciclo ou passaria de `MAX_NEST` níveis."""
+        if any(s is outer for s in inner.closure()):
+            return False
+        return self._levels_above(outer) + 1 + self._levels_below(inner) <= MAX_NEST
+
+    def validate(self) -> None:
+        """Ao abrir: tira os clipes de uma sequência que não existe mais ou que fecharia um ciclo (arquivo mexido à
+        mão ou gravado com erro) e guarda o aviso em `problems`. A interface nunca cria nenhum dos dois."""
+        state: dict[int, int] = {}
+
+        def visit(s: Sequence) -> None:
+            state[id(s)] = 1
+            for key in list(dict.fromkeys(c.src for c in s.clips)):
+                src = self.sources.get(key)
+                if src is None or not src.is_nested:
+                    continue
+                inner = self.get(src.nested_id)
+                if inner is None or state.get(id(inner)) == 1:
+                    s.clips = [c for c in s.clips if c.src != key]
+                    self.problems.append(_("A sequência \"{nome}\" usava uma sequência que não pode ser aberta: os "
+                                           "clipes dela saíram da montagem.").format(nome=s.display_name))
+                elif id(inner) not in state:
+                    visit(inner)
+            state[id(s)] = 2
+
+        for s in self.items:
+            if id(s) not in state:
+                visit(s)
+
+    def sync(self) -> None:
+        """Deixa em dia as fontes das sequências (nome, tamanho, fps, duração, som), no mesmo objeto. Uma sequência
+        sozinha não tem fonte: não há onde usá-la. `Sequence.to_json` chama isto, então cada passo do desfazer e cada
+        cópia para a prévia ou a exportação já saem certos."""
+        wanted = {f"{SOURCE_SEQUENCE}:{s.id}": s for s in self.items} if len(self.items) > 1 else {}
+        for key in [k for k, src in self.sources.items() if src.is_nested and k not in wanted]:
+            del self.sources[key]
+        for key, s in wanted.items():
+            fresh = Source.for_sequence(s)
+            cur = self.sources.get(key)
+            if cur is None:
+                self.sources[key] = fresh
+            else:
+                cur.__dict__.update(fresh.__dict__)
 
 
 # ------------------------------------------------------------------ formato do bloco "edicao" (1.5)
@@ -2146,7 +2418,7 @@ class FormatError(ValueError):
 FEATURES: dict[str, Callable[[Sequence], bool]] = {
     "alfa": lambda seq: any(s.has_alpha for s in seq.used_sources()),
     "chaves": lambda seq: any(c.keys for c in seq.clips),
-    "gerador": lambda seq: any(not s.is_file for s in seq.used_sources()),
+    "gerador": lambda seq: any(s.is_generated for s in seq.used_sources()),
     "transicoes": lambda seq: seq.uses_extra_transitions(),
     "legendas": lambda seq: seq.subtitles is not None and not seq.subtitles.is_empty(),  # subtitles.FEATURE_ID
     "sequencia_imagens": lambda seq: any(s.is_sequence for s in seq.used_sources()),
@@ -2184,6 +2456,8 @@ FEATURES_V5: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_7": _clips_beyond_1_6,
     "pastas": lambda seq: seq.folders.has_folders(),  # pastas do painel de mídia (`Sequence.folders`)
     "janela_util": lambda seq: seq.window > 0,  # "Faixas pretas no quadro" (`Sequence.window`, "janela" no JSON)
+    "varias_sequencias": lambda seq: len(seq.family()) > 1,  # mais de uma sequência ("sequencias" no JSON)
+    "sequencia_aninhada": lambda seq: any(s.is_nested for s in seq.used_sources()),  # sequência usada como clipe
 }
 
 
@@ -2240,19 +2514,32 @@ def migrate(d: dict[str, Any]) -> dict[str, Any]:
 
 
 class History:
-    """Desfazer/refazer da sequência por instantâneos JSON (até `limit` passos)."""
+    """Desfazer/refazer por instantâneos JSON (até `limit` passos). O instantâneo é do projeto inteiro, com as sequências
+    irmãs: "Aninhar seleção" mexe em duas e é um passo só. Trocar de aba não é edição: ele sai sempre a partir da primeira
+    sequência; desfazer volta à sequência em que a mudança foi feita."""
 
     def __init__(self, seq: Sequence, limit: int = 200):
         self.limit = limit
         self._states = [self._dump(seq)]
+        self._active = [seq.id]  # em que sequência cada estado foi gravado
         self._pos = 0
 
     @staticmethod
     def _dump(seq: Sequence) -> str:
-        return json.dumps(seq.to_json(), sort_keys=True, ensure_ascii=False)
+        return json.dumps(seq.family()[0].to_json(), sort_keys=True, ensure_ascii=False)
+
+    def _load(self, pos: int, prefer: str) -> Sequence:
+        """O estado `pos`, com `prefer` como a sequência atual (ou a do próprio estado, se ela ainda não existia)."""
+        seq = Sequence.from_json(json.loads(self._states[pos]))
+        for sid in (prefer, self._active[pos]):
+            hit = next((s for s in seq.family() if sid and s.id == sid), None)
+            if hit is not None:
+                return hit
+        return seq
 
     def reset(self, seq: Sequence) -> None:
         self._states = [self._dump(seq)]
+        self._active = [seq.id]
         self._pos = 0
 
     def push(self, seq: Sequence) -> bool:
@@ -2261,8 +2548,10 @@ class History:
         if s == self._states[self._pos]:
             return False
         self._states = self._states[: self._pos + 1] + [s]
+        self._active = self._active[: self._pos + 1] + [seq.id]
         if len(self._states) > self.limit:
             self._states.pop(0)
+            self._active.pop(0)
         self._pos = len(self._states) - 1
         return True
 
@@ -2276,10 +2565,10 @@ class History:
         if not self.can_undo():
             return None
         self._pos -= 1
-        return Sequence.from_json(json.loads(self._states[self._pos]))
+        return self._load(self._pos, self._active[self._pos + 1])
 
     def redo(self) -> Sequence | None:
         if not self.can_redo():
             return None
         self._pos += 1
-        return Sequence.from_json(json.loads(self._states[self._pos]))
+        return self._load(self._pos, self._active[self._pos])

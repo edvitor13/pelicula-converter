@@ -2861,6 +2861,8 @@ class MainWindow(QMainWindow):
 
         Marcadores e legendas contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
+        if len(seq.family()) > 1:  # 1.7: a sequência aberta pode ser trivial; as outras vão junto
+            return seq.to_json()
         subs = seq.subtitles is not None and not seq.subtitles.is_default()
         if (not seq.clips and not seq.folders.has_folders()) or (
                 self.file_info is not None and seq.is_trivial() == self.file_info.path and not seq.markers
