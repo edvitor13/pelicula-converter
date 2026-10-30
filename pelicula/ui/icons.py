@@ -598,6 +598,13 @@ def _draw_color(name: str, p: QPainter, c: QColor) -> None:
         p.drawRoundedRect(QRectF(3, 6, 8, 12), 1.5, 1.5)
         p.drawRoundedRect(QRectF(13, 6, 8, 12), 1.5, 1.5)
         p.drawLine(QPointF(12, 3.5), QPointF(12, 20.5))
+    elif name == "fx_off":
+        # O brilho de "efeito" riscado: desligar todos os efeitos.
+        _pen(p, c, 1.6)
+        pts = [(12, 3.5), (14, 10), (20.5, 12), (14, 14), (12, 20.5), (10, 14), (3.5, 12), (10, 10)]
+        p.drawPolygon([QPointF(x, y) for x, y in pts])
+        _pen(p, c, 2.0)
+        p.drawLine(QPointF(4.5, 4.5), QPointF(19.5, 19.5))
 
 
 @lru_cache(maxsize=256)

@@ -49,6 +49,7 @@ from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
 from . import luz_fotometro_ui
+from . import sem_efeitos_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -114,11 +115,13 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, source, frame, w, h, profile: str | None = None, shutter: float = 0.0) -> None:
+    def request(self, source, frame, w, h, profile: str | None = None, shutter: float = 0.0,
+                no_effects: bool = False) -> None:
         """Pede o quadro `frame` de `source` em w × h; `profile`: o perfil de entrada do look (a leitura de um
-        arquivo log em faixa legal vem em float32, `media.float_input`); `shutter` (1.6): o ângulo do obturador."""
+        arquivo log em faixa legal vem em float32, `media.float_input`); `shutter` (1.6): o ângulo do obturador;
+        `no_effects` (1.7): sem o perfil de câmera dos clipes."""
         with self._lock:
-            self._pending = (source, frame, w, h, profile, shutter)
+            self._pending = (source, frame, w, h, profile, shutter, no_effects)
             if self._busy:
                 return
             self._busy = True
@@ -132,10 +135,10 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            source, frame, w, h, profile, shutter = job
+            source, frame, w, h, profile, shutter, no_effects = job
             try:
                 if isinstance(source, timeline.Sequence):
-                    img = sequence.grab(source, frame, w, h, 8, shutter=shutter)
+                    img = sequence.grab(source, frame, w, h, 8, shutter=shutter, no_effects=no_effects)
                 else:
                     img = media.grab_frame(source, frame, w, h, 8, profile=profile)
             except Exception as exc:  # noqa: BLE001
@@ -152,7 +155,7 @@ class Player:
         self._stop = threading.Event()
 
     def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None,
-              shutter: float = 0.0) -> None:
+              shutter: float = 0.0, no_effects: bool = False) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
@@ -170,7 +173,7 @@ class Player:
 
         def open_reader(f):
             if is_seq:
-                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1, shutter=shutter)
+                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1, shutter=shutter, no_effects=no_effects)
             return media.FrameReader(source, w, h, 8, f, profile=profile)
 
         def run():
@@ -336,6 +339,7 @@ class MainWindow(QMainWindow):
         self.cur_layers = None
         self.cur_neutral_q: QImage | None = None
         self.edit_film = str(self.settings.value("edit_film", "false")) == "true"
+        self.no_effects = False  # 1.7: "Desligar todos os efeitos" (só nesta sessão, `sem_efeitos_ui`)
         self._sources: dict[str, timeline.Source] = {}
         self._file_infos: dict[str, media.MediaInfo] = {}  # 1.6: metadados de câmera (`media.suggest_input`)
         self.model.clip_profile_for = self._clip_profile_for
@@ -655,6 +659,7 @@ class MainWindow(QMainWindow):
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
+        sem_efeitos_ui.install(self, hl)
         hl.add_spacing(2)
         self.btn_zoom_out = self._flat("zoom_out", _("Menos zoom (−). A roda do mouse também dá zoom."))
         self.btn_zoom_out.clicked.connect(lambda: self.viewer.zoom_step(-1))
@@ -1095,6 +1100,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
+        sem_efeitos_ui.reset(self)
         self._file_infos[info.path] = info
         if detect:
             self._detect_profile(info)
@@ -1180,7 +1186,7 @@ class MainWindow(QMainWindow):
         self.timeline.setEnabled(video)
         self.btn_export.setEnabled(on)
         self.btn_frame.setEnabled(on)
-        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full):
+        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full, self.btn_no_effects):
             b.setEnabled(on)
 
     def preview_size(self) -> tuple[int, int]:
@@ -1201,11 +1207,11 @@ class MainWindow(QMainWindow):
         self.frame_idx = f
         self._update_time()
         w, h = self.preview_size()
-        prof = self.store.get("entrada")
+        prof = sem_efeitos_ui.read_entrada(self)
         self._float_source = self.src_seq is None and media.float_input(self.info, prof)
         self._shutter_read = self._shutter()
         self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof,
-                            self._shutter_read)
+                            self._shutter_read, self.no_effects)
 
     def _frame_loaded(self, source, frame: int, img) -> None:
         expected = self.src_seq if self.src_seq is not None else self.info
@@ -1264,11 +1270,13 @@ class MainWindow(QMainWindow):
             alpha = not full and seq is not None and seq.transparent
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
                                  size=size, keys=self._export_keys(), burn=self._subtitle_burn(full),
-                                 alpha=bool(alpha) and seq is not None)
+                                 alpha=bool(alpha) and seq is not None, no_effects=self.no_effects)
 
     def _shutter(self) -> float:
         """1.6: o ângulo do obturador do look da prévia (0 = desligado ou sem película; `tempo_camera`)."""
         from .. import tempo_camera
+        if self.no_effects:
+            return 0.0
         return tempo_camera.shutter_angle(None if (self.mode == "edicao" and not self.edit_film) else self.store.values)
 
     def _subtitle_burn(self, full: bool = False):
@@ -1353,6 +1361,8 @@ class MainWindow(QMainWindow):
 
     def _update_label_proc(self) -> None:
         self.viewer.label_proc = _("EDIÇÃO") if (self.mode == "edicao" and not self.edit_film) else _("PELÍCULA")
+        if self.no_effects:
+            self.viewer.label_proc = _("SEM EFEITOS")
         self.viewer.update()
 
     def _set_edit_film(self, on: bool) -> None:
@@ -1969,7 +1979,7 @@ class MainWindow(QMainWindow):
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
         cor_ui.after_render(self, recipe)
-        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None:
+        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None and not recipe.no_effects:
             self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
     def _render_thumbs(self) -> None:
@@ -2011,7 +2021,7 @@ class MainWindow(QMainWindow):
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
             timer.start()  # as miniaturas dos presets usam o perfil do arquivo
         if (key in ("entrada", "*") and self.info is not None and self.src_seq is None and not self.playing
-                and media.float_input(self.info, self.store.get("entrada")) != getattr(self, "_float_source", False)):
+                and media.float_input(self.info, sem_efeitos_ui.read_entrada(self)) != getattr(self, "_float_source", False)):
             self.request_frame(self.frame_idx)  # log ↔ Rec.709: o quadro é lido de novo (super-brancos em float)
         elif (self.src_seq is not None and not self.playing and key in ("obturador_on", "obturador_angulo", "*")
               and self._shutter() != getattr(self, "_shutter_read", 0.0)):
@@ -2112,7 +2122,7 @@ class MainWindow(QMainWindow):
             f = loop_start
         w, h = self.preview_size()
         self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
-                          loop_start, self.store.get("entrada"), self._shutter())
+                          loop_start, sem_efeitos_ui.read_entrada(self), self._shutter(), self.no_effects)
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -2686,6 +2696,8 @@ class MainWindow(QMainWindow):
         if self.info is None:
             self.open_dialog()
             return
+        if not sem_efeitos_ui.confirm_export(self):
+            return
         self.store.commit()
         inout = None
         if self.inp is not None or self.outp is not None:
@@ -2702,7 +2714,7 @@ class MainWindow(QMainWindow):
                            last_platform=str(self.settings.value("export_platform", "")),
                            chapters=self._export_chapters(), look_keys=self._export_keys(),
                            subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues(),
-                           queue_jobs=list(self.queue.jobs))
+                           queue_jobs=list(self.queue.jobs), no_effects=self.no_effects)
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2716,13 +2728,15 @@ class MainWindow(QMainWindow):
 
     def _export_look(self) -> tuple[dict, str]:
         """O que sai na exportação é o que a prévia mostra: no modo Edição sem película, só a montagem."""
+        if self.no_effects:
+            return presets.builtin_values("original"), _("Sem efeitos")
         if self.mode == "edicao" and not self.edit_film:
             return presets.builtin_values("original"), _("Sem película (só a edição)")
         return self.store.snapshot(), self.preset_name(self.preset_id)
 
     def _export_keys(self) -> dict:
         """As chaves de animação do look que vão com `_export_look` ({} no modo Edição sem película)."""
-        if self.mode == "edicao" and not self.edit_film:
+        if self.no_effects or (self.mode == "edicao" and not self.edit_film):
             return {}
         return self.store.keys_json()
 
@@ -2797,7 +2811,8 @@ class MainWindow(QMainWindow):
         w, h = self.info.width, self.info.height
         recipe = self.frame_recipe(16, full=True, alpha=alpha)
         if self.src_seq is not None:
-            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True, shutter=recipe.shutter))
+            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True, shutter=recipe.shutter,
+                                                  no_effects=recipe.no_effects))
         else:
             img = None
         if img is None:
@@ -2860,7 +2875,7 @@ class MainWindow(QMainWindow):
         return box.clickedButton() is discard
 
     def _thumbnail(self) -> bytes:
-        img = self.viewer.proc
+        img = sem_efeitos_ui.thumbnail_image(self) if self.no_effects else self.viewer.proc
         if img is None:
             return b""
         small = img.scaled(320, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -2925,6 +2940,7 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard():
             return
         self.stop_play()
+        sem_efeitos_ui.reset(self)
         self.project_path = None
         self.file_info = None
         self.cur = None
@@ -2964,6 +2980,7 @@ class MainWindow(QMainWindow):
         """Mostra um projeto já lido (de um .plc ou de uma cópia da recuperação automática, sem `p.path`).
         `remember`: entra nos projetos recentes."""
         self.input_notice.offer(None)  # 1.6: um projeto salvo nunca recebe sugestão de perfil
+        sem_efeitos_ui.reset(self)
         if p.sequence:
             self._open_sequence_project(p, remember)
             return
@@ -3390,7 +3407,8 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
             "Edição: Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
-            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
+            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)") + "\n\n" + _(
+            "Shift+D — desligar / religar todos os efeitos"))
 
     def about(self) -> None:
         try:
@@ -3434,6 +3452,9 @@ class MainWindow(QMainWindow):
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
             self.bin.place(k == Qt.Key.Key_Comma)  # inserir / sobrescrever no cursor
+            return
+        if k == Qt.Key.Key_D and mod == Qt.KeyboardModifier.ShiftModifier:
+            sem_efeitos_ui.toggle(self)
             return
         if k in (Qt.Key.Key_J, Qt.Key.Key_K, Qt.Key.Key_L) and not shift:
             if k == Qt.Key.Key_K:

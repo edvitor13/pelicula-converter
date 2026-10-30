@@ -115,9 +115,10 @@ class ExportDialog(QDialog):
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
                  last_platform: str = "", chapters=None, look_keys: dict | None = None, subtitles=None,
-                 subtitle_cues=None, queue_jobs=()):
+                 subtitle_cues=None, queue_jobs=(), no_effects: bool = False):
         super().__init__(parent)
         self.info = info
+        self.no_effects = bool(no_effects)  # 1.7: "Desligar todos os efeitos" (`ExportSettings.no_effects`)
         self.queue_jobs = queue_jobs  # o que já está na fila: outro trabalho com o mesmo destino pede outro nome
         # legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência
         self.subs_doc = subtitles
@@ -745,6 +746,7 @@ class ExportDialog(QDialog):
             p = self.perf_dict()
             s.threads, s.priority, s.hwaccel, s.gpu, s.buffer = (p["threads"], p["priority"], p["hwaccel"],
                                                                  p["gpu"], p["buffer"])
+        s.no_effects = self.no_effects
         return s
 
     def _quality_changed(self) -> None:
