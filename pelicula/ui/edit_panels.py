@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import copy
+import os
 
-from PySide6.QtCore import QMimeData, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
-                               QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QStackedWidget, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from .. import editparams, keyframes
 from ..i18n import N_, _, decimal_sep
-from ..timeline import AUDIO, VIDEO, Clip, Source
+from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 from . import filtro_ajustes, icons, theme
 from .edit_model import TimelineModel
 from .flow import flow_widget
 from .keyframes_ui import ClipKeys, KeyRows
+from .pastas_ui import FolderActions, FolderTree, MediaItem
 from .store import ParamStore
 from .tempo_ui import TempoPanel
 from .timeline_view import MIME_SOURCE
@@ -60,56 +62,12 @@ KIND_LABELS = {"video": N_("vídeo"), "audio": N_("áudio"), "imagem": N_("image
 
 
 # ------------------------------------------------------------------ mídia
-class _BinList(QListWidget):
-    """Lista que arrasta os caminhos (para a linha do tempo) e aceita arquivos soltos."""
-
-    filesDropped = Signal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.CopyAction)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.setIconSize(THUMB)
-        self.setSpacing(2)
-        self.setUniformItemSizes(True)
-        self.setStyleSheet(f"QListWidget {{ background: transparent; border: none; }}"
-                           f"QListWidget::item {{ padding: 4px; border-radius: 6px; color: {theme.TEXT}; }}"
-                           f"QListWidget::item:selected {{ background: {theme.PANEL3}; color: {theme.ACCENT_HI}; }}"
-                           f"QListWidget::item:hover {{ background: {theme.PANEL2}; }}")
-
-    def mimeTypes(self):
-        return [MIME_SOURCE, "text/uri-list"]
-
-    def mimeData(self, items):
-        md = QMimeData()
-        paths = [it.data(Qt.ItemDataRole.UserRole) for it in items]
-        md.setData(MIME_SOURCE, "\n".join(paths).encode("utf-8"))
-        md.setUrls([QUrl.fromLocalFile(p) for p in paths])
-        return md
-
-    def dragEnterEvent(self, e):
-        if e.source() is self:
-            super().dragEnterEvent(e)
-        elif e.mimeData().hasUrls():
-            e.acceptProposedAction()
-
-    def dragMoveEvent(self, e):
-        if e.source() is self:
-            e.ignore()
-        elif e.mimeData().hasUrls():
-            e.acceptProposedAction()
-
-    def dropEvent(self, e):
-        if e.source() is self:
-            e.ignore()
-            return
-        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
-        if paths:
-            e.acceptProposedAction()
-            self.filesDropped.emit(paths)
+# A lista da Mídia é `pastas_ui.FolderTree` (árvore de pastas; sem pasta nenhuma é a lista de sempre).
+def _mtime(path: str) -> float:
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0.0
 
 
 def _kind_pixmap(kind: str, thumb: QImage | None) -> QPixmap:
@@ -141,8 +99,9 @@ class MediaBin(QWidget):
     removeRequested = Signal(str)
     filesDropped = Signal(list)
     placeRequested = Signal(list, bool)   # (caminhos, inserir): no cursor, empurrando (True) ou cobrindo (False)
+    filesDroppedIn = Signal(list, str)    # (arquivos do sistema, id da pasta) soltos sobre uma pasta
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, model: TimelineModel | None = None):
         super().__init__(parent)
         self.setObjectName("Panel")
         self.setMinimumWidth(220)
@@ -185,12 +144,15 @@ class MediaBin(QWidget):
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.empty.setAcceptDrops(False)
-        self.list = _BinList()
-        self.list.itemDoubleClicked.connect(lambda it: self.addRequested.emit(it.data(Qt.ItemDataRole.UserRole)))
+        self.list = FolderTree(THUMB)
         self.list.itemSelectionChanged.connect(self._sync)
         self.list.filesDropped.connect(self.filesDropped)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._menu)
+        # Pastas (`pastas_ui`): sem modelo (painel solto, em testes) elas valem só neste painel.
+        self.pastas = FolderActions(self, model if model is not None else TimelineModel(Sequence()))
+        row.insertWidget(row.indexOf(self.btn_add), self.pastas.btn_folder)
+        row.insertWidget(row.indexOf(self.btn_add), self.pastas.btn_sort)
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.list)
         lay.addWidget(self.stack, 1)
@@ -215,54 +177,51 @@ class MediaBin(QWidget):
 
     def add_source(self, src: Source, thumb: QImage | None = None) -> None:
         self._sources[src.path] = src
-        item = self._item(src.path)
+        item = self.list.media(src.path)
         if item is None:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, src.path)
-            self.list.addItem(item)
+            item = MediaItem(src.path)
+            self.list.add_media(item)
         kind = source_kind(src)
         if kind == "gerado" and src.unbounded:
-            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])}")
+            item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])}")
         else:
             dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
-            item.setText(f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
-        item.setToolTip(src.path)
-        item.setData(Qt.ItemDataRole.UserRole + 1, kind)
-        item.setIcon(QIcon(_kind_pixmap(kind, thumb)))
-        item.setSizeHint(QSize(0, THUMB.height() + 12))
+            item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
+        item.setToolTip(0, src.path)
+        item.kind, item.name = kind, src.name
+        item.mtime = _mtime(src.path) if src.is_file else 0.0
+        item.setIcon(0, QIcon(_kind_pixmap(kind, thumb)))
+        item.setSizeHint(0, QSize(0, THUMB.height() + 12))
         self._sync()
 
     def set_thumb(self, path: str, thumb: QImage) -> None:
-        item = self._item(path)
+        item = self.list.media(path)
         if item is not None:
-            item.setIcon(QIcon(_kind_pixmap(item.data(Qt.ItemDataRole.UserRole + 1) or "video", thumb)))
+            item.setIcon(0, QIcon(_kind_pixmap(item.kind or "video", thumb)))
 
     def remove(self, path: str) -> None:
-        item = self._item(path)
-        if item is not None:
-            self.list.takeItem(self.list.row(item))
+        self.list.remove_media(path)
         self._sources.pop(path, None)
         self._sync()
 
     def clear(self) -> None:
-        self.list.clear()
+        self.list.clear_all()
         self._sources.clear()
         self._sync()
 
     def paths(self) -> list[str]:
-        return [self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count())]
+        return [it.path for it in self.list.media_items()]
 
     def source(self, path: str) -> Source | None:
         return self._sources.get(path)
 
     def current_path(self) -> str | None:
         it = self.list.currentItem()
-        return it.data(Qt.ItemDataRole.UserRole) if it is not None else None
+        return it.path if isinstance(it, MediaItem) else None
 
     def selected_paths(self) -> list[str]:
-        """Itens escolhidos, na ordem da lista."""
-        rows = sorted(self.list.row(it) for it in self.list.selectedItems())
-        return [self.list.item(r).data(Qt.ItemDataRole.UserRole) for r in rows]
+        """Itens escolhidos, na ordem em que aparecem (as pastas escolhidas não contam)."""
+        return [it.path for it in self.list.selected_media()]
 
     def place(self, insert: bool) -> None:
         """"Inserir no cursor" (`,`) / "Sobrescrever no cursor" (`.`) com os itens escolhidos."""
@@ -271,38 +230,34 @@ class MediaBin(QWidget):
             self.placeRequested.emit(paths, bool(insert))
 
     def _menu(self, pos) -> None:
-        if self.list.itemAt(pos) is None or not self.list.selectedItems():
-            return
-        menu = QMenu(self)
+        self.pastas.menu(pos)
+
+    def fill_media_menu(self, menu: QMenu) -> None:
+        """As ações do menu de um item da Mídia (o `pastas_ui` acrescenta "Mover para" e "Nova pasta")."""
         menu.addAction(_("Adicionar ao fim da linha do tempo"), self._add_current)
         menu.addAction(_("Inserir no cursor (,)"), lambda: self.place(True))
         menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.place(False))
         menu.addSeparator()
         menu.addAction(_("Tirar da lista"), self._remove_current)
-        menu.exec(self.list.viewport().mapToGlobal(pos))
 
     # -------------------------------------------------------- interno
-    def _item(self, path: str) -> QListWidgetItem | None:
-        for i in range(self.list.count()):
-            it = self.list.item(i)
-            if it.data(Qt.ItemDataRole.UserRole) == path:
-                return it
-        return None
+    def _item(self, path: str) -> MediaItem | None:
+        return self.list.media(path)
 
     def _sync(self) -> None:
-        has = self.list.count() > 0
+        has = self.list.count() > 0 or self.list.folders.has_folders()
         self.stack.setCurrentWidget(self.list if has else self.empty)
-        sel = bool(self.list.selectedItems())
+        sel = bool(self.list.selected_media())
         self.btn_add.setEnabled(sel)
         self.btn_remove.setEnabled(sel)
 
     def _add_current(self) -> None:
-        for it in self.list.selectedItems():
-            self.addRequested.emit(it.data(Qt.ItemDataRole.UserRole))
+        for p in self.selected_paths():
+            self.addRequested.emit(p)
 
     def _remove_current(self) -> None:
-        for it in list(self.list.selectedItems()):
-            self.removeRequested.emit(it.data(Qt.ItemDataRole.UserRole))
+        for p in self.selected_paths():
+            self.removeRequested.emit(p)
 
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls() and not e.mimeData().hasFormat(MIME_SOURCE):
