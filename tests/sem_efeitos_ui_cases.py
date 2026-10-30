@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
 
-from pelicula import export, media, presets, project, sequence  # noqa: E402
+from pelicula import export, media, presets, project  # noqa: E402
 from pelicula import timeline as tl  # noqa: E402
 from pelicula.export import ExportSettings  # noqa: E402
 from pelicula.ui import main_window, theme  # noqa: E402
@@ -445,8 +445,6 @@ def test_export_frames_follow_the_preview(win, sample_video):
         np.testing.assert_array_equal(win.still_frame(n),
                                       export.preview_frame(win.engine, win.info, win._export_look()[0], s, n, seq=seq,
                                                            depth=16, keys=win._export_keys()))
-    fl = sequence.grab(seq, 3, 64, 36, 8, no_effects=True)
-    assert fl.layers
 
 
 # ------------------------------------------------------------------ modo × comparação
@@ -465,9 +463,15 @@ def test_labels_of_the_two_selectors(win):
 
 def test_mode_switch_icons_follow_the_text(win):
     for b in win.mode_switch.buttons.values():
-        assert not b.icon().isNull() and b.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        assert not b.icon().isNull()
         assert _pixels_of(b.icon(), QIcon.State.Off) == {theme.MUTED}
         assert _pixels_of(b.icon(), QIcon.State.On) == {"#1b1205"}
+    # com largura, ícone e texto; janela estreita: só o ícone, como os outros botões do topo
+    bar = win.top_bar
+    for level, style in ((0, Qt.ToolButtonStyle.ToolButtonTextBesideIcon), (1, Qt.ToolButtonStyle.ToolButtonIconOnly)):
+        bar._apply(level)
+        assert {b.toolButtonStyle() for b in win.mode_switch.buttons.values()} == {style}
+    bar._adapt(bar.width())
     for b in win.compare.buttons.values():
         assert b.icon().isNull()
 

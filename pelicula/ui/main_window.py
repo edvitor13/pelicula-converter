@@ -635,7 +635,8 @@ class MainWindow(QMainWindow):
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
         # Janela estreita: os botões ficam só com o ícone e o nome do app some.
-        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue, self.btn_subs],
+        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue, self.btn_subs,
+                                  *self.mode_switch.buttons.values()],
                          optional=[self._brand])
         return bar
 
