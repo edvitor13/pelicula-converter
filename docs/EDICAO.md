@@ -463,6 +463,13 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 
 ## 5. Monitores
 
+**Desligar todos os efeitos** (o botão com o brilho riscado na barra da prévia, **Shift+D**): a montagem aparece sem o
+look e sem os ajustes de imagem dos clipes (cor, detalhe, perfil de câmera, pele, cor escolhida, degradê). Cortes,
+tempo, enquadramento, opacidade, mesclagem, transições, títulos, legendas gravadas e o som continuam. Ao religar, tudo
+volta exatamente como estava; não entra no desfazer nem no projeto, e abrir outro arquivo ou projeto religa. A exportação
+segue a prévia e pergunta antes (*Exportar sem efeitos*, *Religar e exportar*, *Cancelar*). O seletor da comparação é
+**Resultado / Dividido / Lado a lado / Original**: *Resultado* é o que sai, com ou sem película.
+
 Acima dos ajustes há um monitor com quatro vistas:
 
 - **Histograma**: quantos pixels há em cada nível de brilho;

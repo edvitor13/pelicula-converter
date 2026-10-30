@@ -58,7 +58,8 @@ pelicula/
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
                              exportação, prévia da exportação, medição de velocidade e linha de comando;
-                             legendas gravadas (burn: "copia" antes do look, "digital" depois)
+                             legendas gravadas (burn: "copia" antes do look, "digital" depois); 1.7, no_effects
+                             (tudo desligado, ARQUITETURA §40)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
@@ -210,6 +211,7 @@ pelicula/
                              1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
                              "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D), fotometro_ui (botão
                              Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
+                             1.7, sem_efeitos_ui ("Desligar todos os efeitos": botão, Shift+D, pergunta ao exportar)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -448,6 +450,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_entrada_sugestao.py` | perfil sugerido pelos metadados: tabela de dicionários do ffprobe, XML da Sony, etiquetas guardadas, preenchimento dos clipes novos |
 | `tests/test_entrada_ui.py` | casos de `entrada_ui_cases.py`: cartão "Câmera" do inspetor, aviso da sugestão (um clique, nunca ao reabrir), clipes novos preenchidos num passo do desfazer |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
+| `tests/test_sem_efeitos.py` | `frame.Recipe.no_effects` e `ExportSettings.no_effects` sem GPU (receita, padrões, JSON antigo); na GPU: igual à montagem com os ajustes de imagem no padrão e o preset "original" (8 e 16 bits), a edição continua, campo desligado igual, arquivo direto, `grab` = `SequenceReader`, exportação |
+| `tests/test_sem_efeitos_ui.py` | casos de `sem_efeitos_ui_cases.py`: botão, etiqueta e Shift+D nos dois modos; desligar e religar não muda valores, chaves, montagem, desfazer, alterações nem imagem; slider movido desligado, leitura de log e de perfil do clipe, obturador, miniaturas, abrir religa, `.plc` igual, a pergunta ao exportar, trabalho guarda o campo; seletores de modo e de comparação (rótulos, ícones, estilos, tecla C) |
 | `tests/test_correcoes_17_ui.py` | casos de `correcoes_17_ui_cases.py`: botão, telas e `self.mode` iguais ao abrir projetos e Ctrl+Z no histórico certo (#50), a prévia toca o som do que ficou depois de apagar, mover, mudar volume e faixa (#51), âncora do zoom pelo marcador, pelo ponteiro e pelo centro (#53), Exportar com a fila ocupada e destino repetido (#59) |
 | `tests/test_fila_exportacao.py` | fila de exportação sem GPU: trabalho novo não mexe no que está rodando, destino repetido (`queue_clash`), nome livre (`free_output`) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
