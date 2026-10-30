@@ -136,7 +136,8 @@ pelicula/
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
                              pré-multiplicada, alfa na cobertura) e a saída da tela; CLIP_CS/CLIP_TR_CS (1.6: o
                              CLIP/CLIP_TR com a cor simples, só quando a camada traz u_cs_on), CAMERA (1.6: perfil
-                             de câmera do clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32)
+                             de câmera do clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32);
+                             NEST_PREMUL (1.7: a tela de uma sequência transparente, sem cortar os super-brancos)
   masks.py                   1.6, máscaras sem Qt nem GPU: pele em OkLab/OkLCh (skin_mask, conta-gotas skin_hue_of,
                              skin_even) e degradê linear/radial em px@1080 (gradient_mask); GLSL + referência numpy
   planes.py                  1.6, "Cor por planos" do look (módulo Beta cor_planos): uniforms u_cp_*, referência
@@ -172,14 +173,17 @@ pelicula/
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
                              RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo),
-                             THUMBNAIL_FRAME + source_thumbnail()
+                             THUMBNAIL_FRAME + source_thumbnail(); sequência aninhada (1.7): LayerImage.nested com
+                             Nested (FrameLayers de dentro), nested_canvas(), _NestedStream (seção 41.5)
   generators.py              geradores (sem Qt de interface): GENERATORS (cor, degrade, contagem) com Field (campos em
                              Source.data), desenho determinístico, o bipe da ponta (audiomix.TONES), needs_text()
   titles.py                  títulos (RENDERERS["texto"]): title_of(data), PRESETS, ANIMATIONS, motion(), draw()
                              (textrender → RGBA pré-multiplicado), missing()
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
-                             (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe)
+                             (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe);
+                             sequência aninhada (1.7): WAV da mixagem de dentro como entrada do clipe
+                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -428,6 +432,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
 | `tests/test_geometria.py` | geometria da 1.7: escala por eixo (largura e altura medidas no quadro, antes da rotação), desespremer (tabela, faixas, preencher, esticar, ordem), janela útil (tamanhos pares, retângulo na prévia e na exportação, encaixe e posição, faixas pretas em 8/16 bits com o look por cima, transparência, encaixe da exportação, títulos, legendas, transições), `grab` = `SequenceReader`, exportação = prévia, JSON esparso e formato 5 |
 | `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
+| `tests/test_aninhada.py` | imagem e som da sequência aninhada: a **gêmea** (a montagem e a mesma montagem num único clipe de sequência dão os mesmos bits, em 8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação, em dois níveis, e as mesmas amostras de som), `grab` × `SequenceReader`, fundo transparente × opaco, ajustes no clipe de sequência, janela útil, clipe log com o próprio perfil lá dentro, cache do quadro sem quadro velho, cache de WAVs, cancelar, `pelicula-cli exportar` |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
@@ -597,6 +602,9 @@ muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de a
 Operação nova que mexe na estrutura: no modelo, rode-a dentro de `with self.seq.keep_main():` para a faixa
 principal magnética valer (sem ela não faz nada) e monte-a com as primitivas (`_cut`, `split`, `trim_*`,
 `move`, `delete`, `_clear_range`, `open_space`); regras em `docs/ARQUITETURA.md`, seção 13.8.
+Mudou o que um clipe faz na imagem ou no som? Vale também dentro de uma sequência aninhada, sem regra nova: rode
+`tests/test_aninhada.py`, em que a gêmea (a montagem dentro de um único clipe de sequência) precisa dar os mesmos bits. Um dado novo
+em `LayerImage` precisa descer pelos níveis (`Recipe._blend_layers`, `_NestedStream`, `Engine._canvas`; seção 41.5).
 
 ### Legendas (editar, gravar, entregar, tirar tempo)
 
