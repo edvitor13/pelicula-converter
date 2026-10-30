@@ -40,6 +40,8 @@ _DEFAULTS = editparams.VIDEO.defaults()
 _COLOR_KEYS = [k for k in editparams.color_keys() if k not in DETAIL_KEYS]
 # Taxas do desespremer do clipe. Tabela própria: a da Lente anamórfica do look (`anamorfico.SQUEEZES`) não tem 1,55.
 DESQUEEZE = {"nao": 1.0, "1.33": 1.33, "1.5": 1.5, "1.55": 1.55, "1.8": 1.8, "2.0": 2.0}
+# 1.7: `u_px_per_uv` de um clipe de sequência que cobre a tela pixel a pixel: a cobertura de todo pixel dá 1 exato.
+EXACT_PX_PER_UV = 1.0e7
 
 
 def mat3_uniform(m: np.ndarray) -> tuple:
@@ -112,6 +114,11 @@ def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h
     v = values if values is not None else clip.values
     mode = v.get("encaixe", "ajustar")
     if mode == "esticar":
+        return float(aw), float(ah)
+    if (src is not None and src.is_nested and not seq.window and desqueeze(v) == 1.0
+            and src.width * seq.height == src.height * seq.width):
+        # 1.7: uma sequência da mesma proporção é a tela inteira. Os lados pares de uma tela reduzida não são outra
+        # proporção: encaixar pela tela deixaria um clipe sem ajustes reamostrado em menos de um pixel.
         return float(aw), float(ah)
     sw *= desqueeze(v)
     f = min(aw / sw, ah / sh) if mode == "ajustar" else max(aw / sw, ah / sh)

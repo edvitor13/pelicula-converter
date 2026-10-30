@@ -99,12 +99,15 @@ def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canv
 def nested_canvas(inner: timeline.Sequence, w: int, h: int) -> tuple[int, int]:
     """Tamanho da tela da sequência interna para um clipe decodificado em `w` × `h` (`decode_size`): a proporção dela e
     lados pares, sem passar do tamanho dela (como um vídeo, nunca maior que a caixa nem que o arquivo). Assim a prévia
-    reduzida monta uma tela reduzida (px@1080 já acompanha) e "Esticar" estica a imagem em vez de reencaixar lá dentro."""
-    k = max(int(w) / inner.width, int(h) / inner.height)
+    reduzida monta uma tela reduzida (px@1080 já acompanha) e "Esticar" estica a imagem em vez de reencaixar lá dentro.
+    Uma caixa que já tem a proporção dela, a menos do arredondamento, fica como está: é a tela de fora, pixel a pixel."""
+    w, h = int(w), int(h)
+    k = max(w / inner.width, h / inner.height)
     if k >= 1.0:
         return inner.width, inner.height
-    cw, ch = max(2, int(round(inner.width * k))), max(2, int(round(inner.height * k)))
-    return cw - cw % 2, ch - ch % 2
+    near = abs(w * inner.height - h * inner.width) <= 2 * max(inner.width, inner.height)
+    cw, ch = (w, h) if near else (int(round(inner.width * k)), int(round(inner.height * k)))
+    return max(2, cw - cw % 2), max(2, ch - ch % 2)
 
 
 def _blank(w: int, h: int, depth: int) -> np.ndarray:
