@@ -33,7 +33,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import editparams, timeline, timemap
+from .. import aninhar, editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
@@ -871,6 +871,34 @@ class TimelineModel(QObject):
             return False
         self._done("sequencias")
         return True
+
+    # ------------------------------------------------------------ aninhar e desaninhar (#57, `aninhar.py`)
+    def nest_selection(self, name: str = "", look: dict | None = None) -> "aninhar.NestResult":
+        """"Aninhar seleção": os clipes selecionados (e os ligados) vão para uma sequência nova do projeto, e a de fora
+        fica com um clipe só que a mostra; a aba aberta continua sendo a de fora, com o clipe novo selecionado. Um passo
+        só do desfazer (que é um só para o projeto). `aninhar.Refusal` quando não dá, sem ter mudado nada."""
+        self.commit()
+        res = aninhar.nest(self.seq, self.selection, name, look)
+        self.selection = [c.id for c in res.clips]
+        self.marker_sel = None
+        self.selectionChanged.emit()
+        self._done("structure")
+        return res
+
+    def unnest_loss(self, cid: str) -> list[str]:
+        """O que "Desaninhar" perderia no clipe de sequência (vazio: nada). `aninhar.Refusal` se não dá."""
+        return aninhar.unnest_loss(self.seq, cid)
+
+    def unnest_clip(self, cid: str) -> "aninhar.UnnestResult":
+        """"Desaninhar": os clipes de dentro voltam para esta sequência, no trecho que o clipe de sequência mostrava. Quem
+        chama já perguntou sobre `unnest_loss`. Um passo do desfazer; a sequência de dentro fica no projeto."""
+        self.commit()
+        res = aninhar.unnest(self.seq, cid)
+        self.selection = [c.id for c in res.clips]
+        self.marker_sel = None
+        self.selectionChanged.emit()
+        self._done("structure")
+        return res
 
     # ------------------------------------------------------------ chaves de animação (keyframes.py)
     # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo

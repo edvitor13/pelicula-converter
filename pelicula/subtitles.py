@@ -267,36 +267,108 @@ class Mapping:
         return (e, s) if self.reverse else (s, e)
 
 
+@dataclass(frozen=True)
+class Chained:
+    """Uma legenda que passa por dois clipes: `first` leva o arquivo à sequência de dentro e `then`, o clipe de sequência
+    (1.7), leva a sequência de dentro à de fora, com a mesma conta de um clipe de arquivo. Responde como um `Mapping`
+    (`reverse`, `speed`, `to_seq`, `to_file`, `span`), então a edição das legendas não sabe a diferença."""
+    first: Any
+    then: Mapping
+
+    @property
+    def clip(self) -> str:
+        return self.then.clip
+
+    @property
+    def reverse(self) -> bool:
+        return self.first.reverse != self.then.reverse
+
+    @property
+    def speed(self) -> float:
+        return self.first.speed * self.then.speed
+
+    def to_seq(self, x: float) -> float:
+        return self.then.to_seq(self.first.to_seq(x))
+
+    def to_file(self, t: float) -> float:
+        return self.first.to_file(self.then.to_file(t))
+
+    def span(self, lo: float, hi: float) -> tuple[float, float]:
+        s, e = self.to_seq(lo), self.to_seq(hi)
+        return (e, s) if self.reverse else (s, e)
+
+
 def mapping_of(seq, clip) -> Mapping:
     """O `Mapping` do clipe (o mesmo de `mapped`)."""
     tm = seq.time_map(clip) if clip.retimed else None
     return Mapping(clip.id, seq.src_time(clip, clip.start), clip.start / seq.fps, clip.speed, tm)
 
 
+def _reaches(seq, path: str, audio: bool, depth: int = 0) -> bool:
+    """A sequência mostra o arquivo `path` (ou o som dele, com `audio`), direto ou dentro de uma sequência aninhada?"""
+    from .timeline import AUDIO, VIDEO
+    if depth > 16:  # a montagem já não tem ciclo; o limite é só um cinto de segurança
+        return False
+    for c in seq.clips:
+        if audio and c.kind != AUDIO:
+            continue
+        if c.src == path and (audio or (c.kind == VIDEO and not c.frozen)):
+            return True
+        inner = seq.nested(c)
+        if inner is not None and not c.frozen and _reaches(inner, path, audio, depth + 1):
+            return True
+    return False
+
+
+def carriers(seq, path: str) -> list:
+    """Os clipes de `seq` que mostram a fala do arquivo: `clips_for` e, na 1.7, os clipes de sequência que têm o arquivo
+    dentro (em qualquer nível). O som vale mais que a imagem em cada nível, como em `clips_for`."""
+    from .timeline import AUDIO, VIDEO
+    audio = [c for c in seq.clips if c.kind == AUDIO
+             and (c.src == path or ((inner := seq.nested(c)) is not None and _reaches(inner, path, True)))]
+    if audio:
+        return audio
+    return [c for c in seq.clips if c.kind == VIDEO and not c.frozen
+            and (c.src == path or ((inner := seq.nested(c)) is not None and _reaches(inner, path, False)))]
+
+
+def _through(seq, clip, pieces, min_piece: float):
+    """Os pedaços `(índice, mapeamento de dentro ou None, legenda)` vistos pelo clipe: o trecho do que ele mostra, na
+    sequência `seq`. Para um clipe de arquivo, as legendas são as do arquivo; para um clipe de sequência, as já
+    levadas à sequência de dentro."""
+    a, b = sorted((seq.src_time(clip, clip.start), seq.src_time(clip, clip.end)))  # trecho que o clipe mostra
+    if b <= a + EPS:
+        return
+    m = mapping_of(seq, clip)
+    for i, inner, cue in pieces:
+        lo, hi = max(cue.start, a), min(cue.end, b)
+        if hi <= lo + EPS:
+            continue
+        words = tuple(sorted((Word(*m.span(max(w.start, a), min(w.end, b)), w.text) for w in cue.words
+                              if a - EPS <= (w.start + w.end) / 2 < b - EPS), key=lambda w: w.start))
+        if cue.words and not words:
+            continue
+        cut = lo > cue.start + EPS or hi < cue.end - EPS
+        s, e = m.span(lo, hi)
+        if cut and e - s < min_piece:
+            continue
+        text = cue.text if len(words) == len(cue.words) else " ".join(w.text for w in words)
+        yield i, m if inner is None else Chained(inner, m), Cue(s, e, text, words, cue.italic, cue.bold)
+
+
 def mapped(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE):
     """Cada pedaço visível das legendas presas ao arquivo `path`: (índice da legenda em `cues`, `Mapping` do clipe,
     legenda em segundos da sequência), na ordem dos clipes. É a regra de `map_cues` (que junta e tira as
-    repetidas); a interface usa isto para saber de onde veio cada legenda que aparece."""
+    repetidas); a interface usa isto para saber de onde veio cada legenda que aparece. Um clipe de sequência com o arquivo
+    dentro (1.7) passa a legenda por dois clipes, o de dentro e o dele (`Chained`)."""
     cues = list(cues)
-    for c in clips_for(seq, path):
-        a, b = sorted((seq.src_time(c, c.start), seq.src_time(c, c.end)))  # trecho do arquivo que o clipe mostra
-        if b <= a + EPS:
-            continue
-        m = mapping_of(seq, c)
-        for i, cue in enumerate(cues):
-            lo, hi = max(cue.start, a), min(cue.end, b)
-            if hi <= lo + EPS:
-                continue
-            words = tuple(sorted((Word(*m.span(max(w.start, a), min(w.end, b)), w.text) for w in cue.words
-                                  if a - EPS <= (w.start + w.end) / 2 < b - EPS), key=lambda w: w.start))
-            if cue.words and not words:
-                continue
-            cut = lo > cue.start + EPS or hi < cue.end - EPS
-            s, e = m.span(lo, hi)
-            if cut and e - s < min_piece:
-                continue
-            text = cue.text if len(words) == len(cue.words) else " ".join(w.text for w in words)
-            yield i, m, Cue(s, e, text, words, cue.italic, cue.bold)
+    direct = [(i, None, cue) for i, cue in enumerate(cues)]
+    for c in carriers(seq, path):
+        inner = seq.nested(c)
+        pieces = direct if inner is None else list(mapped(inner, path, cues, min_piece))
+        if inner is not None:
+            pieces = [(i, m, cue) for i, m, cue in pieces]
+        yield from _through(seq, c, pieces, min_piece)
 
 
 def cue_key(cue: Cue) -> tuple:
