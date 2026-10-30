@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -426,13 +426,15 @@ class ExportDialog(QDialog):
                                     "leva o nome da sequência, na pasta do destino."))
         v.addWidget(self.multi_box)
         self.multi_list = QListWidget()
+        self.multi_list.setObjectName("Panel")
         for t in self.targets.values():
             item = QListWidgetItem(t.name)
             item.setData(Qt.ItemDataRole.UserRole, t.id)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if t.id == self._target_id else Qt.CheckState.Unchecked)
+            item.setSizeHint(QSize(0, 28))
             self.multi_list.addItem(item)
-        self.multi_list.setMaximumHeight(min(190, 34 * max(1, len(self.targets)) + 12))
+        self.multi_list.setFixedHeight(min(190, 28 * max(1, len(self.targets)) + 8))
         self.multi_list.setVisible(False)
         self.multi_list.itemChanged.connect(self._multi_changed)
         v.addWidget(self.multi_list)

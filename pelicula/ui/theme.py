@@ -165,6 +165,8 @@ QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSp
 QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #4a423a; background: {PANEL2}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QListWidget::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #4a423a; background: {PANEL2}; }}
+QListWidget::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 1px solid #4a423a; background: {PANEL2}; }}
 QRadioButton::indicator:checked {{ background: {ACCENT}; border: 3px solid {PANEL2}; outline: 1px solid {ACCENT}; }}
 
