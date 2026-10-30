@@ -828,7 +828,7 @@ class SectionCard(QFrame):
 
     # ------------------------------------------------------------ filtro de ajustes (ui/filtro_ajustes.py)
     def set_filter(self, keys: set[str] | None) -> None:
-        """Filtro de ajustes: `keys` = chaves dos controles que bateram (vazio = a seção inteira bateu); None desliga.
+        """Filtro de ajustes: `keys` = chaves dos controles que bateram (vazio = só a seção bateu); None desliga.
 
         Com filtro o cartão abre, os controles que bateram ganham destaque e os avançados escondidos aparecem se
         foram eles que bateram (na cor por faixa, a faixa escolhida passa a ser a do controle). Desligar devolve o

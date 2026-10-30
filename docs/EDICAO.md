@@ -154,7 +154,7 @@ A Mídia aceita **pastas coloridas** para organizar os arquivos importados. É s
 arquivos do disco, nem na imagem, nem no som, e ficam guardadas no projeto. Sem nenhuma pasta, a Mídia é a lista de
 sempre.
 
-- **Criar:** o botão de pasta ao lado de *Importar…*, o botão direito (*Nova pasta*) ou **Ctrl+Shift+N**. Com uma
+- **Criar:** o botão de pasta na linha do título da Mídia, o botão direito (*Nova pasta*) ou **Ctrl+Shift+N**. Com uma
   pasta escolhida, a nova nasce dentro dela (subpasta). O nome já abre para você digitar.
 - **Abrir e fechar:** a Mídia vira uma árvore; a seta de cada pasta abre e fecha. Qual pasta está aberta vale
   enquanto o painel está aberto (não vai para o projeto).

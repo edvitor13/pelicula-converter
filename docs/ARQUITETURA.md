@@ -3923,9 +3923,9 @@ projeto nem catálogos, e não é gravado em lugar nenhum (nem em `QSettings`).
 - **Normalização:** minúsculas e sem acentos (`norm`, a mesma de `ui/looks._norm`).
 - **Termos:** o texto digitado vira palavras; cada uma precisa aparecer, em qualquer ordem, como pedaço do texto da
   seção **ou** de algum controle (uma palavra pode bater no título e outra num controle). `search(query, sections)` devolve
-  `{chave da seção: Match(section, keys)}`: `section` = todas as palavras bateram no texto da seção (todas as linhas
-  ficam, nada é destacado); `keys` = chaves dos controles que bateram as palavras que a seção não cobriu (só esses são
-  destacados).
+  `{chave da seção: Match(section, keys)}`: `section` = todas as palavras bateram no texto da seção; `keys` = chaves dos
+  controles que bateram alguma palavra, mesmo que a seção também a tenha (são os destacados: "aberração" está no subtítulo
+  de Lente e nitidez, e a linha da aberração cromática fica destacada). O cartão mostra as linhas todas nos dois casos.
 - **Tolerância:** só se a busca exata não achou **nada**, repete com um erro de digitação (Levenshtein ≤ 1, `within_one`,
   sem dependência) em palavras de 5 letras ou mais, comparadas com as palavras do texto e com o começo delas; assim
   o resultado exato nunca ganha ruído.
@@ -3934,7 +3934,7 @@ projeto nem catálogos, e não é gravado em lugar nenhum (nem em `QSettings`).
 
 ### 38.2 Cartões (`SectionCard.set_filter`)
 
-`set_filter(keys)`: `None` desliga; um conjunto (vazio = a seção inteira bateu) abre o cartão, destaca as linhas de `keys`
+`set_filter(keys)`: `None` desliga; um conjunto (vazio = só a seção bateu) abre o cartão, destaca as linhas de `keys`
 (`objectName` "FiltroHit" com folha de estilo própria na linha, desfeitos ao desligar), mostra as linhas avançadas
 escondidas que bateram e, na cor por faixa (`layout == "hsl"`), escolhe a faixa do primeiro controle que bateu.
 Ao ligar o primeiro filtro o cartão guarda o que a pessoa tinha (aberto/fechado, faixa de cor); ao desligar devolve tudo.

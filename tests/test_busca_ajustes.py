@@ -64,6 +64,13 @@ def test_todos_os_termos_precisam_bater():
     assert "lente" not in keys("aberracao xyzxyz")
 
 
+def test_o_controle_que_bateu_fica_destacado_mesmo_com_a_secao_batendo():
+    # "aberração" está no subtítulo de Lente e nitidez e no controle da aberração cromática
+    r = busca.search("aberracao", params.SECTIONS)["lente"]
+    assert r.section and "aberracao" in r.keys
+    assert "distorcao" not in r.keys
+
+
 def test_secao_inteira_x_controle():
     r = busca.search("halacao", params.SECTIONS)["halacao"]
     assert r.section

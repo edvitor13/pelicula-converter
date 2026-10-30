@@ -208,8 +208,8 @@ def _hit(term: str, entry: Entry, fuzzy: bool) -> bool:
 
 @dataclass(frozen=True)
 class Match:
-    """Resultado de uma seção: `section` = a própria seção bateu (todas as linhas ficam); `keys` = chaves dos
-    controles que bateram (só eles são destacados)."""
+    """Resultado de uma seção: `section` = a própria seção bateu em todas as palavras; `keys` = chaves dos controles
+    que bateram (são os destacados; o cartão mostra as linhas todas nos dois casos)."""
     section: bool
     keys: frozenset[str]
 
@@ -221,10 +221,11 @@ def _search(terms: list[str], idx: list[SectionIndex], fuzzy: bool) -> dict[str,
         whole = True
         ok = True
         for t in terms:
+            hits = {k for k, e in s.params.items() if _hit(t, e, fuzzy)}
             if _hit(t, s.section, fuzzy):
+                keys |= hits
                 continue
             whole = False
-            hits = {k for k, e in s.params.items() if _hit(t, e, fuzzy)}
             if not hits:
                 ok = False
                 break

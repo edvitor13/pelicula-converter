@@ -103,7 +103,7 @@ def test_look_filter_finds_the_card_in_any_language_and_accent(win):
         assert "lente" in vis and len(vis) < len(win.cards), (q, vis)
         card = next(c for c in win.cards if c.section.key == "lente")
         assert card.expanded
-        assert not hit_keys([card])  # a seção inteira bateu: nenhuma linha dela é destacada
+        assert "aberracao" in hit_keys([card])  # está no subtítulo do cartão, e a linha que bateu fica destacada
         results.append(vis)
     assert results[0] == results[3] == results[4]  # com e sem acento, maiúsculas ou não: o mesmo resultado
     # a interface em outro idioma não muda o resultado

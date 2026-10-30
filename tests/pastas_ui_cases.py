@@ -302,6 +302,24 @@ def win():
     yield w
 
 
+def test_folder_buttons_sit_on_the_title_row():
+    """A fila de Importar é a de antes das pastas: com mais dois botões, "Importar…" saía cortado na largura do painel."""
+    b, _m = bin_with()
+    b.btn_new.setVisible(True)
+    b.resize(310, 500)
+    b.show()
+    APP.processEvents()
+    try:
+        assert b.pastas.btn_folder.isVisible() and b.pastas.btn_sort.isVisible()
+        assert b.pastas.btn_folder.y() == b.pastas.btn_sort.y()
+        assert b.pastas.btn_folder.geometry().bottom() < b.btn_import.y()
+        fila = b.btn_import.geometry()
+        for w in (b.btn_new, b.btn_add, b.btn_remove):
+            assert fila.top() <= w.geometry().center().y() <= fila.bottom()  # centralizados na mesma fila
+    finally:
+        b.close()
+
+
 def test_window_open_project_with_unused_media_in_a_folder(win, tmp_path):
     used, loose = str(tmp_path / "usado.mp4"), str(tmp_path / "solto.mp4")
     for p in (used, loose):

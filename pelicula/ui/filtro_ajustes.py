@@ -156,7 +156,7 @@ class FiltroAjustes(QWidget):
                 card.set_filter(None)
                 continue
             card.setVisible(True)
-            card.set_filter(set() if m.section else keys)
+            card.set_filter(keys)
             shown += 1
         if shown:
             p.label.setVisible(False)
