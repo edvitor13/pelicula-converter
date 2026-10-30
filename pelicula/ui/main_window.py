@@ -49,6 +49,7 @@ from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
 from . import luz_fotometro_ui
+from . import pastas_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -469,11 +470,12 @@ class MainWindow(QMainWindow):
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
         self.looks.presetChosen.connect(self.apply_preset)
-        self.bin = MediaBin()
+        self.bin = MediaBin(model=self.model)
         self.bin.importRequested.connect(self.import_dialog)
         self.bin.addRequested.connect(self.add_to_timeline)
         self.bin.removeRequested.connect(self._bin_remove)
         self.bin.filesDropped.connect(self._bin_files)
+        self.bin.filesDroppedIn.connect(lambda paths, folder: self._bin_files(paths, folder))
         self.bin.placeRequested.connect(self.place_at_cursor)
         self.bin.set_new_menu(generators_ui.new_menu(self, self.new_generated))
         self._generated_seen: dict[str, str] = {}  # dados de cada clipe sem arquivo na Mídia (para atualizar)
@@ -968,6 +970,7 @@ class MainWindow(QMainWindow):
         sc("Ctrl+1", lambda: self.set_mode("pelicula"))
         sc("Ctrl+Alt+C", lambda: self.mode == "edicao" and self.inspector.copy_values())
         sc("Ctrl+Alt+V", lambda: self.mode == "edicao" and self.inspector.paste_values())
+        sc("Ctrl+Shift+N", lambda: self.mode == "edicao" and self.bin.pastas.new_folder())  # pasta na Mídia
         sc("Ctrl+L", lambda: self.btn_loop.toggle())  # o L sozinho é do J/K/L (reproduzir para a frente)
         sc("F11", self.toggle_preview_fullscreen)
         sc("Shift+F11", self.toggle_window_fullscreen)
@@ -1436,7 +1439,10 @@ class MainWindow(QMainWindow):
         """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
         if self._loading:
             return
-        if kind == "markers":
+        if kind == "pastas":
+            # Pastas da Mídia são só organização: a prévia e o som não mudam (a Mídia se refaz sozinha).
+            self._adopt_folder_sources()
+        elif kind == "markers":
             # Marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução).
             self._sync_film_markers()
         elif kind == "subtitles":
@@ -1451,10 +1457,18 @@ class MainWindow(QMainWindow):
                 self.request_frame(self.frame_idx)
             self._schedule_mix()
         else:
+            self._adopt_folder_sources()
             self._refresh_source()
         self._update_title()
         self._update_history()
         self._generated_timer.start()  # clipe sem arquivo mudado (ou desfeito): nome e miniatura na Mídia
+
+    def _adopt_folder_sources(self) -> None:
+        """Item de pasta que a Mídia ainda não mostra (um desfazer trouxe de volta): entra na lista."""
+        seq = self.model.seq
+        for path in list(seq.folders.items):
+            if path in seq.sources and path not in self._sources:
+                self.adopt_source(seq.sources[path])
 
     # ---------------------------------------------------------------- marcadores e capítulos
     def _sync_film_markers(self) -> None:
@@ -1782,16 +1796,33 @@ class MainWindow(QMainWindow):
         elif side == "start":
             self.seek(max(0, self.frame_idx - n))
 
-    def _bin_files(self, paths: list) -> None:
-        """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo)."""
-        paths = self._offer_sequences([str(p) for p in paths])
+    def _bin_files(self, paths: list, folder: str = "") -> None:
+        """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo). `folder`: a pasta da
+        Mídia onde eles entram. Uma pasta do sistema vira uma pasta da Mídia com o mesmo nome e os arquivos dela
+        (sem descer nas subpastas), a não ser que seja de imagens numeradas (aí vale a pergunta da sequência)."""
+        paths = [str(p) for p in paths]
+        dirs = [p for p in paths if os.path.isdir(p) and media.find_sequence(p) is None]
+        paths = self._offer_sequences([p for p in paths if p not in dirs])
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            for p in paths:
-                if os.path.isfile(str(p)) or p in self._sources:
-                    self._probe_source(str(p))
+            adopted = self._probe_all(paths)
+            if folder:
+                self.model.media_to_folder(adopted, folder, self._sources)
+            for d in dirs:
+                inside = self._probe_all(pastas_ui.media_in_dir(d))
+                self.model.folder_with_media(Path(d).name, folder, inside, self._sources)
         finally:
             QApplication.restoreOverrideCursor()
+
+    def _probe_all(self, paths: list[str]) -> list[str]:
+        """Põe os arquivos na Mídia; devolve os caminhos que entraram."""
+        out: list[str] = []
+        for p in paths:
+            if os.path.isfile(str(p)) or p in self._sources:
+                src = self._probe_source(str(p))
+                if src is not None:
+                    out.append(src.path)
+        return out
 
     # ---------------------------------------------------------------- sequências de imagens numeradas
     def _ask_sequence(self, path: str, single: bool = True):
@@ -1891,10 +1922,8 @@ class MainWindow(QMainWindow):
                                                        "antes de tirá-lo da Mídia."))
             return
         self._sources.pop(path, None)
-        thumbs = getattr(self.bin, "_thumbs", None)
-        self.bin.clear()
-        for src in self._sources.values():
-            self.bin.add_source(src, (thumbs or {}).get(src.path))
+        self.bin.remove(path)
+        self.model.media_forget(path)  # sai também da pasta onde estava
 
     def sequence_settings(self) -> None:
         from .sequence_dialog import SequenceDialog
@@ -2812,8 +2841,9 @@ class MainWindow(QMainWindow):
         Marcadores e legendas contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
         subs = seq.subtitles is not None and not seq.subtitles.is_default()
-        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
-                             and not seq.markers and not subs and not getattr(self.file_info, "is_sequence", False)):
+        if (not seq.clips and not seq.folders.has_folders()) or (
+                self.file_info is not None and seq.is_trivial() == self.file_info.path and not seq.markers
+                and not subs and not seq.folders.has_folders() and not getattr(self.file_info, "is_sequence", False)):
             return None  # sequência de imagens: a montagem guarda a velocidade escolhida ao importar
         return seq.to_json()
 
@@ -3390,7 +3420,9 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
             "Edição: Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
-            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
+            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)") + "\n\n" + _(
+            "Edição, Mídia: Ctrl+Shift+N pasta nova • F2 (ou dois cliques no nome) renomeia a pasta • "
+            "arrastar leva itens e pastas para dentro e para fora das pastas"))
 
     def about(self) -> None:
         try:

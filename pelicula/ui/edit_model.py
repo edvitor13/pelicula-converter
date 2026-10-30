@@ -688,6 +688,22 @@ class TimelineModel(QObject):
         self._done("pastas")
         return f.id
 
+    def folder_drop(self, paths: Iterable[str], fids: Iterable[str], target: str,
+                    sources: dict[str, Source] | None = None) -> bool:
+        """Arrastar na Mídia: itens e pastas para dentro da pasta `target` ("" = raiz), num passo só do desfazer.
+        Pasta para dentro dela mesma ou de uma subpasta (ciclo) fica onde está."""
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        changed = False
+        for fid in fids:
+            changed |= self.seq.folders.move(fid, target)
+        changed |= self.seq.folders.assign(paths, target)
+        if changed:
+            self._done("pastas")
+        return changed
+
     def media_forget(self, path: str) -> None:
         """O item saiu da Mídia: sai também da pasta (sem passo do desfazer quando não estava em nenhuma)."""
         if self.seq.folders.unassign(path):
