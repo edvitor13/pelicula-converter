@@ -886,10 +886,16 @@ class SectionCard(QFrame):
 
 
 # ------------------------------------------------------------------ botões segmentados
+SEG_ICON = 16
+
+
 class Segmented(QFrame):
     changed = Signal(str)
 
-    def __init__(self, items: list[tuple[str, str, str]], parent=None):
+    def __init__(self, items: list[tuple[str, str, str]], parent=None, name: str = "Seg",
+                 item_icons: dict[str, str] | None = None):
+        """`name`: o nome de estilo dos botões (`theme`: "Seg", "SegMode", "SegQuiet"). `item_icons` ({chave: ícone de
+        `icons.py`}): um ícone antes do texto, na cor do texto nos dois estados (`icons.two_state`)."""
         super().__init__(parent)
         self.setObjectName("SegBox")
         lay = QHBoxLayout(self)
@@ -900,11 +906,15 @@ class Segmented(QFrame):
         self.buttons: dict[str, QToolButton] = {}
         for key, text, tip in items:
             b = QToolButton()
-            b.setObjectName("Seg")
+            b.setObjectName(name)
             b.setText(text)
             b.setToolTip(tip)
             b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if item_icons and key in item_icons:
+                b.setIcon(icons.two_state(item_icons[key], theme.MUTED, theme.SEG_CHECKED_TEXT, SEG_ICON))
+                b.setIconSize(QSize(SEG_ICON, SEG_ICON))
+                b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             self.group.addButton(b)
             lay.addWidget(b)
             self.buttons[key] = b

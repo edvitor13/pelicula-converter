@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtGui import QIcon, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
@@ -24,7 +24,7 @@ APP = QApplication.instance() or QApplication([])
 from pelicula import export, media, presets, project, sequence  # noqa: E402
 from pelicula import timeline as tl  # noqa: E402
 from pelicula.export import ExportSettings  # noqa: E402
-from pelicula.ui import main_window, sem_efeitos_ui  # noqa: E402
+from pelicula.ui import main_window, theme  # noqa: E402
 
 KEYS = {"grao_forca": [[0.0, 0.5, "linear"], [20.0, 2.0, "linear"]]}
 
@@ -447,3 +447,61 @@ def test_export_frames_follow_the_preview(win, sample_video):
                                                            depth=16, keys=win._export_keys()))
     fl = sequence.grab(seq, 3, 64, 36, 8, no_effects=True)
     assert fl.layers
+
+
+# ------------------------------------------------------------------ modo × comparação
+def _pixels_of(icon, state) -> set:
+    img = icon.pixmap(16, 16, QIcon.Mode.Normal, state).toImage()
+    return {img.pixelColor(x, y).name() for x in range(img.width()) for y in range(img.height())
+            if img.pixelColor(x, y).alpha() == 255}
+
+
+def test_labels_of_the_two_selectors(win):
+    labels = {k: b.text() for k, b in win.compare.buttons.items()}
+    assert labels == {"proc": "Resultado", "split": "Dividido", "side": "Lado a lado", "orig": "Original"}
+    assert win.compare.buttons["proc"].toolTip() == "Só o resultado"
+    assert {k: b.text() for k, b in win.mode_switch.buttons.items()} == {"pelicula": "Película", "edicao": "Edição"}
+
+
+def test_mode_switch_icons_follow_the_text(win):
+    for b in win.mode_switch.buttons.values():
+        assert not b.icon().isNull() and b.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        assert _pixels_of(b.icon(), QIcon.State.Off) == {theme.MUTED}
+        assert _pixels_of(b.icon(), QIcon.State.On) == {"#1b1205"}
+    for b in win.compare.buttons.values():
+        assert b.icon().isNull()
+
+
+def test_object_names_and_other_selectors_keep_their_look(win):
+    assert {b.objectName() for b in win.mode_switch.buttons.values()} == {"SegMode"}
+    assert {b.objectName() for b in win.compare.buttons.values()} == {"SegQuiet"}
+    assert {b.objectName() for b in win.inspector.kind_seg.buttons.values()} == {"Seg"}
+    assert all(b.icon().isNull() for b in win.inspector.kind_seg.buttons.values())
+    # sem âmbar na comparação: só o modo e os demais seletores usam a pílula
+    qss = theme.stylesheet()
+    quiet = next(line for line in qss.splitlines() if line.startswith("QToolButton#SegQuiet:checked"))
+    assert theme.ACCENT not in quiet and theme.PANEL3 in quiet and theme.TEXT in quiet
+    mode = next(line for line in qss.splitlines() if line.startswith("QToolButton#SegMode:checked"))
+    assert theme.ACCENT in mode and "#1b1205" in mode
+    seg = next(line for line in qss.splitlines() if line.startswith("QToolButton#Seg:checked"))
+    assert theme.ACCENT in seg
+
+
+def test_compare_shortcut_and_keys_still_work(win, sample_video):
+    _open(win, sample_video)
+    order = ["proc", "split", "side", "orig"]
+    for key in order:
+        win.compare.set_current(key)
+        win._set_compare(key)
+        assert win.viewer.mode == key and win.compare.buttons[key].isChecked()
+    win.compare.buttons["proc"].click()
+    assert win.viewer.mode == "proc"
+    for i in range(1, 5):
+        _key(win, Qt.Key.Key_C)
+        assert win.viewer.mode == order[i % 4] and win.compare.buttons[order[i % 4]].isChecked()
+    win.mode_switch.buttons["edicao"].click()
+    assert win.mode == "edicao" and win.mode_switch.buttons["edicao"].isChecked()
+    win.mode_switch.buttons["pelicula"].click()
+    assert win.mode == "pelicula"
+    win.compare.set_current("split")
+    win._set_compare("split")

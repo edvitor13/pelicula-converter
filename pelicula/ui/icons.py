@@ -623,6 +623,23 @@ def icon(name: str, color: str = theme.TEXT, size: int = 20) -> QIcon:
     return ic
 
 
+def two_state(name: str, off: str, on: str, size: int = 16) -> QIcon:
+    """Um ícone que acompanha o texto de um botão marcável: a cor `off` desmarcado e `on` marcado."""
+    ic = QIcon()
+    for state, color in ((QIcon.State.Off, off), (QIcon.State.On, on)):
+        for scale in (1, 2):
+            pm = QPixmap(size * scale, size * scale)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.scale(size * scale / 24.0, size * scale / 24.0)
+            draw(name, p, QColor(color))
+            p.end()
+            pm.setDevicePixelRatio(scale)
+            ic.addPixmap(pm, QIcon.Mode.Normal, state)
+    return ic
+
+
 def assets_dir():
     """Pasta assets/ no código-fonte ou dentro do executável (PyInstaller)."""
     import sys

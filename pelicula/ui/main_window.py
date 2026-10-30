@@ -565,7 +565,7 @@ class MainWindow(QMainWindow):
         self.mode_switch = Segmented([
             ("pelicula", _("Película"), _("Aplicar o look de película no vídeo ou na montagem (Ctrl+1)")),
             ("edicao", _("Edição"), _("Cortar, juntar clipes e ajustar cor e som antes do look de película (Ctrl+2)")),
-        ])
+        ], name="SegMode", item_icons={"pelicula": "film", "edicao": "scissors"})
         self.mode_switch.set_current("pelicula")
         self.mode_switch.changed.connect(self.set_mode)
         hl.addWidget(self.mode_switch)
@@ -650,11 +650,11 @@ class MainWindow(QMainWindow):
         hl = FlowLayout(bar, 8, 6)
         hl.setContentsMargins(12, 8, 12, 8)
         self.compare = Segmented([
-            ("proc", _("Película"), _("Só o resultado")),
+            ("proc", _("Resultado"), _("Só o resultado")),
             ("split", _("Dividido"), _("Arraste a linha para comparar. Segure o botão direito para ver o original.")),
             ("side", _("Lado a lado"), _("Original e resultado lado a lado")),
             ("orig", _("Original"), _("Só o vídeo original")),
-        ])
+        ], name="SegQuiet")  # o âmbar da barra fica para o modo
         mode = str(self.settings.value("compare", "split"))
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
