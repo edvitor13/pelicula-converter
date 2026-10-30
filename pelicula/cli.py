@@ -216,13 +216,42 @@ def look_keys(proj, preset, sets) -> dict:
     return {k: v for k, v in proj.look_keys.items() if k not in fixed}
 
 
-def project_sequence(proj):
-    """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro)."""
+def sequence_list(seq) -> str:
+    """As sequências de um projeto, uma por linha, para a mensagem de erro de `--sequencia`."""
+    group = seq.family()
+    return "\n".join(f"  {s.display_name}" + (f" (id: {s.id})" if len(group) > 1 and s.id else "") for s in group)
+
+
+def pick_sequence(proj, key=None):
+    """A sequência de um projeto que `--sequencia` escolhe (nome ou id; sem ela, a que estava aberta ao salvar).
+    Devolve (sequência, é a que estava aberta). Nome que não existe: erro com a lista das que existem."""
+    from . import timeline
+    top = timeline.Sequence.from_json(proj.sequence)
+    if not key:
+        return top, True
+    group = top.family()
+    k = str(key).strip()
+    hit = next((s for s in group if s.id and s.id == k), None) \
+        or next((s for s in group if s.display_name.casefold() == k.casefold()), None)
+    if hit is None:
+        raise CliError(_("Sequência não encontrada: {nome}. As do projeto:\n{lista}").format(
+            nome=key, lista=sequence_list(top)))
+    return hit, hit is top
+
+
+def project_sequence(proj, name=None):
+    """Sequência do modo Edição de um projeto (None se não tem ou se é só o arquivo inteiro). `name`: a sequência
+    escolhida com `--sequencia` (nome ou id); sem ela, a que estava aberta ao salvar."""
     from . import sequence, timeline
     if not proj or not proj.sequence:
+        if name:
+            raise CliError(_("Este projeto não tem sequências para escolher com --sequencia."))
         return None
-    seq = timeline.Sequence.from_json(proj.sequence)
+    seq, _active = pick_sequence(proj, name)
     if not seq.clips:
+        if len(seq.family()) > 1:
+            raise CliError(_("A sequência \"{nome}\" não tem clipes para exportar. Escolha outra com --sequencia:\n"
+                             "{lista}").format(nome=seq.display_name, lista=sequence_list(seq)))
         return None
     trivial = seq.direct_file()  # um arquivo com transparência passa pela montagem
     if trivial and (not proj.media_path or os.path.abspath(trivial) == os.path.abspath(proj.media_path)):
@@ -233,30 +262,33 @@ def project_sequence(proj):
     return seq
 
 
-def project_subtitles(proj):
+def project_subtitles(proj, name=None):
     """Legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência — as mesmas da
-    janela, também quando a montagem é só o arquivo inteiro. (None, []) sem legendas."""
-    from . import timeline
+    janela, também quando a montagem é só o arquivo inteiro. (None, []) sem legendas. `name`: a sequência de
+    `--sequencia`."""
     if not proj or not proj.sequence:
         return None, []
-    full = timeline.Sequence.from_json(proj.sequence)
+    full, _active = pick_sequence(proj, name)
     subs = full.subtitles
     if subs is None or subs.is_empty():
         return None, []
     return subs, (subs.timeline_cues(full) if full.clips else subs.timeline_cues(None, proj.media_path))
 
 
-def _source_and_values(path: str, preset, sets):
-    """Entrada pode ser vídeo/imagem ou um projeto .plc. Devolve (arquivo, valores, preset, projeto, sequência)."""
+def _source_and_values(path: str, preset, sets, sequence_name=None):
+    """Entrada pode ser vídeo/imagem ou um projeto .plc. Devolve (arquivo, valores, preset, projeto, sequência).
+    `sequence_name`: a sequência de um projeto que `--sequencia` escolhe (padrão: a que estava aberta ao salvar)."""
     from . import project
     proj = None
+    if sequence_name and not path.lower().endswith(project.EXT):
+        raise CliError(_("--sequencia só vale para um projeto .plc."))
     if path.lower().endswith(project.EXT):
         try:
             proj = project.load(path)
         except project.ProjectError as exc:
             raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
         values, pid = build_values(proj.values, preset, sets)
-        seq = project_sequence(proj)
+        seq = project_sequence(proj, sequence_name)
         if seq is not None:
             from . import sequence
             _prepare_text(seq)
@@ -374,7 +406,7 @@ def cmd_export(a) -> int:
     from .engine import Engine
     resolution = parse_resolution(a.resolucao) if a.resolucao is not None else None
     _need_ffmpeg()
-    src, values, pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
+    src, values, pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set, a.sequencia)
     if seq is not None:
         from . import sequence
         info = sequence.media_info(seq)
@@ -382,6 +414,9 @@ def cmd_export(a) -> int:
         info = media.probe(src)
         if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
             _report_auto_profile(auto_input_profile(values, a.set, info))
+    if a.trecho and a.sequencia and proj is not None and not pick_sequence(proj, a.sequencia)[1]:
+        raise CliError(_("--trecho usa a entrada e a saída marcadas na sequência que estava aberta ao salvar; "
+                         "use --inicio e --fim com --sequencia."))
     start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
     end = parse_time(a.fim, info.fps) if a.fim else (proj.out_point if proj and a.trecho and proj.out_point else -1)
     duration = ((info.frames - 1 if end < 0 else min(end, info.frames - 1)) - start + 1) / info.fps
@@ -428,7 +463,7 @@ def cmd_export(a) -> int:
                 caminho=export.output_target(out, s)))
         raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=out))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    subs, cues = project_subtitles(proj)
+    subs, cues = project_subtitles(proj, a.sequencia)
     choice = subtitles.default_delivery(subs, s.container) if a.legendas in (None, "projeto") else a.legendas
     sub_fields = subtitles.delivery_fields(choice, subs, cues, s.container)
     if values.get("scan_on") or sub_fields["burn"]:
@@ -537,7 +572,7 @@ def cmd_frame(a) -> int:
     from .frame import Recipe
     from .subtitles import Burn
     _need_ffmpeg()
-    src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set)
+    src, values, _pid, proj, seq = _source_and_values(a.entrada, a.preset, a.set, a.sequencia)
     if seq is not None:
         from . import sequence
         info = sequence.media_info(seq)
@@ -547,13 +582,14 @@ def cmd_frame(a) -> int:
         legal = media.legal_range(info)
         if proj is None:  # arquivo aberto agora (um projeto salvo guarda o perfil escolhido)
             _report_auto_profile(auto_input_profile(values, a.set, info))
-    frame = parse_time(a.tempo, info.fps) if a.tempo else (proj.frame if proj else 0)
+    other = bool(a.sequencia) and proj is not None and not pick_sequence(proj, a.sequencia)[1]
+    frame = parse_time(a.tempo, info.fps) if a.tempo else (proj.frame if proj and not other else 0)
     frame = max(0, min(frame, info.frames - 1))
     path = a.saida or str(Path(src).with_name(f"{Path(src).stem}_quadro{frame}.png"))
     ext = Path(path).suffix.lower()
     if ext not in export.STILL_ARGS:
         raise CliError(_("Formato de imagem não suportado: {ext} (use .png, .tif ou .jpg)").format(ext=ext))
-    subs, cues = project_subtitles(proj)
+    subs, cues = project_subtitles(proj, a.sequencia)
     burn = Burn.make(subs.burn, subs.style, cues) if subs is not None else None  # gravadas, como o projeto pede
     if values.get("scan_on") or burn is not None:
         _gui_app()
@@ -690,8 +726,46 @@ def cmd_platforms(a) -> int:
     return 0
 
 
+def project_info(path: str, as_json: bool) -> int:
+    """`info` de um projeto .plc: as sequências dele (a aberta ao salvar vem marcada)."""
+    from . import project
+    try:
+        proj = project.load(path)
+    except project.ProjectError as exc:
+        raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
+    rows = []
+    if proj.sequence:
+        from . import timeline
+        top = timeline.Sequence.from_json(proj.sequence)
+        for s in top.family():
+            rows.append({"nome": s.display_name, "id": s.id or None, "largura": s.width, "altura": s.height,
+                         "fps": round(s.fps, 3), "quadros": s.duration, "duracao_s": round(s.duration / s.fps, 3),
+                         "clipes": len(s.clips), "aberta": s is top})
+    data = {"projeto": str(Path(path).resolve()), "nome": proj.name, "formato": proj.to_json()["formato"],
+            "modo": proj.mode, "arquivo": proj.media_path or None, "sequencias": rows}
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(_("Projeto: {nome}").format(nome=proj.name or Path(path).stem))
+    if not rows:
+        print("  " + _("Sem montagem: só o arquivo {caminho}").format(caminho=proj.media_path))
+        return 0
+    print(_("Sequências ({n}):").format(n=len(rows)))
+    for r in rows:
+        mark = " *" if r["aberta"] and len(rows) > 1 else ""
+        fps = f"{r['fps']:g}"
+        print("  " + _("{nome}: {w}×{h} • {fps} quadros/s • {dur} s • clipes: {n}").format(
+            nome=r["nome"], w=r["largura"], h=r["altura"], fps=fps, dur=f"{r['duracao_s']:g}", n=r["clipes"])
+            + (f" • id {r['id']}" if r["id"] and len(rows) > 1 else "") + mark)
+    if len(rows) > 1:
+        print("  " + _("* a que estava aberta ao salvar (a padrão de --sequencia)"))
+    return 0
+
+
 def cmd_info(a) -> int:
-    from . import media
+    from . import media, project
+    if a.entrada.lower().endswith(project.EXT):
+        return project_info(a.entrada, a.json)
     _need_ffmpeg()
     info = media.probe(a.entrada)
     data = {"arquivo": info.path, "largura": info.width, "altura": info.height, "fps": round(info.fps, 3),
@@ -884,6 +958,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--fim", help=_("fim: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--trecho", action="store_true", help=_("usa a entrada e a saída marcadas no projeto"))
+    p.add_argument("--sequencia", metavar=_("NOME"),
+                   help=_("sequência do projeto a exportar: o nome ou o id (padrão: a que estava aberta ao salvar; "
+                          "veja \"info projeto.plc\")"))
     p.add_argument("--legendas", choices=["projeto", "nao", "faixa", "copia", "digital", "srt", "vtt"],
                    help=_("legendas do projeto: projeto (o que ele pede; padrão), nao, faixa (no arquivo), copia "
                           "(gravadas antes do look), digital (depois do look), srt ou vtt (arquivo ao lado)"))
@@ -909,6 +986,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("entrada", help=_("vídeo, imagem ou projeto .plc"))
     p.add_argument("-o", "--saida", help=_("arquivo .png, .tif ou .jpg"))
     p.add_argument("--tempo", help=_("segundos, 00:01:02.5 ou #quadro"))
+    p.add_argument("--sequencia", metavar=_("NOME"),
+                   help=_("sequência do projeto: o nome ou o id (padrão: a que estava aberta ao salvar)"))
     look_args(p)
     p.set_defaults(func=cmd_frame)
 
@@ -937,7 +1016,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_platforms)
 
-    p = sub.add_parser("info", help=_("mostra as informações de um arquivo"))
+    p = sub.add_parser("info", help=_("mostra as informações de um arquivo ou as sequências de um projeto .plc"))
     p.add_argument("entrada")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_info)

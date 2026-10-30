@@ -314,6 +314,8 @@ def fresh(win, mode="edicao", seq=None):
         win.model.set_sequence(seq)
         win._loading = False
         win.seqs_ui.reset()
+        for src in seq.sources.values():    # a Mídia mostra os arquivos da montagem, como ao abrir um projeto
+            win.adopt_source(src)
         win._refresh_source(reset=True)
     win._saved_state = win._state()
     pump()
@@ -690,3 +692,395 @@ def test_moving_a_tab_reorders_without_reloading_and_keeps_the_open_one(win, mon
     win.model.undo()
     pump()
     assert [t.id for t in win.seqs_ui.tabs.tabs] == ids
+
+
+# ------------------------------------------------------------------ a Mídia
+def media_paths(win) -> list[str]:
+    return win.bin.paths()
+
+
+def seq_paths(win) -> list[str]:
+    return [p for p in win.bin.paths() if p.startswith("sequencia:")]
+
+
+def two_tabs(win, monkeypatch, seq=None):
+    fresh(win, seq=seq or color_seq())
+    accepting(monkeypatch)
+    win.seqs_ui.new_sequence()
+    pump()
+    return [s.id for s in win.model.sequences()]
+
+
+def test_media_lists_sequences_only_with_two_or_more(win, monkeypatch):
+    fresh(win, seq=color_seq())
+    assert seq_paths(win) == []                        # uma sequência só: a Mídia é a de sempre
+    ids = two_tabs(win, monkeypatch)
+    assert seq_paths(win) == [f"sequencia:{i}" for i in ids]
+    item = win.bin.list.media(f"sequencia:{ids[1]}")
+    assert item.kind == "sequencia" and "Sequência 2" in item.text(0) and "sequência" in item.text(0)
+    assert not item.icon(0).isNull() and "320 × 180" in item.toolTip(0)
+    win.model.remove_sequence(ids[1])
+    pump()
+    assert seq_paths(win) == []                        # voltou a uma só: some da Mídia
+    win.model.undo()
+    pump()
+    assert len(seq_paths(win)) == 2
+
+
+def test_media_entry_follows_the_name_and_the_duration(win, monkeypatch):
+    ids = two_tabs(win, monkeypatch)
+    item = win.bin.list.media(f"sequencia:{ids[1]}")
+    win.seqs_ui.rename(ids[1], "Abertura")
+    pump()
+    assert "Abertura" in item.text(0)
+    win.model.insert_media(tl.Source.virtual("cor", 320, 180, "24/1", data={"cor": "#115577"}, seconds=2.0), at=0)
+    pump()
+    assert "0:02" in win.bin.list.media(f"sequencia:{ids[1]}").text(0)
+
+
+def test_media_double_click_opens_the_tab(win, monkeypatch):
+    ids = two_tabs(win, monkeypatch)
+    win.seqs_ui.activate(ids[0])
+    pump()
+    item = win.bin.list.media(f"sequencia:{ids[1]}")
+    win.bin.pastas._double_click(item, 0)
+    pump()
+    assert win.model.seq.id == ids[1] and win.seqs_ui.tabs.active == ids[1]
+    clip_item = win.bin.list.media(win.model.sequences()[0].clips[0].src)
+    n = len(win.model.sequences()[0].clips)
+    win.bin.pastas._double_click(clip_item, 0)         # um clipe da Mídia continua entrando na linha do tempo
+    pump()
+    assert len(win.model.seq.clips) == 1 and len(win.model.sequences()[0].clips) == n
+
+
+def test_media_sequences_go_into_folders_and_come_back_with_undo(win, monkeypatch):
+    ids = two_tabs(win, monkeypatch)
+    key = f"sequencia:{ids[1]}"
+    fid = win.model.folder_create("Cenas")
+    assert win.model.media_to_folder([key], fid, win._sources)
+    pump()
+    assert win.model.seq.folders.folder_of(key) == fid
+    assert win.bin.list.media(key).parent() is win.bin.list.folder_item(fid)
+    win.model.undo()
+    pump()
+    assert win.model.seq.folders.folder_of(key) == "" and win.bin.list.media(key) is not None
+    win.model.redo()
+    pump()
+    assert win.model.seq.folders.folder_of(key) == fid
+    win.model.remove_sequence(ids[1])               # apagar a sequência tira o item da pasta
+    pump()
+    assert key not in win.model.seq.folders.items and win.bin.list.media(key) is None
+
+
+def test_media_refuses_to_place_a_sequence_with_a_short_message(win, monkeypatch):
+    ids = two_tabs(win, monkeypatch)
+    win.seqs_ui.activate(ids[0])
+    pump()
+    n = len(win.model.seq.clips)
+    key = f"sequencia:{ids[1]}"
+    for call in (lambda: win.add_to_timeline(key), lambda: win.place_at_cursor([key], True),
+                 lambda: win.drop_on_timeline([key], 10, tl.VIDEO, 0)):
+        call()
+        assert len(win.model.seq.clips) == n
+    win.statusBar().clearMessage()
+    win.add_to_timeline(key)
+    assert "sequência dentro de outra" in win.statusBar().currentMessage()
+    assert len(win.model.seq.clips) == n and win.model.sequence_users(ids[1]) == []
+
+
+def test_media_trash_on_a_sequence_asks_to_delete_it(win, monkeypatch):
+    ids = two_tabs(win, monkeypatch)
+    asked = []
+    monkeypatch.setattr(win.seqs_ui, "confirm_delete", lambda s, users: asked.append(s.id) or False)
+    win._bin_remove(f"sequencia:{ids[1]}")
+    assert asked == [ids[1]] and len(win.model.sequences()) == 2
+    monkeypatch.setattr(win.seqs_ui, "confirm_delete", lambda s, users: True)
+    win._bin_remove(f"sequencia:{ids[1]}")
+    pump()
+    assert len(win.model.sequences()) == 1
+
+
+def select_in_bin(win, *paths):
+    win.bin.list.clearSelection()
+    for p in paths:
+        win.bin.list.media(p).setSelected(True)
+
+
+def menu_texts(win) -> list[str]:
+    from PySide6.QtWidgets import QMenu
+    m = QMenu()
+    win.bin.fill_media_menu(m)
+    return [a.text() for a in m.actions() if a.text()]
+
+
+def test_media_menu_of_a_sequence_and_of_a_video(win, monkeypatch, tmp_path):
+    ids = two_tabs(win, monkeypatch)
+    key = f"sequencia:{ids[1]}"
+    select_in_bin(win, key)
+    texts = menu_texts(win)
+    assert texts == ["Abrir a sequência", "Duplicar", "Apagar a sequência…"]    # sem as ações de pôr na linha do tempo
+    src = win.model.sequences()[0].clips[0].src
+    select_in_bin(win, src)
+    texts = menu_texts(win)
+    assert "Nova sequência a partir deste vídeo" in texts and "Inserir no cursor (,)" in texts
+    select_in_bin(win, key, src)       # mistura: o menu dos arquivos (pôr uma sequência já é recusado)
+    assert "Abrir a sequência" not in menu_texts(win)
+
+
+def test_new_sequence_from_the_video_menu_uses_the_first_video_of_the_selection(win, monkeypatch, tmp_path):
+    v1 = tone_video(tmp_path, "m1.mp4", "192x108", 30, 440)
+    fresh(win, seq=color_seq())
+    audio = tl.Source("C:/v/musica.wav", 0, 0, 0.0, "24/1", 1, 5.0, has_video=False, has_audio=True)
+    win.adopt_source(audio)
+    video = win.adopt_source(media_source(v1))
+    seen = accepting(monkeypatch)
+    select_in_bin(win, audio.path, video.path)
+    from PySide6.QtWidgets import QMenu
+    m = QMenu()
+    win.bin.fill_media_menu(m)
+    [a for a in m.actions() if a.text() == "Nova sequência a partir deste vídeo"][0].trigger()
+    pump()
+    assert (seen[0].w.value(), seen[0].h.value(), seen[0].fps.currentData()) == (192, 108, "30/1")
+    assert [c.src for c in win.model.seq.clips if c.kind == tl.VIDEO] == [v1]
+    assert win.model.seq.id and len(win.model.sequences()) == 2
+
+
+def test_new_sequence_from_an_image_keeps_its_size_with_24_fps(win, monkeypatch, tmp_path):
+    from pelicula import testimage
+    from PySide6.QtGui import QImage
+    png = str(tmp_path / "foto.png")
+    img = testimage.make(200, 120)
+    QImage(img.data, 200, 120, 600, QImage.Format.Format_RGB888).save(png)
+    fresh(win, seq=color_seq(320, 180, "30/1"))
+    src = win.adopt_source(media_source(png))
+    seen = accepting(monkeypatch)
+    win.seqs_ui.new_sequence(src)
+    assert (seen[0].w.value(), seen[0].h.value(), seen[0].fps.currentData()) == (200, 120, "24/1")
+    assert (win.model.seq.width, win.model.seq.height, win.model.seq.fps_str) == (200, 120, "24/1")
+
+
+# ------------------------------------------------------------------ exportação
+def target(tid, name, frames=48, fps=24.0, fps_str="24/1", size=(320, 180), cues=None, chapters=None,
+           in_out=None, transparent=False):
+    from pelicula.ui.export_dialog import ExportTarget
+    seq = tl.Sequence(size[0], size[1], fps_str, name=name, micro_fade=True, transparent=transparent)
+    seq.insert_media(tl.Source(f"C:/v/{tid}.mp4", size[0], size[1], fps, fps_str, frames, frames / fps,
+                               pix_fmt="yuv420p", has_audio=True), 0)
+    from pelicula import sequence as seqmod
+    return ExportTarget(tid, name, seqmod.media_info(seq), seq, in_out, chapters or [], None, cues or [], 0)
+
+
+def export_dialog(targets, active="a", in_out=None, queue_jobs=()):
+    from pelicula import params
+    from pelicula.ui.export_dialog import ExportDialog
+    t = next(x for x in targets if x.id == active)
+    d = ExportDialog(None, t.info, params.defaults(), "Look", in_out if in_out is not None else t.in_out, sequence=t.sequence,
+                     chapters=t.chapters, subtitles=t.subtitles, subtitle_cues=t.cues, targets=targets,
+                     target_id=active, queue_jobs=queue_jobs)
+    return d
+
+
+def test_export_has_no_sequence_row_with_a_lone_sequence_and_keeps_the_name():
+    t = target("a", "", frames=24)
+    d = export_dialog([t])
+    try:
+        assert d.seq_group.isHidden() and not d.targets
+        assert Path(d.path.text()).stem == "a_edicao_pelicula"          # o nome de sempre: <arquivo>_edicao_pelicula
+        assert [j.out_path for j in d.jobs()] == [d.path.text()]
+    finally:
+        d.done(0)
+
+
+def test_export_sequence_row_defaults_to_the_open_one_and_lists_every_sequence():
+    ts = [target("a", "Sequência 1"), target("b", "Sequência 2", frames=96)]
+    d = export_dialog(ts, active="b")
+    try:
+        assert not d.seq_group.isHidden() and d.seq_box.count() == 2 and d.seq_box.currentData() == "b"
+        assert d.title_label.text() == "Sequência 2" and "Sequência 2_pelicula" in d.path.text()
+        assert "320 × 180" in d.seq_info.text() and not d.multi_box.isChecked() and d.multi_list.isHidden()
+    finally:
+        d.done(0)
+
+
+def test_choosing_another_sequence_rebuilds_what_depends_on_it():
+    from pelicula.subtitles import Cue, Subtitles
+    subs = Subtitles()
+    a = target("a", "Sequência 1", frames=48, in_out=(5, 20), chapters=[(0, "Início"), (24, "Meio")])
+    b = target("b", "Sequência 2", frames=120, fps=30.0, fps_str="30/1", size=(640, 360), transparent=True)
+    b.subtitles, b.cues = subs, [Cue(0.0, 1.0, "Oi")]
+    d = export_dialog([a, b], active="a")
+    try:
+        assert d.r_sel.isEnabled() and "–" in d.r_sel.text() and d.chapters_box.isVisibleTo(d) is True
+        assert "(2)" in d.chapters_box.text() and d.subs_row.isHidden() and not d.alpha_box.isChecked()
+        d.r_sel.setChecked(True)
+        assert d._range() == (5, 20)
+        d._preview_key = ("x",)
+        d.seq_box.setCurrentIndex(d.seq_box.findData("b"))
+        assert d.info is b.info and d.sequence is b.sequence and d._target_id == "b"
+        assert not d.r_sel.isEnabled() and d.r_all.isChecked() and d._range() == (0, -1)       # volta à sequência inteira
+        assert d.chapters_box.isHidden() and d.chapter_points() == []
+        assert not d.subs_row.isHidden() and d.alpha_box.isChecked()
+        assert d.title_label.text() == "Sequência 2" and "640 × 360" in d.seq_info.text()
+        assert Path(d.path.text()).stem == "Sequência 2_pelicula"                               # o nome acompanha
+        assert d._preview_key is None or d._preview_key != ("x",)
+        assert abs(d._duration() - 4.0) < 1e-6                                                  # 120 quadros a 30/s
+        d.seq_box.setCurrentIndex(d.seq_box.findData("a"))
+        assert d.r_sel.isEnabled() and abs(d._duration(trim=False) - 2.0) < 1e-6 and d.chapters_box.isVisibleTo(d)
+    finally:
+        d.done(0)
+
+
+def test_a_name_the_person_typed_survives_changing_the_sequence():
+    ts = [target("a", "Sequência 1"), target("b", "Sequência 2")]
+    d = export_dialog(ts, active="a")
+    try:
+        d.path.setText("C:/saida/meu_filme.mp4")
+        d.seq_box.setCurrentIndex(d.seq_box.findData("b"))
+        assert d.path.text() == "C:/saida/meu_filme.mp4"
+    finally:
+        d.done(0)
+
+
+def test_export_several_sequences_in_the_queue_with_unique_names_and_the_same_settings(tmp_path):
+    from pelicula.subtitles import Cue, Subtitles
+    ts = [target("a", "Sequência 1"), target("b", "Abertura", frames=96, fps=25.0, fps_str="25/1", size=(640, 360)),
+          target("c", "Abertura (cópia)", frames=24)]
+    d = export_dialog(ts, active="a")
+    try:
+        d.out_dir = str(tmp_path)
+        d.path.setText(str(tmp_path / "saida.mp4"))
+        d.multi_box.setChecked(True)
+        assert not d.multi_list.isHidden() and d.checked_ids() == ["a"] and "Pôr 1 na fila" in d.ok_button.text()
+        d.multi_list.item(1).setCheckState(Qt.CheckState.Checked)
+        d.multi_list.item(2).setCheckState(Qt.CheckState.Checked)
+        assert "Pôr 3 na fila" in d.ok_button.text()
+        jobs = d.jobs()
+        assert [Path(j.out_path).name for j in jobs] == ["saida.mp4", "Abertura_pelicula.mp4",
+                                                         "Abertura (cópia)_pelicula.mp4"]
+        assert len({j.out_path for j in jobs}) == 3 and all(Path(j.out_path).parent == tmp_path for j in jobs)
+        assert [j.sequence for j in jobs] == [t.sequence for t in ts] and [j.info for j in jobs] == [t.info for t in ts]
+        assert jobs[1].info.fps == 25.0 and (jobs[1].info.width, jobs[1].info.height) == (640, 360)
+        assert all(j.settings.to_dict() == jobs[0].settings.to_dict() for j in jobs)
+        assert all(j.start_frame == 0 and j.end_frame == -1 for j in jobs)
+        # o mesmo destino já na fila ou no disco: o nome ganha _2, nada é sobrescrito
+        (tmp_path / "Abertura_pelicula.mp4").write_bytes(b"x")
+        again = d.jobs()
+        assert Path(again[1].out_path).name == "Abertura_pelicula_2.mp4"
+        # desmarcar tira da fila; a escolhida na caixa sempre entra ao trocar
+        d.multi_list.item(2).setCheckState(Qt.CheckState.Unchecked)
+        assert [Path(j.out_path).name for j in d.jobs()][-1] == "Abertura_pelicula_2.mp4" and len(d.jobs()) == 2
+        d.seq_box.setCurrentIndex(d.seq_box.findData("c"))
+        assert "c" in d.checked_ids()
+        d.multi_box.setChecked(False)
+        assert len(d.jobs()) == 1 and d.ok_button.text().strip().startswith("Adicionar")
+    finally:
+        d.done(0)
+
+
+def test_the_queue_of_several_sequences_does_not_keep_the_transparency_of_an_opaque_one(tmp_path):
+    ts = [target("a", "Sequência 1", transparent=True), target("b", "Sequência 2", transparent=False)]
+    d = export_dialog(ts, active="a")
+    try:
+        d.path.setText(str(tmp_path / "x.mov"))
+        d._set_combo(d.quality, "prores_xq")
+        d._quality_changed()
+        d.alpha_box.setChecked(True)
+        d.multi_box.setChecked(True)
+        d.multi_list.item(1).setCheckState(Qt.CheckState.Checked)
+        jobs = d.jobs()
+        from pelicula import export
+        assert export.wants_alpha(jobs[0].settings) and not export.wants_alpha(jobs[1].settings)
+    finally:
+        d.done(0)
+
+
+def test_the_window_puts_one_job_per_sequence_in_the_queue_with_copies(win, monkeypatch, tmp_path):
+    from pelicula.ui import export_dialog as ed
+    ids = two_tabs(win, monkeypatch)
+    win.model.insert_media(tl.Source.virtual("cor", 320, 180, "24/1", data={"cor": "#115577"}, seconds=1.0), at=0)
+    pump(lambda: win.cur is not None)
+    added = []
+    monkeypatch.setattr(win.queue, "add", added.append)
+    monkeypatch.setattr(win, "show_queue", lambda: None)
+    shown = []
+
+    def fake_exec(self):
+        shown.append(self)
+        self.path.setText(str(tmp_path / "x.mp4"))
+        self.multi_box.setChecked(True)
+        for i in range(self.multi_list.count()):
+            self.multi_list.item(i).setCheckState(Qt.CheckState.Checked)
+        return 1
+
+    monkeypatch.setattr(ed.ExportDialog, "exec", fake_exec)
+    win.new_export()
+    d = shown[0]
+    assert d._target_id == ids[1] and [t for t in d.targets] == ids               # a aberta é a padrão
+    assert len(added) == 2 and {Path(j.out_path).name for j in added} == {"x.mp4", "Sequência 1_pelicula.mp4"}
+    assert all(j.sequence is not win.model.seq and j.sequence is not win.src_seq for j in added)
+    assert [j.sequence.id for j in added] == [ids[1], ids[0]] or {j.sequence.id for j in added} == set(ids)
+    assert all(len(j.sequence.family()) == 2 for j in added)                       # as irmãs vão junto (cópia completa)
+
+
+def test_export_works_with_the_open_sequence_empty_when_another_has_clips(win, monkeypatch):
+    from pelicula.ui import export_dialog as ed
+    ids = two_tabs(win, monkeypatch)                 # a aberta é a nova, vazia; a primeira tem um clipe
+    assert win.info is None and win.seqs_ui.can_export_other() and win.btn_export.isEnabled()
+    shown = []
+
+    def fake_exec(self):
+        shown.append((self._target_id, self.info, self.sequence, list(self.targets)))
+        return 0
+
+    monkeypatch.setattr(ed.ExportDialog, "exec", fake_exec)
+    win.new_export()
+    assert len(shown) == 1 and shown[0][0] == ids[0] and shown[0][1].width == 320 and shown[0][2] is not None
+    assert shown[0][3] == []          # só uma sequência tem o que sair: sem a linha da escolha
+    win.model.undo()                  # volta a uma só, e a vazia some com o resto
+    pump()
+
+
+def test_a_real_export_of_two_sequences_through_the_dialog(win, monkeypatch, tmp_path):
+    from pelicula import export
+    from pelicula.engine import Engine
+    from pelicula.ui import export_dialog as ed
+    v1 = tone_video(tmp_path, "r1.mp4", "160x90", 24, 440, 1)
+    v2 = tone_video(tmp_path, "r2.mp4", "192x108", 30, 880, 1)
+    fresh(win)
+    win.import_paths([v1])
+    pump(lambda: win.cur is not None)
+    accepting(monkeypatch, fps="30/1", size=(192, 108))
+    win.seqs_ui.new_sequence()
+    win.import_paths([v2])
+    pump(lambda: win.cur is not None)
+    added = []
+    monkeypatch.setattr(win.queue, "add", added.append)
+    monkeypatch.setattr(win, "show_queue", lambda: None)
+
+    def fake_exec(self):
+        self.path.setText(str(tmp_path / "saida.mp4"))
+        self._set_combo(self.quality, "leve")
+        self._quality_changed()
+        self._set_combo(self.speed, "ultrafast")
+        self.res.setCurrentIndex(self.res.findData("original"))
+        self.multi_box.setChecked(True)
+        for i in range(self.multi_list.count()):
+            self.multi_list.item(i).setCheckState(Qt.CheckState.Checked)
+        return 1
+
+    monkeypatch.setattr(ed.ExportDialog, "exec", fake_exec)
+    win.new_export()
+    assert len(added) == 2
+    engine = Engine()
+    try:
+        for job in added:
+            export.run_job(job, engine)
+            assert job.status == "concluido", job.error
+    finally:
+        engine.release()
+    outs = {Path(j.out_path).name: media.probe(j.out_path) for j in added}
+    assert sorted(outs) == ["Sequência 1_pelicula.mp4", "saida.mp4"]
+    second, first = outs["saida.mp4"], outs["Sequência 1_pelicula.mp4"]          # a aberta (a 2ª) saiu em "saida.mp4"
+    assert (second.width, second.height, second.frames) == (192, 108, 30) and abs(second.fps - 30) < 0.01
+    assert (first.width, first.height, first.frames) == (160, 90, 24) and abs(first.fps - 24) < 0.01
+    assert first.has_audio and second.has_audio
