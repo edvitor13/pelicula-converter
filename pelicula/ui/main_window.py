@@ -49,6 +49,7 @@ from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
 from . import luz_fotometro_ui
+from . import filtro_ajustes
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -920,6 +921,7 @@ class MainWindow(QMainWindow):
         il.addStretch(1)
         scroll.setWidget(inner)
         vl.addWidget(scroll, 1)
+        self.look_filter = filtro_ajustes.install(vl, w, [self.cards], index=vl.indexOf(scroll))  # 1.7: "Filtrar ajustes…"
         # Losangos das chaves do look (o alvo é o próprio store; quadros do arquivo ou da montagem).
         self.look_keys = KeyRows(self.store, self.store, self.cards, self)
         self.look_keys.seekRequested.connect(self.seek)
@@ -3327,6 +3329,9 @@ class MainWindow(QMainWindow):
         for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
             editor.set_allowed("titulos_geradores" in on)
         self._check_modules()
+        for filtro in (getattr(self, "look_filter", None), getattr(self.inspector, "filtro", None)):
+            if filtro is not None:
+                filtro.reapply()  # o filtro de ajustes não mostra de volta cartão de módulo desligado
 
     def _check_modules(self) -> None:
         """Aviso discreto se o look ou a montagem usam módulos desligados (a imagem não muda)."""
@@ -3390,7 +3395,8 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
             "Edição: Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
-            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
+            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)") + "\n\n" + _(
+            "Ctrl+F (com o foco nos ajustes) ou / — filtrar ajustes (Esc limpa o filtro)"))
 
     def about(self) -> None:
         try:
@@ -3414,6 +3420,8 @@ class MainWindow(QMainWindow):
         shift = bool(mod & Qt.KeyboardModifier.ShiftModifier)
         if mod & Qt.KeyboardModifier.ControlModifier:
             return super().keyPressEvent(e)
+        if (k == Qt.Key.Key_Slash or e.text() == "/") and filtro_ajustes.focus_current(self, QApplication.focusWidget()):
+            return  # 1.7: "/" leva ao filtro de ajustes (fora de campos de texto)
         fps = int(round(self.info.fps)) if self.info else 24
         if self.mode == "edicao" and k == Qt.Key.Key_S:
             self.model.split_at(self.frame_idx)
