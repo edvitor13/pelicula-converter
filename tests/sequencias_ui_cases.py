@@ -535,6 +535,29 @@ def test_switching_tabs_is_not_a_change_but_a_rename_is(win, monkeypatch):
     assert not win.is_dirty()
 
 
+def test_in_and_out_points_do_not_make_switching_tabs_a_change(win, monkeypatch):
+    fresh(win, seq=color_seq())
+    accepting(monkeypatch)
+    win.seqs_ui.new_sequence()
+    first, second = win.model.sequences()
+    win.seqs_ui.activate(first.id)
+    pump()
+    win.inp, win.outp = 5, 30
+    win._saved_state = win._state()
+    for sid in (second.id, first.id, second.id):
+        win.seqs_ui.activate(sid)
+        pump()
+        assert not win.is_dirty()
+    win.inp = 3   # marcar na outra aba é mudança
+    assert win.is_dirty()
+    win.inp = None
+    assert not win.is_dirty()
+    win.seqs_ui.activate(first.id)
+    pump()
+    win.outp = 31  # mudar a da aba de volta também
+    assert win.is_dirty()
+
+
 def test_a_rename_does_not_reload_the_preview(win, monkeypatch):
     fresh(win, seq=color_seq())
     accepting(monkeypatch)

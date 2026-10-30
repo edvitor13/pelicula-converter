@@ -132,7 +132,8 @@ class TimelineModel(QObject):
         only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
         only_folders = not (only_markers or only_subtitles) and _without_folders(seq) == _without_folders(self.seq)
         tabs = _without_tabs(seq)
-        only_tabs = not (only_markers or only_subtitles or only_folders) and tabs is not None             and tabs == _without_tabs(self.seq)
+        only_tabs = (not (only_markers or only_subtitles or only_folders) and tabs is not None
+                     and tabs == _without_tabs(self.seq))
         self.seq = seq
         self._filter_selection()
         # Desfazer um marcador, uma legenda, uma pasta ou o nome de uma sequência não recarrega a prévia.
@@ -845,9 +846,10 @@ class TimelineModel(QObject):
             return -1
         self.commit()
         at = next(i for i, s in enumerate(group) if s is target)
+        users = [s for s, _n in self.sequence_users(target.id)]  # só quem perdeu clipes se acerta
         gone = target.siblings.remove(target)
-        for s in target.siblings.items:
-            if s.magnetic and gone:
+        for s in users:
+            if s.magnetic:
                 s.settle_main()
         if target is self.seq:
             rest = target.siblings.items
@@ -862,6 +864,7 @@ class TimelineModel(QObject):
         target = next((s for s in group if s.id == sid), None)
         if target is None or len(group) < 2:
             return False
+        self.commit()
         before = [s.id for s in group]
         target.siblings.move(target, to)
         if [s.id for s in target.siblings.items] == before:

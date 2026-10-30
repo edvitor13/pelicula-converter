@@ -2919,9 +2919,11 @@ class MainWindow(QMainWindow):
 
     def _state(self) -> dict:
         # Várias sequências: o estado é o do projeto a partir da primeira aba, para trocar de aba não parecer mudança.
-        seq = self.model.seq.family()[0].to_json() if len(self.model.seq.family()) > 1 else self._seq_json()
+        many = len(self.model.seq.family()) > 1
+        seq = self.model.seq.family()[0].to_json() if many else self._seq_json()
         return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
-                "keys": self.store.keys_json(), "preset": self.preset_id, "in": self.inp, "out": self.outp,
+                "keys": self.store.keys_json(), "preset": self.preset_id,
+                "in": self.seqs_ui.in_out_state() if many else self.inp, "out": None if many else self.outp,
                 "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
     def _has_project(self) -> bool:

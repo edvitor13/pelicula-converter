@@ -176,6 +176,17 @@ class SequencesUI(QObject):
         self.sync_bin()
         return switched
 
+    def in_out_state(self) -> dict[str, tuple]:
+        """Entrada e saída marcadas em cada aba (`MainWindow._state`): marcar é mudança, trocar de aba não."""
+        w, seq = self.win, self.model.seq
+        out = {}
+        for s in seq.family():
+            view = self.views.get(s.id)
+            pair = (w.inp, w.outp) if s is seq else (view.inp, view.outp) if view is not None else (None, None)
+            if pair != (None, None):
+                out[s.id] = pair
+        return out
+
     # ------------------------------------------------------------ operações (a janela pergunta, o modelo faz)
     def activate(self, sid: str) -> None:
         if sid and self.model.activate_sequence(sid):

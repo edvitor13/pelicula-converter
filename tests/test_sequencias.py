@@ -550,3 +550,31 @@ def test_the_models_operations_leave_a_lone_project_as_it_was():
     sid = m.new_sequence(320, 180, "24/1")
     m.remove_sequence(sid)
     assert json.dumps(m.seq.to_json(), sort_keys=True) == before
+
+
+def test_removing_a_sequence_settles_only_the_ones_that_lost_clips():
+    m, _k = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    m.insert_media(_src(), 0)
+    m.new_sequence(320, 180, "24/1", magnetic=True)
+    c = m.seq
+    m.insert_media(c.sources[f"sequencia:{b.id}"], 0)
+    m.insert_media(_src(), 100)
+    a.magnetic, a.clips[0].start = True, 10  # espaço de quem não tem nada a ver com a sequência apagada
+    assert m.remove_sequence(b.id) > 0
+    assert a.clips[0].start == 10
+    assert min(cl.start for cl in c.clips) == 0  # em quem perdeu o clipe, a faixa principal se fecha
+
+
+def test_move_sequence_keeps_what_was_pending_in_a_step_of_its_own():
+    m, _k = _model()
+    a = m.seq
+    m.new_sequence(320, 180, "24/1")
+    b = m.seq
+    next(c for c in a.clips if c.kind == tl.VIDEO).values["opacidade"] = 0.5  # ajuste ainda sem passo no histórico
+    assert m.move_sequence(b.id, 0)
+    m.undo()  # só a ordem volta
+    assert [s.id for s in m.sequences()] == [a.id, b.id]
+    assert next(c for c in m.sequences()[0].clips if c.kind == tl.VIDEO).values["opacidade"] == 0.5
