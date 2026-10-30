@@ -648,7 +648,7 @@ def _over_v1(clips_media, transparent: bool):
 
 @pytest.mark.gpu
 @pytest.mark.ffmpeg
-@pytest.mark.parametrize("depth, limit", [(8, 1), (16, 3)])
+@pytest.mark.parametrize("depth, limit", [(8, 1), (16, 1)])
 def test_transparent_inner_sequence_shows_what_is_below_like_the_clips_outside(gl_engine, clips_media, depth, limit):
     from pelicula.frame import Recipe
     flat, outer, inner = _over_v1(clips_media, True)
@@ -1257,3 +1257,114 @@ def test_nested_clip_with_a_muted_inner_sequence_is_silent(clips_media, tmp_path
     assert not audiomix.has_audio(inner) and audiomix.segments(twin) == []
     assert not audiomix.has_audio(twin)
     assert audiomix.render_mix(twin, str(tmp_path / "o.wav")) is False
+
+
+# ------------------------------------------------------------------ de ponta a ponta
+def e2e_montage(clips_media, qapp) -> tl.Sequence:
+    """A montagem de imagem (cortes, transições, PNG, título) com uma segunda faixa de som, com fade e volume."""
+    flat = flat_montage(clips_media, qapp)
+    longo = media.probe_source(clips_media[0])
+    extra = next(c for c in flat.insert_media(longo, at=5, vtrack=4, atrack=1) if c.kind == tl.AUDIO)
+    flat.set_values(extra.id, {"fade_in": 0.2, "volume": -6.0})
+    flat.clips = [c for c in flat.clips if not (c.kind == tl.VIDEO and c.track == 4)]
+    return flat
+
+
+def _decoded(path, ffmpeg, tmp) -> tuple[list, np.ndarray]:
+    """(quadros em 16 bits, amostras de 24 bits) de uma saída FFV1 + PCM."""
+    import subprocess
+    from helpers import read_all
+    info = media.probe(str(path))
+    assert info.has_audio and info.audio_codec == "pcm_s24le"
+    wav = tmp / (path.stem + "_som.wav")
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-nostdin", "-i", str(path), "-map", "0:a:0", "-c:a", "copy", str(wav)],
+                   check=True)
+    return read_all(media.FrameReader(info, W, H, 16)), _samples(wav)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_export_of_the_twin_gives_the_same_frames_and_sound(gl_engine, clips_media, qapp, ffmpeg_ok, tmp_path, mix_dir):
+    flat = e2e_montage(clips_media, qapp)
+    twin = twin_of(flat)
+    s = export.ExportSettings(codec="ffv1", container="mkv", pix="rgb48le", audio="pcm24", dither=False)
+    got = []
+    for seq, name in ((flat, "plano.mkv"), (twin, "gemea.mkv")):
+        out = tmp_path / name
+        job = export.ExportJob(info=sequence.media_info(seq), values=_look(LOOK), settings=s, out_path=str(out), sequence=seq)
+        export.run_job(job, gl_engine)
+        assert job.status == "concluido", job.error
+        assert job.done == flat.duration
+        got.append(_decoded(out, ffmpeg_ok, tmp_path))
+    (fa, sa), (fb, sb) = got
+    assert len(fa) == len(fb) == flat.duration
+    for t, (a, b) in enumerate(zip(fa, fb)):
+        assert np.array_equal(a, b), f"quadro {t}: {_first_diff(a, b)}"
+    assert np.abs(sa).max() > 0.01
+    _same_sound(sa, sb, 0.0)
+    assert audiomix.nested_mix_path(twin.family()[1]).startswith(str(mix_dir))
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_preview_frame_of_the_export_dialog_equals_the_exported_frame(gl_engine, clips_media, qapp):
+    flat = flat_montage(clips_media, qapp)
+    twin = twin_of(flat)
+    s = export.ExportSettings(codec="ffv1", container="mkv", pix="rgb48le", audio="pcm24", dither=False)
+    info = sequence.media_info(twin)
+    frames = list(exported_frames(gl_engine, twin, _look(LOOK), 16, s))
+    for t in (0, 12, 30, 42):
+        got = export.preview_frame(gl_engine, info, _look(LOOK), s, t, seq=twin, depth=16)
+        assert np.array_equal(got, frames[t]), f"quadro {t}: {_first_diff(got, frames[t])}"
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_cli_exports_a_saved_project_with_a_nested_clip(gl_engine, clips_media, qapp, ffmpeg_ok, tmp_path, mix_dir, capsys):
+    from pelicula import cli, project
+    flat = e2e_montage(clips_media, qapp)
+    twin = twin_of(flat)
+    got = []
+    for seq, name in ((flat, "plano"), (twin, "gemea")):
+        plc = tmp_path / f"{name}.plc"
+        project.save(project.Project(values=_look(LOOK), preset_id=LOOK, sequence=seq.to_json()), str(plc))
+        out = tmp_path / f"{name}.mkv"
+        assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "ffv1", "-q"]) == 0, capsys.readouterr().err
+        got.append(_decoded(out, ffmpeg_ok, tmp_path))
+    raw = project.load(str(tmp_path / "gemea.plc"))
+    assert raw.to_json()["formato"] == project.FORMAT
+    assert "sequencia_aninhada" in tl.Sequence.from_json(raw.sequence).features()
+    (fa, sa), (fb, sb) = got
+    assert len(fa) == len(fb) == flat.duration
+    for t, (a, b) in enumerate(zip(fa, fb)):
+        assert np.array_equal(a, b), f"quadro {t}: {_first_diff(a, b)}"
+    _same_sound(sa, sb, 0.0)
+    # um arquivo que falta lá dentro é um erro de quem exporta, como na montagem de cima
+    gone = tmp_path / "gemea2.plc"
+    d = twin.to_json()
+    for block in [d, *d["sequencias"]]:
+        for f in block.get("fontes", []):
+            if f["caminho"] == clips_media[1]:
+                f["caminho"] = str(tmp_path / "sumiu.mp4")
+        for c in block.get("clipes", []):
+            if c.get("fonte") == clips_media[1]:
+                c["fonte"] = str(tmp_path / "sumiu.mp4")
+    project.save(project.Project(values=_look(LOOK), sequence=d), str(gone))
+    assert cli.main(["exportar", str(gone), "-o", str(tmp_path / "x.mkv"), "--qualidade", "ffv1", "-q"]) == 1
+    assert "sumiu.mp4" in capsys.readouterr().err
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_inner_sequence_at_another_fps_gives_its_own_frames_and_sound(gl_engine, clips_media, ffmpeg_ok, tmp_path, mix_dir):
+    """Dentro a 30 fps, fora a 24: o tempo é o de um vídeo de 30 fps, o quadro é o de dentro bit a bit e o som, o mesmo."""
+    outer = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    inner = outer.ensure_set().create(W, H, "30/1")
+    inner.insert_media(media.probe_source(clips_media[0]), at=0)
+    clip = put(outer, inner)
+    assert clip.dur == round(inner.duration * 24 / 30)
+    for t, f in ((0, 0), (4, 5), (12, 15)):
+        a = gl_engine.compose(sequence.grab(outer, t, W, H, 16), outer, W, H, 16)
+        b = gl_engine.compose(sequence.grab(inner, f, W, H, 16), inner, W, H, 16)
+        assert np.array_equal(a, b), f"quadro {t}: {_first_diff(a, b)}"
+    _same_sound(_mix(inner, tmp_path / "dentro.wav"), _mix(outer, tmp_path / "fora.wav"), 0.0)
