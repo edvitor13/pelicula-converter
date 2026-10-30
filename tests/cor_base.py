@@ -195,7 +195,7 @@ def edit_hashes(engine, seq) -> dict:
 
 # ------------------------------------------------------------------ plugin do DaVinci
 def plugin_sources() -> dict:
-    from pelicula import resolve
+    from pelicula import APP_NAME, __version__, resolve
     out = {}
     for kind in resolve.KINDS:
         for dialect in (resolve.DCTL, resolve.GLSL, resolve.CPP):
@@ -203,6 +203,7 @@ def plugin_sources() -> dict:
                 text = resolve.source(kind, dialect)
             except Exception as exc:  # noqa: BLE001  (um nó que não existe num dialeto)
                 text = f"erro: {type(exc).__name__}"
+            text = text.replace(f"{APP_NAME} {__version__}", f"{APP_NAME} <versão>")  # a versão do app não conta
             out[f"{kind}/{dialect}"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return out
 

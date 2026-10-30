@@ -1,3 +1,15 @@
+## Versão 1.6.0 — 29 de outubro de 2026
+
+**Cor e película: câmeras log, cor simples, laboratório completo e grão de verdade.**
+
+- 🎥 **Sua câmera, do jeito certo.** Perfis novos (Canon Log 2 e 3, F-Log, F-Log2, D-Log, S-Log2, L-Log e o EI do LogC3), perfil por clipe no modo Edição e sugestão automática pelos dados do arquivo. Altas luzes de vídeo log acima do branco não são mais cortadas, e cores muito saturadas (LED, neon) são protegidas.
+- 🎨 **Cor simples.** No modo Edição: conta-gotas do branco, automático pelo clipe inteiro, igualar a outro clipe ou a uma imagem protegendo a pele, clicar numa cor e mudar só ela, pele natural, degradê e grupos de cor. Zebra, falsa cor e quadro de referência na prévia.
+- 🧪 **Laboratório completo.** Slide reversível, revelação cruzada, película vencida, pré-exposição, scanner de luz branca e filmes calibrados pelas folhas de dados públicas da Kodak. No modo Edição, a **luz da copiadora por clipe** (Alt+R/G/B/D) e, em teste, o **fotômetro da película**, que mostra onde o negativo perde detalhe ou estoura. Quatro presets novos.
+- 🌾 **Grão de verdade.** O grão nasce no negativo, em cada camada, muda com a densidade e pode ser feito de grãos de prata simulados (Beta). Maciez, respiração e nitidez por camada, e a halação física.
+- 📷 **Câmera e formato.** Obturador de 180° a partir de vídeo de 50/60/120 qps, manivela, lente anamórfica, data impressa, formatos de foto (135, meio quadro, 120), a montagem virando emendas de película e a **Máquina do tempo**: escolha um ano e onde o filme passava.
+- 🎛️ **Plugin do DaVinci Resolve.** Ganhou os perfis, processos, grão e formatos novos. **Reinstale o plugin** pela janela do app para ter tudo.
+- 📂 **Projetos.** Um projeto que usa algo novo da 1.6 só abre na 1.6 ou mais nova; os antigos abrem e saem iguais.
+
 ## Versão 1.5.0 — 28 de outubro de 2026
 
 **Movimento, texto e legendas no modo Edição.**

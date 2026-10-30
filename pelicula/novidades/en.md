@@ -1,3 +1,15 @@
+## Version 1.6.0 — October 29, 2026
+
+**Color and film: log cameras, simple color, a complete lab and real grain.**
+
+- 🎥 **Your camera, done right.** New profiles (Canon Log 2 and 3, F-Log, F-Log2, D-Log, S-Log2, L-Log and LogC3 EI), per-clip camera profiles in Edit mode and automatic suggestions from the file's metadata. Log highlights above white are no longer clipped, and very saturated colors (LED, neon) are protected.
+- 🎨 **Simple color.** In Edit mode: white balance eyedropper, automatic from the whole clip, match another clip or an image while protecting skin, click a color and change only it, natural skin, gradient and color groups. Zebra, false color and a reference frame in the preview.
+- 🧪 **A complete lab.** Reversal slide, cross processing, expired film, flashing, white-light scanner and films calibrated from Kodak's public data sheets. In Edit mode, **per-clip printer lights** (Alt+R/G/B/D) and, in testing, the **film light meter**, which shows where the negative loses detail or blows out. Four new presets.
+- 🌾 **Real grain.** Grain is born in the negative, in each layer, changes with density and can be made of simulated silver grains (Beta). Per-layer softness, breathing and sharpness, and physical halation.
+- 📷 **Camera and format.** 180° shutter from 50/60/120 fps video, hand crank, anamorphic lens, date stamp, photo formats (135, half frame, 120), the edit turning into film splices and the **Time machine**: pick a year and where the film was shown.
+- 🎛️ **DaVinci Resolve plugin.** It has the new profiles, processes, grain and formats. **Reinstall the plugin** from the app window to get everything.
+- 📂 **Projects.** A project that uses something new from 1.6 only opens in 1.6 or newer; older projects open and render the same.
+
 ## Version 1.5.0 — October 28, 2026
 
 **Motion, text and subtitles in Edit mode.**
