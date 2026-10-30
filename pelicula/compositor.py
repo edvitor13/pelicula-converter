@@ -100,14 +100,14 @@ def desqueeze(v: dict[str, Any]) -> float:
 def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
             values: dict[str, Any] | None = None) -> tuple[float, float]:
     """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe e na proporção já desespremida ("Esticar"
-    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe sem arquivo
+    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe gerado
     (título, cor…) não tem proporção própria: com janela, ele nasce do tamanho dela. `values`: os ajustes no quadro
     (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
     _x, _y, aw, ah = seq.window_rect(canvas_w, canvas_h)
     sw = float(src.width if src and src.width else aw)
     sh = float(src.height if src and src.height else ah)
-    if seq.window and src is not None and not src.is_file:
+    if seq.window and src is not None and src.is_generated:
         sw, sh = float(aw), float(ah)
     v = values if values is not None else clip.values
     mode = v.get("encaixe", "ajustar")

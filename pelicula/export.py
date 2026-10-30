@@ -628,10 +628,10 @@ def _norm(path: str) -> str:
 
 
 def job_inputs(info: media.MediaInfo, sequence=None) -> list[str]:
-    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, todos os arquivos da montagem (clipes sem
-    arquivo não contam)."""
+    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, os arquivos que a montagem usa, em qualquer nível
+    (clipes sem arquivo não contam; a Mídia é do projeto todo, e o que nenhum clipe usa não é lido)."""
     if sequence is not None:
-        return [str(p) for p, s in sequence.sources.items() if s.is_file]
+        return [str(s.path) for s in sequence.deep_sources() if s.is_file]
     return [info.path]
 
 
