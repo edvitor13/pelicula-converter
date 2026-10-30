@@ -513,17 +513,19 @@ def _remove(path: str) -> None:
 
 def mix_key(seq: timeline.Sequence) -> str:
     """Impressão digital de tudo que muda o som (para saber quando refazer o WAV da prévia)."""
+    clips = sorted((c for c in seq.clips if c.kind == timeline.AUDIO), key=lambda c: (c.track, c.start, c.id))
+    used = {c.src for c in clips}  # fonte sem clipe (o clipe foi apagado) não muda o som e `Sequence.copy()` a tira
     data = {
         "fps": seq.fps_str,
         "faixas": [t.to_json() for t in seq.kind_tracks(timeline.AUDIO)],
-        "clipes": [c.to_json() for c in seq.clips if c.kind == timeline.AUDIO],
-        "fontes": sorted((p, round(s.duration, 6)) for p, s in seq.sources.items() if s.has_audio),
+        "clipes": [c.to_json() for c in clips],
+        "fontes": sorted((p, round(s.duration, 6)) for p, s in seq.sources.items() if s.has_audio and p in used),
     }
     if seq.micro_fade:
         data["micro_fades"] = True
     tns = tones(seq)
     if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
-        data["tons"] = [[t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns]
+        data["tons"] = sorted([t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns)
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 

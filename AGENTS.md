@@ -446,6 +446,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_entrada_sugestao.py` | perfil sugerido pelos metadados: tabela de dicionários do ffprobe, XML da Sony, etiquetas guardadas, preenchimento dos clipes novos |
 | `tests/test_entrada_ui.py` | casos de `entrada_ui_cases.py`: cartão "Câmera" do inspetor, aviso da sugestão (um clique, nunca ao reabrir), clipes novos preenchidos num passo do desfazer |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
+| `tests/test_correcoes_17_ui.py` | casos de `correcoes_17_ui_cases.py`: botão, telas e `self.mode` iguais ao abrir projetos e Ctrl+Z no histórico certo (#50), a prévia toca o som do que ficou depois de apagar, mover, mudar volume e faixa (#51), âncora do zoom pelo marcador, pelo ponteiro e pelo centro (#53), Exportar com a fila ocupada e destino repetido (#59) |
+| `tests/test_fila_exportacao.py` | fila de exportação sem GPU: trabalho novo não mexe no que está rodando, destino repetido (`queue_clash`), nome livre (`free_output`) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
 

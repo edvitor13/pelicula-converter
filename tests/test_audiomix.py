@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import wave
 
 import numpy as np
@@ -88,6 +89,70 @@ def test_mix_key_follows_only_audio(tmp_path):
     au = [c for c in seq.clips if c.kind == tl.AUDIO][0]
     seq.set_values(au.id, {**au.values, "volume": -3.0})
     assert audiomix.mix_key(seq) != k0
+
+
+def test_mix_key_is_the_same_on_the_copy(tmp_path):
+    """A janela calcula a chave numa cópia; se a do modelo fosse outra, a mixagem nova seria jogada fora (#51)."""
+    a, b, d = fake_files(tmp_path, "a.mp4", "b.mp4", "d.mp4")
+    seq = seq_with([a, b, d])
+    assert audiomix.mix_key(seq) == audiomix.mix_key(seq.copy())
+    first = next(c for c in seq.clips if c.src == a and c.kind == tl.VIDEO)
+    seq.delete([first.id])  # a fonte continua na montagem sem clipe; a cópia não a leva
+    assert a in seq.sources and a not in seq.copy().sources
+    assert audiomix.mix_key(seq) == audiomix.mix_key(seq.copy())
+    last = next(c for c in seq.clips if c.src == d and c.kind == tl.VIDEO)
+    seq.move(last.id, 0)  # a ordem da lista deixa de ser a ordem no tempo; a cópia grava em ordem de tempo
+    seq.move(next(c.id for c in seq.clips if c.src == b and c.kind == tl.VIDEO), 500)
+    assert audiomix.mix_key(seq) == audiomix.mix_key(seq.copy())
+    au = next(c for c in seq.clips if c.src == d and c.kind == tl.AUDIO)
+    seq.move(au.id, au.start, 1)  # outra faixa
+    assert audiomix.mix_key(seq) == audiomix.mix_key(seq.copy())
+    assert seq.retime(au.id, reverse=True)  # reverso: a entrada do clipe é gravada com mais casas
+    assert audiomix.mix_key(seq) == audiomix.mix_key(seq.copy())
+
+
+def test_mix_key_ignores_a_source_without_clip(tmp_path):
+    a, b = fake_files(tmp_path, "a.mp4", "b.mp4")
+    seq = seq_with([a])
+    k0 = audiomix.mix_key(seq)
+    seq.add_source(tl.Source(b, 320, 180, 24.0, "24/1", 48, 2.0, has_audio=True))
+    assert audiomix.mix_key(seq) == k0
+
+
+def _tone_file(ffmpeg, path, freq, secs):
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", f"sine=frequency={freq}:sample_rate=48000:duration={secs}",
+                    "-c:a", "pcm_s16le", str(path)], check=True, timeout=60)
+    return media.probe_source(str(path))
+
+
+def _heard(path, t0=0.2, t1=0.8):
+    reader = audiomix.WavReader(str(path))
+    x = reader.read(int(t0 * reader.rate), int((t1 - t0) * reader.rate))
+    x = x[:, 0] if x.ndim > 1 else x
+    spectrum = np.abs(np.fft.rfft(x * np.hanning(len(x))))
+    return float(np.argmax(spectrum) * reader.rate / len(x)), float(np.sqrt(np.mean(x ** 2)))
+
+
+@pytest.mark.ffmpeg
+def test_mix_after_deleting_moving_and_changing_track(ffmpeg_ok, tmp_path):
+    """O que a exportação grava depois de apagar o 1º clipe: o som do que ficou, com volume e faixa (#51)."""
+    seq = tl.Sequence()
+    for name, freq in (("a.wav", 440), ("b.wav", 1000)):
+        seq.insert_media(_tone_file(ffmpeg_ok, tmp_path / name, freq, 2))
+    a, b = [str(tmp_path / n) for n in ("a.wav", "b.wav")]
+    seq.delete([next(c.id for c in seq.clips if c.src == a)])
+    clip = next(c for c in seq.clips if c.src == b)
+    seq.move(clip.id, 0)
+    assert audiomix.render_mix(seq, str(tmp_path / "1.wav"))
+    freq, level = _heard(tmp_path / "1.wav")
+    assert freq == pytest.approx(1000, abs=5) and level > 0.01
+    seq.set_values(clip.id, {**clip.values, "volume": -6.0})
+    assert audiomix.render_mix(seq, str(tmp_path / "2.wav"))
+    assert 20 * np.log10(_heard(tmp_path / "2.wav")[1] / level) == pytest.approx(-6.0, abs=0.2)
+    seq.move(clip.id, 0, 1)
+    assert clip.track == 1
+    assert audiomix.render_mix(seq, str(tmp_path / "3.wav"))
+    assert _heard(tmp_path / "3.wav")[0] == pytest.approx(1000, abs=5)
 
 
 @pytest.mark.parametrize("version,option", [((9, 0), "-/filter_complex"), ((7, 1, 2), "-/filter_complex"),

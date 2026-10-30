@@ -16,6 +16,7 @@ outros testes; por isso os casos ficam em `<nome>_ui_cases.py` (não coletados s
         check(results, name)
 
 O subprocesso herda PELICULA_SETTINGS_DIR do conftest: nada toca as preferências do usuário.
+Cada caso é uma função `test_*` sem `parametrize` (o nome precisa bater com o da junit): use um laço dentro dele.
 """
 
 from __future__ import annotations

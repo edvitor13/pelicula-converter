@@ -924,7 +924,10 @@ de onda (com cache por arquivo).
 - O `FrameLoader` e o `Player` aceitam arquivo ou sequência (`sequence.grab` / `SequenceReader`);
   a montagem (`Engine.compose`) acontece na thread principal, com o mesmo contexto da prévia.
 - Som da prévia da sequência: `audiomix.render_mix` num WAV temporário em segundo plano (troca de nome
-  a cada versão, porque o player segura o arquivo aberto), refeito quando `mix_key()` muda.
+  a cada versão, porque o player segura o arquivo aberto), refeito quando `mix_key()` muda. A chave olha só o
+  que muda o som (clipes de áudio em ordem de tempo e as fontes deles) e sai igual no modelo e numa cópia
+  (`Sequence.copy()` tira as fontes sem clipe e grava em ordem de tempo): `_start_mix` e `_mix_done` a calculam
+  na cópia. Se as duas divergissem, toda mixagem nova seria descartada e a prévia ficaria no WAV antigo (#51).
 - O que a prévia mostra é o que sai: no modo Edição sem *Com película*, exportar e salvar quadro
   saem só com a montagem (look "Original").
 - Marcadores: `M` põe um no cursor no modo Edição (no Película o `M` continua sendo o som; `Shift+M` é o

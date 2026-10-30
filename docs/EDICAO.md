@@ -130,7 +130,7 @@ exportado não tem transparência (sai sempre com a cor por baixo), e sequência
 | Apagar e juntar | **Excluir e fechar o espaço** (Shift+Delete) puxa o que vem depois |
 | Juntar os clipes da faixa | Botão direito → **Remover espaços da faixa** |
 | Ímã | Liga/desliga com **N**: os clipes grudam no cursor, nas bordas dos outros e na entrada/saída. Segure **Shift** enquanto arrasta para inverter o ímã naquele momento |
-| Zoom | **+ / −**, Ctrl + roda do mouse, o controle de zoom ou **Ajustar** (sequência inteira) |
+| Zoom | **+ / −**, Ctrl + roda do mouse, o controle de zoom ou **Ajustar** (sequência inteira). O zoom mantém o marcador de reprodução parado na tela; se ele estiver fora da vista, vem para o centro. Com **Zoom pelo marcador de reprodução** desmarcado (botão direito nos controles de zoom ou Configurações › Geral), Ctrl + roda aproxima pelo ponteiro e o resto, pelo centro da vista |
 | Rolar | Roda do mouse (para os lados); Shift + roda (para cima e para baixo) |
 | Ir para um ponto | Clique ou arraste na régua de tempo |
 

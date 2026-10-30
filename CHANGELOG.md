@@ -7,6 +7,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Corrigido
+- **Ctrl+Z desfazendo o look na Edição:** abrir um projeto salvo no modo Película com a Edição na tela deixava o botão
+  e o histórico na Película e as telas na Edição (#50).
+- **Som do clipe apagado na prévia:** depois de apagar um clipe ou mudar a ordem deles, a prévia continuava tocando a
+  mixagem antiga, e volume e faixa pareciam não fazer efeito. A exportação não tinha o problema (#51).
+- **Zoom da linha do tempo pulando para longe:** todo zoom agora mantém o marcador de reprodução parado e o traz para
+  o centro quando está fora da vista. A opção **Zoom pelo marcador de reprodução** (marcada por padrão, em
+  Configurações › Geral e no botão direito dos controles de zoom) volta ao ponteiro e ao centro da vista (#53).
+- **Exportar durante uma exportação:** o botão (e o Ctrl+E) agora mostra a fila, em vez de abrir outra exportação
+  que recomeçava do zero ao terminar a primeira. Na fila há *Adicionar outra exportação…*, e um destino que já está
+  na fila pede outro nome (#59).
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

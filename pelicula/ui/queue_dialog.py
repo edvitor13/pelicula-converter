@@ -95,7 +95,7 @@ class JobRow(QFrame):
 
 
 class QueueDialog(QDialog):
-    def __init__(self, parent, queue: ExportQueue):
+    def __init__(self, parent, queue: ExportQueue, on_add=None):
         super().__init__(parent)
         self.queue = queue
         self.setWindowTitle(_("Fila de exportação"))
@@ -127,6 +127,11 @@ class QueueDialog(QDialog):
         clear.clicked.connect(self._clear)
         row.addWidget(clear)
         row.addStretch(1)
+        self.btn_add = QPushButton(_("Adicionar outra exportação…"))
+        self.btn_add.setVisible(on_add is not None)
+        if on_add is not None:
+            self.btn_add.clicked.connect(on_add)
+        row.addWidget(self.btn_add)
         close = QPushButton(_("Fechar"))
         close.clicked.connect(self.close)
         row.addWidget(close)

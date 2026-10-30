@@ -43,7 +43,7 @@ from .edit_panels import ClipInspector, MediaBin
 from .keyframes_ui import KeyRows, KeyStrip
 from . import generators_ui, titles_panel
 from .scopes import Scopes
-from .timeline_view import HEADER_W, TimelineEditor
+from .timeline_view import HEADER_W, ZOOM_PLAYHEAD_KEY, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
@@ -344,6 +344,7 @@ class MainWindow(QMainWindow):
         self._mix_key = ""
         self._mix_path = ""
         self._mix_files: list[str] = []
+        self._mix_running: dict[str, str] = {}  # chave → WAV das mixagens a caminho (uma por chave)
         self._mix_token = 0
         self._peaks: dict[str, object] = {}
         self._peaks_pending: set[str] = set()
@@ -1318,14 +1319,15 @@ class MainWindow(QMainWindow):
             self.request_frame(self.frame_idx)
 
     # ================================================================ modos Película / Edição
-    def set_mode(self, mode: str) -> None:
-        """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes)."""
+    def set_mode(self, mode: str, force: bool = False) -> None:
+        """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes).
+        `force`: aplica a tela mesmo sem mudar o modo (projeto aberto por cima da mesma tela)."""
         if mode not in MODES:
             return
         if mode == "edicao" and not modules.is_enabled(self.settings, "edicao"):
             mode = "pelicula"  # módulo desligado: a montagem continua sendo a entrada do look
         self.mode_switch.set_current(mode)
-        if mode == self.mode:
+        if mode == self.mode and not force:
             return
         if self.preview_fullscreen:
             self.toggle_preview_fullscreen()
@@ -1522,9 +1524,12 @@ class MainWindow(QMainWindow):
             self._mix_key, self._mix_path = key, ""
             self._set_audio("seq", "")
             return
+        if key in self._mix_running:
+            return  # esta mesma mixagem já está a caminho
         self._mix_token += 1
         path = os.path.join(tempfile.gettempdir(), f"pelicula_previa_{os.getpid()}_{self._mix_token}.wav")
         self._mix_files.append(path)
+        self._mix_running[key] = path
 
         def run():
             try:
@@ -1536,15 +1541,17 @@ class MainWindow(QMainWindow):
         threading.Thread(target=run, daemon=True, name="mixagem-previa").start()
 
     def _mix_done(self, key: str, path: str) -> None:
-        if self.src_seq is None or key != audiomix.mix_key(self.model.seq):
+        self._mix_running.pop(key, None)
+        if self.src_seq is None or key != audiomix.mix_key(self.model.seq.copy()):  # a mesma forma de `_start_mix`
             return  # já existe uma mixagem mais nova a caminho
         self._mix_key, self._mix_path = key, path
         self._set_audio("seq", path)
         self._clean_mixes(keep=path)
 
     def _clean_mixes(self, keep: str = "") -> None:
+        running = set(self._mix_running.values())  # a mixagem a caminho ainda vai ser entregue
         for f in list(self._mix_files):
-            if f == keep:
+            if f == keep or f in running:
                 continue
             try:
                 if os.path.exists(f):
@@ -1558,6 +1565,7 @@ class MainWindow(QMainWindow):
             from PySide6.QtCore import QUrl
             self.audio.stop()
             self.audio.setSource(QUrl())
+        self._mix_running.clear()
         self._clean_mixes()
         self._meter_close()
 
@@ -2667,6 +2675,14 @@ class MainWindow(QMainWindow):
 
     # ================================================================ exportação
     def export_dialog(self) -> None:
+        """Botão Exportar e Ctrl+E. Com exportação em andamento mostra a fila: outra exportação só de propósito,
+        por "Adicionar outra exportação…" de lá (`new_export`)."""
+        if self.queue.busy:
+            self.show_queue()
+            return
+        self.new_export()
+
+    def new_export(self) -> None:
         if self.info is None:
             self.open_dialog()
             return
@@ -2685,7 +2701,8 @@ class MainWindow(QMainWindow):
                            perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
                            last_platform=str(self.settings.value("export_platform", "")),
                            chapters=self._export_chapters(), look_keys=self._export_keys(),
-                           subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues())
+                           subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues(),
+                           queue_jobs=list(self.queue.jobs))
         if not dlg.exec():
             return
         job = dlg.job()
@@ -2711,7 +2728,7 @@ class MainWindow(QMainWindow):
 
     def show_queue(self) -> None:
         if self.queue_dialog is None:
-            self.queue_dialog = QueueDialog(self, self.queue)
+            self.queue_dialog = QueueDialog(self, self.queue, on_add=self.new_export)
         self.queue_dialog.show()
         self.queue_dialog.raise_()
         self.queue_dialog.activateWindow()
@@ -2731,6 +2748,10 @@ class MainWindow(QMainWindow):
             self.btn_queue.setText(_("Fila ({n})").format(n=len(active)))
         else:
             self.btn_queue.setText(_("Fila"))
+        tip = _("Há uma exportação em andamento: mostra a fila (Ctrl+E)") if active \
+            else _("Exportar com o look atual (Ctrl+E)")
+        if self.btn_export.toolTip() != tip:
+            self.btn_export.setToolTip(tip)
         finished = []
         for j in self.queue.jobs:
             if j.status in ("concluido", "erro") and j.id not in self._seen_done:
@@ -3029,8 +3050,7 @@ class MainWindow(QMainWindow):
         self.preset_combo.blockSignals(False)
         self.looks.set_selected(self.preset_id)
         self._update_modified()
-        self.mode = "pelicula"
-        self.set_mode(p.mode if p.mode in MODES else "edicao")
+        self.set_mode(p.mode if p.mode in MODES else "edicao", force=True)
         self._refresh_source(reset=True)
         if self.info is not None:
             self.inp, self.outp = p.in_point, p.out_point
@@ -3245,6 +3265,8 @@ class MainWindow(QMainWindow):
             self.act_auto_update.blockSignals(False)
         elif key == "modulos":
             self.apply_modules()
+        elif key == ZOOM_PLAYHEAD_KEY:
+            self.tl_editor.canvas.load_zoom_pref()
 
     # ================================================================ módulos (Configurações › Recursos)
     def _module_tools(self) -> dict[str, list]:

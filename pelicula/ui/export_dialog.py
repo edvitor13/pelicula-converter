@@ -115,9 +115,10 @@ class ExportDialog(QDialog):
                  in_out: tuple[int, int] | None, last_dir: str = "", last_quality: str = "",
                  perf: dict | None = None, gpu_name: str = "", sequence=None, frame: int = 0,
                  last_platform: str = "", chapters=None, look_keys: dict | None = None, subtitles=None,
-                 subtitle_cues=None):
+                 subtitle_cues=None, queue_jobs=()):
         super().__init__(parent)
         self.info = info
+        self.queue_jobs = queue_jobs  # o que já está na fila: outro trabalho com o mesmo destino pede outro nome
         # legendas do projeto (`subtitles.Subtitles`) e as da montagem em segundos da sequência
         self.subs_doc = subtitles
         self.subs_cues = list(subtitle_cues or [])
@@ -1001,6 +1002,15 @@ class ExportDialog(QDialog):
             QMessageBox.warning(self, _("Exportar"), _("Escolha um nome diferente do arquivo original."))
             return
         s = self.settings()
+        if export.queue_clash(path, s, self.queue_jobs):
+            free = export.free_output(path, s, self.queue_jobs)
+            r = QMessageBox.question(self, _("Exportar"), _(
+                "A fila já tem uma exportação gravando em:\n{caminho}\n\nPara não sobrescrever, salvar esta como "
+                "{nome}?").format(caminho=export.output_target(path, s), nome=Path(free).name))
+            if r != QMessageBox.StandardButton.Yes:
+                return
+            path = free
+            self.path.setText(path)
         clash = export.partial_clash(path, s, export.job_inputs(self.info, self.sequence))
         if clash:
             QMessageBox.warning(self, _("Exportar"), export.partial_clash_message(clash))

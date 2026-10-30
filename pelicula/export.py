@@ -647,6 +647,24 @@ def partial_clash(path: str, s: ExportSettings, inputs: list[str]) -> str:
     return ""
 
 
+def queue_clash(path: str, s: ExportSettings, jobs) -> bool:
+    """Outro trabalho da fila (na espera ou exportando) grava neste destino?"""
+    target = _norm(output_target(path, s))
+    return any(j.status in ("aguardando", "exportando") and _norm(output_target(j.out_path, j.settings)) == target
+               for j in jobs)
+
+
+def free_output(path: str, s: ExportSettings, jobs) -> str:
+    """O primeiro nome `video_2.mp4`, `video_3.mp4`… que nem a fila nem o disco usam."""
+    p = Path(path)
+    n = 2
+    while True:
+        name = str(p.with_name(f"{p.stem}_{n}{p.suffix}"))
+        if not queue_clash(name, s, jobs) and not output_exists(name, s):
+            return name
+        n += 1
+
+
 def partial_clash_message(src: str) -> str:
     return _("O arquivo de entrada {caminho} tem o nome que esta exportação usa enquanto grava. Escolha outro nome "
              "para a saída.").format(caminho=src)

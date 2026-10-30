@@ -801,7 +801,9 @@ Y quadros/s medidos agora nesta máquina com estas opções"*. O arquivo tempor�
 
 **Fila**: *Adicionar à fila e exportar* põe o trabalho na fila (botão **Fila** no topo mostra o
 progresso). Cada item mostra quadros feitos, porcentagem, velocidade e tempo restante, com
-*Cancelar* e *Abrir pasta*. Pode continuar ajustando e enfileirando outros vídeos enquanto exporta.
+*Cancelar* e *Abrir pasta*. Pode continuar ajustando enquanto exporta. Com uma exportação em andamento, o botão
+**Exportar** (Ctrl+E) mostra a fila; outra exportação entra por *Adicionar outra exportação…*, e um destino que
+já está na fila pede outro nome (`video_2.mp4`) em vez de sobrescrever.
 Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 
 ### 8. Atalhos do teclado

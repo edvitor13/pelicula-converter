@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QInputDialog, QMenu, Q
 from .. import timeline
 from ..i18n import _, decimal_sep, fmt_decimal
 from ..timeline import AUDIO, VIDEO, Clip
-from . import icons, theme
+from . import icons, prefs, theme
 from .edit_model import TimelineModel
 from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
@@ -46,6 +46,7 @@ GAP_H = 8                    # divisória entre vídeo e áudio
 EDGE_PX = 7                  # área das bordas que apara o clipe
 SNAP_PX = 9
 MIN_PPF, MAX_PPF = 0.01, 40.0  # pixels por quadro
+ZOOM_PLAYHEAD_KEY = "zoom_marcador"  # preferência "Zoom pelo marcador de reprodução" (padrão: ligada)
 MIME_SOURCE = "application/x-pelicula-source"
 BTN = 20                     # botões do cabeçalho das faixas
 MARKER_W = 10                # largura do marcador na régua
@@ -57,6 +58,11 @@ _RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
 
 def _elide(fm: QFontMetrics, text: str, width: float) -> str:
     return fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, int(width)))
+
+
+def zoom_playhead_tip() -> str:
+    return _("Marcado: todo zoom mantém o marcador parado na tela (fora da vista, ele vem para o centro). "
+             "Desmarcado: Ctrl + roda do mouse aproxima pelo ponteiro; botões, controle e teclado, pelo centro da vista.")
 
 
 class TimelineCanvas(QWidget):
@@ -83,6 +89,8 @@ class TimelineCanvas(QWidget):
         self.snap = True
         self.insert_mode = False  # soltar/mover empurra o resto (inserir) em vez de cobrir; Ctrl inverte
         self.follow = True        # rola sozinho para acompanhar o cursor na reprodução
+        self.zoom_on_playhead = True
+        self.load_zoom_pref()
         self.peaks_provider: Callable[[str], np.ndarray | None] | None = None
         self._drag: dict | None = None
         self._hover_x: float | None = None
@@ -180,6 +188,20 @@ class TimelineCanvas(QWidget):
         self.scroll = max(0.0, f - (anchor_x - HEADER_W) / ppf)
         self.viewChanged.emit()
         self.update()
+
+    def zoom_to(self, ppf: float, pointer_x: float | None = None) -> None:
+        """Todo zoom da interface passa por aqui. "Zoom pelo marcador de reprodução" (padrão): o marcador fica parado
+        na tela e, fora da vista, vem para o centro. Desligado: a âncora é o ponteiro (`pointer_x`, Ctrl + roda do
+        mouse) ou o centro da vista (botões, controle e teclado)."""
+        if not self.zoom_on_playhead:
+            self.set_ppf(ppf, pointer_x)
+            return
+        if not HEADER_W <= self.frame_to_x(self.playhead) <= self.width():
+            self.scroll = max(0.0, self.playhead - self.visible_frames() / 2)
+        self.set_ppf(ppf, self.frame_to_x(self.playhead))
+
+    def load_zoom_pref(self) -> None:
+        self.zoom_on_playhead = str(prefs.settings().value(ZOOM_PLAYHEAD_KEY, "true")) != "false"
 
     def set_scroll(self, frames: float) -> None:
         self.scroll = max(0.0, float(frames))
@@ -1170,7 +1192,7 @@ class TimelineCanvas(QWidget):
         mods = e.modifiers()
         if mods & Qt.KeyboardModifier.ControlModifier:
             if dy:
-                self.set_ppf(self.ppf * (1.25 if dy > 0 else 0.8), e.position().x())
+                self.zoom_to(self.ppf * (1.25 if dy > 0 else 0.8), e.position().x())
             e.accept()
             return
         if mods & Qt.KeyboardModifier.ShiftModifier and dy:
@@ -1386,9 +1408,9 @@ class TimelineCanvas(QWidget):
             self.snap = not self.snap
             self.toolChanged.emit(self.tool)
         elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
-            self.set_ppf(self.ppf * 1.25, self.frame_to_x(self.playhead))
+            self.zoom_to(self.ppf * 1.25)
         elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
-            self.set_ppf(self.ppf * 0.8, self.frame_to_x(self.playhead))
+            self.zoom_to(self.ppf * 0.8)
         elif k == Qt.Key.Key_Escape:
             self.key_sel = set()
             m.select([])
@@ -1569,22 +1591,40 @@ class TimelineEditor(QWidget):
         self.btn_silences.setVisible(False)
         hl.addWidget(self.btn_silences)
         hl.add_stretch()
-        zo = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também."))
-        zo.clicked.connect(lambda: c.set_ppf(c.ppf * 0.8))
+        zo = self.btn_zoom_out = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
+        zo.clicked.connect(lambda: c.zoom_to(c.ppf * 0.8))
         self.zoom = FilmSlider(0.0, 1.0, 0.001, self._ppf_to_t(4.0))
         self.zoom.setFixedWidth(110)
-        self.zoom.setToolTip(_("Zoom da linha do tempo"))
-        self.zoom.valueChanged.connect(lambda t: c.set_ppf(self._t_to_ppf(t)))
-        zi = self._btn("zoom_in", _("Aproximar (+). Ctrl + roda do mouse também."))
-        zi.clicked.connect(lambda: c.set_ppf(c.ppf * 1.25))
+        self.zoom.setToolTip(_("Zoom da linha do tempo. Botão direito: opções do zoom."))
+        self.zoom.valueChanged.connect(lambda t: c.zoom_to(self._t_to_ppf(t)))
+        zi = self.btn_zoom_in = self._btn("zoom_in", _("Aproximar (+). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
+        zi.clicked.connect(lambda: c.zoom_to(c.ppf * 1.25))
         fit = self._btn("fit", _("Mostrar a sequência inteira"), _("Ajustar"))
         fit.clicked.connect(self.zoom_fit)
         for b in (zo, self.zoom, zi, fit):
             hl.addWidget(b)
+        for b in (zo, self.zoom, zi):
+            b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda pos, w=b: self.zoom_menu().exec(w.mapToGlobal(pos)))
         # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
         bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit],
                          optional=[self.zoom])
         return bar
+
+    def zoom_menu(self) -> QMenu:
+        """Menu rápido dos controles de zoom (a mesma opção de Configurações › Geral)."""
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        act = menu.addAction(_("Zoom pelo marcador de reprodução"))
+        act.setCheckable(True)
+        act.setChecked(self.canvas.zoom_on_playhead)
+        act.setToolTip(zoom_playhead_tip())
+        act.toggled.connect(self._set_zoom_on_playhead)
+        return menu
+
+    def _set_zoom_on_playhead(self, on: bool) -> None:
+        prefs.settings().setValue(ZOOM_PLAYHEAD_KEY, "true" if on else "false")
+        self.canvas.load_zoom_pref()
 
     def _edit_selected_marker(self) -> None:
         if self.model.marker_sel:
@@ -1635,7 +1675,8 @@ class TimelineEditor(QWidget):
     def _sync_bars(self) -> None:
         c = self.canvas
         self._syncing = True
-        total = max(c.seq.duration + c.visible_frames() * 0.5, c.visible_frames())
+        # A rolagem pode ter passado do fim (roda do mouse, zoom): a barra acompanha em vez de pular depois.
+        total = max(c.seq.duration + c.visible_frames() * 0.5, c.scroll + c.visible_frames())
         self.hbar.setRange(0, max(0, int(math.ceil(total - c.visible_frames()))))
         self.hbar.setPageStep(max(1, int(c.visible_frames())))
         self.hbar.setSingleStep(max(1, int(40 / c.ppf)))
