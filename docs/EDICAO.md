@@ -31,7 +31,8 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 └──────────┴─────────────────────────────────────────────┴───────────────┘
 ```
 
-- **Mídia** (esquerda): os arquivos importados — vídeos, imagens e músicas (MP3, WAV, AAC, FLAC…).
+- **Mídia** (esquerda): os arquivos importados — vídeos, imagens e músicas (MP3, WAV, AAC, FLAC…), que podem ficar
+  em pastas coloridas (veja *Pastas na Mídia*).
 - **Prévia** (centro): mostra a montagem no ponto do cursor. A opção **Com película / Sem película**
   liga ou desliga o look de película na prévia enquanto você edita.
 - **Linha do tempo** (embaixo): as faixas de vídeo (V1, V2…) ficam em cima e as de áudio (A1, A2…)
@@ -146,6 +147,34 @@ Cada faixa tem botões no cabeçalho:
 
 **+ Vídeo** e **+ Áudio** criam faixas novas. Arrastar um clipe de vídeo para cima da última faixa de
 vídeo também cria uma faixa nova. Para apagar uma faixa: botão direito nela → **Remover esta faixa**.
+
+### Pastas na Mídia (1.7)
+
+A Mídia aceita **pastas coloridas** para organizar os arquivos importados. É só organização: as pastas não mexem nos
+arquivos do disco, nem na imagem, nem no som, e ficam guardadas no projeto. Sem nenhuma pasta, a Mídia é a lista de
+sempre.
+
+- **Criar:** o botão de pasta ao lado de *Importar…*, o botão direito (*Nova pasta*) ou **Ctrl+Shift+N**. Com uma
+  pasta escolhida, a nova nasce dentro dela (subpasta). O nome já abre para você digitar.
+- **Abrir e fechar:** a Mídia vira uma árvore; a seta de cada pasta abre e fecha. Qual pasta está aberta vale
+  enquanto o painel está aberto (não vai para o projeto).
+- **Renomear:** **F2** ou dois cliques no nome da pasta.
+- **Cor:** botão direito na pasta › *Cor*: as mesmas oito cores dos marcadores, *Padrão* ou *Personalizada…*. A cor
+  pinta o ícone da pasta.
+- **Mover:** arraste itens e pastas para dentro de uma pasta, para fora (solte sobre um item da raiz ou no vazio) ou
+  de uma pasta para outra; o botão direito num item tem *Mover para ›*. Uma pasta não entra nela mesma nem numa
+  subpasta dela. Arrastar um item para a linha do tempo continua igual, também com vários escolhidos.
+- **Apagar:** botão direito › *Apagar pasta*. Se ela não está vazia, o app pergunta; *Apagar só a pasta* faz os itens
+  e as subpastas subirem para a pasta de cima. Nenhum arquivo sai do projeto nem do disco.
+- **Importar numa pasta:** solte arquivos do sistema sobre a pasta. Soltar uma **pasta do sistema** na Mídia cria uma
+  pasta com o mesmo nome e os vídeos, imagens e áudios dela (só os da própria pasta, sem as subpastas; uma pasta de
+  imagens numeradas continua perguntando se é uma sequência).
+- **Ordenar:** o botão ao lado das pastas ordena por *Ordem de importação* (padrão), *Nome*, *Tipo* ou *Data* do
+  arquivo (mais novo primeiro). Vale só para o painel; não é guardado.
+- **Desfazer:** criar, renomear, mudar a cor, mover e apagar pastas são passos do **Ctrl+Z**.
+- **Projeto:** um arquivo importado, colocado numa pasta e que nenhum clipe usa **volta** quando o projeto é aberto
+  de novo (sem pasta, um arquivo fora da linha do tempo continua não sendo guardado, como antes). Um projeto com
+  pastas pede a 1.7 ou mais nova para abrir.
 
 ### Marcadores e capítulos
 
@@ -534,6 +563,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 |---|---|
 | Ctrl+1 / Ctrl+2 | Modo Película / modo Edição |
 | Ctrl+I | Importar mídia |
+| Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

@@ -115,6 +115,8 @@ pelicula/
                              (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
+  pastas.py                  1.7, pastas da Mídia (sem Qt nem timeline): Folder/Folders (criar, renomear, cor, mover sem
+                             ciclo, apagar, itens por chave, JSON tolerante); Sequence.folders e o bloco "pastas" (§39)
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
                              de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
                              split_edit, faixa magnética keep_main/settle_main; tempo: time_map, retime (rampa e
@@ -182,6 +184,7 @@ pelicula/
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             1.7, pastas da Mídia: pastas_ui (FolderTree, FolderActions; modelo em pastas.py),
                              keyframes_ui (losangos das chaves: KeyRows, KeyStrip), tempo_ui (rampa, reverso,
                              congelar este quadro),
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
@@ -399,6 +402,8 @@ Testes do modo Edição, do plugin e dos módulos:
 |---|---|
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
+| `tests/test_pastas.py` | pastas da Mídia sem Qt de interface: modelo (ciclos, apagar dos dois jeitos), JSON e JSON quebrado, bloco "pastas" e fonte solta que volta ao reabrir (`project.save`/`load`, caminho relativo), desfazer, formato 5 só com pastas, `is_trivial` |
+| `tests/test_pastas_ui.py` | casos de `pastas_ui_cases.py`: criar, renomear, cor, arrastar para dentro e para fora, apagar, desfazer, ordenar, MIME do arrasto e seleção múltipla, painel sem pastas igual, reabrir projeto com mídia solta numa pasta e a janela |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
 | `tests/test_chaves_ui.py` | casos de `chaves_ui_cases.py`: losangos do inspetor (estados, chave no cursor, chave automática, arrastar = um passo do desfazer, setas, menu de curvas, apagar/limpar), do look, da linha do tempo (juntos, dica, clique vai até a chave, arrastar com ímã no cursor, Shift, Delete, desfazer), `KeyStrip` e a janela (faixas sob a barra e "Look" na Edição) |

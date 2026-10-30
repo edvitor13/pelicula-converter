@@ -43,6 +43,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
 36. [Base da 1.7: formato 5](#36-base-da-17-formato-5)
+39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
 
 ---
 
@@ -3839,3 +3840,52 @@ projeto usa algo dela, e a 1.6 recusa com "O projeto foi salvo por uma versão m
 - **Projetos gravados pela 1.6** (`tests/data/projetos_1_6/`): os dois projetos da referência da 1.4 com recursos da
   1.6 por cima, gravados pela 1.6.0 com `gerar.py`, junto do que ela fez ao abri-los (`referencia.json`).
   `tests/test_project_migration.py` roda as mesmas conferências nas duas pastas.
+
+## 39. Pastas no painel de mídia
+
+Pastas coloridas para organizar a Mídia do modo Edição (#58). Só organização: nada aqui entra em `is_trivial()`,
+`layers_at`, no som, no render ou nos arquivos do disco.
+
+- **Modelo puro** (`pelicula/pastas.py`, sem Qt e sem `timeline`): `Folder(id, name, color, parent)` e `Folders`
+  (`folders`: id → pasta, na ordem de criação; `items`: chave do item → id da pasta, fora dele = raiz). Ids `p1`, `p2`…
+  de um contador do objeto (sem aleatório nem relógio; `from_json` continua depois do maior). Operações que devolvem se
+  mudaram algo: `create`, `rename`, `set_color`, `move` (recusa ciclo, mãe que não existe e a própria pasta), `delete`
+  (subpastas e itens sobem para a mãe; `to_root=True` leva para a raiz), `assign`, `unassign`, `rename_item`,
+  `keep_items`. Cor: `""` (padrão), id de `PALETTE` (= `timeline.MARKER_COLORS`, conferido em
+  `tests/test_pastas.py`) ou `#rrggbb`. O item é uma chave genérica (hoje o caminho da fonte): uma sequência da fase
+  3 (#57) poderá entrar com a chave dela.
+- **JSON** (`Folders.to_json`/`from_json`; tolerante: mãe desconhecida vai para a raiz, ciclos se desfazem, chave
+  desconhecida some). Na montagem: `Sequence.folders`, bloco `"pastas"` do `"edicao"` só quando há pasta, e a linha
+  `"pastas"` em `timeline.FEATURES_V5` (projeto 5, bloco 4; a 1.6 recusa com o aviso de sempre):
+  `{"lista": [{"id","nome","cor","pai"}], "midia": {caminho: id da pasta}, "fontes": [Source.to_json()…]}`.
+- **A armadilha:** `"fontes"` do bloco só traz as fontes que algum clipe usa, e a Mídia guarda as dela à parte, então um
+  arquivo importado e ainda fora da linha do tempo não voltava ao reabrir. Por isso `"pastas"."fontes"` traz o JSON
+  das fontes que estão numa pasta e nenhum clipe usa (`Sequence._folders_json`); `from_json` põe essas fontes em
+  `Sequence.sources` (sem clipe) e descarta itens sem fonte. Sem pasta nenhuma nada muda: o arquivo fora da linha do
+  tempo e fora de pastas continua não sendo guardado.
+- **Projeto:** `Project.to_json` põe `"relativo"` também nas fontes de `"pastas"."fontes"`, e `_relink_sequence` as
+  reencontra pelo caminho relativo como as de `"fontes"` (arquivo que falta: a janela pergunta, como já fazia);
+  `Sequence.relink` leva o item da pasta junto (`Folders.rename_item`). `main_window._seq_json` grava a montagem
+  mesmo trivial ou sem clipes quando há pastas.
+- **Desfazer:** `TimelineModel.folder_create/rename/color/move/delete`, `media_to_folder`, `folder_with_media` (pasta
+  nova já com itens) e `folder_drop` (arrastar vários itens e pastas), cada uma um passo (`History` por JSON, que leva
+  o bloco), com `changed("pastas")`. Desfazer/refazer que só mudam as pastas também emitem `"pastas"` (a prévia e o
+  som não recarregam; `_without_folders`). `media_to_folder` leva a `Source` ainda fora da montagem para
+  `seq.sources` (assim o projeto a guarda); `media_forget` tira o item da pasta quando ele sai da Mídia.
+- **Painel** (`ui/pastas_ui.py`; `edit_panels.MediaBin` só liga): `FolderTree` (QTreeWidget com miniaturas do mesmo
+  tamanho) no lugar da lista; o API de lista (`count`, `item`, `row`, `setCurrentRow`, `paths`, `selected_paths`,
+  `current_path`, `place`) conta só os itens de mídia, na ordem em que aparecem; sem pasta nenhuma é plano. O arrasto
+  para a linha do tempo mantém `MIME_SOURCE` (só caminhos de itens); pastas arrastadas levam `MIME_FOLDERS`, que só vale
+  dentro do painel, e o drop interno nunca usa `MoveAction` (o Qt apagaria os itens). O destino do drop é a pasta sob o
+  cursor, a pasta do item sob o cursor ou a raiz; arquivos do sistema sobre uma pasta emitem `filesDroppedIn`, e a janela
+  (`MainWindow._bin_files(paths, folder)`) importa nela; uma pasta do sistema vira uma pasta com os arquivos de mídia
+  dela (`media_in_dir`, sem recursão). `FolderActions` cuida de botões, menus, ordenar (`ordem`/`nome`/`tipo`/`data`,
+  só no painel) e liga o painel ao modelo (`model.changed` → `refresh`); a abertura das pastas fica em
+  `FolderTree._expanded`.
+- **Atalho:** Ctrl+Shift+N (no modo Edição). F2 renomeia a pasta escolhida.
+- **Testes:** `tests/test_pastas.py` (modelo, ciclos, apagar dos dois jeitos, JSON quebrado, fonte solta que volta por
+  `project.save`/`load` com caminho relativo, desfazer, formato 5 só com pastas, `is_trivial`) e
+  `tests/test_pastas_ui.py` (casos de `pastas_ui_cases.py`).
+- **Limites:** a cor da pasta não aparece nos clipes da linha do tempo; sequências em pastas ficam para a fase 3 (#57);
+  sem "entrar na pasta" em grade (só árvore); soltar uma pasta do sistema não desce nas subpastas; a ordenação e a
+  abertura das pastas não são guardadas.
