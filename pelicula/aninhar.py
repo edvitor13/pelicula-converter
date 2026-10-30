@@ -161,10 +161,33 @@ def _plan_nest(seq: Sequence, ids, look: dict | None) -> _Plan:
     if blend and transparent:
         warnings.append(_("A mesclagem de um clipe agora vale dentro da sequência, e não sobre o que ficou embaixo "
                           "dela."))
+    if seq.window and any(c.kind == VIDEO and (seq.sources.get(c.src) is not None and seq.sources[c.src].is_generated)
+                          for c in sel):
+        warnings.append(_("Títulos e clipes gerados se encaixam na janela útil de fora; dentro da sequência, na tela "
+                          "dela. Podem mudar um pouco."))
+    if _joins_continuous(seq, sel, sel_ids):
+        warnings.append(_("A emenda de som entre a seleção e o clipe vizinho, que não tinha fade, ganha um fade curto "
+                          "(5 ms) nas pontas."))
     if look and (look.get("mfilme_on") or (look.get("lab_on") and any(
             c.kind == VIDEO and luz_plano.has_lights(c.values) for c in sel))):
         warnings.append(_("O look que lê os cortes da montagem agora vê a seleção como um plano só."))
     return _Plan(sel, a, b, vtracks, atracks, v_land, a_land, delta, transparent, below, warnings)
+
+
+def _joins_continuous(seq: Sequence, sel: list[Clip], sel_ids: set[str]) -> bool:
+    """Algum clipe de som da seleção continua um vizinho de fora sem emenda (`Sequence.continues`)? Os fades curtos de 5 ms
+    só nascem nas emendas que cortam o som, então a ponta do clipe de sequência ganha um onde não havia."""
+    if not seq.micro_fade:
+        return False
+    for c in sel:
+        if c.kind != AUDIO:
+            continue
+        prev, nxt = seq.previous_on_track(c), seq.next_on_track(c)
+        if prev is not None and prev.id not in sel_ids and seq.continues(prev, c):
+            return True
+        if nxt is not None and nxt.id not in sel_ids and seq.continues(c, nxt):
+            return True
+    return False
 
 
 def _plan_audio(seq: Sequence, sel: list[Clip], atracks: list[int]) -> tuple[int | None, float, list[str]]:

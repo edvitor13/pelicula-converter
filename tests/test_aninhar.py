@@ -11,6 +11,7 @@ import pytest
 from pelicula import aninhar, audiomix, subtitles as sb
 from pelicula import timeline as tl
 from pelicula.aninhar import Refusal
+from pelicula.i18n import _
 
 W, H = 320, 180
 
@@ -55,7 +56,7 @@ def test_nesting_moves_the_clips_with_the_same_ids_and_shifted_times():
     v_track_before = [t.name for t in seq.kind_tracks(tl.VIDEO)]
     res = aninhar.nest(seq, [b_v.id])
     inner = res.inner
-    assert seq.family() == [seq, inner] and inner.display_name == "Sequência 2"
+    assert seq.family() == [seq, inner] and inner.display_name == _("Sequência {n}").format(n=2)
     # os mesmos objetos andaram: id, entrada, ligação e valores intactos; só o tempo e a faixa mudaram
     assert b_v in inner.clips and b_a in inner.clips and b_v.start == 0 and b_a.start == 0
     assert b_v.id and b_v.link == b_a.link and b_v not in seq.clips and b_a not in seq.clips
@@ -162,7 +163,7 @@ def test_the_inner_background_and_micro_fade_follow_the_outer_one():
 def test_the_inner_name_is_free_and_an_asked_name_is_used():
     seq = montage()
     seq.ensure_set().create(W, H, "24/1")     # "Sequência 2" já existe
-    assert aninhar.nest(seq, [by(seq, "a").id]).inner.display_name == "Sequência 3"
+    assert aninhar.nest(seq, [by(seq, "a").id]).inner.display_name == _("Sequência {n}").format(n=3)
     assert aninhar.nest(seq, [by(seq, "b").id], name="Abertura").inner.display_name == "Abertura"
 
 
@@ -437,6 +438,19 @@ def test_nonlinear_effects_with_a_track_volume_warn():
     assert aninhar.nest(seq2, ids2).warnings == []         # a 0 dB a ordem do ganho não importa
 
 
+def test_a_join_without_a_cut_warns_about_the_short_fade_it_gets():
+    seq = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    seq.insert_media(fsrc("C:/nao/a.mp4"), 0)
+    seq.split(24)
+    seq.split(48)
+    mid = next(c for c in seq.clips if c.kind == tl.VIDEO and c.start == 24)
+    res = aninhar.nest(seq, [mid.id])
+    assert any("5 ms" in w for w in res.warnings)
+    lone = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    lone.insert_media(fsrc("C:/nao/a.mp4"), 0)
+    assert aninhar.nest(lone, [c.id for c in lone.clips]).warnings == []
+
+
 # ------------------------------------------------------------------ desaninhar
 def sig(seq):
     """A montagem do ponto de vista da imagem e do som (sem a faixa onde cada coisa está, só a ordem das faixas)."""
@@ -577,7 +591,7 @@ def test_two_levels_nest_a_selection_that_already_has_a_nested_clip():
     second = aninhar.nest(seq, [outv.id, by(seq, "b").id])     # o clipe de sequência entra numa segunda sequência
     assert any(c.src == f"sequencia:{first.inner.id}" for c in second.inner.clips)
     assert seq.nested(second.clips[0]) is second.inner
-    assert [s.display_name for s in seq.family()] == ["Sequência 1", "Sequência 2", "Sequência 3"]
+    assert [s.display_name for s in seq.family()] == [_("Sequência 1")] + [_("Sequência {n}").format(n=n) for n in (2, 3)]
     assert second.inner.can_contain(seq.sources[f"sequencia:{first.inner.id}"])
     aninhar.unnest(seq, next(c.id for c in second.clips if c.kind == tl.VIDEO))
     assert any(c.src == f"sequencia:{first.inner.id}" for c in seq.clips)
@@ -656,3 +670,305 @@ def test_a_project_without_nested_clips_maps_subtitles_as_before():
     seq = montage()
     assert subs_for(seq) == [(2.2, 3.0, "primeira"), (3.2, 3.9, "segunda")]
     assert sb.carriers(seq, "C:/nao/b.mp4") == sb.clips_for(seq, "C:/nao/b.mp4")
+
+
+# ================================================================== na GPU e no ffmpeg: a promessa de "nada muda"
+# Uma montagem de verdade (cortes, transições, opacidade, geometria, chaves, PNG transparente, título com mesclagem, duas
+# faixas de som em volumes diferentes, transição de som e legenda presa ao arquivo) é exportada; a seleção é aninhada e
+# exportada de novo; desaninhada e exportada outra vez. Imagem e som pelo caminho de sempre (`Recipe`, `render_mix`) e, uma
+# vez, pelo terminal, num projeto salvo.
+import numpy as np  # noqa: E402
+
+from pelicula import cli, export, media, project, sequence  # noqa: E402
+from test_aninhada import LOOK, _first_diff, _look, _samples, clips_media, mix_dir  # noqa: E402,F401
+
+
+def golden(clips_media, qapp, subtitles=True) -> tl.Sequence:
+    """A montagem do teste: tudo que o brief pede, com os clipes de V1 a V4 e o som em duas faixas."""
+    from test_aninhada import flat_montage
+    seq = flat_montage(clips_media, qapp, background=(0.1, 0.2, 0.3))
+    longo = media.probe_source(clips_media[0])
+    over = next(c for c in seq.clips if c.kind == tl.VIDEO and c.track == 1)
+    seq.set_key(over.id, "opacidade", over.start + 4, 0.9)
+    seq.set_key(over.id, "pos_x", over.start + 2, 0.3)
+    seq.set_key(over.id, "pos_x", over.start + 14, -0.2)
+    # a transição de som entre o primeiro e o segundo clipe da V1
+    b_a = next(c for c in seq.clips if c.kind == tl.AUDIO and c.start == 18)
+    seq.set_values(b_a.id, {"transicao": 0.4})
+    extra = next(c for c in seq.insert_media(longo, at=5, vtrack=4, atrack=1) if c.kind == tl.AUDIO)
+    seq.set_values(extra.id, {"fade_in": 0.2, "volume": -6.0})
+    seq.clips = [c for c in seq.clips if not (c.kind == tl.VIDEO and c.track == 4)]
+    seq.track(tl.AUDIO, 0).volume = -2.0
+    seq.track(tl.AUDIO, 1).volume = -4.0
+    if subtitles:
+        seq.subtitles = sb.Subtitles(sources={clips_media[0]: [cue(0.1, 0.6, "Olá"), cue(1.0, 1.7, "mundo afora"),
+                                                                 cue(2.4, 3.0, "no fim")]}, burn="digital")
+    return seq
+
+
+def frames_of(engine, seq, values, depth, scale=1.0):
+    """Os quadros pelo caminho da exportação, com as legendas gravadas do projeto."""
+    burn = sb.Burn.for_project(seq.subtitles, seq)
+    info = sequence.media_info(seq)
+    s = export.ExportSettings()
+    rec = export.frame_pipeline(info, values, s, seq, scale, depth, burn=burn)
+    reader, skip = export.open_reader(info, rec, 0, seq.duration, None, media.Perf(), seq)
+    assert skip == 0
+    out = []
+    try:
+        for i in range(seq.duration):
+            out.append(rec.render(engine, reader.read(), i))
+        assert reader.error == ""
+    finally:
+        reader.close()
+    return out
+
+
+def worst(a_frames, b_frames) -> tuple[int, int, float]:
+    """(maior diferença em passos, valores diferentes, fração deles) entre duas listas de quadros."""
+    assert len(a_frames) == len(b_frames)
+    mx, n, total = 0, 0, 0
+    for a, b in zip(a_frames, b_frames):
+        assert a.shape == b.shape and a.dtype == b.dtype
+        d = np.abs(a.astype(np.int64) - b.astype(np.int64))
+        mx = max(mx, int(d.max()))
+        n += int((d > 0).sum())
+        total += d.size
+    return mx, n, n / total
+
+
+def assert_identical(a_frames, b_frames, what="") -> None:
+    assert len(a_frames) == len(b_frames)
+    for t, (a, b) in enumerate(zip(a_frames, b_frames)):
+        assert np.array_equal(a, b), f"{what} quadro {t}: {_first_diff(a, b)}"
+
+
+def nest_all(seq, **kw):
+    """Aninha tudo (Ctrl+A) e devolve o resultado."""
+    return aninhar.nest(seq, [c.id for c in seq.clips], **kw)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("depth", [8, 16])
+@pytest.mark.parametrize("look", [None, LOOK])
+def test_nesting_everything_then_unnesting_gives_the_same_frames(gl_engine, clips_media, qapp, depth, look):
+    values = _look(look)
+    seq = golden(clips_media, qapp)
+    flat = frames_of(gl_engine, seq, values, depth)
+    assert any(f.max() > 0 for f in flat)
+    res = nest_all(seq, look=values)
+    assert not res.warnings and not res.inner.transparent and len(seq.clips) == 2
+    nested = frames_of(gl_engine, seq, values, depth)
+    assert_identical(flat, nested, "aninhada")
+    outv = next(c for c in res.clips if c.kind == tl.VIDEO)
+    aninhar.unnest(seq, outv.id)
+    assert not any(c.src.startswith("sequencia:") for c in seq.clips)
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "desaninhada")
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_nesting_everything_keeps_the_subtitles_burnt_in_the_same_place(gl_engine, clips_media, qapp):
+    seq = golden(clips_media, qapp)
+    plain = golden(clips_media, qapp, subtitles=False)
+    values = _look(LOOK)
+    with_text = frames_of(gl_engine, seq, values, 8)
+    without = frames_of(gl_engine, plain, values, 8)
+    assert worst(with_text, without)[0] > 0                   # a legenda está mesmo desenhada
+    before = [(c.start, c.end, c.text) for c in seq.subtitles.timeline_cues(seq)]
+    assert {c[2] for c in before} == {"Olá", "mundo afora", "no fim"} and len(before) > 3   # o arquivo aparece em vários clipes
+    res = nest_all(seq)
+    assert [(c.start, c.end, c.text) for c in seq.subtitles.timeline_cues(seq)] == before
+    assert_identical(with_text, frames_of(gl_engine, seq, values, 8), "legendas, aninhada")
+    aninhar.unnest(seq, next(c.id for c in res.clips if c.kind == tl.VIDEO))
+    assert [(c.start, c.end, c.text) for c in seq.subtitles.timeline_cues(seq)] == before
+    assert_identical(with_text, frames_of(gl_engine, seq, values, 8), "legendas, desaninhada")
+
+
+SOUND_LIMIT_STEPS = 1.0   # medido: 1 passo de 24 bits, quando a faixa de fora tem volume (ver o handoff)
+
+
+def mix_of(seq, path) -> np.ndarray:
+    assert audiomix.render_mix(seq, str(path)) is True
+    return _samples(path)
+
+
+def _sound_diff(a, b) -> tuple[float, int]:
+    """(maior diferença em passos de 24 bits, amostras diferentes)."""
+    assert abs(len(a) - len(b)) <= 2, (len(a), len(b))
+    n = min(len(a), len(b))
+    d = np.abs(a[:n] - b[:n]) * 8388608.0
+    return float(d.max()), int((d > 0).sum())
+
+
+@pytest.mark.ffmpeg
+def test_the_sound_after_nesting_and_unnesting_sample_by_sample(clips_media, qapp, tmp_path, mix_dir):
+    seq = golden(clips_media, qapp)
+    flat = mix_of(seq, tmp_path / "plano.wav")
+    assert np.abs(flat).max() > 0.01
+    res = nest_all(seq)
+    nested = mix_of(seq, tmp_path / "aninhada.wav")
+    d1 = _sound_diff(flat, nested)
+    aninhar.unnest(seq, next(c.id for c in res.clips if c.kind == tl.AUDIO))
+    back = mix_of(seq, tmp_path / "desaninhada.wav")
+    d2 = _sound_diff(flat, back)
+    print(f"\nsom: aninhada {d1[0]:.0f} passos de 24 bits em {d1[1]} amostras; desaninhada {d2[0]:.0f} em {d2[1]}")
+
+
+def _stage_png_and_decode(seq, name, tmp_path, ffmpeg_ok, values):
+    """Salva o projeto e exporta pelo terminal (FFV1 + PCM); devolve (quadros em 16 bits, amostras)."""
+    from test_aninhada import _decoded
+    plc = tmp_path / f"{name}.plc"
+    project.save(project.Project(values=values, preset_id=LOOK, sequence=seq.to_json()), str(plc))
+    out = tmp_path / f"{name}.mkv"
+    assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "ffv1", "-q"]) == 0
+    return _decoded(out, ffmpeg_ok, tmp_path)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_cli_on_a_saved_project_gives_the_same_frames_and_sound_before_after_nesting_and_after_unnesting(
+        gl_engine, clips_media, qapp, ffmpeg_ok, tmp_path, mix_dir, capsys):
+    values = _look(LOOK)
+    seq = golden(clips_media, qapp)
+    flat_f, flat_s = _stage_png_and_decode(seq, "plano", tmp_path, ffmpeg_ok, values)
+    res = nest_all(seq)
+    nest_f, nest_s = _stage_png_and_decode(seq, "aninhada", tmp_path, ffmpeg_ok, values)
+    saved = project.load(str(tmp_path / "aninhada.plc"))
+    assert "sequencia_aninhada" in tl.Sequence.from_json(saved.sequence).features()
+    aninhar.unnest(seq, next(c.id for c in res.clips if c.kind == tl.VIDEO))
+    back_f, back_s = _stage_png_and_decode(seq, "desaninhada", tmp_path, ffmpeg_ok, values)
+    assert len(flat_f) == len(nest_f) == len(back_f) == seq.duration
+    for t in range(len(flat_f)):
+        assert np.array_equal(flat_f[t], nest_f[t]), f"aninhada, quadro {t}: {_first_diff(flat_f[t], nest_f[t])}"
+        assert np.array_equal(flat_f[t], back_f[t]), f"desaninhada, quadro {t}: {_first_diff(flat_f[t], back_f[t])}"
+    d1, d2 = _sound_diff(flat_s, nest_s), _sound_diff(flat_s, back_s)
+    print(f"\nterminal, som: aninhada {d1}; desaninhada {d2}")
+    assert d1[0] <= SOUND_LIMIT_STEPS and d2 == (0.0, 0)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("depth", [8, 16])
+@pytest.mark.parametrize("look", [None, LOOK])
+def test_a_window_on_the_outer_sequence_is_kept_when_nesting_everything(gl_engine, clips_media, qapp, depth, look):
+    """Sem clipe gerado, no máximo 1 passo (arredondamento da tela de dentro, que tem o tamanho da janela). O título, que
+    se encaixa na janela de fora mas na tela inteira de dentro, muda um pouco: o aviso existe por isso."""
+    values = _look(look)
+    for with_title in (False, True):
+        seq = golden(clips_media, qapp, subtitles=False)
+        if not with_title:
+            seq.clips = [c for c in seq.clips if not (c.kind == tl.VIDEO and c.track == 3)]
+        seq.window = 2.39
+        flat = frames_of(gl_engine, seq, values, depth)
+        res = nest_all(seq)
+        assert res.inner.window == 0.0 and res.inner.height < seq.height and seq.window == 2.39
+        assert bool(res.warnings) == with_title
+        got = worst(flat, frames_of(gl_engine, seq, values, depth))
+        print(f"\njanela, {depth} bits, look {look}, título {with_title}: máximo {got[0]} passos, {got[1]} valores "
+              f"({got[2] * 100:.4f}%)")
+        assert got[0] <= WINDOW_LIMIT[(depth, look is None, with_title)], got
+        aninhar.unnest(seq, next(c.id for c in res.clips if c.kind == tl.VIDEO))
+        assert_identical(flat, frames_of(gl_engine, seq, values, depth), "janela, desaninhada")
+
+
+# medido (ver o handoff); o primeiro item é a profundidade, o segundo "sem look", o terceiro "com o título"
+WINDOW_LIMIT = {(8, True, False): 1, (8, False, False): 1, (16, True, False): 256, (16, False, False): 256,
+                (8, True, True): 4, (8, False, True): 9, (16, True, True): 1000, (16, False, True): 2240}
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("depth", [8, 16])
+@pytest.mark.parametrize("look", [None, LOOK])
+def test_nesting_upper_tracks_over_an_unselected_v1_is_within_one_step(gl_engine, clips_media, qapp, depth, look):
+    values = _look(look)
+    seq = golden(clips_media, qapp, subtitles=False)
+    over = next(c for c in seq.clips if c.kind == tl.VIDEO and c.track == 1)
+    png = next(c for c in seq.clips if c.kind == tl.VIDEO and c.track == 2)
+    flat = frames_of(gl_engine, seq, values, depth)
+    res = aninhar.nest(seq, [over.id, png.id], look=values)
+    assert res.inner.transparent and not res.warnings
+    outv = res.clips[0]
+    assert (outv.track, outv.start, outv.end) == (1, 6, 44)
+    got = worst(flat, frames_of(gl_engine, seq, values, depth))
+    print(f"\nfaixas de cima, {depth} bits, look {look}: máximo {got[0]} passos, {got[1]} valores ({got[2] * 100:.4f}%)")
+    assert got[0] <= (16 if (depth == 16 and look) else 1), got   # o look amplifica o passo de 16 bits: < 1 passo de 8 bits
+    aninhar.unnest(seq, outv.id)
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "faixas de cima, desaninhada")
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_a_blend_mode_over_unselected_clips_changes_the_picture_and_that_is_why_it_warns(gl_engine, clips_media, qapp):
+    seq = golden(clips_media, qapp, subtitles=False)
+    title = next(c for c in seq.clips if c.kind == tl.VIDEO and c.track == 3)   # mesclagem "tela"
+    flat = frames_of(gl_engine, seq, None, 8)
+    res = aninhar.nest(seq, [title.id])
+    assert res.inner.transparent and len(res.warnings) == 1
+    got = worst(flat, frames_of(gl_engine, seq, None, 8))
+    print(f"\nmesclagem sobre o que ficou fora: máximo {got[0]} passos em {got[2] * 100:.3f}% dos valores")
+    assert got[0] > 1   # o aviso existe porque a imagem muda de verdade
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("depth", [8, 16])
+def test_nesting_a_selection_that_already_has_a_nested_clip(gl_engine, clips_media, qapp, depth):
+    values = _look(LOOK)
+    seq = golden(clips_media, qapp, subtitles=False)
+    png_src = media.probe_source(clips_media[2])
+    ref = golden(clips_media, qapp, subtitles=False)
+    for s in (seq, ref):  # o mesmo clipe extra, por cima de tudo, nas duas
+        extra = s.insert_media(png_src, at=20, vtrack=5, with_audio=False)[0]
+        extra.dur = 12
+        extra.id = "extra0001"
+    flat = frames_of(gl_engine, ref, values, depth)
+    first = aninhar.nest(seq, [c.id for c in seq.clips if c.id != "extra0001"])
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "uma vez")
+    second = aninhar.nest(seq, [c.id for c in seq.clips])
+    assert second.inner.name != first.inner.name and seq.nested(second.clips[0]) is second.inner
+    assert any(seq.sources[c.src].is_nested for c in second.inner.clips)
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "duas vezes")
+    aninhar.unnest(seq, next(c.id for c in second.clips if c.kind == tl.VIDEO))
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "desaninhada uma")
+    aninhar.unnest(seq, next(c.id for c in seq.clips if c.kind == tl.VIDEO and c.src.startswith("sequencia:")))
+    assert_identical(flat, frames_of(gl_engine, seq, values, depth), "desaninhada duas")
+    assert first.inner is not second.inner
+
+
+@pytest.mark.ffmpeg
+def test_nesting_a_selection_in_the_middle_changes_the_sound_only_at_the_edges(clips_media, qapp, tmp_path, mix_dir):
+    """A emenda sem estalo (o clipe continua o anterior) ganha os fades curtos nas duas pontas do clipe de sequência."""
+    longo = media.probe_source(clips_media[0])
+    seq = tl.Sequence(width=W, height=H, fps_str="24/1", micro_fade=True)
+    seq.insert_media(longo, at=0)
+    seq.split(24)
+    seq.split(48)
+    mid = next(c for c in seq.clips if c.kind == tl.VIDEO and c.start == 24)
+    flat = mix_of(seq, tmp_path / "plano.wav")
+    res = aninhar.nest(seq, [mid.id])
+    nested = mix_of(seq, tmp_path / "aninhada.wav")
+    n = min(len(flat), len(nested))
+    diff = np.abs(flat[:n] - nested[:n]) * 8388608.0
+    where = np.nonzero(diff.max(axis=1) > 0)[0] if diff.ndim > 1 else np.nonzero(diff > 0)[0]
+    micro = int(round(tl.MICRO_FADE * audiomix.RATE))
+    edges = [24 / 24 * audiomix.RATE, 48 / 24 * audiomix.RATE]
+    assert len(where)
+    assert all(min(abs(w - e) for e in edges) <= micro + 1 for w in where), (where.min(), where.max())
+    print(f"\nemendas: {len(where)} amostras diferentes, todas a até {micro} amostras de uma ponta; máximo {diff.max():.0f} passos")
+    aninhar.unnest(seq, res.clips[0].id)
+    assert _sound_diff(flat, mix_of(seq, tmp_path / "volta.wav")) == (0.0, 0)
+
+
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("scale", [0.5, 0.37])
+def test_nesting_everything_on_a_reduced_preview_canvas(gl_engine, clips_media, qapp, scale):
+    """A prévia reduzida (lados pares arredondados) também fica igual: o mesmo caminho da exportação, em tamanho menor."""
+    values = _look(LOOK)
+    seq = golden(clips_media, qapp)
+    flat = frames_of(gl_engine, seq, values, 8, scale=scale)
+    nest_all(seq)
+    assert_identical(flat, frames_of(gl_engine, seq, values, 8, scale=scale), f"prévia {scale}")
