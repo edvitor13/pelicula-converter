@@ -179,9 +179,10 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
 
 
 def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth: int = 8,
-         hq: bool = False, shutter: float = 0.0) -> FrameLayers:
+         hq: bool = False, shutter: float = 0.0, no_effects: bool = False) -> FrameLayers:
     """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread). `shutter` (1.6): o ângulo do
-    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`)."""
+    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`).
+    `no_effects` (1.7, `frame.Recipe.no_effects`): a leitura de sempre, sem o perfil de câmera do clipe."""
     out = []
     for layer in seq.layers_at(frame):
         src = seq.sources.get(layer.clip.src)
@@ -193,7 +194,7 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
             continue
         if not present(src):
             continue
-        prof = camera.read_profile(layer.clip.values)
+        prof = None if no_effects else camera.read_profile(layer.clip.values)
         win = seq.src_window(layer.clip, frame, shutter) if shutter > 0 else None
         stack = None
         if win is not None:
@@ -346,9 +347,11 @@ class SequenceReader:
 
     def __init__(self, seq: timeline.Sequence, canvas_w: int, canvas_h: int, depth: int = 8, start: int = 0,
                  count: int | None = None, hq: bool = False, perf: media.Perf | None = None,
-                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0):
+                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0,
+                 no_effects: bool = False):
         self.seq = seq.copy()
         self.shutter = float(shutter)  # 1.6: ângulo do obturador do look (0 = o quadro de sempre)
+        self.no_effects = bool(no_effects)  # 1.7: a leitura de sempre, sem o perfil de câmera dos clipes
         self.w, self.h, self.depth, self.hq = int(canvas_w), int(canvas_h), depth, hq
         self.perf = perf or media.Perf()
         self.start = max(0, int(start))
@@ -382,7 +385,7 @@ class SequenceReader:
         w, h = self._size(clip)
         kind = _ReverseStream if clip.reverse and not clip.frozen else _ClipStream
         return kind(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf,
-                    camera.read_profile(clip.values))
+                    None if self.no_effects else camera.read_profile(clip.values))
 
     def _stream(self, clip: timeline.Clip, f: int) -> _ClipStream:
         st = self._streams.get(clip.id)

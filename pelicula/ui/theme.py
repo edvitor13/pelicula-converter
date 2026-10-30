@@ -13,6 +13,7 @@ FAINT = "#6b6258"
 ACCENT = "#f0a63a"
 ACCENT_HI = "#ffc76b"
 ACCENT_DIM = "#7a5320"
+SEG_CHECKED_TEXT = "#1b1205"  # texto na pílula âmbar dos seletores
 DANGER = "#e5534b"
 OK = "#5cc48a"
 
@@ -130,6 +131,12 @@ QToolButton#Flat:checked {{ background: {PANEL3}; border-color: {ACCENT_DIM}; co
 QToolButton#Seg {{ background: transparent; border: none; border-radius: 6px; padding: 5px 10px; color: {MUTED}; }}
 QToolButton#Seg:hover {{ color: {TEXT}; background: {PANEL3}; }}
 QToolButton#Seg:checked {{ color: #1b1205; background: {ACCENT}; font-weight: 600; }}
+QToolButton#SegMode {{ background: transparent; border: none; border-radius: 6px; padding: 6px 13px; color: {MUTED}; }}
+QToolButton#SegMode:hover {{ color: {TEXT}; background: {PANEL3}; }}
+QToolButton#SegMode:checked {{ color: {SEG_CHECKED_TEXT}; background: {ACCENT}; font-weight: 600; }}
+QToolButton#SegQuiet {{ background: transparent; border: none; border-radius: 6px; padding: 5px 10px; color: {MUTED}; }}
+QToolButton#SegQuiet:hover {{ color: {TEXT}; background: {PANEL3}; }}
+QToolButton#SegQuiet:checked {{ color: {TEXT}; background: {PANEL3}; font-weight: 600; }}
 QFrame#SegBox {{ background: {PANEL2}; border: 1px solid {BORDER}; border-radius: 8px; }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
 

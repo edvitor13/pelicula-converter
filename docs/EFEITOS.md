@@ -31,6 +31,13 @@ os ajustes avançados que estavam escondidos. Se o ajuste está num **módulo de
 está e que dá para ligar em Configurações › Recursos. **Ctrl+F** (com o foco no painel) ou **/** levam ao campo; **Esc**
 limpa. Apagar o texto devolve o painel exatamente como estava (cartões abertos, avançados, posição da rolagem). O filtro
 só muda o que você vê: não altera nenhum valor, não vai para o projeto e não é lembrado ao fechar o app.
+**Desligar todos os efeitos.** O botão com o brilho riscado na barra da prévia (**Shift+D**) tira de cena o look inteiro
+(com as chaves, o LUT e o obturador) e, no modo Edição, os ajustes de imagem dos clipes: cor, detalhe, perfil de câmera,
+pele, cor escolhida, degradê. Ficam a edição e o som: cortes, tempo, enquadramento, opacidade, mesclagem, transições,
+títulos, geradores e legendas gravadas. A etiqueta da imagem diz **SEM EFEITOS**. Nada é apagado: ao religar, tudo volta
+exatamente como estava, e o que você mexer enquanto isso aparece ao religar. Não entra no desfazer nem no projeto, e abrir
+outro arquivo ou projeto religa os efeitos. "Salvar quadro" e a exportação seguem a prévia: ao exportar com os efeitos
+desligados, o app pergunta se é para exportar sem efeitos ou religar antes; um trabalho já na fila fica como foi criado.
 
 **Animar o look (chaves).** Os ajustes de número, cor e rodas têm um **losango** ao lado do nome: clique para
 gravar uma chave no cursor; com o ajuste animado, mexer no controle grava a chave ali (chave automática); as

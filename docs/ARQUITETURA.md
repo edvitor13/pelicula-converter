@@ -46,6 +46,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 37. [Geometria do clipe e da sequência](#37-geometria-do-clipe-e-da-sequência)
 38. [Filtro de busca nos ajustes (1.7)](#38-filtro-de-busca-nos-ajustes-17)
 39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
+40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 
 ---
 
@@ -4010,3 +4011,42 @@ Pastas coloridas para organizar a Mídia do modo Edição (#58). Só organizaç�
 - **Limites:** a cor da pasta não aparece nos clipes da linha do tempo; sequências em pastas ficam para a fase 3 (#57);
   sem "entrar na pasta" em grade (só árvore); soltar uma pasta do sistema não desce nas subpastas; a ordenação e a
   abertura das pastas não são guardadas.
+
+## 40. Desligar todos os efeitos
+
+"Desligar todos os efeitos" (1.7, `ui/sem_efeitos_ui.py`) é **um booleano lido onde a receita é montada**; nenhum valor,
+chave, clipe ou modelo muda. Religar dá os mesmos quadros bit a bit, sem passo no desfazer, sem "alterações não salvas"
+e sem nada no `to_json`.
+
+- **`frame.Recipe.no_effects`** (o último campo): em `__post_init__`, `keys = {}`, `lut = None` e `values` vira
+  `presets.builtin_values("original")`, o caminho "sem película" de `_export_look`; `values` None (prévia do modo Edição
+  sem película) continua None. Daí `Recipe.profile` é `rec709`, `Recipe.shutter` é 0 e `light_of`/`target_of` são os do
+  Rec.709. `Recipe.montage` passa `neutral=True` ao `Engine.compose`, pula `camera.uses_profiles` (nem `camera`, nem
+  `float_out`) e ignora a pilha do obturador de um quadro lido antes de desligar.
+- **O que sai**: tudo sob `u_cc_on`/`u_det_on` (`compositor.clip_uniforms(neutral=True)`: cor, detalhe, vinheta, desbotar e,
+  dentro de `cc`, a cor simples: pele, cor escolhida, degradê), o perfil de câmera do clipe (o passo `CAMERA` e a leitura)
+  e a luz da copiadora (`luz_plano` só age com `lab_on`, e o "original" não tem). O `compositor` não mudou.
+- **O que fica**: geometria (`u_xf`, `u_crop`), opacidade, mesclagem, `u_fade`, transições (`transitions.apply`, na luz
+  Rec.709), tempo (`layers_at`, manivela), títulos, geradores, legendas gravadas (`Recipe.burn`) e o som (`audiomix` não
+  vê o campo).
+- **Leitura**: o perfil do clipe muda o que se lê (log em float32), então `sequence.grab` e `SequenceReader` recebem
+  `no_effects` e pedem `prof = None`. Sem isso o quadro não seria o de um clipe no padrão. No arquivo direto a leitura segue
+  `Recipe.profile` (`rec709`); na janela, `sem_efeitos_ui.read_entrada`.
+- **Exportação**: `ExportSettings.no_effects` (padrão False; JSON antigo sem ele abre em `from_dict`) vai por
+  `frame_pipeline` a `open_reader`/`preview_frame`. O trabalho guarda os ajustes como vieram (`ExportJob.to_dict`), mas a
+  receita usa o caminho sem película: um trabalho na fila fica como foi criado, seja qual for o botão depois. Vale também
+  para a medição de velocidade e a prévia da janela (`ExportDialog(no_effects=)` → `settings()`).
+- **Janela**: `MainWindow.no_effects`, ganchos curtos em `frame_recipe`, `_shutter`, `_export_look`, `_export_keys`,
+  `_update_label_proc`, `render_now` (sem o aviso do LUT), `request_frame`/`start_play` (`FrameLoader`/`Player` levam
+  `no_effects`), `still_frame`, `_on_param`, `new_export` (`confirm_export`, a pergunta), `load_media`, `show_project` e
+  `new_project` (`reset`). Ao trocar, `_toggled` remonta (`_compose_current`), desenha de novo e, se a leitura muda
+  (`_reading`: obturador, log em float32, perfis dos clipes), lê o quadro de novo ou reinicia o leitor da reprodução.
+- **Projeto**: `_make_project` não vê o campo. A miniatura viria da tela, então `_thumbnail` usa
+  `sem_efeitos_ui.thumbnail_image`: lê e desenha o quadro atual como ele sai com os efeitos ligados, e o `.plc` é o mesmo
+  JSON nos dois estados. As miniaturas dos presets usam uma receita própria e continuam mostrando os looks.
+- **Testes**: `tests/test_sem_efeitos.py` (sem GPU: receita e JSON; na GPU: igual à montagem com os ajustes no padrão e o
+  "original", em 8 e 16 bits, `grab` = `SequenceReader`, exportação) e `tests/sem_efeitos_ui_cases.py` (janela).
+
+Na mesma barra, o seletor de comparação (`Segmented(name="SegQuiet")`) tem a marca discreta e o rótulo "Resultado" (a chave
+continua `"proc"`, gravada nos projetos), e o âmbar fica para o seletor de modo (`name="SegMode"`, com `item_icons`, que
+usa `icons.two_state`; na janela estreita, só o ícone, pela `AdaptiveBar`).

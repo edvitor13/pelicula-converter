@@ -29,6 +29,10 @@ exportação num formato com alfa, `export.wants_alpha`) a montagem sai RGBA de 
 a cor é a mesma de sempre e o alfa é a cobertura da montagem movida pela geometria do look (veja
 `alphashaders`). Sem `alpha`, nada muda.
 
+Com `no_effects` (1.7, "Desligar todos os efeitos", ARQUITETURA §40) a montagem sai neutra e sem os perfis de câmera dos
+clipes, e o look é o caminho "sem película" (o preset "original", sem chaves nem LUT). A edição continua (cortes, tempo,
+enquadramento, opacidade, mesclagem, transições, títulos, legendas gravadas). Nada é alterado: é só este campo.
+
 O que muda entre quem chama são só os campos: a prévia usa o tamanho reduzido, 8 bits e o pontilhado do
 look; a exportação usa o tamanho e a profundidade da saída. Com os mesmos campos, o quadro é bit a bit o mesmo
 (`tests/test_frame.py`). Montar uma receita com a faixa e o LUT certos: `export.frame_pipeline` (com os ajustes
@@ -62,8 +66,14 @@ class Recipe:
     src_fps: float = 0.0          # fps do arquivo/sequência, em que as chaves do look estão (0 = `fps`)
     burn: Any = None              # subtitles.Burn: legendas gravadas no vídeo (antes ou depois do look); None = sem
     alpha: bool = False           # saída RGBA (h × w × 4, cor direta): a transparência da montagem
+    no_effects: bool = False      # 1.7: sem o look e sem os ajustes de imagem dos clipes (`values` None continua None)
 
     def __post_init__(self) -> None:
+        if self.no_effects:  # 1.7: o caminho "sem película"; os ajustes e as chaves de quem chamou ficam como estão lá
+            from . import presets
+            self.keys, self.lut = {}, None
+            if self.values is not None:
+                self.values = presets.builtin_values("original")
         if self.keys:  # JSON do projeto ou chaves já limpas: sempre `keyframes.Key` só de ajustes animáveis
             from . import keyframes, params
             self.keys = keyframes.clean_keys(params.FILM, self.keys)
@@ -72,10 +82,10 @@ class Recipe:
     @classmethod
     def for_source(cls, values: dict | None, fps: float, depth: int, *, legal: bool, seq=None, dither=False,
                    size: tuple[int, int] | None = None, keys: dict | None = None, burn=None,
-                   alpha: bool = False) -> "Recipe":
+                   alpha: bool = False, no_effects: bool = False) -> "Recipe":
         """Receita sem encaixe (prévia, "Salvar quadro", `pelicula-cli quadro`), com o LUT dos ajustes."""
         return cls(values, float(fps), int(depth), bool(dither) and depth == 8, bool(legal), lut_of(values), seq,
-                   None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha))
+                   None, 0.0, size, dict(keys or {}), float(fps), burn, bool(alpha), bool(no_effects))
 
     @property
     def profile(self) -> str | None:
@@ -115,14 +125,15 @@ class Recipe:
             return self.blend(engine, img)
         if not isinstance(img, FrameLayers):
             return img
-        if any(li.stack is not None for li in img.layers):  # 1.6, obturador por clipe (modo Edição)
+        neutral = neutral or self.no_effects  # 1.7: sem os ajustes de imagem dos clipes
+        if not self.no_effects and any(li.stack is not None for li in img.layers):  # 1.6, obturador por clipe
             img = FrameLayers(img.frame, [self._blend_layer(engine, li) for li in img.layers])
         w, h = self.montage_size()
         crop = self.fit.canvas_crop if self.fit is not None else None
         from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
         kw = {"alpha": True} if self.alpha else {}
         from . import camera
-        if camera.uses_profiles(self.seq):  # 1.6: perfis de câmera por clipe (a tela vai ao look em float32)
+        if not self.no_effects and camera.uses_profiles(self.seq):  # 1.6: perfis de câmera por clipe (a tela vai ao look em float32)
             # sem look (prévia sem película) o espaço é o Rec.709, o mesmo da exportação "Sem película", que usa o
             # preset "original" (entrada Rec.709)
             kw.update(camera=camera.target_of(self.values, self.legal),
