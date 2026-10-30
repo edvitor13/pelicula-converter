@@ -39,6 +39,7 @@ from typing import Any, Callable, Iterable
 
 from . import editparams, keyframes, timemap
 from .i18n import N_, _
+from .pastas import Folders
 
 VIDEO = "video"
 AUDIO = "audio"
@@ -488,6 +489,9 @@ class Sequence:
     # "Fundo transparente": a tela começa transparente em vez da cor do fundo; vale na prévia (xadrez), no "Salvar
     # quadro" em PNG/TIFF e nas exportações com alfa (`export.wants_alpha`). "fundo_transparente" no JSON, só ligado.
     transparent: bool = False
+    # 1.7: pastas do painel de mídia (`pastas.Folders`). Só organização: não entram em `is_trivial`, `layers_at`,
+    # som nem render. "pastas" no JSON, só quando há alguma pasta.
+    folders: Folders = field(default_factory=Folders)
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -1987,6 +1991,19 @@ class Sequence:
             out["legendas"] = self.subtitles.to_json()  # presas aos arquivos: acompanham a montagem
         if self.transparent:
             out["fundo_transparente"] = True
+        if self.folders.has_folders():
+            out["pastas"] = self._folders_json(used)
+        return out
+
+    def _folders_json(self, used: set[str]) -> dict[str, Any]:
+        """O bloco "pastas": as pastas, o que há em cada uma e as fontes que estão numa pasta e nenhum clipe usa
+        (`"fontes"` do bloco só traz as usadas; sem isto, um arquivo importado e ainda fora da linha do tempo não
+        voltaria ao reabrir o projeto)."""
+        out = self.folders.to_json()
+        out["midia"] = {k: f for k, f in out["midia"].items() if k in self.sources}
+        extra = [self.sources[k].to_json() for k in out["midia"] if k not in used]
+        if extra:
+            out["fontes"] = extra
         return out
 
     @classmethod
@@ -2031,6 +2048,13 @@ class Sequence:
         if isinstance(d.get("legendas"), dict):
             from .subtitles import Subtitles
             seq.subtitles = Subtitles.from_json(d["legendas"])
+        if isinstance(d.get("pastas"), dict):
+            for sd in d["pastas"].get("fontes") or []:  # em pasta e sem clipe: ficam na Mídia, sem ir à montagem
+                if isinstance(sd, dict) and sd.get("caminho") and sd["caminho"] not in seq.sources:
+                    src = Source.from_json(sd)
+                    seq.sources[src.path] = src
+            seq.folders = Folders.from_json(d["pastas"])
+            seq.folders.keep_items(seq.sources)
         return seq
 
     def relink(self, old: str, new: str, seq_start: int | None = None) -> None:
@@ -2046,6 +2070,7 @@ class Sequence:
         src = self.sources.pop(old)
         src.path = new
         self.sources[new] = src
+        self.folders.rename_item(old, new)
         for c in self.clips:
             if c.src == old:
                 c.src = new
@@ -2111,6 +2136,7 @@ def _clips_beyond_1_6(seq: Sequence) -> bool:
 # que a 1.6 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_7" pega tudo o que a 1.6 não lê.
 FEATURES_V5: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_7": _clips_beyond_1_6,
+    "pastas": lambda seq: seq.folders.has_folders(),  # pastas do painel de mídia (`Sequence.folders`)
 }
 
 

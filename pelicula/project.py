@@ -70,6 +70,10 @@ class Project:
             for src in edicao.get("fontes") or []:
                 if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":  # sem arquivo: nada
                     src["relativo"] = _relative(str(src.get("caminho") or ""), base)
+            pastas = edicao.get("pastas")  # 1.7: fontes numa pasta e fora da linha do tempo (mesmo tratamento)
+            for src in (pastas.get("fontes") or []) if isinstance(pastas, dict) else []:
+                if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":
+                    src["relativo"] = _relative(str(src.get("caminho") or ""), base)
         feats = self.features()
         data = {
             "app": APP_NAME,
@@ -224,8 +228,9 @@ def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
     if not project_path:
         return seq.to_json()
     folder = os.path.dirname(os.path.abspath(project_path))
-    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "")
-            for s in data.get("fontes") or [] if isinstance(s, dict)}
+    pastas = data.get("pastas")
+    listed = list(data.get("fontes") or []) + (list(pastas.get("fontes") or []) if isinstance(pastas, dict) else [])
+    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "") for s in listed if isinstance(s, dict)}
     for old in list(seq.sources):
         rel = rels.get(old, "")
         start = seq.sources[old].seq_start

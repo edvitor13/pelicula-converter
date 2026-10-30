@@ -8,6 +8,8 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 - "settings": resolução, fps, fundo, fades curtos nas emendas de som ou faixa principal magnética;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
+- "pastas": só as pastas do painel de mídia (a imagem e o som não mudam: a prévia não recarrega),
+  inclusive ao desfazer/refazer;
 - "subtitles": só as legendas mudaram (`edit_subtitles`; a montagem e o som não mudam, só o desenho das
   legendas gravadas no vídeo), inclusive ao desfazer/refazer;
 - "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
@@ -38,6 +40,13 @@ AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo 
 def _without_markers(seq: Sequence) -> dict[str, Any]:
     d = seq.to_json()
     d.pop("marcadores", None)
+    return d
+
+
+def _without_folders(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("pastas", None)
+    d.pop("formato", None)  # o recurso "pastas" muda o formato do bloco
     return d
 
 
@@ -97,10 +106,12 @@ class TimelineModel(QObject):
             return
         only_markers = _without_markers(seq) == _without_markers(self.seq)
         only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
+        only_folders = not (only_markers or only_subtitles) and _without_folders(seq) == _without_folders(self.seq)
         self.seq = seq
         self._filter_selection()
         # Desfazer um marcador ou uma legenda não recarrega a prévia.
-        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles else "*")
+        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles
+                          else "pastas" if only_folders else "*")
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -618,6 +629,69 @@ class TimelineModel(QObject):
             self.marker_sel = None
             self.selectionChanged.emit()
             self._done("markers")
+
+    # ------------------------------------------------------------ pastas da Mídia (pastas.py)
+    # Só organização: cada operação é um passo do desfazer e emite "pastas" (a prévia e o som não recarregam).
+    def folder_create(self, name: str, parent: str = "", color: str = "") -> str:
+        """Pasta nova (dentro de `parent`); devolve o id."""
+        f = self.seq.folders.create(name, parent, color)
+        self._done("pastas")
+        return f.id
+
+    def folder_rename(self, fid: str, name: str) -> bool:
+        if self.seq.folders.rename(fid, name):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_color(self, fid: str, color: str) -> bool:
+        if self.seq.folders.set_color(fid, color):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_move(self, fid: str, parent: str) -> bool:
+        """Pasta para dentro de outra ("" = raiz); False se faria um ciclo."""
+        if self.seq.folders.move(fid, parent):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_delete(self, fid: str, to_root: bool = False) -> bool:
+        """Apaga só a pasta: o que havia nela sobe para a mãe (ou vai para a raiz); nenhuma mídia sai do projeto."""
+        if self.seq.folders.delete(fid, to_root):
+            self._done("pastas")
+            return True
+        return False
+
+    def media_to_folder(self, paths: Iterable[str], fid: str, sources: dict[str, Source] | None = None) -> bool:
+        """Põe itens da Mídia numa pasta ("" = raiz). `sources`: as fontes da Mídia que a montagem ainda não tem
+        (importadas e fora da linha do tempo); entram em `seq.sources` para o projeto guardá-las com a pasta."""
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        if self.seq.folders.assign(paths, fid):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_with_media(self, name: str, parent: str, paths: Iterable[str],
+                          sources: dict[str, Source] | None = None) -> str:
+        """Pasta nova já com itens (soltar uma pasta do sistema na Mídia): um passo só do desfazer."""
+        f = self.seq.folders.create(name, parent)
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        self.seq.folders.assign(paths, f.id)
+        self._done("pastas")
+        return f.id
+
+    def media_forget(self, path: str) -> None:
+        """O item saiu da Mídia: sai também da pasta (sem passo do desfazer quando não estava em nenhuma)."""
+        if self.seq.folders.unassign(path):
+            self._done("pastas")
 
     # ------------------------------------------------------------ chaves de animação (keyframes.py)
     # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo
