@@ -70,7 +70,10 @@ class Engine:
         self._text_tex = self.ctx.texture((1, 1), 1, data=b"\x00", dtype="f1")
         self._text_key = None
         self._text_aspect = 0.0
-        self._clip_tex: dict[int, moderngl.Texture] = {}
+        self._clip_tex: dict[int | str, moderngl.Texture] = {}
+        # 1.7, tela montada de cada clipe de sequência: {caminho: (camadas, sequência, parâmetros, textura)}; veja
+        # `_nested_texture`.
+        self._nested_tex: dict[str, tuple] = {}
 
     # ------------------------------------------------------------ recursos
     # Uniforms do FINAL que o plano só grava com o efeito ligado (os planos de sempre não mudam): o valor neutro
@@ -496,7 +499,7 @@ class Engine:
         return np.frombuffer(data, dtype=np.float32).reshape(h, w, comps).copy()
 
     # ------------------------------------------------------------ modo Edição
-    def _clip_texture(self, slot: int, img: np.ndarray) -> moderngl.Texture:
+    def _clip_texture(self, slot: int | str, img: np.ndarray) -> moderngl.Texture:
         h, w = img.shape[:2]
         comps = 4 if img.ndim == 3 and img.shape[2] == 4 else 3  # 4 = RGBA pré-multiplicado (transparência)
         dtype = "f1" if img.dtype == np.uint8 else ("f4" if img.dtype == np.float32 else "nu2")  # f4: log (1.6)
@@ -536,38 +539,11 @@ class Engine:
         `camera` (1.6, `camera.Target`, a entrada do look): os clipes com perfil de câmera próprio passam antes pelo
         `editshaders.CAMERA` (`_camera_pass`). `float_out`: devolve a tela em float32 (h, w, 3), sem cortar em 0–1
         nem arredondar (a montagem com perfis de clipe vai assim ao look). Sem os dois, tudo como antes.
+        Um clipe de sequência (1.7, `LayerImage.nested`) é a tela dela, montada do mesmo jeito (`_nested_texture`).
         """
-        from . import compositor
         size = (int(canvas_w), int(canvas_h))
-        a = self._target("canvas_a", size, dtype="f4")
-        b = self._target("canvas_b", size, dtype="f4")
-        bg = tuple(float(c) for c in seq.background)
-        a[1].use()
-        a[1].clear(bg[0], bg[1], bg[2], 0.0 if alpha and getattr(seq, "transparent", False) else 1.0)
-        src, dst = a, b
-        for slot, li in enumerate(frame_layers.layers):
-            img = li.image
-            tex = self._clip_texture(slot, img)
-            U, mip = compositor.clip_uniforms(seq, li.layer, img.shape[1], img.shape[0], size[0], size[1], neutral,
-                                              tex_alpha=tex.components == 4, light=light)
-            if camera is not None:  # 1.6: clipe com perfil de câmera próprio → espaço da entrada do look
-                tex = self._camera_pass(slot, tex, seq, li.layer, camera)
-            if mip:
-                tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
-                tex.build_mipmaps()
-            else:
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            program = "clip"
-            if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
-                program = "clip_tr"
-                self._lazy_program(program, editshaders.CLIP_TR)
-            if "u_cs_on" in U:  # 1.6: cor simples do clipe (`colorsimple.py`)
-                program += "_cs"
-                self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
-            self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
-            src, dst = dst, src
-        if seq.window:  # 1.7, "Faixas pretas no quadro": camadas e fundo só dentro da janela útil
-            self._window_bars(src, seq.window_rect(*size), size)
+        src = self._canvas(frame_layers, seq, size, "", 0.0 if alpha and getattr(seq, "transparent", False) else 1.0,
+                           neutral, light, camera)
         out_dtype = "u1" if depth == 8 else "u2"
         osize, offset = size, (0, 0)
         if crop is not None:
@@ -587,6 +563,78 @@ class Engine:
         arr = np.frombuffer(data, dtype=np.uint8 if depth == 8 else np.uint16)
         return arr.reshape(osize[1], osize[0], 3)
 
+    def _canvas(self, frame_layers, seq, size: tuple[int, int], path: str, start_alpha: float, neutral: bool, light,
+                camera):
+        """A tela de uma sequência com as camadas desenhadas e as faixas da janela útil: o alvo (textura, framebuffer)
+        em f4, cor direta e cobertura. `path` é o lugar desta tela na montagem ("" = a de cima; "/2" = o clipe de
+        sequência na camada 2; "/2/0" = o da camada 0 dele): os alvos e as texturas levam esse nome, então uma tela de
+        dentro nunca escreve na de fora nem na de outro clipe, e são reaproveitados entre quadros."""
+        from . import compositor
+        a = self._target("canvas_a" + path, size, dtype="f4")
+        b = self._target("canvas_b" + path, size, dtype="f4")
+        bg = tuple(float(c) for c in seq.background)
+        a[1].use()
+        a[1].clear(bg[0], bg[1], bg[2], start_alpha)
+        src, dst = a, b
+        for slot, li in enumerate(frame_layers.layers):
+            key = f"{path}:{slot}" if path else slot
+            if li.nested is not None:
+                tex = self._nested_texture(li.nested, f"{path}/{slot}", neutral, light, camera)
+                tw, th, tex_alpha = li.nested.size[0], li.nested.size[1], bool(li.nested.seq.transparent)
+            else:
+                tex = self._clip_texture(key, li.image)
+                tw, th, tex_alpha = li.image.shape[1], li.image.shape[0], tex.components == 4
+            U, mip = compositor.clip_uniforms(seq, li.layer, tw, th, size[0], size[1], neutral, tex_alpha=tex_alpha,
+                                              light=light)
+            if li.nested is not None and U["u_exact"] and "u_tr_kind" not in U:
+                # A tela inteira pixel a pixel não tem borda a suavizar. Na última coluna, o erro de 32 bits do uv vira
+                # cobertura de 0,99998: de fora vazaria 0,002% do que está embaixo, e a tela não sairia bit a bit.
+                U["u_px_per_uv"] = (compositor.EXACT_PX_PER_UV, compositor.EXACT_PX_PER_UV)
+            if camera is not None:  # 1.6: clipe com perfil de câmera próprio → espaço da entrada do look
+                tex = self._camera_pass(key, tex, seq, li.layer, camera)
+            if mip:
+                tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+                tex.build_mipmaps()
+            else:
+                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            program = "clip"
+            if "u_tr_kind" in U:  # 1.5: transição de película nesta camada
+                program = "clip_tr"
+                self._lazy_program(program, editshaders.CLIP_TR)
+            if "u_cs_on" in U:  # 1.6: cor simples do clipe (`colorsimple.py`)
+                program += "_cs"
+                self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
+            self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
+            src, dst = dst, src
+        if seq.window:  # 1.7, "Faixas pretas no quadro": camadas e fundo só dentro da janela útil
+            self._window_bars(src, seq.window_rect(*size), size)
+        return src
+
+    def _nested_texture(self, nested, path: str, neutral: bool, light, camera) -> moderngl.Texture:
+        """A imagem de um clipe de sequência (`sequence.Nested`): a tela dela, em f4 e sem arredondar nada, por isso um
+        clipe sem ajustes sai bit a bit como os clipes de dentro fora dele. Opaca, a tela começa no fundo da sequência;
+        com "Fundo transparente", começa transparente e passa por `editshaders.NEST_PREMUL`.
+
+        Uma câmera lenta mostra o mesmo quadro de dentro em vários de fora: as mesmas camadas (o mesmo objeto, que
+        `_NestedStream` repete; o registro segura a referência, então o `is` não confunde objetos) da mesma sequência
+        com os mesmos parâmetros reaproveitam a textura. Quem escreve nesses alvos é só este caminho, e sempre troca o
+        registro."""
+        size = (int(nested.size[0]), int(nested.size[1]))
+        params = (bool(neutral), light, camera, size)
+        hit = self._nested_tex.get(path)
+        if hit is not None and hit[0] is nested.layers and hit[1] is nested.seq and hit[2] == params:
+            return hit[3]
+        inner = nested.seq
+        canvas = self._canvas(nested.layers, inner, size, path, 0.0 if inner.transparent else 1.0, neutral, light, camera)
+        tex = canvas[0]
+        if inner.transparent:
+            self._lazy_program("nest_premul", editshaders.NEST_PREMUL)
+            pm = self._target("nest_pm" + path, size, dtype="f4")
+            self._run("nest_premul", pm, {"t_canvas": tex}, {})
+            tex = pm[0]
+        self._nested_tex[path] = (nested.layers, inner, params, tex)
+        return tex
+
     def _window_bars(self, canvas, rect: tuple[int, int, int, int], size: tuple[int, int]) -> None:
         """Fora da janela útil a tela fica preta e opaca (também com o "Fundo transparente": as faixas são imagem)."""
         x, y, w, h = rect
@@ -595,7 +643,7 @@ class Engine:
             if box[2] > 0 and box[3] > 0:
                 canvas[1].clear(0.0, 0.0, 0.0, 1.0, viewport=box)
 
-    def _camera_pass(self, slot: int, tex, seq, layer, target):
+    def _camera_pass(self, slot: int | str, tex, seq, layer, target):
         """1.6: a imagem de um clipe com perfil de câmera próprio convertida para a entrada do look (textura f4 do
         mesmo tamanho, `editshaders.CAMERA`); um clipe que segue o look volta como está."""
         from . import camera
@@ -631,6 +679,7 @@ class Engine:
         for t in self._clip_tex.values():
             t.release()
         self._clip_tex.clear()
+        self._nested_tex.clear()
         for tex, fbo in self._targets.values():
             fbo.release()
             tex.release()

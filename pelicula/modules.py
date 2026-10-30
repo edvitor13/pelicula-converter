@@ -264,25 +264,28 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         from . import planes
         if planes.active(v):
             used.add("cor_planos")
-    # Montagem vazia ou só "o arquivo inteiro, sem mudanças" não é edição.
-    trivial = getattr(sequence, "is_trivial", lambda: True)
-    if sequence is not None and getattr(sequence, "clips", True) and not trivial():
-        used.add("edicao")
-        if any(s.is_generated for s in getattr(sequence, "used_sources", lambda: [])()):
-            used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
-    if sequence is not None and getattr(sequence, "uses_extra_transitions", lambda: False)():
-        used.add("transicoes")
-    if sequence is not None:  # 1.6: cor escolhida, degradê, pele natural ou grupo de cor num clipe
+    # 1.7: o aviso é do projeto, então olha todas as sequências dele (`Sequence.family`; sozinha, só ela).
+    family = [] if sequence is None else getattr(sequence, "family", lambda: [sequence])()
+    for seq in family:
+        # Montagem vazia ou só "o arquivo inteiro, sem mudanças" não é edição.
+        trivial = getattr(seq, "is_trivial", lambda: True)
+        if getattr(seq, "clips", True) and not trivial():
+            used.add("edicao")
+            if any(s.is_generated for s in getattr(seq, "used_sources", lambda: [])()):
+                used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
+        if getattr(seq, "uses_extra_transitions", lambda: False)():
+            used.add("transicoes")
+        # 1.6: cor escolhida, degradê, pele natural ou grupo de cor num clipe
         from . import colorsimple
-        clips = getattr(sequence, "clips", [])
+        clips = getattr(seq, "clips", [])
         if any(getattr(c, "color_group", "") or colorsimple.active(c.values) for c in clips):
             used.add("cor_simples")
         if any(c.values.get("manivela", "nenhuma") != "nenhuma" for c in clips if c.kind == "video"):
             used.add("camera_cinema")  # 1.6: manivela
         from . import luz_plano
-        if luz_plano.uses(sequence):  # 1.6: luz da copiadora por plano (o cartão é do Laboratório)
+        if luz_plano.uses(seq):  # 1.6: luz da copiadora por plano (o cartão é do Laboratório)
             used.add("laboratorio")
-    for subs in (subtitles, getattr(sequence, "subtitles", None)):
+    for subs in (subtitles, *(getattr(seq, "subtitles", None) for seq in family)):
         if subs is not None and not subs.is_empty():
             used.add("legendas")
     return used

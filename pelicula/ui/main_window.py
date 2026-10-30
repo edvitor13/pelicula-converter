@@ -1256,7 +1256,7 @@ class MainWindow(QMainWindow):
             clip = seq.find(li.layer.clip.id)
             if clip is not None:  # com as chaves de animação do clipe atual avaliadas neste quadro
                 layer = dataclasses.replace(li.layer, clip=clip, values=seq.values_at(clip, fl.frame))
-                out.append(sequence.LayerImage(layer, li.image, li.stack))
+                out.append(dataclasses.replace(li, layer=layer))
         return sequence.FrameLayers(fl.frame, out)
 
     def frame_recipe(self, depth: int = 8, full: bool = False, alpha: bool | None = None) -> Recipe:

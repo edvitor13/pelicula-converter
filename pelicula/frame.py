@@ -33,6 +33,9 @@ Com `no_effects` (1.7, "Desligar todos os efeitos", ARQUITETURA §40) a montagem
 clipes, e o look é o caminho "sem película" (o preset "original", sem chaves nem LUT). A edição continua (cortes, tempo,
 enquadramento, opacidade, mesclagem, transições, títulos, legendas gravadas). Nada é alterado: é só este campo.
 
+Um clipe de sequência (1.7, ARQUITETURA §41.5) é montado dentro de `Engine.compose`, com os mesmos parâmetros da de fora
+(`neutral`, a luz das transições e o espaço do look); o obturador é misturado aqui, em qualquer nível (`_blend_layers`).
+
 O que muda entre quem chama são só os campos: a prévia usa o tamanho reduzido, 8 bits e o pontilhado do
 look; a exportação usa o tamanho e a profundidade da saída. Com os mesmos campos, o quadro é bit a bit o mesmo
 (`tests/test_frame.py`). Montar uma receita com a faixa e o LUT certos: `export.frame_pipeline` (com os ajustes
@@ -126,8 +129,8 @@ class Recipe:
         if not isinstance(img, FrameLayers):
             return img
         neutral = neutral or self.no_effects  # 1.7: sem os ajustes de imagem dos clipes
-        if not self.no_effects and any(li.stack is not None for li in img.layers):  # 1.6, obturador por clipe
-            img = FrameLayers(img.frame, [self._blend_layer(engine, li) for li in img.layers])
+        if not self.no_effects:  # 1.6, obturador por clipe
+            img = self._blend_layers(engine, img)
         w, h = self.montage_size()
         crop = self.fit.canvas_crop if self.fit is not None else None
         from .transitions import light_of  # transições da 1.5: misturam na luz da entrada do look
@@ -150,9 +153,19 @@ class Recipe:
         cid, cv = curve if curve is not None else tempo_camera.curve_of(self.values, self.legal)
         return engine.temporal_blend(list(stack.images), list(stack.weights), cid, cv)
 
+    def _blend_layers(self, engine, fl):
+        """As camadas com o obturador misturado, em qualquer nível; sem nada a misturar, o mesmo objeto (`Engine.compose`
+        reconhece as camadas de um clipe de sequência por ele)."""
+        from .sequence import FrameLayers
+        out = [self._blend_layer(engine, li) for li in fl.layers]
+        return fl if all(a is b for a, b in zip(out, fl.layers)) else FrameLayers(fl.frame, out)
+
     def _blend_layer(self, engine, li):
         """Uma camada com os quadros da janela do obturador vira a mistura deles, na curva do próprio clipe (o perfil
-        de câmera dele, com a faixa do arquivo; ou a entrada do look)."""
+        de câmera dele, com a faixa do arquivo; ou a entrada do look). Um clipe de sequência: as camadas de dentro."""
+        if li.nested is not None:
+            inner = self._blend_layers(engine, li.nested.layers)
+            return li if inner is li.nested.layers else replace(li, nested=replace(li.nested, layers=inner))
         if li.stack is None:
             return li
         from . import camera, media, tempo_camera

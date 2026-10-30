@@ -40,6 +40,8 @@ _DEFAULTS = editparams.VIDEO.defaults()
 _COLOR_KEYS = [k for k in editparams.color_keys() if k not in DETAIL_KEYS]
 # Taxas do desespremer do clipe. Tabela própria: a da Lente anamórfica do look (`anamorfico.SQUEEZES`) não tem 1,55.
 DESQUEEZE = {"nao": 1.0, "1.33": 1.33, "1.5": 1.5, "1.55": 1.55, "1.8": 1.8, "2.0": 2.0}
+# 1.7: `u_px_per_uv` de um clipe de sequência que cobre a tela pixel a pixel: a cobertura de todo pixel dá 1 exato.
+EXACT_PX_PER_UV = 1.0e7
 
 
 def mat3_uniform(m: np.ndarray) -> tuple:
@@ -100,18 +102,23 @@ def desqueeze(v: dict[str, Any]) -> float:
 def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
             values: dict[str, Any] | None = None) -> tuple[float, float]:
     """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe e na proporção já desespremida ("Esticar"
-    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe sem arquivo
+    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe gerado
     (título, cor…) não tem proporção própria: com janela, ele nasce do tamanho dela. `values`: os ajustes no quadro
     (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
     _x, _y, aw, ah = seq.window_rect(canvas_w, canvas_h)
     sw = float(src.width if src and src.width else aw)
     sh = float(src.height if src and src.height else ah)
-    if seq.window and src is not None and not src.is_file:
+    if seq.window and src is not None and src.is_generated:
         sw, sh = float(aw), float(ah)
     v = values if values is not None else clip.values
     mode = v.get("encaixe", "ajustar")
     if mode == "esticar":
+        return float(aw), float(ah)
+    if (src is not None and src.is_nested and not seq.window and desqueeze(v) == 1.0
+            and src.width * seq.height == src.height * seq.width):
+        # 1.7: uma sequência da mesma proporção é a tela inteira. Os lados pares de uma tela reduzida não são outra
+        # proporção: encaixar pela tela deixaria um clipe sem ajustes reamostrado em menos de um pixel.
         return float(aw), float(ah)
     sw *= desqueeze(v)
     f = min(aw / sw, ah / sh) if mode == "ajustar" else max(aw / sw, ah / sh)

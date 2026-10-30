@@ -180,7 +180,8 @@ class Source:
         alpha = bool(seq.transparent)
         return cls(path=f"{SOURCE_SEQUENCE}:{seq.id}", width=seq.width, height=seq.height, fps=float(fr),
                    fps_str=f"{fr.numerator}/{fr.denominator}", frames=frames, duration=frames / float(fr),
-                   has_video=any(c.kind == VIDEO for c in seq.clips) or not seq.clips, has_audio=seq.has_audio,
+                   has_video=any(c.kind == VIDEO for c in seq.clips) or not seq.clips,
+                   has_audio=seq.has_audio or _has_tones(seq),
                    pix_fmt="rgba" if alpha else "rgb24", color_space="gbr", color_range="pc",
                    color_transfer="iec61966-2-1", color_primaries="bt709", has_alpha=alpha, kind=SOURCE_SEQUENCE,
                    data={SOURCE_SEQUENCE: seq.id, "nome": seq.display_name})
@@ -275,6 +276,13 @@ class Source:
                    kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
                    data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {},
                    seq_start=_seq_start(d.get("sequencia")))
+
+
+def _has_tones(seq: "Sequence") -> bool:
+    """A sequência toca um tom de clipe gerado (o bipe da ponta)? `audiomix.TONES` é quem sabe: o tom vem de um clipe de
+    vídeo, e a mixagem dela tem som mesmo sem nenhum clipe de áudio."""
+    from . import audiomix
+    return bool(audiomix.tones(seq))
 
 
 def _seq_start(value) -> int:

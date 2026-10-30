@@ -4109,3 +4109,72 @@ O bloco `"edicao"` continua sendo o bloco da sequência aberta. Com mais de uma 
 `History` guarda o projeto inteiro, porque "Aninhar seleção" mexe em duas sequências e é um passo só. O instantâneo sai sempre a
 partir da primeira aba, então trocar de aba não vira passo. Desfazer volta à sequência em que a mudança foi feita (`_active`) e,
 se ela ainda não existia naquele estado, à que estava aberta.
+
+### 41.5 Imagem e som da sequência aninhada
+
+A regra é a do resto do programa: um caminho só para a prévia e a exportação, sem regra de tempo nova. Testes em
+`tests/test_aninhada.py`; o coração deles é a **gêmea**: uma montagem e a mesma montagem dentro de uma sequência, num único
+clipe sem ajuste, dão os mesmos bits em todo quadro (8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação) e
+as mesmas amostras de 24 bits (diferença medida: zero).
+
+**Leitura** (`sequence.py`). `LayerImage.nested` traz um `Nested(seq, layers, size)` no lugar da imagem: o `FrameLayers` do quadro
+interno, lido por `grab` (acesso aleatório) ou por um `_NestedStream` dentro do `SequenceReader` (que usa um `SequenceReader`
+interno). O quadro interno vem de `src_frame`, como o de um arquivo. `image` guarda só um quadradinho preto, porque nada lê pixels
+de um clipe de sequência. Quem precisa da montagem inteira atravessa os níveis: `Sequence.deep_sources` (arquivos que faltam,
+`export.job_inputs`), `closure` (`anyp` de `media_info`, `camera.uses_profiles`, `modules.used_by`) e `_video_sources`.
+
+**Tamanho da tela interna** (`nested_canvas`). A regra de um vídeo: nunca maior que a sequência, com lados pares. A diferença
+para `decode_size` é que, na proporção da tela de fora (mesmo depois de arredondar para lados pares), a tela é **exatamente** a de
+fora; é o que permite a identidade numa prévia de 180×100 de um quadro 16:9. Em `compositor.fit_box`, uma sequência da mesma
+proporção da de fora ocupa a tela inteira, sem a conta de encaixe que daria 159,75 em vez de 160 linhas.
+
+**Composição** (`Engine.compose` → `_canvas` → `_nested_texture`). `_canvas` é a parte recursiva. Cada clipe de sequência monta
+a tela de dentro em float32, sem arredondar, e ela vira a textura do clipe: sem leitura da GPU e sem passar por 8 bits; só o `OUT`
+final arredonda, uma vez. Alvos e texturas levam o **caminho** do clipe na montagem (`""`, `"/2"`, `"/2/0"`), então dois clipes da
+mesma sequência no mesmo quadro nunca dividem tela. A memória é de duas telas f4 por caminho, reaproveitadas de quadro a quadro.
+
+- **Identidade exata:** `CLIP` calcula a cobertura com `u_px_per_uv`. Com os erros de float32 ela dava 0,99998 na última coluna e o
+  fundo de fora vazava. Como o texto de `CLIP` está preso pelo hash de `tests/test_transitions.py`, um clipe de sequência sem ajuste
+  de geometria usa `EXACT_PX_PER_UV`, e a cobertura dá 1 exato.
+- **Sequência transparente:** a tela sai pré-multiplicada por `NEST_PREMUL` (`editshaders.py`). `alphashaders.PREMUL` não serve:
+  ele corta o RGB em 0–1, perdendo os super-brancos de um clipe log, e `clipAlpha` distorceria a cobertura (20% viraria 19,8%).
+  `NEST_PREMUL` compensa `clipAlpha`. Sobre um V1, contra os mesmos clipes fora, **não é bit a bit**: medido em 18 quadros, no
+  máximo 1 passo, em 1% dos valores em 8 bits (empates de arredondamento com opacidade 50%) e em 0,2% em 16 bits. Vem do ponto
+  flutuante de tirar e repor o alfa. Uma sequência opaca não passa por isso.
+- **Câmera:** cada clipe de dentro converte com o próprio perfil para a entrada do look (`Target` é passado para baixo). O clipe de
+  sequência em si não tem perfil: `camera.uniforms` devolve `None`. Sem clipe de perfil em nível nenhum, a tela de dentro é a de sempre.
+- **Cache do quadro** (câmera lenta repete o quadro interno): `_nested_tex` guarda a tela por caminho e só reaproveita com o
+  **mesmo objeto** `FrameLayers`, a mesma sequência e os mesmos `neutral`, `light`, `camera` e tamanho. Quadro lido de novo é outro
+  objeto e monta de novo: no pior caso custa tempo, nunca mostra quadro velho. `_NestedStream` entrega o mesmo objeto quando o
+  quadro se repete.
+- **Obturador e mesclagem** (`Recipe._blend_layers`) descem pelos níveis com `dataclasses.replace`, na mesma conta. A mistura do
+  obturador é dos clipes de dentro, com a janela deles; o clipe de sequência acelerado não tem pilha própria.
+
+**Som** (`audiomix.py`). A sequência é mixada antes, pela mesma `render_mix` (recursiva), num WAV que vira a entrada da cadeia do
+clipe como um arquivo qualquer: aparar, velocidade, rampa, reverso, equalização, fades e transição não têm regra nova. `Clip.src`
+continua `sequencia:<id>`; o caminho vai em `seg["path"]`.
+
+- **Nome do WAV** (`nested_mix_path`): a versão do app + `mix_key` da sequência + a duração + data e tamanho dos arquivos de som
+  em qualquer nível. `mix_key` ganha `"aninhadas"` só quando há clipe de sequência, então a chave e o grafo de uma montagem sem
+  isso continuam os de antes, byte a byte (conferido contra a BASE com cortes, transição, reverso, rampa e faixas).
+- **Cache** (`nested_dir`, no temporário do sistema): sobrevive à sessão, porque mixar de novo é o que custa, e `_prune_nested`
+  segura o total em `NEST_MAX_BYTES`, tirando os mais antigos, nunca os da mixagem atual nem os usados há menos de `NEST_KEEP_S`.
+  Grava num parcial e troca no fim (`os.replace`). Não há limpeza ao sair: o limite é o que segura o disco.
+- **Cancelar e erro:** o `cancel` chega à mixagem de dentro (`False`, sem deixar nada) e o `RuntimeError` dela sobe como erro da de fora.
+- **Forma de onda:** `source_peaks` lê o WAV, se já existe.
+- **Bipe da ponta** dentro de uma sequência: fica no WAV dela, no mesmo número de amostra.
+
+**Limites conhecidos** (nada aqui é um bug a corrigir sem decidir antes):
+
+- **Legendas gravadas e marcadores** de dentro não sobem: só os da sequência exportada contam.
+- **O look que lê cortes** (`montagem_filme`, `luz_plano`) vê um clipe de sequência como um plano só.
+- **Mesclagem dentro de uma sequência transparente** mistura com a tela de dentro, não com o que está embaixo dela.
+- **Janela útil da sequência de dentro sob um look:** a receita só pinta de preto exato as faixas da sequência exportada. As de dentro
+  são imagem, e o grão passa por elas; dentro da janela o quadro segue bit a bit. Sem look, tudo igual.
+- **Saída maior que a sequência:** a tela de dentro para no tamanho dela e é ampliada de uma vez, e os clipes fora de uma sequência seriam
+  ampliados um a um. Fica perto (`tests/test_aninhada.py`), não bit a bit.
+- **Clipe de sequência acelerado** não ganha borrão do obturador: a mistura é só dos clipes de dentro.
+- **Som posto depois** dentro de uma sequência que já é clipe só de vídeo em outra: o clipe de fora não ganha clipe de áudio; é preciso
+  colocar de novo.
+- **Quem lê a imagem do clipe** (conta-gotas, ajuste automático) vê o quadradinho preto; **legendas automáticas e corte por texto**
+  (`subauto.spans_for`, `subedit.items`) pulam clipes de sequência, porque olham só arquivos.
