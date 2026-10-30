@@ -58,16 +58,18 @@ def canvas_size(seq: timeline.Sequence, height: int | None = None) -> tuple[int,
 
 
 def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> tuple[int, int]:
-    """Tamanho em que o clipe é decodificado: a caixa do encaixe na tela (× escala, se ampliado),
+    """Tamanho em que o clipe é decodificado: a caixa do encaixe na tela (× escala de cada eixo, se ampliado),
     sem passar da resolução do arquivo. Com a escala animada, a maior escala do clipe (decodifica uma vez só,
     no tamanho em que ele mais aparece)."""
     from . import compositor, keyframes
     src = seq.sources[clip.src]
     sw, sh = (src.width or canvas_w), (src.height or canvas_h)
     bw, bh = compositor.fit_box(seq, clip, canvas_w, canvas_h)
-    k = max(1.0, keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0))))
-    w = min(int(round(bw * k)), sw)
-    h = min(int(round(bh * k)), sh)
+    k = keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0)))
+    kx = max(1.0, k * keyframes.max_value(clip.keys.get("escala_x"), float(clip.values.get("escala_x", 1.0))))
+    ky = max(1.0, k * keyframes.max_value(clip.keys.get("escala_y"), float(clip.values.get("escala_y", 1.0))))
+    w = min(int(round(bw * kx)), sw)
+    h = min(int(round(bh * ky)), sh)
     return max(2, w), max(2, h)
 
 

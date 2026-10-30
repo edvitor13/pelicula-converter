@@ -18,8 +18,8 @@ Como cada ajuste é interpretado (valores de vídeo Rec.709 de 0 a 1, chamados "
   HSL de 8 faixas (partição suave entre as faixas vizinhas, sem efeito em cinzas).
 - **Detalhe**: redução de ruído bilateral 5×5, desfoque por mipmap, nitidez (máscara de nitidez) e
   clareza (contraste local contra um mipmap bem desfocado). Raios proporcionais à altura do clipe.
-- **Enquadramento**: encaixe (mostrar inteiro, preencher, esticar), escala, posição (fração da tela,
-  y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
+- **Enquadramento**: encaixe (mostrar inteiro, preencher, esticar), escala (e por eixo: `axis_scale`), posição
+  (fração da tela, y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
 """
 
 from __future__ import annotations
@@ -101,21 +101,27 @@ def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h
     return sw * f, sh * f
 
 
+def axis_scale(v: dict[str, Any]) -> tuple[float, float]:
+    """Escala final de cada eixo do clipe, antes da rotação: `escala × escala_x` e `escala × escala_y`."""
+    s = float(v["escala"])
+    return s * float(v.get("escala_x", 1.0)), s * float(v.get("escala_y", 1.0))
+
+
 def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
               values: dict[str, Any] | None = None) -> np.ndarray:
     """Matriz 3×3 que leva um pixel da tela (x, y, 1) ao uv do clipe (0 a 1)."""
     v = values if values is not None else clip.values
     bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
-    s = float(v["escala"])
+    sx, sy = axis_scale(v)
     th = math.radians(float(v["rotacao"]))
     cs, sn = math.cos(th), math.sin(th)
     cx = canvas_w / 2.0 + float(v["pos_x"]) * canvas_w
     cy = canvas_h / 2.0 + float(v["pos_y"]) * canvas_h
     fx = -1.0 if v["espelhar_h"] else 1.0
     fy = -1.0 if v["espelhar_v"] else 1.0
-    ax = fx / (s * bw)
-    ay = fy / (s * bh)
-    # q = R(-θ)(p - c);  u = 0,5 + fx·q.x / (s·bw);  v = 0,5 + fy·q.y / (s·bh)
+    ax = fx / (sx * bw)
+    ay = fy / (sy * bh)
+    # q = R(-θ)(p - c);  u = 0,5 + fx·q.x / (sx·bw);  v = 0,5 + fy·q.y / (sy·bh)
     return np.array([
         [ax * cs, ax * sn, 0.5 - ax * (cs * cx + sn * cy)],
         [-ay * sn, ay * cs, 0.5 - ay * (-sn * cx + cs * cy)],
@@ -150,12 +156,12 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
     v = layer.values if layer.values is not None else clip.values
     bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
-    s = float(v["escala"])
+    sx, sy = axis_scale(v)
     U: dict[str, Any] = {
         "u_canvas": (float(canvas_w), float(canvas_h)),
         "u_clip_px": (float(tex_w), float(tex_h)),
         "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h, v)),
-        "u_px_per_uv": (float(s * bw), float(s * bh)),
+        "u_px_per_uv": (float(sx * bw), float(sy * bh)),
         "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
