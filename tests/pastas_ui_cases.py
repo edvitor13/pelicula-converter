@@ -218,10 +218,11 @@ def test_system_files_dropped_on_a_folder_import_into_it():
     into, plain = [], []
     b.filesDroppedIn.connect(lambda p, f: into.append((p, f)))
     b.filesDropped.connect(plain.append)
-    drop_urls(b, b.list.folder_item(f1), ["C:/x/novo.mp4"])
-    assert into == [(["C:/x/novo.mp4"], f1)] and plain == []
-    drop_urls(b, None, ["C:/x/outro.mp4"])
-    assert plain == [["C:/x/outro.mp4"]]
+    novo, outro = (os.path.abspath(n).replace(os.sep, "/") for n in ("novo.mp4", "outro.mp4"))  # absoluto em cada sistema
+    drop_urls(b, b.list.folder_item(f1), [novo])
+    assert into == [([novo], f1)] and plain == []
+    drop_urls(b, None, [outro])
+    assert plain == [[outro]]
 
 
 # ------------------------------------------------------------------ desfazer, ordem, aberta/fechada
