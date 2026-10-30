@@ -117,6 +117,18 @@ class MediaItem(QTreeWidgetItem):
     def text(self, column: int = 0) -> str:   # como o item da lista de antes (uma coluna só)
         return super().text(column)
 
+    def data(self, *args):
+        """Como o item da lista de antes: `data(UserRole)` é o caminho e `data(UserRole + 1)` o tipo."""
+        if len(args) == 1:
+            role = int(getattr(args[0], "value", args[0]))
+            user = Qt.ItemDataRole.UserRole.value
+            if role == user:
+                return self.path
+            if role == user + 1:
+                return self.kind
+            return super().data(0, args[0])
+        return super().data(*args)
+
 
 class FolderTree(QTreeWidget):
     """A Mídia como árvore: pastas que abrem e fecham e, dentro delas, os itens com miniatura. Sem nenhuma pasta

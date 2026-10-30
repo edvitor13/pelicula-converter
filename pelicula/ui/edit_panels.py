@@ -241,6 +241,9 @@ class MediaBin(QWidget):
         menu.addAction(_("Tirar da lista"), self._remove_current)
 
     # -------------------------------------------------------- interno
+    def _item(self, path: str) -> MediaItem | None:
+        return self.list.media(path)
+
     def _sync(self) -> None:
         has = self.list.count() > 0 or self.list.folders.has_folders()
         self.stack.setCurrentWidget(self.list if has else self.empty)
