@@ -231,6 +231,14 @@ escala, opacidade e as chaves de animação do clipe (painel Imagem) continuam v
 Selecione um clipe e use o painel da direita. Quando o vídeo tem som ligado, escolha **Imagem** ou **Som**
 no topo do painel.
 
+### Filtrar ajustes
+
+O campo **Filtrar ajustes…** fica no alto do painel Clipe, acima dos cartões, nas páginas **Imagem** e **Som**. Ele
+procura em português, inglês e espanhol (sem diferença de acentos) nos títulos das seções, nos nomes e dicas dos
+controles e nos nomes das opções, e deixa só os cartões que têm a ver, com o controle encontrado destacado. O filtro
+continua ligado ao trocar de clipe. **Ctrl+F** com o foco no painel ou **/** fora de um campo de texto levam ao
+campo; **Esc** limpa e devolve o painel como estava. Detalhes em [Efeitos e ajustes](EFEITOS.md).
+
 ### Ajustes rápidos
 
 Um clique resolve o mais comum:
@@ -534,6 +542,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 |---|---|
 | Ctrl+1 / Ctrl+2 | Modo Película / modo Edição |
 | Ctrl+I | Importar mídia |
+| Ctrl+F (no painel) / / | Filtrar ajustes do clipe (Esc limpa) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

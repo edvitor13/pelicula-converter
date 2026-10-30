@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidg
 from .. import editparams, keyframes
 from ..i18n import N_, _, decimal_sep
 from ..timeline import AUDIO, VIDEO, Clip, Source
-from . import icons, theme
+from . import filtro_ajustes, icons, theme
 from .edit_model import TimelineModel
 from .flow import flow_widget
 from .keyframes_ui import ClipKeys, KeyRows
@@ -392,6 +392,7 @@ class ClipInspector(QWidget):
         self.audio_page, self.acards = self._page(editparams.AUDIO_SECTIONS, self.astore, self.OPEN_AUDIO, False)
         self.stack.addWidget(self.video_page)
         self.stack.addWidget(self.audio_page)
+        self.filtro = filtro_ajustes.install(lay, self, [self.vcards, self.acards], index=lay.indexOf(self.stack))
         self.vstore.changed.connect(lambda key: self._store_changed(self.vstore, self.vcards, key))
         self.astore.changed.connect(lambda key: self._store_changed(self.astore, self.acards, key))
         from . import transitions_ui  # 1.5: ícones dos tipos de transição e só os ajustes do tipo escolhido
@@ -528,6 +529,7 @@ class ClipInspector(QWidget):
 
     def _show(self) -> None:
         c = self.current_clip()
+        self.filtro.setVisible(c is not None)  # 1.7: o filtro de ajustes sobrevive à troca de clipe
         if c is None:
             self.stack.setCurrentWidget(self.empty)
             self.title.setText(_("Nenhum clipe selecionado"))

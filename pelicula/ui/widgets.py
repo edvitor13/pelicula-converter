@@ -785,6 +785,10 @@ class SectionCard(QFrame):
         self.rows: list[ParamRow] = []
         self._chips: dict[str, ColorChip] = {}
         self.hsl_color = ""
+        self._advanced: bool | None = None  # último `set_advanced` (None = nunca chamado)
+        self._filter: dict | None = None  # estado de antes do filtro de ajustes (`set_filter`); None = sem filtro
+        self._marked: list[ParamRow] = []
+        self._forced: list[ParamRow] = []
         if section.layout == "hsl":
             self._build_hsl_chips(bl)
         for p in section.params:
@@ -813,11 +817,60 @@ class SectionCard(QFrame):
         self.chev.setPixmap(pm)
 
     def set_advanced(self, show: bool) -> None:
+        self._advanced = show
         if self._chips:
             return
         for r in self.rows:
             if r.param.advanced:
                 r.setVisible(show)
+        if self._filter is not None:
+            self._force_marked()
+
+    # ------------------------------------------------------------ filtro de ajustes (ui/filtro_ajustes.py)
+    def set_filter(self, keys: set[str] | None) -> None:
+        """Filtro de ajustes: `keys` = chaves dos controles que bateram (vazio = a seção inteira bateu); None desliga.
+
+        Com filtro o cartão abre, os controles que bateram ganham destaque e os avançados escondidos aparecem se
+        foram eles que bateram (na cor por faixa, a faixa escolhida passa a ser a do controle). Desligar devolve o
+        cartão exatamente como estava: aberto ou fechado, avançados escondidos, faixa de cor. Só a interface muda."""
+        self._unmark()
+        if keys is None:
+            if self._filter is not None:
+                before, self._filter = self._filter, None
+                if before["hsl"]:
+                    self.set_hsl_color(before["hsl"])
+                self.set_expanded(before["expanded"])
+            return
+        if self._filter is None:
+            self._filter = {"expanded": self.expanded, "hsl": self.hsl_color}
+        self.set_expanded(True)
+        self._marked = [r for r in self.rows if r.param.key in keys]
+        for r in self._marked:
+            r.setObjectName("FiltroHit")
+            r.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            r.setStyleSheet(f"#FiltroHit {{ background: {QColor(theme.ACCENT).darker(300).name()};"
+                            f" border-radius: 6px; }}")
+        if self._chips and self._marked:
+            key = self._marked[0].param.key
+            color = next((c for c in self._chips if key.startswith(f"hsl_{c}_")), "")
+            if color:
+                self.set_hsl_color(color)
+        self._force_marked()
+
+    def _force_marked(self) -> None:
+        for r in self._marked:
+            if r.param.advanced and not self._chips and not r.isVisibleTo(self.body):
+                r.setVisible(True)
+                self._forced.append(r)
+
+    def _unmark(self) -> None:
+        for r in self._marked:
+            r.setObjectName("")
+            r.setStyleSheet("")
+        self._marked = []
+        for r in self._forced:
+            r.setVisible(bool(self._advanced))
+        self._forced = []
 
     # ------------------------------------------------------------ HSL (cor por faixa)
     def _build_hsl_chips(self, layout: QVBoxLayout) -> None:
