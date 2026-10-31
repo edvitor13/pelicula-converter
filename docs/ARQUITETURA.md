@@ -1480,7 +1480,7 @@ Ferramentas de IA não cabem num pacote só: precisam de um código num commit f
 Python próprio (PyTorch com CUDA) e de modelos de gigabytes. Uma **receita** (`Tool.recipe`,
 `backend="receita"`) descreve tudo isso com versões e hashes fixos no código; `tools.download()` chama
 `install_recipe()`. A primeira receita é o **CorridorKey 2.0** (Corridor Digital), no módulo Beta
-`recorte_ia`; a 1.8 reaproveita a mesma receita para o ambiente PyTorch próprio da "Cor por planos".
+`recorte_ia`; a 1.9 reaproveita a mesma receita para o ambiente PyTorch próprio da "Cor por planos".
 
 ```python
 Recipe(version="2.0-485f5e9",
@@ -3467,7 +3467,7 @@ compara os dois na GPU.
 
 - **"cor_planos"** (Beta, começa desligado, fora dos perfis): esconde o cartão "Cor por planos" do look. A máscara
   da pele só por cor ainda erra em madeira clara e areia, e a separação frente/fundo é só um degradê (a
-  profundidade fica para a 1.8), por isso Beta.
+  profundidade fica para a 1.9), por isso Beta.
 - **"cor_simples"** (estável, grupo "cor", nos perfis Criador, Cinema e Tudo; fora do Simples): esconde a barra
   "Cor simples" do inspetor e os cartões "Pele natural", "Cor escolhida" e "Degradê". Estável porque cada
   ferramenta só preenche ajustes comuns do clipe (temperatura, HSL, exposição…), que o usuário vê e desfaz, e os
