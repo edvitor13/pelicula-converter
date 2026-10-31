@@ -124,6 +124,11 @@ class SequencesUI(QObject):
             one = len(seqs) == 1
             sid = seqs[0].nested_id
             menu.addAction(_("Abrir a sequência"), lambda: self.activate(sid)).setEnabled(one)
+            menu.addSeparator()
+            menu.addAction(_("Adicionar ao fim da linha do tempo"), lambda: [self.win.add_to_timeline(p) for p in paths])
+            menu.addAction(_("Inserir no cursor (,)"), lambda: self.win.bin.place(True))
+            menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.win.bin.place(False))
+            menu.addSeparator()
             menu.addAction(_("Duplicar"), lambda: self.duplicate(sid)).setEnabled(one)
             menu.addSeparator()
             menu.addAction(_("Apagar a sequência…"), lambda: self.delete(sid)).setEnabled(one)

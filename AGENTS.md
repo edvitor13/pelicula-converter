@@ -121,6 +121,8 @@ pelicula/
   testimage.py               cena de teste
   pastas.py                  1.7, pastas da Mídia (sem Qt nem timeline): Folder/Folders (criar, renomear, cor, mover sem
                              ciclo, apagar, itens por chave, JSON tolerante); Sequence.folders e o bloco "pastas" (§39)
+  aninhar.py                 1.7, Aninhar seleção / Desaninhar (sem Qt nem GPU, §41.7): nest(), unnest(), unnest_loss(),
+                             refusal_for(), Refusal; nada muda na imagem nem no som, ou recusa/avisa
   timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, janela útil:
                              window, window_rect, aspect_size; marcadores, emendas
                              de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
@@ -203,7 +205,9 @@ pelicula/
                              sequence_dialog (configurar a sequência e, com `name=`, criar uma nova); 1.7, várias
                              sequências (ARQUITETURA §41.6): sequence_tabs (SequenceTabs, as abas sobre a linha do tempo),
                              sequencias_ui (SequencesUI: ponto único de ligação, estado de cada aba, Mídia, alvos da
-                             exportação); resolve_dialog (plugin do DaVinci);
+                             exportação); 1.7, sequência dentro de sequência (§41.7): aninhar_ui (NestUI: Aninhar
+                             seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
+                             resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
                              corridorkey_dialog (Recorte por IA, Beta);
@@ -438,6 +442,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_geometria.py` | geometria da 1.7: escala por eixo (largura e altura medidas no quadro, antes da rotação), desespremer (tabela, faixas, preencher, esticar, ordem), janela útil (tamanhos pares, retângulo na prévia e na exportação, encaixe e posição, faixas pretas em 8/16 bits com o look por cima, transparência, encaixe da exportação, títulos, legendas, transições), `grab` = `SequenceReader`, exportação = prévia, JSON esparso e formato 5 |
 | `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
 | `tests/test_aninhada.py` | imagem e som da sequência aninhada: a **gêmea** (a montagem e a mesma montagem num único clipe de sequência dão os mesmos bits, em 8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação, em dois níveis, e as mesmas amostras de som), `grab` × `SequenceReader`, fundo transparente × opaco, ajustes no clipe de sequência, janela útil, clipe log com o próprio perfil lá dentro, cache do quadro sem quadro velho, cache de WAVs, cancelar, `pelicula-cli exportar` |
+| `tests/test_aninhar.py` | aninhar e desaninhar: o que vai para onde (ids, faixas, volumes, mudo e solo, fundo, janela, magnética), recusas, legendas presas ao arquivo que atravessam a sequência, e na GPU/ffmpeg a prova de "nada muda" (quadros bit a bit em 8 e 16 bits, com e sem look, prévia reduzida, terminal; som de 24 bits; janela útil; faixas de cima; aninhar o que já tem clipe de sequência) |
+| `tests/test_aninhar_ui.py` | casos de `aninhar_ui_cases.py`: pôr uma sequência da Mídia (e as recusas), dois cliques, Aninhar seleção (menu, atalho, um passo do desfazer), Desaninhar, desenho, forma de onda, inspetor e ferramentas que leem o arquivo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
@@ -609,7 +615,10 @@ principal magnética valer (sem ela não faz nada) e monte-a com as primitivas (
 `move`, `delete`, `_clear_range`, `open_space`); regras em `docs/ARQUITETURA.md`, seção 13.8.
 Mudou o que um clipe faz na imagem ou no som? Vale também dentro de uma sequência aninhada, sem regra nova: rode
 `tests/test_aninhada.py`, em que a gêmea (a montagem dentro de um único clipe de sequência) precisa dar os mesmos bits. Um dado novo
-em `LayerImage` precisa descer pelos níveis (`Recipe._blend_layers`, `_NestedStream`, `Engine._canvas`; seção 41.5).
+em `LayerImage` precisa descer pelos níveis (`Recipe._blend_layers`, `_NestedStream`, `Engine._canvas`; seção 41.5). Operação que leva clipes de uma sequência para outra (`pelicula/aninhar.py`, seção 41.7)
+mantém os ids dos clipes (a semente das transições e do grão sai do id), confere tudo antes de mexer em qualquer coisa (uma
+recusa não muda nada) e entra em `tests/test_aninhar.py`, onde "nada muda" é medido; legenda presa a arquivo atravessa a
+sequência pelo `subtitles.Chained`.
 
 ### Legendas (editar, gravar, entregar, tirar tempo)
 

@@ -38,7 +38,7 @@ def current_source(main) -> tuple[str, object | None]:
                 src = model.seq.source(clip)
             except (KeyError, AttributeError):
                 continue
-            if src is not None and src.has_video and not src.is_image:
+            if src is not None and src.is_file and src.has_video and not src.is_image:  # sem gerador nem sequência (1.7)
                 return src.path, src
     info = getattr(main, "file_info", None)
     if info is not None and not getattr(info, "is_image", False):

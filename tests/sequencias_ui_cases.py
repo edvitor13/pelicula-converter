@@ -795,20 +795,21 @@ def test_media_sequences_go_into_folders_and_come_back_with_undo(win, monkeypatc
     assert key not in win.model.seq.folders.items and win.bin.list.media(key) is None
 
 
-def test_media_refuses_to_place_a_sequence_with_a_short_message(win, monkeypatch):
+def test_media_refuses_to_place_a_sequence_inside_itself_with_a_short_message(win, monkeypatch):
+    # (pôr uma sequência dentro de outra funciona desde a frente "aninhar": `tests/aninhar_ui_cases.py`)
     ids = two_tabs(win, monkeypatch)
     win.seqs_ui.activate(ids[0])
     pump()
     n = len(win.model.seq.clips)
-    key = f"sequencia:{ids[1]}"
+    key = f"sequencia:{ids[0]}"
     for call in (lambda: win.add_to_timeline(key), lambda: win.place_at_cursor([key], True),
                  lambda: win.drop_on_timeline([key], 10, tl.VIDEO, 0)):
         call()
         assert len(win.model.seq.clips) == n
     win.statusBar().clearMessage()
     win.add_to_timeline(key)
-    assert "sequência dentro de outra" in win.statusBar().currentMessage()
-    assert len(win.model.seq.clips) == n and win.model.sequence_users(ids[1]) == []
+    assert "nela mesma" in win.statusBar().currentMessage()
+    assert len(win.model.seq.clips) == n and win.model.sequence_users(ids[0]) == []
 
 
 def test_media_trash_on_a_sequence_asks_to_delete_it(win, monkeypatch):
@@ -841,12 +842,13 @@ def test_media_menu_of_a_sequence_and_of_a_video(win, monkeypatch, tmp_path):
     key = f"sequencia:{ids[1]}"
     select_in_bin(win, key)
     texts = menu_texts(win)
-    assert texts == ["Abrir a sequência", "Duplicar", "Apagar a sequência…"]    # sem as ações de pôr na linha do tempo
+    assert texts == ["Abrir a sequência", "Adicionar ao fim da linha do tempo", "Inserir no cursor (,)",
+                     "Sobrescrever no cursor (.)", "Duplicar", "Apagar a sequência…"]
     src = win.model.sequences()[0].clips[0].src
     select_in_bin(win, src)
     texts = menu_texts(win)
     assert "Nova sequência a partir deste vídeo" in texts and "Inserir no cursor (,)" in texts
-    select_in_bin(win, key, src)       # mistura: o menu dos arquivos (pôr uma sequência já é recusado)
+    select_in_bin(win, key, src)       # mistura: o menu dos arquivos
     assert "Abrir a sequência" not in menu_texts(win)
 
 

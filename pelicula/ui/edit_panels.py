@@ -330,6 +330,8 @@ class ClipInspector(QWidget):
         self.clip_id: str | None = None
         self.kind = VIDEO
         self._loading = False
+        self._camera_hidden = False   # o cartão "Câmera" some num clipe de sequência (`_for_nested`)
+        self._auto_tip: str | None = None
         self.vstore = ParamStore(None, schema=editparams.VIDEO)
         self.astore = ParamStore(None, schema=editparams.AUDIO)
         lay = QVBoxLayout(self)
@@ -513,8 +515,10 @@ class ClipInspector(QWidget):
             if panel is not None:
                 panel.refresh()
         src = self.model.seq.sources.get(c.src)
-        self.title.setText(c.name or (src.name if src else ""))
-        kind = _("Imagem parada") if (src is not None and src.is_image) else (
+        nested = src is not None and src.is_nested
+        self._for_nested(nested and c.kind == VIDEO)
+        self.title.setText(src.name if nested else (c.name or (src.name if src else "")))
+        kind = _("Sequência") if nested else _("Imagem parada") if (src is not None and src.is_image) else (
             _("Vídeo") if c.kind == VIDEO else _("Som"))
         fps = self.model.seq.fps
         speed = "" if abs(c.speed - 1) < 1e-6 else "  •  " + f"{c.speed:g}".replace(".", decimal_sep()) + "×"
@@ -524,6 +528,25 @@ class ClipInspector(QWidget):
             tipo=kind, duracao=timecode(c.dur, fps), inicio=timecode(c.start, fps)) + speed + many)
         if c.kind == VIDEO:
             self.btn_paste.setEnabled(self.model.has_clipboard())
+
+    def _for_nested(self, on: bool) -> None:
+        """Clipe de uma sequência (1.7): some o que fala do arquivo (o perfil de câmera do clipe) e o "Automático", que
+        analisa o quadro de um arquivo, fica desligado. O resto (cor, enquadramento, velocidade, transições) vale."""
+        card = next((x for x in self.vcards if x.section.key == "camera"), None)
+        if card is not None and on != self._camera_hidden:
+            self._camera_hidden = on
+            card.setVisible(not on)
+            for p in self.filtro.panels:  # um filtro em andamento guarda a visibilidade de antes dos cartões
+                if card in p.natural:
+                    p.natural[card] = not on
+            self.filtro.reapply()
+        self.chip_auto.setEnabled(not on)
+        if on and self._auto_tip is None:
+            self._auto_tip = self.chip_auto.toolTip()
+            self.chip_auto.setToolTip(_("Não vale para um clipe de sequência: ajuste a cor nos clipes de dentro dela."))
+        elif not on and self._auto_tip is not None:
+            self.chip_auto.setToolTip(self._auto_tip)
+            self._auto_tip = None
 
     def _load(self) -> None:
         """Copia os valores e as chaves do clipe para o store certo (sem gerar edições). As chaves vão em

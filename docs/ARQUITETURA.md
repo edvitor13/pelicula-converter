@@ -4177,7 +4177,7 @@ continua `sequencia:<id>`; o caminho vai em `seg["path"]`.
 - **Som posto depois** dentro de uma sequência que já é clipe só de vídeo em outra: o clipe de fora não ganha clipe de áudio; é preciso
   colocar de novo.
 - **Quem lê a imagem do clipe** (conta-gotas, ajuste automático) vê o quadradinho preto; **legendas automáticas e corte por texto**
-  (`subauto.spans_for`, `subedit.items`) pulam clipes de sequência, porque olham só arquivos.
+  (`subauto.spans_for`) pulam clipes de sequência, porque olham só arquivos (as legendas presas a um arquivo, em compensação, atravessam a sequência: §41.7).
 
 ### 41.6 Interface das várias sequências
 
@@ -4241,7 +4241,80 @@ modelo da §41.
   `tests/test_sequencias_ui.py` (abas, janela de criar, trocas entre vazia/só o arquivo/montagem/fps e tamanho diferentes nos
   dois modos, estado por aba, desfazer entre abas, "não salvas", reabrir, Mídia, exportação em fila e uma exportação real de
   duas sequências), `tests/test_sequencias_cli.py` (terminal, com exportação e quadro de verdade).
-- **Limites**: sequência da Mídia na linha do tempo, duplo clique num clipe aninhado e "Aninhar seleção" ficam para a frente
-  C; a miniatura da sequência na Mídia é só o ícone; o estado das abas (cursor, zoom) não vai para o `.plc`; sem arrastar
+- **Limites**: (sequência da Mídia na linha do tempo, duplo clique num clipe aninhado e "Aninhar seleção": §41.7); a miniatura da sequência na Mídia é só o ícone; o estado das abas (cursor, zoom) não vai para o `.plc`; sem arrastar
   uma aba para fora; "Pôr várias na fila" usa o trecho inteiro de cada sequência (entrada e saída marcadas valem só para a
   aberta, quando é a única escolhida).
+
+
+### 41.7 Aninhar na interface
+
+Frente "aninhar" da fase 3 (#57): pôr uma sequência na linha do tempo, abrir a de um clipe, **Aninhar seleção** e
+**Desaninhar**. As contas são puras (`pelicula/aninhar.py`, sem Qt nem GPU); a janela está em `ui/aninhar_ui.py`
+(`NestUI`, ponto único de ligação como `SequencesUI`). O formato não muda: nenhuma chave nova no JSON, nenhum id novo em
+`FEATURES_V5`.
+
+**A promessa: aninhar não muda a imagem nem o som.** Onde ela não se sustenta, a operação recusa (`aninhar.Refusal`, com o
+motivo e o que fazer, na barra de status; nada muda, nem uma sequência nova) ou avisa (`NestResult.warnings`).
+
+- **Do que `nest` faz** (`TimelineModel.nest_selection`, um passo do desfazer, que é um só para o projeto): a seleção mais os
+  clipes ligados (`Sequence.expand`) vai para uma sequência criada por `SequenceSet.create`, **os mesmos objetos `Clip`, com os
+  mesmos ids** (a semente das transições e do grão sai do id), com o tempo deslocado de `-a` (`a` = o começo mais cedo) e só as
+  faixas usadas, na mesma ordem e com nome, escondida e solo. As chaves de animação são relativas ao clipe (`key_off`) e não
+  andam. Fora ficam todas as faixas; entram um clipe de vídeo (na mais baixa selecionada que não está escondida) e um de som
+  (idem, não muda), ligados, em `a` com a duração inteira, sem nenhum ajuste (`fit_box` dá a tela toda ou a janela). A sequência
+  de dentro tem o tamanho de `window_rect` quando a de fora tem janela útil (e não tem janela), o mesmo `micro_fade`, e é
+  `magnetic` só se a de fora é e a V1 de dentro não tem buraco (nada anda: `settle_main` não roda).
+- **Recusas**: nada selecionado; clipe em faixa travada (também o par ligado); um clipe fora da seleção sobre o intervalo numa
+  faixa que tem clipe selecionado ("no meio"), ou numa faixa de vídeo visível entre a mais baixa e a mais alta selecionadas
+  (a ordem das camadas mudaria); uma transição que usa o vizinho (`dissolver` e `editparams.EXTRA_TWO_CLIP`: o clipe de dentro
+  não tem sobra além das pontas) ou uma transição de som (`audiomix.crossfades`) ligando um clipe da seleção a um de fora;
+  passar de `MAX_NEST` níveis; volumes de faixa tão diferentes que o de dentro sairia de -60 a +12 dB.
+- **Fundo**: sem nada de fora embaixo da seleção no intervalo e com a de fora não transparente, a de dentro é **opaca** com o
+  fundo da de fora (mesclagem e caminho bit a bit como antes). Senão, `transparent` (limite conhecido da 41.5: até 1 passo). Uma
+  mesclagem com a de dentro transparente avisa que ela passa a valer dentro da sequência.
+- **Som**: `volume da faixa de dentro = o de antes - o da faixa onde o clipe de fora cai` (a mais baixa que soa; sem tons, ver
+  abaixo), então o ganho vale uma vez. Mudo e solo: as faixas que o solo de fora já silenciava ficam mudas dentro, e o clipe de
+  fora só cai numa faixa que soa. O bipe de uma ponta (`audiomix.TONES`) não passa pela faixa: com ele, só uma faixa a 0 dB
+  serve (ou uma faixa nova no fim). Com volume na faixa de fora e efeitos que dependem da ordem do ganho (voz, ruído,
+  normalizar) o som pode mudar um pouco: avisa. O `micro_fade` de fora não age nas pontas do clipe de som (`src_in` 0 e a
+  duração inteira); a emenda de uma seleção que **continuava** o vizinho sem corte ganha o fade curto de 5 ms nas duas pontas
+  (limite aceito, avisa).
+- **Legendas presas a um arquivo** (`subtitles.mapped`, `carriers`, `Chained`): antes o clipe de sequência era pulado e a
+  legenda sumia ao aninhar. Agora a legenda passa pelo clipe de dentro (segundos do arquivo → da sequência de dentro) e pelo
+  clipe de sequência (→ da de fora), com a mesma conta de um clipe de arquivo; `Chained` responde como `Mapping`, então
+  `subedit` (editar texto, mover, aparar, dividir) funciona sem saber a diferença. Quem não tem clipe de sequência passa
+  exatamente pelo mesmo caminho de antes. Legendas da sequência (tempo fixo) e marcadores ficam na de fora. Legendas
+  automáticas e corte por texto (`subauto`, `subedit.anchor_at`) continuam olhando só arquivos.
+- **Avisa** (não recusa): o look que lê os cortes (`mfilme_on`; luz por plano com `lab_on`) passa a ver um plano só; título ou
+  gerador dentro de uma janela útil de fora (o gerador se encaixa na janela lá e na tela inteira de dentro).
+- **Desaninhar** (`unnest_clip`, um passo): recusa velocidade diferente de 1, rampa, reverso, congelar, faixa travada e outro
+  fps de dentro (arredondar mudaria o tempo). Pergunta antes quando o clipe de sequência tem ajuste (`unnest_loss`: opacidade,
+  mesclagem, transições, enquadramento, cor, volume, fades, chaves) ou a sequência tem fundo, janela ou proporção diferentes.
+  Os clipes de dentro que cruzam o trecho `[src_in, src_in + dur)` são cortados com a conta de `Sequence._cut` (a ponta cortada
+  perde a transição daquele lado), deslocados para o tempo de fora e voltam com os ids de dentro (novos só se já existem aqui).
+  Faixas de vídeo: a partir da do clipe, reaproveitando as livres e do mesmo estado; senão entram faixas novas **no meio**
+  (as de cima sobem), então nada de fora muda de camada. Faixas de som: a primeira livre com o mesmo volume e estado, senão
+  uma nova no fim; o volume volta a ser o de antes (`volume de dentro + o da faixa de fora`). Só volta o vídeo se só há o clipe
+  de vídeo de fora (e só o som se só há o de som). A sequência de dentro fica no projeto.
+- **Pôr da Mídia** (`MainWindow._insert`): `aninhar.refusal_for` diz por que não (ela mesma, ciclo, níveis, vazia, sumiu) e
+  nada muda; a sequência **não** impõe o formato dela (`_adopt_format` não roda). O menu de uma sequência na Mídia tem
+  "Adicionar ao fim", "Inserir no cursor" e "Sobrescrever no cursor". Uma sequência que ganha som depois de posta só com
+  vídeo **não** cria sozinha o clipe de som de fora (fica muda até pôr de novo).
+- **Dois cliques** num clipe de sequência (`TimelineCanvas.openNestedRequested`): abre a aba com o cursor no quadro de dentro
+  que estava sob o clique (`Sequence.src_frame`, preso à sequência). A aba de fora guarda o estado dela, como em toda troca.
+- **Desenho**: cores próprias (`theme.CLIP_NESTED*`), o ícone da sequência e o nome de agora. **Forma de onda**: o WAV da
+  mixagem de dentro (`audiomix.nested_mix_path`), lido quando existe (`NestUI.peaks`; a chave muda com qualquer edição de
+  dentro e a lista é limpa a cada mudança); o refresco vem quando a mixagem de fora termina (`mix_finished`).
+- **Inspetor e ferramentas**: o cartão "Câmera" some, o "Automático" e os conta-gotas/Igualar ficam desligados com o motivo
+  na dica, `auto_adjust_clip` recusa com mensagem, `corridorkey_dialog.current_source` e `TimelineModel.set_source_data` só
+  aceitam arquivo / gerador. O painel do gerador já não abria (sem gerador para o tipo).
+- **Atalho**: Ctrl+Shift+G (aninhar seleção). Menu de contexto do clipe: "Aninhar seleção", e no clipe de sequência "Abrir a
+  sequência" e "Desaninhar".
+- **Testes**: `tests/test_aninhar.py` (modelo sem GPU e, na GPU e no ffmpeg, a prova de "nada muda": quadros bit a bit em 8 e
+  16 bits, com e sem look, prévia reduzida, terminal; som amostra a amostra), `tests/aninhar_ui_cases.py` +
+  `tests/test_aninhar_ui.py`.
+- **Medido** (ver `tests/test_aninhar.py`): selecionando tudo, quadros **idênticos** antes, depois de aninhar e depois de
+  desaninhar; som: aninhar com volume de faixa difere **1 passo de 24 bits** em parte das amostras (o ganho passa por um WAV de
+  24 bits no meio), desaninhar volta **exato**. Faixas de cima sobre uma V1 de fora (dentro transparente): 1 passo em 8 bits e
+  em 16 bits sem look; com look, até 15 passos de 16 bits. Janela útil de fora: sem clipe gerado, 1 passo em 8 bits (205 de 65535
+  em 16); com o título, 4 a 9 passos em 8 bits (999 a 2240 em 16). Fade curto de 5 ms nas pontas de uma emenda sem corte.
