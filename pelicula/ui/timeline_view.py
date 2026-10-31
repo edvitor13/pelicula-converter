@@ -56,6 +56,17 @@ MARKER_HIT = 6               # distância (px) que ainda pega um marcador
 _RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
 
 
+_NESTED_PIXMAP = None
+
+
+def nested_pixmap():
+    """O ícone da sequência (12 px) que vai antes do nome do clipe de sequência, no tamanho da tela de agora."""
+    global _NESTED_PIXMAP
+    if _NESTED_PIXMAP is None:
+        _NESTED_PIXMAP = icons.icon("sequence", "#fff6e8", 12).pixmap(12, 12)
+    return _NESTED_PIXMAP
+
+
 def _elide(fm: QFontMetrics, text: str, width: float) -> str:
     return fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, int(width)))
 
@@ -75,6 +86,11 @@ class TimelineCanvas(QWidget):
     viewChanged = Signal()
     clipActivated = Signal(str)
     toolChanged = Signal(str)
+    # 1.7, sequência dentro de sequência (`ui/aninhar_ui.py`): aninhar a seleção, desaninhar um clipe de sequência (id) e abrir
+    # a sequência dele (id do clipe, quadro da sequência de fora sob o clique)
+    nestRequested = Signal()
+    unnestRequested = Signal(str)
+    openNestedRequested = Signal(str, int)
 
     def __init__(self, model: TimelineModel, parent=None):
         super().__init__(parent)
@@ -357,7 +373,15 @@ class TimelineCanvas(QWidget):
         b = self.frame_to_x((self.outp + 1) if self.outp is not None else max(self.seq.duration, 1))
         p.fillRect(QRectF(a, RULER_H, max(b - a, 1), h - RULER_H), QColor(240, 166, 58, 14))
 
+    def is_nested(self, c: Clip) -> bool:
+        """O clipe mostra outra sequência do projeto (1.7)?"""
+        src = self.seq.sources.get(c.src)
+        return src is not None and src.is_nested
+
     def _clip_colors(self, c: Clip) -> tuple[QColor, QColor]:
+        if self.is_nested(c):
+            return ((QColor(theme.CLIP_NESTED_AUDIO), QColor(theme.CLIP_NESTED_AUDIO_HI)) if c.kind == AUDIO
+                    else (QColor(theme.CLIP_NESTED), QColor(theme.CLIP_NESTED_HI)))
         if c.kind == AUDIO:
             return QColor(theme.CLIP_AUDIO), QColor(theme.CLIP_AUDIO_HI)
         src = self.seq.sources.get(c.src)
@@ -386,6 +410,11 @@ class TimelineCanvas(QWidget):
         text_x = max(r.left(), HEADER_W) + 6
         src = self.seq.sources.get(c.src)
         label = c.name or (src.name if src is not None else "")
+        if src is not None and src.is_nested:  # o ícone da sequência e o nome de agora (ela pode ter sido renomeada)
+            label = src.name
+            if r.right() - text_x > 24:
+                p.drawPixmap(QPointF(text_x, r.top() + 4), nested_pixmap())
+                text_x += 16
         extra = []
         if abs(c.speed - 1.0) > 1e-6:
             extra.append(f"{c.speed:g}".replace(".", decimal_sep()) + "×")
@@ -1147,6 +1176,8 @@ class TimelineCanvas(QWidget):
         if clip is not None:
             self.model.select_group(clip.id)
             self.clipActivated.emit(clip.id)
+            if self.is_nested(clip):  # a sequência dele, com o cursor no quadro de dentro que estava sob o clique
+                self.openNestedRequested.emit(clip.id, int(math.floor(self.x_to_frame(pos.x()))))
 
     def leaveEvent(self, _e):
         self._hover_x = None
@@ -1248,6 +1279,7 @@ class TimelineCanvas(QWidget):
             if clip.id not in m.selection:
                 m.select_group(clip.id)
             menu.addAction(_("Dividir no cursor"), lambda: m.split_at(self.playhead))
+            self.nest_actions(menu, clip, pos.x())
             menu.addAction(_("Excluir"), lambda: m.delete_selected())
             menu.addAction(_("Excluir e fechar o espaço"), lambda: m.delete_selected(ripple=True))
             if clip.link:
@@ -1281,6 +1313,15 @@ class TimelineCanvas(QWidget):
         menu.addSeparator()
         menu.addAction(_("Adicionar marcador no cursor (M)"), lambda: self.add_marker_at())
         menu.exec(e.globalPosition().toPoint())
+
+    def nest_actions(self, menu: QMenu, clip: Clip, x: float) -> None:
+        """"Aninhar seleção" (a seleção inteira) e, num clipe de sequência, "Abrir a sequência" e "Desaninhar"."""
+        menu.addAction(_("Aninhar seleção (Ctrl+Shift+G)"), self.nestRequested.emit)
+        if self.is_nested(clip):
+            menu.addAction(_("Abrir a sequência"), lambda: self.openNestedRequested.emit(
+                clip.id, int(math.floor(self.x_to_frame(x)))))
+            menu.addAction(_("Desaninhar"), lambda: self.unnestRequested.emit(clip.id))
+        menu.addSeparator()
 
     def audio_cut_near(self, clip: Clip, x: float) -> Clip | None:
         """O clipe que entra no corte de som mais perto do clique (`x`) dentro de `clip`: o próprio clipe
@@ -1472,6 +1513,9 @@ class TimelineEditor(QWidget):
     filesDropped = Signal(list, int, str, int)
     filesInserted = Signal(list, int, str, int)
     clipActivated = Signal(str)
+    nestRequested = Signal()
+    unnestRequested = Signal(str)
+    openNestedRequested = Signal(str, int)
 
     def __init__(self, model: TimelineModel, parent=None):
         super().__init__(parent)
@@ -1499,6 +1543,9 @@ class TimelineEditor(QWidget):
         c.filesDropped.connect(self.filesDropped)
         c.filesInserted.connect(self.filesInserted)
         c.clipActivated.connect(self.clipActivated)
+        c.nestRequested.connect(self.nestRequested)
+        c.unnestRequested.connect(self.unnestRequested)
+        c.openNestedRequested.connect(self.openNestedRequested)
         c.viewChanged.connect(self._sync_bars)
         c.toolChanged.connect(self._sync_tools)
         model.selectionChanged.connect(self._sync_actions)
@@ -1709,7 +1756,8 @@ class TimelineEditor(QWidget):
         self.canvas.update()
 
     def peaks_ready(self, path: str) -> None:
-        if any(c.src == path for c in self.model.seq.clips if c.kind == AUDIO):
+        # path vazio: as formas de onda das sequências aninhadas (a chave delas é o WAV da mixagem, não o `Clip.src`)
+        if not path or any(c.src == path for c in self.model.seq.clips if c.kind == AUDIO):
             self.canvas.update()
 
     def zoom_fit(self) -> None:

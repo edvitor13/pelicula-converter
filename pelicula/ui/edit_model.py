@@ -418,7 +418,7 @@ class TimelineModel(QObject):
         todos os clipes da fonte; recusa (False) se algum está numa faixa travada. `record=False` (arrastando um
         controle) agrupa o histórico em 400 ms, como `set_clip_values`. Avisa com "values" (só a imagem muda)."""
         src = self.seq.sources.get(path)
-        if src is None or src.is_file:
+        if src is None or not src.is_generated:  # arquivo, ou outra sequência (1.7): os dados dela não são deste editor
             return False
         if any(self.seq.locked(c) for c in self.seq.clips if c.src == path):
             return False

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
+from .. import (APP_NAME, __version__, aninhar, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
                loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, textrender,
                timeline, titles, updater)
 from ..i18n import N_, _
@@ -52,6 +52,7 @@ from . import geometria_ui, luz_fotometro_ui
 from . import filtro_ajustes
 from . import pastas_ui
 from . import sequencias_ui
+from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
 
@@ -387,6 +388,7 @@ class MainWindow(QMainWindow):
         luz_fotometro_ui.install(self)  # 1.6: luz por plano e fotômetro da película (`ui/luz_fotometro_ui.py`)
         geometria_ui.install(self)  # 1.7: desespremer do clipe e janela útil da sequência (`ui/geometria_ui.py`)
         self.seqs_ui = sequencias_ui.install(self)  # 1.7: abas das sequências do projeto (`ui/sequencias_ui.py`)
+        self.nest_ui = aninhar_ui.install(self)  # 1.7: aninhar, desaninhar e abrir a sequência de um clipe (`ui/aninhar_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1598,6 +1600,7 @@ class MainWindow(QMainWindow):
         self._mix_key, self._mix_path = key, path
         self._set_audio("seq", path)
         self._clean_mixes(keep=path)
+        self.nest_ui.mix_finished()  # os WAVs das sequências de dentro nasceram com a mixagem: a forma de onda deles
 
     def _clean_mixes(self, keep: str = "") -> None:
         running = set(self._mix_running.values())  # a mixagem a caminho ainda vai ser entregue
@@ -1625,6 +1628,8 @@ class MainWindow(QMainWindow):
         if path in self._peaks:
             return self._peaks[path]
         src = self.model.seq.sources.get(path)
+        if src is not None and src.is_nested:
+            return self.nest_ui.peaks(src)  # o WAV da mixagem da sequência, se já existe
         if src is not None and not src.is_file:
             return None  # clipe sem arquivo: sem som
         if path not in self._peaks_pending:
@@ -1754,10 +1759,13 @@ class MainWindow(QMainWindow):
                 insert: bool = False):
         """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o que vem depois em vez de cobrir."""
         seq = self.model.seq
-        if src.is_nested:  # 1.7: uma sequência ainda não entra como clipe pela Mídia (a interface do aninhar vem depois)
-            self.statusBar().showMessage(_("Ainda não dá para pôr uma sequência dentro de outra pela Mídia."), 6000)
-            return []
-        self._adopt_format(src)
+        if src.is_nested:  # 1.7: uma sequência não impõe o formato dela a quem a recebe (nada de `_adopt_format`)
+            why = aninhar.refusal_for(seq, src)
+            if why:
+                self.statusBar().showMessage(why, 7000)
+                return []
+        else:
+            self._adopt_format(src)
         if not src.has_video:
             if at is None:
                 # Música: começa no início, na primeira faixa de áudio vazia.
@@ -1991,6 +1999,11 @@ class MainWindow(QMainWindow):
         seq = self.model.seq
         clip = seq.find(cid)
         if clip is None or clip.kind != timeline.VIDEO:
+            return
+        src = seq.sources.get(clip.src)
+        if src is not None and src.is_nested:  # a imagem dele é a da sequência: não há quadro de arquivo para analisar
+            self.statusBar().showMessage(_("A cor automática lê o quadro de um arquivo. Ajuste a cor nos clipes dentro "
+                                           "da sequência."), 7000)
             return
         img = None
         if self.cur_layers is not None:
@@ -3513,7 +3526,9 @@ class MainWindow(QMainWindow):
             "Shift+D — desligar / religar todos os efeitos") + "\n\n" + _(
             "Edição, sequências: Ctrl+Tab / Ctrl+Shift+Tab — próxima / anterior sequência (abas sobre a linha do tempo; "
             "\"+\" cria uma, dois cliques na aba renomeiam, arrastar muda a ordem, botão direito duplica, "
-            "configura ou apaga)"))
+            "configura ou apaga)") + "\n\n" + _(
+            "Edição: Ctrl+Shift+G aninha a seleção numa sequência nova (Ctrl+Z desfaz) • dois cliques num clipe de "
+            "sequência abrem a dela • botão direito nele: Desaninhar"))
 
     def about(self) -> None:
         try:

@@ -547,8 +547,8 @@ faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são
 - **Sequência vazia**: uma sequência nova não tem clipes, e a janela fica como num projeto vazio do modo Edição (sem
   prévia nem som). Dá para salvar o projeto assim e exportar outra sequência.
 - **Na Mídia** as sequências aparecem, com um ícone próprio, quando o projeto tem **duas ou mais**: dois cliques abrem a aba
-  e elas podem ir para pastas como qualquer item. Por enquanto uma sequência da Mídia **não** pode ser posta na linha do
-  tempo de outra (a janela avisa); isso vem depois.
+  e elas podem ir para pastas como qualquer item. Uma sequência da Mídia também pode ser posta na linha do tempo de outra
+  (veja *Sequências dentro de sequências*, logo abaixo).
 - **Exportar**: com duas ou mais sequências a janela ganha a linha **Sequência**, com a aberta escolhida. Trocar de sequência
   refaz o que depende dela: a duração, o trecho (volta para a sequência inteira), os capítulos, as legendas, a transparência,
   o nome e o tamanho do arquivo e a prévia. **Pôr várias sequências na fila** deixa marcar quais saem: uma tarefa para
@@ -557,6 +557,53 @@ faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são
 - **No terminal**, `pelicula-cli info projeto.plc` lista as sequências (a aberta ao salvar vem marcada) e `exportar` e
   `quadro` aceitam `--sequencia NOME` (o nome ou o id; sem ela vale a que estava aberta ao salvar). Um nome que não existe
   é um erro que lista os válidos.
+
+### Sequências dentro de sequências (1.7)
+
+Uma sequência pode entrar em outra **como um clipe**: a abertura montada à parte vira um clipe só na montagem final, e
+mexer na abertura muda o clipe. Ele tem imagem e som ligados, como um arquivo de vídeo.
+
+- **Pôr uma sequência na linha do tempo**: arraste-a da **Mídia**, ou use o botão direito nela (*Adicionar ao fim da linha
+  do tempo*, *Inserir no cursor*, *Sobrescrever no cursor*; também `,` e `.`). A sequência **não impõe o formato dela** a
+  quem a recebe: tamanho e quadros por segundo da de fora ficam como estão. Não dá para pôr uma sequência nela mesma, numa
+  que já a usa (formaria um ciclo), passando de 8 níveis, nem uma sequência vazia: a barra de status diz o motivo e nada muda.
+- **Abrir a sequência de um clipe**: **dois cliques** nele (ou *Abrir a sequência* no botão direito). A aba abre com o cursor
+  no quadro de dentro que estava sob o clique. Voltar para a outra aba devolve o cursor e o zoom que ela tinha.
+- **Aninhar seleção** (botão direito num clipe, ou **Ctrl+Shift+G**): os clipes selecionados (e os ligados a eles) viram uma
+  sequência nova, sem janela e sem perguntas; a aba continua a de fora, com o clipe novo selecionado. É um passo só do
+  **Ctrl+Z**. *Aninhar não muda a imagem nem o som.* Para isso, a ação **recusa**, dizendo o que fazer, quando: não há nada
+  selecionado ou há clipe em faixa travada; um clipe que não está na seleção ficaria no meio dela (na mesma faixa, ou numa
+  faixa de vídeo entre a mais baixa e a mais alta da seleção); uma transição (inclusive de som) liga um clipe da seleção a um
+  de fora; passaria de 8 níveis. Ela **avisa**, mas aninha, quando: uma mesclagem passa a valer só dentro da sequência (há
+  clipes de fora por baixo); o look de película lê os cortes da montagem (*A montagem na película*, luz por plano) e passa a
+  ver a seleção como um plano só; um título ou gerador está numa janela útil; ou uma emenda de som sem corte ganha o fade
+  curto de 5 ms nas pontas.
+- **Desaninhar** (botão direito no clipe de sequência): os clipes de dentro voltam para esta linha do tempo, no trecho que o
+  clipe mostrava e com os mesmos ids; a sequência de dentro **continua no projeto**. Aninhar e desaninhar sem mexer em nada dá
+  a mesma imagem e o mesmo som. Se o clipe de sequência tem ajustes (opacidade, cor, enquadramento, transições, volume…), a
+  janela pergunta antes, porque eles se perdem. Com velocidade diferente de 1×, rampa, reverso ou quadro congelado, ou se a
+  sequência de dentro tem outros quadros por segundo, **não dá**: a mensagem diz por quê.
+- **O clipe na linha do tempo** tem cor própria (azul-violeta), o ícone de sequência e o nome atual dela; o som mostra a forma
+  de onda da mixagem de dentro, que aparece quando o som da montagem termina de ser preparado.
+- **No painel do clipe**: velocidade, rampa, cor, enquadramento, opacidade e transições valem no clipe de sequência. O perfil
+  de câmera do clipe some, e *Automático*, os conta-gotas e *Igualar* ficam desligados (eles leem o quadro de um arquivo):
+  use-os nos clipes de dentro.
+- **Legendas presas a um arquivo** continuam aparecendo (e dá para editá-las) depois de aninhar. As legendas da sequência e
+  os marcadores ficam na sequência de fora.
+
+Limites que vale conhecer:
+
+- Com **clipes de fora por baixo** da seleção, a sequência de dentro é transparente e o resultado pode diferir em **1 passo**
+  de cor (de 255) em parte dos pixels; sem nada por baixo, é idêntico bit a bit.
+- Com **janela útil** na de fora, a de dentro tem o tamanho da janela; títulos e geradores dentro podem mudar alguns passos de
+  cor nas bordas das letras.
+- Com **volume de faixa** de som diferente de 0 dB, o som aninhado pode diferir **1 passo de 24 bits** (inaudível); desaninhar
+  volta ao som exato. Voz, redução de ruído e normalizar num clipe com volume de faixa podem soar um pouco diferente.
+- Uma sequência que **ganha som depois** de posta como clipe só de vídeo não ganha o clipe de som de fora sozinha: ela fica
+  muda até você pôr de novo.
+- Sequências de dentro **não mostram as legendas gravadas nem os marcadores** delas na sequência de fora; *Gerar legendas* e
+  *Cortar pelo texto* ignoram os clipes de sequência.
+- A janela de **Exportar** e o terminal tratam o clipe de sequência como qualquer clipe: a sequência exportada é a de fora.
 
 ### Proporção da sequência
 
@@ -668,6 +715,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl+F (no painel) / / | Filtrar ajustes do clipe (Esc limpa) |
 | Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
 | Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
+| Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

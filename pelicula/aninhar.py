@@ -106,6 +106,25 @@ def _has_tone(seq: Sequence, clips: list[Clip]) -> bool:
     return False
 
 
+# ------------------------------------------------------------------ pôr uma sequência da Mídia na linha do tempo
+def refusal_for(seq: Sequence, src: timeline.Source) -> str:
+    """Por que `seq` não pode ter um clipe desta fonte de sequência, numa frase curta ("" = pode): ela mesma, um ciclo, o
+    limite de níveis, uma que não existe mais ou uma sem nenhum clipe (que daria um clipe de um quadro só)."""
+    inner = seq.siblings.get(src.nested_id) if (src.is_nested and seq.siblings is not None) else None
+    if inner is None:
+        return "" if not src.is_nested else _("Essa sequência não existe mais no projeto.")
+    if inner is seq:
+        return _("Uma sequência não pode entrar nela mesma.")
+    if not seq.can_contain(src):
+        if any(s is seq for s in inner.closure()):
+            return _("\"{nome}\" já usa esta sequência: uma dentro da outra formaria um ciclo.").format(
+                nome=inner.display_name)
+        return _("Passaria de {n} níveis de sequência dentro de sequência.").format(n=timeline.MAX_NEST)
+    if not inner.clips:
+        return _("A sequência \"{nome}\" está vazia: ponha clipes nela antes.").format(nome=inner.display_name)
+    return ""
+
+
 # ------------------------------------------------------------------ aninhar
 def _plan_nest(seq: Sequence, ids, look: dict | None) -> _Plan:
     sel = seq.expand(ids)
