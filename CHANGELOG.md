@@ -7,6 +7,41 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Várias sequências no projeto** (#57): abas sobre a linha do tempo, cada uma com tamanho, quadros por segundo,
+  proporção, faixas, marcadores e legendas próprios; a Mídia e as pastas são do projeto. **+** cria, dois cliques
+  renomeiam, arrastar muda a ordem, **Ctrl+Tab** e **Ctrl+Shift+Tab** passam de aba. *Nova sequência a partir deste
+  vídeo*, na Mídia, já vem com o formato dele. Trocar de aba não é mudança, e o **Ctrl+Z** é um só para o projeto.
+- **Sequência dentro de sequência** (#57): uma sequência entra em outra como um clipe de imagem e som ligados, até 8
+  níveis; mexer na de dentro muda o clipe. **Aninhar seleção** (**Ctrl+Shift+G**) leva os clipes para uma sequência nova
+  sem mudar a imagem nem o som, e **Desaninhar** devolve. Dois cliques no clipe abrem a sequência no quadro certo.
+  Quando a promessa não se sustenta, a ação recusa ou avisa; os limites estão em *Sequências dentro de sequências*
+  (`docs/EDICAO.md`).
+- **Exportar sequências** (#57): com duas ou mais, a janela escolhe qual sai e *Pôr várias sequências na fila* gera uma
+  tarefa para cada. No terminal, `pelicula-cli exportar` e `quadro` aceitam `--sequencia NOME`, e `info` lista as
+  sequências do projeto.
+- **Proporção de cinema na sequência** (#55): 1,33 a 2,76 (com 2,39 Scope) ou personalizada, como quadro real ou como
+  faixas pretas no quadro. Com faixas nasce a **janela útil**: encaixe, posição, títulos e legendas valem dentro dela, e
+  as faixas ficam em preto exato, fora do look.
+- **Desespremer o clipe** (#52): 1,33×, 1,5×, 1,55×, 1,8×, 2× ou taxa manual, antes de o clipe se encaixar no quadro,
+  para vídeo de lente anamórfica no meio de uma montagem.
+- **Escala horizontal e vertical** (#54) nos ajustes do clipe, de 10% a 400%, com chaves de animação.
+- **Filtrar ajustes** (#56): um campo no alto dos painéis de ajustes, nos dois modos, procura em português, inglês e
+  espanhol nos títulos, nos controles, nas dicas e nas opções. **Ctrl+F** ou **/** levam a ele, **Esc** limpa e devolve
+  o painel como estava.
+- **Pastas coloridas na Mídia** (#58): pastas e subpastas, oito cores ou uma personalizada, arrastar, ordenar por nome,
+  tipo ou data, e soltar uma pasta do sistema para importá-la. Um arquivo guardado numa pasta volta com o projeto mesmo
+  sem estar na linha do tempo.
+- **Desligar todos os efeitos** (**Shift+D**): mostra a imagem sem o look e sem os ajustes de imagem dos clipes, para
+  comparar. Religar devolve tudo, nada entra no projeto ou no desfazer, e a exportação pergunta antes de sair sem efeitos.
+- **Seletores da prévia:** o modo e a comparação ganharam ícones e o estado escolhido mais claro, e o seletor de
+  comparação agora é *Resultado / Dividido / Lado a lado / Original*.
+
+### Mudou
+- **Projetos:** um projeto que usa algo novo da 1.7 (mais de uma sequência, sequência como clipe, pastas, janela útil,
+  escala por eixo ou desespremer) só abre na 1.7 ou mais nova. Os antigos abrem e saem iguais, e a proporção como quadro
+  real continua abrindo nas versões anteriores.
+
 ### Corrigido
 - **Ctrl+Z desfazendo o look na Edição:** abrir um projeto salvo no modo Película com a Edição na tela deixava o botão
   e o histórico na Película e as telas na Edição (#50).
