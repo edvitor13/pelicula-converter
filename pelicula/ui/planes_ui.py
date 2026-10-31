@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QToolButton, Q
 
 from .. import masks, planes
 from ..i18n import N_, _
-from . import icons, theme
+from . import icons, sem_efeitos_ui, theme
 
 FRONT_RGB = (0.94, 0.65, 0.23)   # laranja: frente
 BACK_RGB = (0.30, 0.55, 0.95)    # azul: fundo
@@ -129,6 +129,9 @@ class PlanesUI:
     # ------------------------------------------------------------ conta-gotas
     def _toggle_pick(self, on: bool) -> None:
         viewer = self.win.viewer
+        if on and sem_efeitos_ui.refuses_tool(self.win):
+            self._pick_done()
+            return
         if on:
             self._picking = True
             viewer.start_pick()

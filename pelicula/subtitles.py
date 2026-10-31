@@ -366,8 +366,6 @@ def mapped(seq, path: str, cues: Iterable[Cue], min_piece: float = MIN_PIECE):
     for c in carriers(seq, path):
         inner = seq.nested(c)
         pieces = direct if inner is None else list(mapped(inner, path, cues, min_piece))
-        if inner is not None:
-            pieces = [(i, m, cue) for i, m, cue in pieces]
         yield from _through(seq, c, pieces, min_piece)
 
 

@@ -1995,6 +1995,8 @@ class MainWindow(QMainWindow):
     def auto_adjust_clip(self, cid: str, whole: bool = True) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço.
         `whole`: 1.6, o clipe inteiro (`colorsimple.sample_frames`; vídeo de arquivo) em vez do quadro atual."""
+        if sem_efeitos_ui.refuses_tool(self):
+            return
         if whole and cor_ui.auto_whole_clip(self, cid):
             return
         seq = self.model.seq

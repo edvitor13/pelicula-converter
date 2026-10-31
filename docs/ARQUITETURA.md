@@ -4019,6 +4019,9 @@ Pastas coloridas para organizar a Mídia do modo Edição (#58). Só organizaç�
 chave, clipe ou modelo muda. Religar dá os mesmos quadros bit a bit, sem passo no desfazer, sem "alterações não salvas"
 e sem nada no `to_json`.
 
+- **Quem ajusta medindo a imagem recusa** (`sem_efeitos_ui.refuses_tool`, com o aviso na barra de status): os conta-gotas do
+  clipe e da pele, o "Automático" e o "Igualar". O resultado não apareceria, e o quadro lido vem sem o perfil de câmera. Desligar
+  com um conta-gotas ligado cancela. Zebra, falsa cor e fotômetro só leem a tela e continuam.
 - **`frame.Recipe.no_effects`** (o último campo): em `__post_init__`, `keys = {}`, `lut = None` e `values` vira
   `presets.builtin_values("original")`, o caminho "sem película" de `_export_look`; `values` None (prévia do modo Edição
   sem película) continua None. Daí `Recipe.profile` é `rec709`, `Recipe.shutter` é 0 e `light_of`/`target_of` são os do

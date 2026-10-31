@@ -174,6 +174,44 @@ def test_off_then_on_is_exactly_as_before(win, sample_video):
         assert _state(win) == state, mode
 
 
+def test_tools_that_adjust_by_the_image_ask_to_turn_the_effects_back_on(win, sample_video, tmp_path):
+    _montage(win, sample_video)
+    clip = next(c for c in win.model.seq.clips if c.kind == tl.VIDEO)
+    other = next(c for c in win.model.seq.clips if c.kind == tl.VIDEO and c.id != clip.id)
+    win.model.select_group(clip.id)
+    APP.processEvents()
+    tools = win.color_tools
+    tools.btn_wb.setChecked(True)   # ligado antes de desligar os efeitos: o conta-gotas não pode continuar medindo
+    assert win.viewer.picking
+    _switch(win, True)
+    assert not win.viewer.picking and not tools.btn_wb.isChecked()
+    before = json.dumps(win.model.seq.to_json(), sort_keys=True)
+
+    def refused() -> None:
+        assert "Religue os efeitos" in win.statusBar().currentMessage()
+        win.statusBar().clearMessage()
+        assert not win.viewer.picking
+        assert json.dumps(win.model.seq.to_json(), sort_keys=True) == before
+
+    tools.btn_color.setChecked(True)
+    assert not tools.btn_color.isChecked()
+    refused()
+    win.auto_adjust_clip(clip.id)
+    refused()
+    assert tools.match_clip(other.id) is False
+    refused()
+    assert tools.match_image(str(tmp_path / "nao_precisa_existir.png")) is False
+    refused()
+    win.planes_ui._toggle_pick(True)
+    assert not win.planes_ui._picking
+    refused()
+
+    _switch(win, False)
+    tools.btn_wb.setChecked(True)
+    assert win.viewer.picking   # religado, o conta-gotas volta a valer
+    win.viewer.cancel_pick()
+
+
 def test_file_in_film_mode_shows_the_original_preset(win, sample_video):
     _open(win, sample_video)
     _look(win)

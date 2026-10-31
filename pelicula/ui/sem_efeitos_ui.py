@@ -49,9 +49,21 @@ def _reading(win):
     return win._shutter(), media.float_input(win.info, read_entrada(win))
 
 
+def refuses_tool(win) -> bool:
+    """Com os efeitos desligados, quem ajusta medindo a imagem (conta-gotas, "Automático", "Igualar") recusa: a pessoa não
+    veria o resultado, e o quadro lido vem sem o perfil de câmera. True = recusou, com o aviso na barra de status."""
+    if not win.no_effects:
+        return False
+    win.statusBar().showMessage(_("Religue os efeitos (Shift+D) para usar esta ferramenta: ela ajusta pela imagem, e o "
+                                  "resultado não apareceria."), 7000)
+    return True
+
+
 def _toggled(win, off: bool) -> None:
     before = _reading(win)
     win.no_effects = bool(off)
+    if off:  # um conta-gotas ligado mediria a imagem sem efeitos
+        win.viewer.cancel_pick()
     win._update_label_proc()
     if win.cur_layers is not None:
         win._compose_current()

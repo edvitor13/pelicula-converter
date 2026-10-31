@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMenu, QToolBut
 
 from .. import colorsimple, media, timeline
 from ..i18n import _
-from . import icons, theme
+from . import icons, sem_efeitos_ui, theme
 from .flow import flow_widget
 
 NEW_CARDS = ("pele", "alvo", "degrade")
@@ -149,6 +149,9 @@ class ColorTools:
     def _toggle(self, kind: str, on: bool) -> None:
         viewer = self.win.viewer
         other = self.btn_color if kind == "wb" else self.btn_wb
+        if on and sem_efeitos_ui.refuses_tool(self.win):
+            self._pick_done()
+            return
         if on:
             if other.isChecked():
                 other.blockSignals(True)
@@ -321,7 +324,7 @@ class ColorTools:
 
     def match_clip(self, cid: str) -> bool:
         other = self.model.seq.find(cid)
-        if other is None:
+        if other is None or sem_efeitos_ui.refuses_tool(self.win):
             return False
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -332,6 +335,8 @@ class ColorTools:
         return self._apply_match(ref, other.values, other.name or (src.name if src else "-"))
 
     def match_image(self, path: str | None = None) -> bool:
+        if sem_efeitos_ui.refuses_tool(self.win):
+            return False
         if path is None:
             path, _f = QFileDialog.getOpenFileName(self.win, _("Igualar a uma imagem"), "",
                                                    _("Imagens") + " (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp)")

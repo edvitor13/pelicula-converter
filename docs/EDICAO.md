@@ -638,7 +638,9 @@ encaixam nela. Dá para usar as duas, embora quase sempre baste uma.
 look e sem os ajustes de imagem dos clipes (cor, detalhe, perfil de câmera, pele, cor escolhida, degradê). Cortes,
 tempo, enquadramento, opacidade, mesclagem, transições, títulos, legendas gravadas e o som continuam. Ao religar, tudo
 volta exatamente como estava; não entra no desfazer nem no projeto, e abrir outro arquivo ou projeto religa. A exportação
-segue a prévia e pergunta antes (*Exportar sem efeitos*, *Religar e exportar*, *Cancelar*). O seletor da comparação é
+segue a prévia e pergunta antes (*Exportar sem efeitos*, *Religar e exportar*, *Cancelar*). Enquanto eles estão desligados,
+os conta-gotas, o *Automático* e o *Igualar* pedem para religar: eles ajustam pela imagem, e o resultado não apareceria.
+Zebra, falsa cor e fotômetro continuam e medem o que a tela mostra. O seletor da comparação é
 **Resultado / Dividido / Lado a lado / Original**: *Resultado* é o que sai, com ou sem película.
 
 Acima dos ajustes há um monitor com quatro vistas:

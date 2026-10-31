@@ -35,7 +35,8 @@ só muda o que você vê: não altera nenhum valor, não vai para o projeto e n�
 (com as chaves, o LUT e o obturador) e, no modo Edição, os ajustes de imagem dos clipes: cor, detalhe, perfil de câmera,
 pele, cor escolhida, degradê. Ficam a edição e o som: cortes, tempo, enquadramento, opacidade, mesclagem, transições,
 títulos, geradores e legendas gravadas. A etiqueta da imagem diz **SEM EFEITOS**. Nada é apagado: ao religar, tudo volta
-exatamente como estava, e o que você mexer enquanto isso aparece ao religar. Não entra no desfazer nem no projeto, e abrir
+exatamente como estava, e o que você mexer enquanto isso aparece ao religar. Os conta-gotas, o *Automático* e o *Igualar* pedem
+para religar antes, porque ajustam pela imagem e o resultado não apareceria. Não entra no desfazer nem no projeto, e abrir
 outro arquivo ou projeto religa os efeitos. "Salvar quadro" e a exportação seguem a prévia: ao exportar com os efeitos
 desligados, o app pergunta se é para exportar sem efeitos ou religar antes; um trabalho já na fila fica como foi criado.
 
