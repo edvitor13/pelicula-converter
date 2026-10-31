@@ -193,11 +193,10 @@ class MediaBin(QWidget):
             item = MediaItem(src.path)
             self.list.add_media(item)
         kind = source_kind(src)
-        if kind == "gerado" and src.unbounded:
+        if kind == "imagem" or (kind == "gerado" and src.unbounded):
             item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])}")
         else:
-            dur = _("imagem") if kind == "imagem" else fmt_seconds(src.length)
-            item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])} • {dur}")
+            item.setText(0, f"{src.name}\n{_(KIND_LABELS[kind])} • {fmt_seconds(src.length)}")
         item.setToolTip(0, f"{src.name}\n{src.width} × {src.height}" if src.is_nested else src.path)
         item.kind, item.name = kind, src.name
         item.mtime = _mtime(src.path) if src.is_file else 0.0

@@ -1453,8 +1453,9 @@ class MainWindow(QMainWindow):
         if self.src_seq is not None:
             seq = self.src_seq
             n = sum(1 for c in seq.clips if c.kind == timeline.VIDEO)
-            self.st_file.setText(_("Montagem {w}×{h} • {fps} fps • {n} clipes de imagem • {dur}").format(
-                w=seq.width, h=seq.height, fps=i18n.fmt_decimal(seq.fps, 3), n=n,
+            clips = _("1 clipe de imagem") if n == 1 else _("{n} clipes de imagem").format(n=n)
+            self.st_file.setText(_("Montagem {w}×{h} • {fps} fps • {clipes} • {dur}").format(
+                w=seq.width, h=seq.height, fps=i18n.fmt_decimal(seq.fps, 3), clipes=clips,
                 dur=timecode(seq.duration, seq.fps)))
             self.file_label.setText(_("Montagem da edição"))
             self._schedule_mix(immediate=not was_seq or reset)
