@@ -1,3 +1,16 @@
+## Version 1.7.0 — October 30, 2026
+
+**Multiple sequences, sequences inside sequences and cinema formats in the edit.**
+
+- 🗂️ **Multiple sequences.** Tabs above the timeline, each with its own size, frame rate and tracks. Create one from a video, switch tabs with **Ctrl+Tab** and add several to the export queue at once.
+- 🎞️ **Sequences inside sequences.** A sequence goes into another as a clip with picture and sound, and changing the inner one changes the clip. **Nest selection** (**Ctrl+Shift+G**) groups clips without changing the picture or the sound, and **Unnest** brings them back. When that can't be guaranteed, the app refuses or warns you.
+- 📐 **Cinema formats.** 2.39 (Scope) and other aspect ratios, as a real frame or as burned-in black bars, with clips, titles and subtitles inside the usable window. Per-clip **Desqueeze** for anamorphic lenses, and separate horizontal and vertical scale.
+- 📁 **Colored folders in Media.** Folders and subfolders, dragging, sorting and dropping a system folder to import it.
+- 🔎 **Filter settings.** Type in Portuguese, English or Spanish and the panel shows only what matters (**Ctrl+F** or **/**).
+- 👁️ **Turn off all effects.** **Shift+D** shows the picture without the look and without the clips' image adjustments, to compare. Turning them back on restores everything, and export asks before rendering without effects.
+- 🛠️ **Fixes.** Ctrl+Z undoing the look in Edit mode, deleted clips still playing in the preview, the timeline zoom jumping away, and Export during an export.
+- 📂 **Projects.** A project that uses something new from 1.7 only opens in 1.7 or newer; older projects open and render the same.
+
 ## Version 1.6.0 — October 29, 2026
 
 **Color and film: log cameras, simple color, a complete lab and real grain.**
