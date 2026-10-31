@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.7.0] - 2026-10-30
+
 ### Adicionado
 - **Várias sequências no projeto** (#57): abas sobre a linha do tempo, cada uma com tamanho, quadros por segundo,
   proporção, faixas, marcadores e legendas próprios; a Mídia e as pastas são do projeto. **+** cria, dois cliques
@@ -53,10 +59,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Exportar durante uma exportação:** o botão (e o Ctrl+E) agora mostra a fila, em vez de abrir outra exportação
   que recomeçava do zero ao terminar a primeira. Na fila há *Adicionar outra exportação…*, e um destino que já está
   na fila pede outro nome (#59).
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.6.0] - 2026-10-29
 

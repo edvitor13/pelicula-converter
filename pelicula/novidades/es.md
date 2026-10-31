@@ -1,3 +1,16 @@
+## Versión 1.7.0 — 30 de octubre de 2026
+
+**Varias secuencias, secuencia dentro de secuencia y el formato de cine en el montaje.**
+
+- 🗂️ **Varias secuencias.** Pestañas sobre la línea de tiempo, cada una con su tamaño, cuadros por segundo y pistas. Crea una a partir de un vídeo, cambia de pestaña con **Ctrl+Tab** y pon varias en la cola de exportación de una vez.
+- 🎞️ **Secuencia dentro de secuencia.** Una secuencia entra en otra como un clip de imagen y sonido, y cambiar la de dentro cambia el clip. **Anidar selección** (**Ctrl+Shift+G**) agrupa los clips sin cambiar la imagen ni el sonido, y **Desanidar** los devuelve. Cuando eso no se puede garantizar, la app rechaza o avisa.
+- 📐 **Formato de cine.** Proporción 2,39 (Scope) y otras, como cuadro real o franjas negras grabadas, con clips, títulos y subtítulos dentro de la ventana útil. **Desanamorfizar** por clip para lente anamórfica, y escala horizontal y vertical separadas.
+- 📁 **Carpetas de colores en Medios.** Carpetas y subcarpetas, arrastrar, ordenar y soltar una carpeta del sistema para importarla.
+- 🔎 **Filtrar ajustes.** Escribe en portugués, inglés o español y el panel muestra solo lo que interesa (**Ctrl+F** o **/**).
+- 👁️ **Desactivar todos los efectos.** **Shift+D** muestra la imagen sin el look y sin los ajustes de imagen de los clips, para comparar. Reactivarlos devuelve todo, y la exportación pregunta antes de salir sin efectos.
+- 🛠️ **Correcciones.** Ctrl+Z deshaciendo el look en Edición, clip eliminado que seguía sonando en la vista previa, zoom de la línea de tiempo que saltaba y Exportar durante una exportación.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.7 solo abre en la 1.7 o más nueva; los antiguos abren y salen iguales.
+
 ## Versión 1.6.0 — 29 de octubre de 2026
 
 **Color y película: cámaras log, color simple, laboratorio completo y grano de verdad.**
