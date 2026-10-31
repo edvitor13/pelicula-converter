@@ -1056,6 +1056,11 @@ diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um
 `look.lab_eval()` é a referência em numpy usada nos testes. Com `lab_on` desligado o plano só leva
 `u_lab_on = 0` e a imagem não muda.
 
+**Limite conhecido:** em Rec.709, `dispToStops` leva o código 1,0 ao teto de +12 stops (254/255 dá cerca de +8,6) e
+as linhas de `sens` passam parte disso às outras camadas: `(255, 40, 30)` sai perto de `(225, 205, 145)`, contra
+`(193, 54, 26)` para `(220, 40, 30)`. Mudar o teto muda a cor de projetos salvos com o Laboratório, do LUT exportado e
+do plugin do Resolve, então fica para uma decisão à parte.
+
 ## 15. Plugin do DaVinci Resolve (`resolve.py`)
 
 `build_package(pasta)` grava `PeliculaConverter/` com:

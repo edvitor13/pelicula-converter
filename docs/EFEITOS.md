@@ -219,6 +219,11 @@ de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe sã
 conferido pelo método LAD da Kodak (*Laboratory Aim Density*): o cinza de 16% sai na cópia com densidade visual
 perto de 1,0, como o alvo dos laboratórios, e cerca de 7 pontos de copiadora compensam 1 stop de exposição da
 câmera.
+
+**Limite conhecido:** num vídeo comum (Rec.709), um canal no máximo do arquivo (255 em 8 bits) é lido como muita
+luz, e o efeito entre as camadas leva essa luz às outras cores. Um vermelho estourado em 255 sai claro e quase
+branco, com a borda marcada. No modo Edição, baixar um pouco *Brancos* ou *Exposição* do clipe evita isso.
+
 Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
