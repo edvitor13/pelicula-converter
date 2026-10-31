@@ -116,6 +116,7 @@ class ExportSettings:
     loudness: float = 0.0     # volume alvo em LUFS (−14, −16, −23…); 0 = o som não muda de volume
     true_peak: float = -1.0   # pico real máximo (dBTP) quando há volume alvo
     net_grain: bool = False   # "Grão para redes": grão com tamanho mínimo na saída (look.build_plan(net_grain=))
+    no_effects: bool = False  # 1.7: "Desligar todos os efeitos" valia ao criar o trabalho (`frame.Recipe.no_effects`)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -627,10 +628,10 @@ def _norm(path: str) -> str:
 
 
 def job_inputs(info: media.MediaInfo, sequence=None) -> list[str]:
-    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, todos os arquivos da montagem (clipes sem
-    arquivo não contam)."""
+    """Arquivos lidos pela exportação: o vídeo ou, no modo Edição, os arquivos que a montagem usa, em qualquer nível
+    (clipes sem arquivo não contam; a Mídia é do projeto todo, e o que nenhum clipe usa não é lido)."""
     if sequence is not None:
-        return [str(p) for p, s in sequence.sources.items() if s.is_file]
+        return [str(s.path) for s in sequence.deep_sources() if s.is_file]
     return [info.path]
 
 
@@ -645,6 +646,24 @@ def partial_clash(path: str, s: ExportSettings, inputs: list[str]) -> str:
         if src and (_norm(src) == part or (is_sequence(s) and _norm(os.path.dirname(src)) == part)):
             return src
     return ""
+
+
+def queue_clash(path: str, s: ExportSettings, jobs) -> bool:
+    """Outro trabalho da fila (na espera ou exportando) grava neste destino?"""
+    target = _norm(output_target(path, s))
+    return any(j.status in ("aguardando", "exportando") and _norm(output_target(j.out_path, j.settings)) == target
+               for j in jobs)
+
+
+def free_output(path: str, s: ExportSettings, jobs) -> str:
+    """O primeiro nome `video_2.mp4`, `video_3.mp4`… que nem a fila nem o disco usam."""
+    p = Path(path)
+    n = 2
+    while True:
+        name = str(p.with_name(f"{p.stem}_{n}{p.suffix}"))
+        if not queue_clash(name, s, jobs) and not output_exists(name, s):
+            return name
+        n += 1
 
 
 def partial_clash_message(src: str) -> str:
@@ -732,7 +751,7 @@ def frame_pipeline(info: media.MediaInfo, values: dict, s: ExportSettings, seq=N
         legal = media.legal_range(info)
     return Recipe(values, fps, depth, dither=bool(s.dither) and depth == 8, legal=legal, lut=lut_of(values),
                   seq=seq, fit=geometry, net_grain=float(scale) if s.net_grain else 0.0, keys=dict(keys or {}),
-                  src_fps=float(info.fps), burn=burn, alpha=wants_alpha(s))
+                  src_fps=float(info.fps), burn=burn, alpha=wants_alpha(s), no_effects=bool(s.no_effects))
 
 
 def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, fps_out: str | None,
@@ -742,7 +761,7 @@ def open_reader(info: media.MediaInfo, frames: Recipe, start: int, total: int, f
     if seq is not None:
         from .sequence import SequenceReader
         return SequenceReader(seq, f.dec_w, f.dec_h, frames.depth, start, total, hq=True, perf=perf,
-                              fps_out=fps_out, shutter=frames.shutter), 0
+                              fps_out=fps_out, shutter=frames.shutter, no_effects=frames.no_effects), 0
     from . import tempo_camera
     if fps_out and tempo_camera.active(frames.shutter, float(info.fps), frames.fps):
         # 1.6, obturador: o arquivo na taxa dele; cada quadro da saída mistura os quadros da janela aberta
@@ -768,7 +787,8 @@ def preview_frame(engine: Engine, info: media.MediaInfo, values: dict, s: Export
     frame = max(0, min(int(frame), info.frames - 1))
     if seq is not None:
         from . import sequence
-        img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True, shutter=frames.shutter)
+        img = sequence.grab(seq, frame, f.dec_w, f.dec_h, frames.depth, hq=True, shutter=frames.shutter,
+                            no_effects=frames.no_effects)
     else:
         img = None
         index = round(frame * frames.fps / info.fps) if s.fps != "original" else frame

@@ -106,7 +106,7 @@ class GeneratorEditor(QWidget):
         if c.kind != VIDEO:
             c = next((g for g in self.model.seq.group(c) if g.kind == VIDEO), None)
         src = self.model.seq.sources.get(c.src) if c is not None else None
-        if src is None or src.is_file:
+        if src is None or not src.is_generated:  # arquivo ou outra sequência (1.7): sem painel de gerador
             return None, None
         return src, generators.generator_of(src)
 

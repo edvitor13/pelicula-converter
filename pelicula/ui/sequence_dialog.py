@@ -1,13 +1,14 @@
-"""Janela "Configurar a sequência": resolução, quadros por segundo, cor do fundo, emendas de som e faixa
-principal magnética."""
+"""Janela "Configurar a sequência": resolução, proporção, quadros por segundo, cor do fundo, emendas de som e faixa
+principal magnética. A mesma janela cria uma sequência nova (#57): com `name`, ganha o campo do nome, sem as
+referências aos clipes de uma sequência que já existe (`reference` traz o tamanho do vídeo de onde ela nasce)."""
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import timeline
+from .. import params, timeline
 from ..i18n import N_, _, fmt_decimal
 from ..timeline import VIDEO, Sequence
 from .widgets import ColorButton
@@ -22,6 +23,11 @@ RESOLUTIONS: list[tuple[str, str, int, int]] = [
     ("quadrado", N_("Quadrado — 1080 × 1080"), 1080, 1080),
     ("4x5", N_("Retrato 4:5 — 1080 × 1350"), 1080, 1350),
 ]
+
+# Proporções do menu (1.7): as chaves e os rótulos são os de `params.PROPORCOES`, a "Moldura" do look.
+RATIOS: tuple[str, ...] = ("1.33", "1.37", "1.43", "1.78", "1.85", "2.00", "2.20", "2.39", "2.76")
+RATIO_LABELS = dict(params.PROPORCOES)
+REAL, BARS = "real", "faixas"  # como a proporção sai
 
 
 def fps_label(fps_str: str) -> str:
@@ -41,27 +47,41 @@ def first_video_size(seq: Sequence) -> tuple[int, int] | None:
 
 
 class SequenceDialog(QDialog):
-    def __init__(self, parent, seq: Sequence):
+    def __init__(self, parent, seq: Sequence, name: str | None = None, reference: tuple[int, int] | None = None,
+                 taken=()):
+        """`name` (texto, pode ser vazio): cria uma sequência nova, e `seq` só dá os valores de partida (tamanho, fps,
+        fundo…) — sem as referências aos clipes dela. `reference`: o tamanho do vídeo de onde a nova nasce, como
+        opção "Igual ao vídeo". `taken`: nomes que outras sequências já usam."""
         super().__init__(parent)
-        self.setWindowTitle(_("Configurar a sequência"))
+        self.creating = name is not None
+        self.setWindowTitle(_("Nova sequência") if self.creating else _("Configurar a sequência"))
         self.setMinimumWidth(460)
         self.seq = seq
+        self._taken = {str(t).strip().casefold() for t in taken}
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
-        intro = QLabel(_("Tamanho e ritmo do vídeo montado. Os clipes se encaixam no quadro conforme o "
-                         "\"Encaixe\" de cada um; mudar os quadros por segundo mantém o tempo dos cortes."))
+        if self.creating:
+            intro = QLabel(_("Escolha o tamanho e os quadros por segundo da sequência nova. Dá para mudar depois em "
+                             "\"Configurar a sequência\"."))
+        else:
+            intro = QLabel(_("Tamanho e ritmo do vídeo montado. Os clipes se encaixam no quadro conforme o "
+                             "\"Encaixe\" de cada um; mudar os quadros por segundo mantém o tempo dos cortes."))
         intro.setObjectName("Muted")
         intro.setWordWrap(True)
         lay.addWidget(intro)
         form = QFormLayout()
         form.setSpacing(8)
+        if self.creating:
+            self.name_edit = QLineEdit(name)
+            self.name_edit.setPlaceholderText(_("Nome da sequência"))
+            form.addRow(_("Nome"), self.name_edit)
         self.res = QComboBox()
-        self._first = first_video_size(seq)
+        self._first = reference if self.creating else first_video_size(seq)
         for key, label, w, h in RESOLUTIONS:
             self.res.addItem(_(label), key)
         if self._first:
-            self.res.addItem(_("Igual ao primeiro clipe — {w} × {h}").format(w=self._first[0], h=self._first[1]),
-                             "primeiro")
+            same = _("Igual ao vídeo — {w} × {h}") if self.creating else _("Igual ao primeiro clipe — {w} × {h}")
+            self.res.addItem(same.format(w=self._first[0], h=self._first[1]), "primeiro")
         self.res.addItem(_("Personalizado"), "custom")
         form.addRow(_("Resolução"), self.res)
         size = QWidget()
@@ -78,6 +98,34 @@ class SequenceDialog(QDialog):
         sl.addWidget(self.h)
         sl.addStretch(1)
         form.addRow(_("Largura × altura"), size)
+        ratio = QWidget()
+        rl = QHBoxLayout(ratio)
+        rl.setContentsMargins(0, 0, 0, 0)
+        self.ratio = QComboBox()
+        self.ratio.addItem(_("Do tamanho escolhido"), "")
+        for key in RATIOS:
+            self.ratio.addItem(_(RATIO_LABELS[key]), key)
+        self.ratio.addItem(_("Personalizada"), "custom")
+        self.ratio.setToolTip(_("A proporção da imagem do vídeo montado, como 2,39 (Scope)."))
+        self.ratio_value = QDoubleSpinBox()
+        self.ratio_value.setRange(1.0, 4.0)
+        self.ratio_value.setDecimals(2)
+        self.ratio_value.setSingleStep(0.01)
+        self.ratio_value.setValue(2.39)
+        rl.addWidget(self.ratio, 1)
+        rl.addWidget(self.ratio_value)
+        form.addRow(_("Proporção"), ratio)
+        self.apply_as = QComboBox()
+        self.apply_as.addItem(_("Quadro real"), REAL)
+        self.apply_as.addItem(_("Faixas pretas no quadro"), BARS)
+        self.apply_as.setToolTip(_("Quadro real: a largura ou a altura muda e o arquivo sai nesse tamanho, sem faixas. "
+                                   "Faixas pretas no quadro: o tamanho fica e as faixas são gravadas na imagem; os "
+                                   "clipes, títulos e legendas ficam dentro da janela que sobra."))
+        form.addRow(_("Como aplicar"), self.apply_as)
+        self.result = QLabel()
+        self.result.setObjectName("Muted")
+        self.result.setWordWrap(True)
+        form.addRow("", self.result)
         self.fps = QComboBox()
         choices = list(timeline.FPS_CHOICES)
         if seq.fps_str not in choices:
@@ -112,17 +160,37 @@ class SequenceDialog(QDialog):
         form.addRow(_("Montagem"), self.magnet)
         lay.addLayout(form)
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText(_("Aplicar"))
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText(_("Criar") if self.creating else _("Aplicar"))
         btns.button(QDialogButtonBox.StandardButton.Ok).setObjectName("Primary")
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Cancelar"))
-        btns.accepted.connect(self.accept)
+        btns.accepted.connect(self._ok)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
         self.w.setValue(seq.width)
         self.h.setValue(seq.height)
         self.res.setCurrentIndex(self.res.findData(self._match(seq.width, seq.height)))
         self.res.currentIndexChanged.connect(self._res_changed)
+        if seq.window:  # a janela útil da sequência, no menu
+            key = next((k for k in RATIOS if abs(float(k) - seq.window) < 1e-6), "custom")
+            self.ratio.setCurrentIndex(self.ratio.findData(key))
+            self.ratio_value.setValue(seq.window)
+            self.apply_as.setCurrentIndex(self.apply_as.findData(BARS))
+        for sig in (self.ratio.currentIndexChanged, self.ratio_value.valueChanged, self.apply_as.currentIndexChanged,
+                    self.w.valueChanged, self.h.valueChanged):
+            sig.connect(self._ratio_changed)
         self._res_changed()
+        self._ratio_changed()
+
+    def name_value(self) -> str:
+        """O nome escolhido para a sequência nova ("" = deixa o app dar o próximo "Sequência N")."""
+        return self.name_edit.text().strip() if self.creating else ""
+
+    def _ok(self) -> None:
+        if self.creating and self.name_value().casefold() in self._taken:
+            QMessageBox.warning(self, _("Nova sequência"), _("Já existe uma sequência com o nome \"{nome}\". "
+                                                              "Escolha outro.").format(nome=self.name_value()))
+            return
+        self.accept()
 
     def _match(self, w: int, h: int) -> str:
         for key, _label, rw, rh in RESOLUTIONS:
@@ -146,6 +214,36 @@ class SequenceDialog(QDialog):
             self.w.setValue(size[0])
             self.h.setValue(size[1])
 
+    def chosen_ratio(self) -> float:
+        """A proporção escolhida no menu (0 = "Do tamanho escolhido")."""
+        key = self.ratio.currentData()
+        if not key:
+            return 0.0
+        return float(self.ratio_value.value()) if key == "custom" else float(key)
+
+    def _ratio_changed(self, *_args) -> None:
+        """Mostra na hora o que a proporção vai dar no tamanho escolhido em largura × altura."""
+        ratio = self.chosen_ratio()
+        self.ratio_value.setVisible(self.ratio.currentData() == "custom")
+        self.apply_as.setEnabled(ratio > 0)
+        self.result.setVisible(ratio > 0)
+        if ratio <= 0:
+            self.result.setText("")
+            return
+        fw, fh = int(self.w.value()), int(self.h.value())
+        w, h = timeline.aspect_size(fw, fh, ratio)
+        if (w, h) == (fw, fh):
+            text = _("O quadro já tem essa proporção: {w} × {h}, sem faixas.").format(w=fw, h=fh)
+        elif self.apply_as.currentData() == REAL:
+            text = _("O quadro fica com {w} × {h}.").format(w=w, h=h)
+        elif h < fh:
+            text = _("Quadro de {w} × {h}, com faixas pretas em cima e embaixo: janela útil de {jw} × {jh}.").format(
+                w=fw, h=fh, jw=w, jh=h)
+        else:
+            text = _("Quadro de {w} × {h}, com faixas pretas nas laterais: janela útil de {jw} × {jh}.").format(
+                w=fw, h=fh, jw=w, jh=h)
+        self.result.setText(text)
+
     def _pick_bg(self) -> None:
         c = QColorDialog.getColor(self.bg.color, self, _("Cor do fundo"))
         if c.isValid():
@@ -154,7 +252,19 @@ class SequenceDialog(QDialog):
 
     def values(self) -> tuple[int, int, str, tuple[float, float, float]]:
         c = self.bg.color
-        return int(self.w.value()), int(self.h.value()), str(self.fps.currentData()), (c.redF(), c.greenF(), c.blueF())
+        w, h = int(self.w.value()), int(self.h.value())
+        if self.apply_as.currentData() == REAL:  # "Quadro real" só preenche o tamanho: nada novo fica gravado
+            w, h = timeline.aspect_size(w, h, self.chosen_ratio())
+        return max(16, w), max(16, h), str(self.fps.currentData()), (c.redF(), c.greenF(), c.blueF())
+
+    def window(self) -> float:
+        """A janela útil da sequência (`Sequence.window`): só com "Faixas pretas no quadro" e se a proporção difere da
+        do quadro; 0 = sem janela."""
+        ratio = self.chosen_ratio()
+        if ratio <= 0 or self.apply_as.currentData() != BARS:
+            return 0.0
+        size = (int(self.w.value()), int(self.h.value()))
+        return ratio if timeline.aspect_size(*size, ratio) != size else 0.0
 
     def micro_fade(self) -> bool:
         return self.micro.isChecked()
@@ -166,4 +276,4 @@ class SequenceDialog(QDialog):
         return self.transp.isChecked()
 
 
-__all__ = ["SequenceDialog", "RESOLUTIONS", "fps_label"]
+__all__ = ["SequenceDialog", "RESOLUTIONS", "RATIOS", "fps_label"]

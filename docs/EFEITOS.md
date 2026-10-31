@@ -20,6 +20,26 @@ Dicas de uso dos controles: clique no número para digitar (aceita vírgula, `%`
 **duplo clique** no slider volta ao padrão, **Shift + arrastar** faz ajuste fino, o botão ↺ do
 título restaura a seção inteira e o dado (*Sortear*) troca as sementes aleatórias.
 
+**Filtrar ajustes (1.7).** O campo **Filtrar ajustes…** no alto do painel Ajustes (e do painel Clipe, no modo Edição)
+procura em todos os cartões ao mesmo tempo: no título e no subtítulo de cada seção, no nome e na dica de cada controle,
+nos nomes das opções dos menus e nas palavras que as pessoas costumam usar (por exemplo "chromatic", "fringe" ou
+"franja" para a aberração cromática, "denoise" para o ruído). Digite em **português, inglês ou espanhol**, seja qual for
+o idioma do app, sem se preocupar com maiúsculas nem acentos ("aberracao" acha "aberração"). Cada palavra digitada
+precisa aparecer, em qualquer ordem; só quando nada é encontrado o filtro perdoa uma letra errada em palavras de 5
+letras ou mais. Os cartões sem relação somem; os que ficam se abrem e **destacam** o controle que bateu, mostrando até
+os ajustes avançados que estavam escondidos. Se o ajuste está num **módulo desligado**, o painel diz em qual módulo ele
+está e que dá para ligar em Configurações › Recursos. **Ctrl+F** (com o foco no painel) ou **/** levam ao campo; **Esc**
+limpa. Apagar o texto devolve o painel exatamente como estava (cartões abertos, avançados, posição da rolagem). O filtro
+só muda o que você vê: não altera nenhum valor, não vai para o projeto e não é lembrado ao fechar o app.
+**Desligar todos os efeitos.** O botão com o brilho riscado na barra da prévia (**Shift+D**) tira de cena o look inteiro
+(com as chaves, o LUT e o obturador) e, no modo Edição, os ajustes de imagem dos clipes: cor, detalhe, perfil de câmera,
+pele, cor escolhida, degradê. Ficam a edição e o som: cortes, tempo, enquadramento, opacidade, mesclagem, transições,
+títulos, geradores e legendas gravadas. A etiqueta da imagem diz **SEM EFEITOS**. Nada é apagado: ao religar, tudo volta
+exatamente como estava, e o que você mexer enquanto isso aparece ao religar. Os conta-gotas, o *Automático* e o *Igualar* pedem
+para religar antes, porque ajustam pela imagem e o resultado não apareceria. Não entra no desfazer nem no projeto, e abrir
+outro arquivo ou projeto religa os efeitos. "Salvar quadro" e a exportação seguem a prévia: ao exportar com os efeitos
+desligados, o app pergunta se é para exportar sem efeitos ou religar antes; um trabalho já na fila fica como foi criado.
+
 **Animar o look (chaves).** Os ajustes de número, cor e rodas têm um **losango** ao lado do nome: clique para
 gravar uma chave no cursor; com o ajuste animado, mexer no controle grava a chave ali (chave automática); as
 setas ◀ ▶ vão à chave anterior / seguinte e o botão direito escolhe a curva até a próxima chave, apaga a chave
@@ -199,6 +219,11 @@ de um laboratório bem ajustado; as **luzes da copiadora** que você escolhe sã
 conferido pelo método LAD da Kodak (*Laboratory Aim Density*): o cinza de 16% sai na cópia com densidade visual
 perto de 1,0, como o alvo dos laboratórios, e cerca de 7 pontos de copiadora compensam 1 stop de exposição da
 câmera.
+
+**Limite conhecido:** num vídeo comum (Rec.709), um canal no máximo do arquivo (255 em 8 bits) é lido como muita
+luz, e o efeito entre as camadas leva essa luz às outras cores. Um vermelho estourado em 255 sai claro e quase
+branco, com a borda marcada. No modo Edição, baixar um pouco *Brancos* ou *Exposição* do clipe evita isso.
+
 Como no laboratório de verdade, **Exposição** (seção *Entrada e exposição*) e luzes da copiadora
 trabalham juntas: um negativo superexposto fica mais denso e sai mais claro; para "copiar para
 baixo", aumente a **Densidade da cópia**. Os nomes de filmes são **aproximações artísticas** do
@@ -525,7 +550,7 @@ aparecem igualzinho na prévia e na exportação.
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Proporção** | Original do vídeo, Da bitola escolhida, 1,33 (4:3), 1,37 (Academy), 1,43 (IMAX), 1,66 (europeu), 1,78 (16:9), 1,85 (widescreen), 1,90 (IMAX digital), 2,00 (Univisium), 2,20 (70 mm), 2,39 (Scope), 2,76 (Ultra Panavision) | Original do vídeo | Coloca barras (em cima/embaixo ou nas laterais) para chegar à proporção. O tamanho do arquivo não muda. |
+| **Proporção** | Original do vídeo, Da bitola escolhida, 1,33 (4:3), 1,37 (Academy), 1,43 (IMAX), 1,66 (europeu), 1,78 (16:9), 1,85 (widescreen), 1,90 (IMAX digital), 2,00 (Univisium), 2,20 (70 mm), 2,39 (Scope), 2,76 (Ultra Panavision) | Original do vídeo | Coloca barras (em cima/embaixo ou nas laterais) para chegar à proporção. O tamanho do arquivo não muda. Os clipes não se reenquadram: para isso, use a *Proporção* da sequência no modo Edição (`docs/EDICAO.md`), que é independente desta. |
 | **Cantos arredondados** | 0,000–0,250 | 0,000 | Cantos da janela do projetor, típico de 8 e 16 mm. |
 | **Suavidade da borda** | 0,0000–0,0500 | 0,0020 | Desfoque da borda (fração da altura). |
 | **Borda irregular** | 0–100% | 0% | Borda tremida e irregular, como uma janela de projetor gasta. |
@@ -734,7 +759,7 @@ lenta (e num clipe acelerado). Fica mais lento: lê e mistura 2 a 6 quadros por 
 
 | Ajuste | Faixa | Padrão | O que faz |
 |---|---|---|---|
-| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. |
+| **Desespremer** | Não, 1,33×, 1,5×, 1,8×, 2× | Não | Para vídeo filmado com lente ou adaptador anamórfico (chega espremido na horizontal): a imagem é esticada na largura do quadro e fica numa caixa de letra. 16:9 × 1,33 = 2,37:1. Com o *Scan* ligado, o quadro do negativo mostra a imagem espremida, como um scan de verdade. Para desespremer um clipe só, na montagem, use o *Desespremer* do clipe no modo Edição (`docs/EDICAO.md`). |
 | **Risco de luz** | 0–100% | 50% | A linha horizontal comprida das luzes fortes (só na horizontal). |
 | **Limiar do risco** | 0–5 stops | 2 | Quanto acima do cinza médio a luz precisa estar para riscar. |
 | **Comprimento do risco** | 40–1200 px | 420 | Em px de um quadro de 1080 linhas. |

@@ -7,12 +7,13 @@ miniatura em JPEG (base64) para a lista de projetos recentes.
 Com o modo Edição, o projeto também guarda a sequência (`"edicao"`, ver `timeline.Sequence`) e o
 modo aberto (`"modo"`).
 
-Formato (`"formato"`): esta versão lê até `FORMAT` (4) e grava o **menor** formato que o projeto precisa, para
+Formato (`"formato"`): esta versão lê até `FORMAT` (5) e grava o **menor** formato que o projeto precisa, para
 abrir nas versões antigas sempre que der: 1 = só o arquivo (sem sequência); 2 = com sequência; 3 = usa algum
 recurso da 1.5 (`features()`: os testes de `FEATURES_V3` e de `timeline.FEATURES`); 4 = usa algo da 1.6 (os de
 `FEATURES_V4` e de `timeline.FEATURES_V4`: um ajuste ou uma opção que a 1.5 não lê entra sozinho, pelo retrato
-`params.known_1_5`). Os recursos ficam listados em `"recursos"`. Versões antigas recusam formato maior que o
-delas com aviso. Abrir um formato antigo passa pelos passos de `MIGRATIONS` (1 → 2 → 3 → 4), puros e testados
+`params.known_1_5`); 5 = usa algo da 1.7 (os de `FEATURES_V5` e de `timeline.FEATURES_V5`, pelo retrato
+`params.known_1_6`). Os recursos ficam listados em `"recursos"`. Versões antigas recusam formato maior que o
+delas com aviso. Abrir um formato antigo passa pelos passos de `MIGRATIONS` (1 → 2 → 3 → 4 → 5), puros e testados
 (`tests/test_project_migration.py`).
 """
 
@@ -30,10 +31,11 @@ from . import APP_NAME, __version__, keyframes, params
 from .i18n import _
 
 EXT = ".plc"
-FORMAT = 4          # maior formato que esta versão lê
+FORMAT = 5          # maior formato que esta versão lê
 FORMAT_SIMPLE = 1   # projeto sem sequência do modo Edição
 FORMAT_EDIT = 2     # projeto com sequência, sem nada da 1.5
 FORMAT_15 = 3       # usa algum recurso da 1.5, nada da 1.6
+FORMAT_16 = 4       # usa algo da 1.6, nada da 1.7
 MODES = ("pelicula", "edicao")
 
 
@@ -58,6 +60,8 @@ class Project:
     # arquivo (modo Película) ou da montagem; {} = look fixo. No JSON, "chaves" (só quando há).
     look_keys: dict[str, list] = field(default_factory=dict)
     path: str = ""  # onde o projeto está salvo (não vai para o arquivo)
+    # Avisos de ao abrir (não vão para o arquivo): o que `timeline.SequenceSet.validate` precisou tirar das sequências.
+    problems: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         base = Path(self.path).parent if self.path else None
@@ -65,7 +69,7 @@ class Project:
         edicao = None
         if self.sequence:
             edicao = json.loads(json.dumps(self.sequence))
-            for src in edicao.get("fontes") or []:
+            for src in _block_sources(edicao):
                 if isinstance(src, dict) and src.get("tipo", "arquivo") == "arquivo":  # sem arquivo: nada
                     src["relativo"] = _relative(str(src.get("caminho") or ""), base)
         feats = self.features()
@@ -93,13 +97,13 @@ class Project:
         if keys:
             data["chaves"] = keys
         if feats:
-            data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3 ou 4
+            data["recursos"] = sorted(feats)  # informativo: o que pede o formato 3, 4 ou 5
         return data
 
     def features(self) -> set[str]:
-        """Recursos da 1.5 e da 1.6 que o projeto usa: os de `FEATURES_V3`/`FEATURES_V4` e os da montagem
-        (`timeline.FEATURES`/`timeline.FEATURES_V4`)."""
-        found = {fid for reg in (FEATURES_V3, FEATURES_V4) for fid, check in reg.items() if check(self)}
+        """Recursos da 1.5, da 1.6 e da 1.7 que o projeto usa: os de `FEATURES_V3`/`FEATURES_V4`/`FEATURES_V5` e
+        os da montagem (`timeline.FEATURES`/`timeline.FEATURES_V4`/`timeline.FEATURES_V5`)."""
+        found = {fid for reg in (FEATURES_V3, FEATURES_V4, FEATURES_V5) for fid, check in reg.items() if check(self)}
         if self.sequence:
             from . import timeline
             found |= timeline.Sequence.from_json(self.sequence).features()
@@ -121,12 +125,21 @@ FEATURES_V4: dict[str, Callable[[Project], bool]] = {
 }
 
 
+# Recursos da 1.7 fora da montagem (mesma regra; os da montagem ficam em `timeline.FEATURES_V5`). Um ajuste ou
+# uma opção nova do look não precisa de linha: "ajustes_1_7" pega tudo o que a 1.6 não lê (`params.beyond_1_6`).
+FEATURES_V5: dict[str, Callable[[Project], bool]] = {
+    "ajustes_1_7": lambda p: params.beyond_1_6(params.FILM, params.known_1_6()["look"], p.values, p.look_keys),
+}
+
+
 def needed_format(features: set[str] | frozenset[str], has_sequence: bool) -> int:
-    """O menor formato que guarda o projeto: 4 com algo da 1.6, 3 com recursos da 1.5, 2 com sequência, 1 só com
-    o arquivo."""
+    """O menor formato que guarda o projeto: 5 com algo da 1.7, 4 com algo da 1.6, 3 com recursos da 1.5, 2 com
+    sequência, 1 só com o arquivo."""
     from . import timeline
-    if features & (set(FEATURES_V4) | set(timeline.FEATURES_V4)):
+    if features & (set(FEATURES_V5) | set(timeline.FEATURES_V5)):
         return FORMAT
+    if features & (set(FEATURES_V4) | set(timeline.FEATURES_V4)):
+        return FORMAT_16
     if features:
         return FORMAT_15
     return FORMAT_EDIT if has_sequence else FORMAT_SIMPLE
@@ -164,8 +177,18 @@ def _v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
+    """Formato 4 → 5: nada muda (a 1.7 só acrescenta campos); o bloco "edicao" é migrado ao ser lido
+    (`timeline.Sequence.from_json`), que recusa um bloco de versão mais nova com o aviso do projeto."""
+    out = dict(data)
+    out.setdefault("recursos", [])
+    out["formato"] = 5
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4,
+                                                                     4: _v4_to_v5}
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -193,18 +216,33 @@ def _relative(path: str, base: Path | None) -> str:
         return ""
 
 
-def _relink_sequence(data: Any, project_path: str) -> dict[str, Any] | None:
-    """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu."""
+def _block_sources(block: dict[str, Any]) -> list[Any]:
+    """Todas as fontes gravadas no bloco "edicao": as dos clipes, as que estão numa pasta e fora da linha do tempo
+    (1.7) e as das outras sequências do projeto (1.7)."""
+    out = list(block.get("fontes") or [])
+    pastas = block.get("pastas")
+    out += (pastas.get("fontes") or []) if isinstance(pastas, dict) else []
+    others = block.get("sequencias")
+    for other in others if isinstance(others, list) else []:
+        out += (other.get("fontes") or []) if isinstance(other, dict) else []
+    return out
+
+
+def _relink_sequence(data: Any, project_path: str, problems: list[str] | None = None) -> dict[str, Any] | None:
+    """Sequência do projeto com os arquivos achados pelo caminho relativo quando o absoluto sumiu. `problems` recebe o
+    que a leitura precisou tirar das sequências (a janela mostra: o JSON devolvido já vem limpo)."""
     if not isinstance(data, dict):
         return None
     from . import timeline
     from .media import path_exists  # sequência de imagens: o primeiro quadro dela
     seq = timeline.Sequence.from_json(data)
+    if problems is not None and seq.siblings is not None:
+        problems.extend(seq.siblings.problems)
     if not project_path:
         return seq.to_json()
     folder = os.path.dirname(os.path.abspath(project_path))
-    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "")
-            for s in data.get("fontes") or [] if isinstance(s, dict)}
+    rels = {str(s.get("caminho") or ""): str(s.get("relativo") or "") for s in _block_sources(data)
+            if isinstance(s, dict)}
     for old in list(seq.sources):
         rel = rels.get(old, "")
         start = seq.sources[old].seq_start
@@ -271,8 +309,9 @@ def from_json(data: Any, path: str = "") -> Project:
         return int(v) if isinstance(v, (int, float)) else None
 
     from . import timeline
+    problems: list[str] = []
     try:
-        sequence = _relink_sequence(data.get("edicao"), path)
+        sequence = _relink_sequence(data.get("edicao"), path, problems)
     except timeline.FormatError as exc:
         raise ProjectError(str(exc)) from exc
     return Project(
@@ -293,6 +332,7 @@ def from_json(data: Any, path: str = "") -> Project:
         mode=str(data.get("modo")) if data.get("modo") in MODES else "pelicula",
         look_keys=keyframes.to_json(keyframes.clean_keys(params.FILM, data.get("chaves"))),
         path=str(Path(path).resolve()) if path else "",
+        problems=problems,
     )
 
 

@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QInputDialog, QMenu, Q
 from .. import timeline
 from ..i18n import _, decimal_sep, fmt_decimal
 from ..timeline import AUDIO, VIDEO, Clip
-from . import icons, theme
+from . import icons, prefs, theme
 from .edit_model import TimelineModel
 from .markers import ChaptersDialog, MarkerDialog, marker_color, marker_tooltip, youtube_chapters
 from .flow import AdaptiveBar, FlowLayout
@@ -46,6 +46,7 @@ GAP_H = 8                    # divisória entre vídeo e áudio
 EDGE_PX = 7                  # área das bordas que apara o clipe
 SNAP_PX = 9
 MIN_PPF, MAX_PPF = 0.01, 40.0  # pixels por quadro
+ZOOM_PLAYHEAD_KEY = "zoom_marcador"  # preferência "Zoom pelo marcador de reprodução" (padrão: ligada)
 MIME_SOURCE = "application/x-pelicula-source"
 BTN = 20                     # botões do cabeçalho das faixas
 MARKER_W = 10                # largura do marcador na régua
@@ -55,8 +56,24 @@ MARKER_HIT = 6               # distância (px) que ainda pega um marcador
 _RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
 
 
+_NESTED_PIXMAP = None
+
+
+def nested_pixmap():
+    """O ícone da sequência (12 px) que vai antes do nome do clipe de sequência, no tamanho da tela de agora."""
+    global _NESTED_PIXMAP
+    if _NESTED_PIXMAP is None:
+        _NESTED_PIXMAP = icons.icon("sequence", "#fff6e8", 12).pixmap(12, 12)
+    return _NESTED_PIXMAP
+
+
 def _elide(fm: QFontMetrics, text: str, width: float) -> str:
     return fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, int(width)))
+
+
+def zoom_playhead_tip() -> str:
+    return _("Marcado: todo zoom mantém o marcador parado na tela (fora da vista, ele vem para o centro). "
+             "Desmarcado: Ctrl + roda do mouse aproxima pelo ponteiro; botões, controle e teclado, pelo centro da vista.")
 
 
 class TimelineCanvas(QWidget):
@@ -69,6 +86,11 @@ class TimelineCanvas(QWidget):
     viewChanged = Signal()
     clipActivated = Signal(str)
     toolChanged = Signal(str)
+    # 1.7, sequência dentro de sequência (`ui/aninhar_ui.py`): aninhar a seleção, desaninhar um clipe de sequência (id) e abrir
+    # a sequência dele (id do clipe, quadro da sequência de fora sob o clique)
+    nestRequested = Signal()
+    unnestRequested = Signal(str)
+    openNestedRequested = Signal(str, int)
 
     def __init__(self, model: TimelineModel, parent=None):
         super().__init__(parent)
@@ -83,6 +105,8 @@ class TimelineCanvas(QWidget):
         self.snap = True
         self.insert_mode = False  # soltar/mover empurra o resto (inserir) em vez de cobrir; Ctrl inverte
         self.follow = True        # rola sozinho para acompanhar o cursor na reprodução
+        self.zoom_on_playhead = True
+        self.load_zoom_pref()
         self.peaks_provider: Callable[[str], np.ndarray | None] | None = None
         self._drag: dict | None = None
         self._hover_x: float | None = None
@@ -180,6 +204,20 @@ class TimelineCanvas(QWidget):
         self.scroll = max(0.0, f - (anchor_x - HEADER_W) / ppf)
         self.viewChanged.emit()
         self.update()
+
+    def zoom_to(self, ppf: float, pointer_x: float | None = None) -> None:
+        """Todo zoom da interface passa por aqui. "Zoom pelo marcador de reprodução" (padrão): o marcador fica parado
+        na tela e, fora da vista, vem para o centro. Desligado: a âncora é o ponteiro (`pointer_x`, Ctrl + roda do
+        mouse) ou o centro da vista (botões, controle e teclado)."""
+        if not self.zoom_on_playhead:
+            self.set_ppf(ppf, pointer_x)
+            return
+        if not HEADER_W <= self.frame_to_x(self.playhead) <= self.width():
+            self.scroll = max(0.0, self.playhead - self.visible_frames() / 2)
+        self.set_ppf(ppf, self.frame_to_x(self.playhead))
+
+    def load_zoom_pref(self) -> None:
+        self.zoom_on_playhead = str(prefs.settings().value(ZOOM_PLAYHEAD_KEY, "true")) != "false"
 
     def set_scroll(self, frames: float) -> None:
         self.scroll = max(0.0, float(frames))
@@ -335,7 +373,15 @@ class TimelineCanvas(QWidget):
         b = self.frame_to_x((self.outp + 1) if self.outp is not None else max(self.seq.duration, 1))
         p.fillRect(QRectF(a, RULER_H, max(b - a, 1), h - RULER_H), QColor(240, 166, 58, 14))
 
+    def is_nested(self, c: Clip) -> bool:
+        """O clipe mostra outra sequência do projeto (1.7)?"""
+        src = self.seq.sources.get(c.src)
+        return src is not None and src.is_nested
+
     def _clip_colors(self, c: Clip) -> tuple[QColor, QColor]:
+        if self.is_nested(c):
+            return ((QColor(theme.CLIP_NESTED_AUDIO), QColor(theme.CLIP_NESTED_AUDIO_HI)) if c.kind == AUDIO
+                    else (QColor(theme.CLIP_NESTED), QColor(theme.CLIP_NESTED_HI)))
         if c.kind == AUDIO:
             return QColor(theme.CLIP_AUDIO), QColor(theme.CLIP_AUDIO_HI)
         src = self.seq.sources.get(c.src)
@@ -364,6 +410,11 @@ class TimelineCanvas(QWidget):
         text_x = max(r.left(), HEADER_W) + 6
         src = self.seq.sources.get(c.src)
         label = c.name or (src.name if src is not None else "")
+        if src is not None and src.is_nested:  # o ícone da sequência e o nome de agora (ela pode ter sido renomeada)
+            label = src.name
+            if r.right() - text_x > 24:
+                p.drawPixmap(QPointF(text_x, r.top() + 4), nested_pixmap())
+                text_x += 16
         extra = []
         if abs(c.speed - 1.0) > 1e-6:
             extra.append(f"{c.speed:g}".replace(".", decimal_sep()) + "×")
@@ -1125,6 +1176,8 @@ class TimelineCanvas(QWidget):
         if clip is not None:
             self.model.select_group(clip.id)
             self.clipActivated.emit(clip.id)
+            if self.is_nested(clip):  # a sequência dele, com o cursor no quadro de dentro que estava sob o clique
+                self.openNestedRequested.emit(clip.id, int(math.floor(self.x_to_frame(pos.x()))))
 
     def leaveEvent(self, _e):
         self._hover_x = None
@@ -1170,7 +1223,7 @@ class TimelineCanvas(QWidget):
         mods = e.modifiers()
         if mods & Qt.KeyboardModifier.ControlModifier:
             if dy:
-                self.set_ppf(self.ppf * (1.25 if dy > 0 else 0.8), e.position().x())
+                self.zoom_to(self.ppf * (1.25 if dy > 0 else 0.8), e.position().x())
             e.accept()
             return
         if mods & Qt.KeyboardModifier.ShiftModifier and dy:
@@ -1226,6 +1279,7 @@ class TimelineCanvas(QWidget):
             if clip.id not in m.selection:
                 m.select_group(clip.id)
             menu.addAction(_("Dividir no cursor"), lambda: m.split_at(self.playhead))
+            self.nest_actions(menu, clip, pos.x())
             menu.addAction(_("Excluir"), lambda: m.delete_selected())
             menu.addAction(_("Excluir e fechar o espaço"), lambda: m.delete_selected(ripple=True))
             if clip.link:
@@ -1259,6 +1313,15 @@ class TimelineCanvas(QWidget):
         menu.addSeparator()
         menu.addAction(_("Adicionar marcador no cursor (M)"), lambda: self.add_marker_at())
         menu.exec(e.globalPosition().toPoint())
+
+    def nest_actions(self, menu: QMenu, clip: Clip, x: float) -> None:
+        """"Aninhar seleção" (a seleção inteira) e, num clipe de sequência, "Abrir a sequência" e "Desaninhar"."""
+        menu.addAction(_("Aninhar seleção (Ctrl+Shift+G)"), self.nestRequested.emit)
+        if self.is_nested(clip):
+            menu.addAction(_("Abrir a sequência"), lambda: self.openNestedRequested.emit(
+                clip.id, int(math.floor(self.x_to_frame(x)))))
+            menu.addAction(_("Desaninhar"), lambda: self.unnestRequested.emit(clip.id))
+        menu.addSeparator()
 
     def audio_cut_near(self, clip: Clip, x: float) -> Clip | None:
         """O clipe que entra no corte de som mais perto do clique (`x`) dentro de `clip`: o próprio clipe
@@ -1386,9 +1449,9 @@ class TimelineCanvas(QWidget):
             self.snap = not self.snap
             self.toolChanged.emit(self.tool)
         elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
-            self.set_ppf(self.ppf * 1.25, self.frame_to_x(self.playhead))
+            self.zoom_to(self.ppf * 1.25)
         elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
-            self.set_ppf(self.ppf * 0.8, self.frame_to_x(self.playhead))
+            self.zoom_to(self.ppf * 0.8)
         elif k == Qt.Key.Key_Escape:
             self.key_sel = set()
             m.select([])
@@ -1450,6 +1513,9 @@ class TimelineEditor(QWidget):
     filesDropped = Signal(list, int, str, int)
     filesInserted = Signal(list, int, str, int)
     clipActivated = Signal(str)
+    nestRequested = Signal()
+    unnestRequested = Signal(str)
+    openNestedRequested = Signal(str, int)
 
     def __init__(self, model: TimelineModel, parent=None):
         super().__init__(parent)
@@ -1477,6 +1543,9 @@ class TimelineEditor(QWidget):
         c.filesDropped.connect(self.filesDropped)
         c.filesInserted.connect(self.filesInserted)
         c.clipActivated.connect(self.clipActivated)
+        c.nestRequested.connect(self.nestRequested)
+        c.unnestRequested.connect(self.unnestRequested)
+        c.openNestedRequested.connect(self.openNestedRequested)
         c.viewChanged.connect(self._sync_bars)
         c.toolChanged.connect(self._sync_tools)
         model.selectionChanged.connect(self._sync_actions)
@@ -1484,6 +1553,10 @@ class TimelineEditor(QWidget):
         self._syncing = False
         self._sync_actions()
         self._sync_tools(c.tool)
+
+    def add_header(self, widget: QWidget) -> None:
+        """Uma fileira no topo, acima da barra de ferramentas (as abas das sequências: `sequence_tabs.SequenceTabs`)."""
+        self.layout().insertWidget(0, widget)
 
     def add_lane(self, widget: QWidget) -> None:
         """Uma faixa fina entre a barra de ferramentas e as faixas, alinhada com elas pelo `canvas.frame_to_x`
@@ -1569,22 +1642,40 @@ class TimelineEditor(QWidget):
         self.btn_silences.setVisible(False)
         hl.addWidget(self.btn_silences)
         hl.add_stretch()
-        zo = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também."))
-        zo.clicked.connect(lambda: c.set_ppf(c.ppf * 0.8))
+        zo = self.btn_zoom_out = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
+        zo.clicked.connect(lambda: c.zoom_to(c.ppf * 0.8))
         self.zoom = FilmSlider(0.0, 1.0, 0.001, self._ppf_to_t(4.0))
         self.zoom.setFixedWidth(110)
-        self.zoom.setToolTip(_("Zoom da linha do tempo"))
-        self.zoom.valueChanged.connect(lambda t: c.set_ppf(self._t_to_ppf(t)))
-        zi = self._btn("zoom_in", _("Aproximar (+). Ctrl + roda do mouse também."))
-        zi.clicked.connect(lambda: c.set_ppf(c.ppf * 1.25))
+        self.zoom.setToolTip(_("Zoom da linha do tempo. Botão direito: opções do zoom."))
+        self.zoom.valueChanged.connect(lambda t: c.zoom_to(self._t_to_ppf(t)))
+        zi = self.btn_zoom_in = self._btn("zoom_in", _("Aproximar (+). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
+        zi.clicked.connect(lambda: c.zoom_to(c.ppf * 1.25))
         fit = self._btn("fit", _("Mostrar a sequência inteira"), _("Ajustar"))
         fit.clicked.connect(self.zoom_fit)
         for b in (zo, self.zoom, zi, fit):
             hl.addWidget(b)
+        for b in (zo, self.zoom, zi):
+            b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda pos, w=b: self.zoom_menu().exec(w.mapToGlobal(pos)))
         # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
         bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit],
                          optional=[self.zoom])
         return bar
+
+    def zoom_menu(self) -> QMenu:
+        """Menu rápido dos controles de zoom (a mesma opção de Configurações › Geral)."""
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        act = menu.addAction(_("Zoom pelo marcador de reprodução"))
+        act.setCheckable(True)
+        act.setChecked(self.canvas.zoom_on_playhead)
+        act.setToolTip(zoom_playhead_tip())
+        act.toggled.connect(self._set_zoom_on_playhead)
+        return menu
+
+    def _set_zoom_on_playhead(self, on: bool) -> None:
+        prefs.settings().setValue(ZOOM_PLAYHEAD_KEY, "true" if on else "false")
+        self.canvas.load_zoom_pref()
 
     def _edit_selected_marker(self) -> None:
         if self.model.marker_sel:
@@ -1635,7 +1726,8 @@ class TimelineEditor(QWidget):
     def _sync_bars(self) -> None:
         c = self.canvas
         self._syncing = True
-        total = max(c.seq.duration + c.visible_frames() * 0.5, c.visible_frames())
+        # A rolagem pode ter passado do fim (roda do mouse, zoom): a barra acompanha em vez de pular depois.
+        total = max(c.seq.duration + c.visible_frames() * 0.5, c.scroll + c.visible_frames())
         self.hbar.setRange(0, max(0, int(math.ceil(total - c.visible_frames()))))
         self.hbar.setPageStep(max(1, int(c.visible_frames())))
         self.hbar.setSingleStep(max(1, int(40 / c.ppf)))
@@ -1664,7 +1756,8 @@ class TimelineEditor(QWidget):
         self.canvas.update()
 
     def peaks_ready(self, path: str) -> None:
-        if any(c.src == path for c in self.model.seq.clips if c.kind == AUDIO):
+        # path vazio: as formas de onda das sequências aninhadas (a chave delas é o WAV da mixagem, não o `Clip.src`)
+        if not path or any(c.src == path for c in self.model.seq.clips if c.kind == AUDIO):
             self.canvas.update()
 
     def zoom_fit(self) -> None:

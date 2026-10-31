@@ -34,10 +34,13 @@ pelicula/
   cli.py                     modo terminal (pelicula-cli): exportar, projeto, quadro, lut, presets, parametros…
   i18n.py                    _() / N_(), idiomas (pt_BR, en, es), separador decimal, idioma do sistema
   modules.py                 módulos que o usuário liga e desliga: MODULES, PROFILES, is_enabled(), used_by() (sem Qt)
+  busca_ajustes.py           1.7, busca nos ajustes (sem Qt; ARQUITETURA §38): índice das seções/controles em pt, en e es
+                             (títulos, dicas, opções, chave, sinônimos em KEYWORDS), search() sem acentos, por termos,
+                             com tolerância a um erro só quando a busca exata não acha nada
   locales/                   catálogos en.json e es.json (texto em português → tradução)
   novidades/                 novidades em linguagem simples (pt_BR/en/es.md) e release_vX.Y.Z.md
   project.py                 projetos .plc (JSON): salvar, abrir, caminho relativo, miniatura; formato mínimo
-                             (needed_format, FEATURES_V3, FEATURES_V4) e migração passo a passo (MIGRATIONS)
+                             (needed_format, FEATURES_V3/V4/V5) e migração passo a passo (MIGRATIONS)
   updater.py                 atualização pelo GitHub Releases: checar, baixar, SHA-256, instalar ao fechar
   params.py                  ESQUEMA de todos os ajustes (Param, Section, SECTIONS, PARAMS, sanitize)
   look.py                    build_plan(): ajustes + nº do quadro → uniforms (tabelas de bitola, cópia, scan, gamut,
@@ -58,7 +61,8 @@ pelicula/
   frame.py                   receita única do quadro (Recipe): entrada → montagem (compose) → valores do look no
                              quadro → build_plan(legal=) → render/render_fit; usada pela prévia, "Salvar quadro",
                              exportação, prévia da exportação, medição de velocidade e linha de comando;
-                             legendas gravadas (burn: "copia" antes do look, "digital" depois)
+                             legendas gravadas (burn: "copia" antes do look, "digital" depois); 1.7, no_effects
+                             (tudo desligado, ARQUITETURA §40)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
   presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
@@ -115,7 +119,12 @@ pelicula/
                              (partial_path, replace_file, atomic_write)
   edgetext.py                máscara do texto de borda (QPainter → numpy)
   testimage.py               cena de teste
-  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, marcadores, emendas
+  pastas.py                  1.7, pastas da Mídia (sem Qt nem timeline): Folder/Folders (criar, renomear, cor, mover sem
+                             ciclo, apagar, itens por chave, JSON tolerante); Sequence.folders e o bloco "pastas" (§39)
+  aninhar.py                 1.7, Aninhar seleção / Desaninhar (sem Qt nem GPU, §41.7): nest(), unnest(), unnest_loss(),
+                             refusal_for(), Refusal; nada muda na imagem nem no som, ou recusa/avisa
+  timeline.py                modo Edição: Source, Clip, Track, Layer, Marker, Sequence (montagem, janela útil:
+                             window, window_rect, aspect_size; marcadores, emendas
                              de som: micro_fade, audio_crossfade; ferramentas de corte: open_space, ripple_trim_*,
                              split_edit, faixa magnética keep_main/settle_main; tempo: time_map, retime (rampa e
                              reverso), freeze_frame; sem Qt), History; Source.virtual
@@ -129,7 +138,8 @@ pelicula/
   editshaders.py             GLSL do modo Edição: CLIP (uma camada sobre a tela; u_tex_alpha = textura RGBA
                              pré-multiplicada, alfa na cobertura) e a saída da tela; CLIP_CS/CLIP_TR_CS (1.6: o
                              CLIP/CLIP_TR com a cor simples, só quando a camada traz u_cs_on), CAMERA (1.6: perfil
-                             de câmera do clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32)
+                             de câmera do clipe → entrada do look, passo antes do CLIP) e OUT_FLOAT (tela em float32);
+                             NEST_PREMUL (1.7: a tela de uma sequência transparente, sem cortar os super-brancos)
   masks.py                   1.6, máscaras sem Qt nem GPU: pele em OkLab/OkLCh (skin_mask, conta-gotas skin_hue_of,
                              skin_even) e degradê linear/radial em px@1080 (gradient_mask); GLSL + referência numpy
   planes.py                  1.6, "Cor por planos" do look (módulo Beta cor_planos): uniforms u_cp_*, referência
@@ -165,14 +175,17 @@ pelicula/
   sequence.py                camadas decodificadas: grab() (acesso aleatório), SequenceReader (sequencial),
                              canvas_size(), decode_size(), media_info() (MediaInfo "virtual" da montagem);
                              RENDERERS[tipo] + render_source() (geradores dos clipes sem arquivo),
-                             THUMBNAIL_FRAME + source_thumbnail()
+                             THUMBNAIL_FRAME + source_thumbnail(); sequência aninhada (1.7): LayerImage.nested com
+                             Nested (FrameLayers de dentro), nested_canvas(), _NestedStream (seção 41.5)
   generators.py              geradores (sem Qt de interface): GENERATORS (cor, degrade, contagem) com Field (campos em
                              Source.data), desenho determinístico, o bipe da ponta (audiomix.TONES), needs_text()
   titles.py                  títulos (RENDERERS["texto"]): title_of(data), PRESETS, ANIMATIONS, motion(), draw()
                              (textrender → RGBA pré-multiplicado), missing()
   audiomix.py                mixagem do som da montagem com o ffmpeg (prévia e exportação): fades curtos nas
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
-                             (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe)
+                             (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe);
+                             sequência aninhada (1.7): WAV da mixagem de dentro como entrada do clipe
+                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -182,13 +195,19 @@ pelicula/
                              welcome (boas-vindas e novidades), language_dialog, update_dialog;
                              modo Edição: edit_model (TimelineModel: sequência + histórico + seleção),
                              timeline_view (TimelineEditor), edit_panels (MediaBin, ClipInspector),
+                             1.7, pastas da Mídia: pastas_ui (FolderTree, FolderActions; modelo em pastas.py),
                              keyframes_ui (losangos das chaves: KeyRows, KeyStrip), tempo_ui (rampa, reverso,
                              congelar este quadro),
                              markers (MarkerDialog, ChaptersDialog), meter (AudioMeter, módulo medidor_som),
                              scopes (histograma, forma de onda, parada RGB, vetorscópio),
                              transitions_ui (transições de película: inspetor, menu "Transição" do corte,
                              desenho na linha do tempo, módulo),
-                             sequence_dialog; resolve_dialog (plugin do DaVinci);
+                             sequence_dialog (configurar a sequência e, com `name=`, criar uma nova); 1.7, várias
+                             sequências (ARQUITETURA §41.6): sequence_tabs (SequenceTabs, as abas sobre a linha do tempo),
+                             sequencias_ui (SequencesUI: ponto único de ligação, estado de cada aba, Mídia, alvos da
+                             exportação); 1.7, sequência dentro de sequência (§41.7): aninhar_ui (NestUI: Aninhar
+                             seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
+                             resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
                              corridorkey_dialog (Recorte por IA, Beta);
@@ -210,6 +229,11 @@ pelicula/
                              1.6, luz e fotômetro: luz_fotometro_ui (ponto único de ligação), luz_plano_ui (cartão
                              "Luz da copiadora" do inspetor e os atalhos Alt+R/G/B/D), fotometro_ui (botão
                              Fotômetro da barra da prévia, camada de preview_tools e leitura de um ponto)
+                             1.7, busca: filtro_ajustes (campo "Filtrar ajustes…" do painel de ajustes e do inspetor,
+                             Ctrl+F e /; SectionCard.set_filter)
+                             1.7, geometria_ui (taxa manual e aviso do desespremer no cartão de enquadramento, janela
+                             útil na área segura da prévia)
+                             1.7, sem_efeitos_ui ("Desligar todos os efeitos": botão, Shift+D, pergunta ao exportar)
                              notificações e recuperação: notifier (Notifier + backends bandeja/D-Bus/nulo),
                              recovery_ui (Guard, cópias automáticas, aviso depois de um travamento),
                              crash_dialog (erro inesperado), pages/notificacoes e pages/recuperacao
@@ -306,17 +330,19 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (4) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (5) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
     mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
-    algo da 1.6 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não precisa de registro:
-    o retrato do que a 1.5 lê (`pelicula/data/conhecidos_1_5.json`, `params.beyond_1_5`; nunca editar) faz o
-    projeto ir para o 4 quando o valor sai do padrão ou é uma opção nova. **Estrutura nova no JSON** (campo,
-    bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em `timeline.FEATURES_V4` (da
-    montagem) ou `project.FEATURES_V4` (do projeto) — os da 1.5 ficam em `timeline.FEATURES` e
-    `project.FEATURES_V3` — e o campo dele no JSON só quando usado. Assim um projeto que não usa nada novo
-    continua abrindo nas versões antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos puros de `project.MIGRATIONS` e
-    `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 em `tests/data/projetos_1_4/`);
+    algo da 1.6; 5 = usa algo da 1.7 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não
+    precisa de registro: o retrato do que a 1.6 lê (`pelicula/data/conhecidos_1_6.json`, `params.beyond_1_6`;
+    nunca editar, nem o da 1.5) faz o projeto ir para o 5 quando o valor sai do padrão ou é uma opção nova.
+    **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em
+    `timeline.FEATURES_V5` (da montagem) ou `project.FEATURES_V5` (do projeto) — os da 1.6 ficam em
+    `timeline.FEATURES_V4` e `project.FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
+    campo dele no JSON só quando usado. Assim um projeto que não usa nada novo continua abrindo nas versões
+    antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos
+    puros de `project.MIGRATIONS` e `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 e pela 1.6 em
+    `tests/data/projetos_1_4/` e `tests/data/projetos_1_6/`);
     aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
     recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
@@ -397,6 +423,13 @@ Testes do modo Edição, do plugin e dos módulos:
 |---|---|
 | `tests/test_modules.py` | registro de módulos sem Qt: padrões (estável ligado, em teste desligado), perfis, `used_by` |
 | `tests/test_modules_ui.py` | casos de `modules_ui_cases.py`: página Recursos, perfil do 1º acesso e a janela (cada módulo esconde e devolve as ferramentas, Edição → Película sem mexer na montagem, aviso ao abrir projeto ou aplicar preset) |
+| `tests/test_busca_ajustes.py` | a busca nos ajustes sem Qt: pt/en/es, sem acentos, termos em qualquer ordem, erro de digitação só quando a exata falha, sinônimos, chave interna, rótulo de opção, toda seção dos três esquemas indexada |
+| `tests/test_busca_ajustes_ui.py` | casos de `busca_ajustes_ui_cases.py`: filtro do painel da Película e do inspetor (cartões, destaque, avançados, apagar devolve o estado, mensagens, módulo desligado, `/`, Ctrl+F local, valores intactos) |
+| `tests/test_pastas.py` | pastas da Mídia sem Qt de interface: modelo (ciclos, apagar dos dois jeitos), JSON e JSON quebrado, bloco "pastas" e fonte solta que volta ao reabrir (`project.save`/`load`, caminho relativo), desfazer, formato 5 só com pastas, `is_trivial` |
+| `tests/test_sequencias.py` | várias sequências e sequência aninhada sem GPU (`SequenceSet`): sozinha grava o JSON de antes, Mídia comum, fonte que acompanha a sequência, tempo do clipe (velocidade, fps diferente, sequência encurtada, só som), ciclos e limite de níveis, arquivo mexido à mão, JSON e formato 5, relocalizar e caminho relativo em todos os blocos, desfazer entre abas, e as operações do modelo da interface (`TimelineModel`: criar, duplicar, renomear, apagar, mover e abrir aba, um passo cada; `"sequencias"` ao desfazer um nome) |
+| `tests/test_sequencias_ui.py` | casos de `sequencias_ui_cases.py`: as abas (clique, +, nome ali mesmo, arrastar, menu), a janela de criar (a partir da sequência aberta e de um vídeo), a troca entre vazia, só o arquivo, montagem, fps e tamanho diferentes nos dois modos (prévia, som, escopos), estado por aba, desfazer entre abas, "não salvas", reabrir e o aviso do arquivo mexido, apagar com pergunta, a Mídia (itens, pastas, dois cliques, recusar pôr na linha do tempo, menu), a exportação (linha da sequência, fila de várias, uma exportação real de duas) |
+| `tests/test_sequencias_cli.py` | `--sequencia` no terminal (nome, id, erro com a lista, `--trecho`), `info` de um projeto, exportação e quadro de verdade de duas sequências |
+| `tests/test_pastas_ui.py` | casos de `pastas_ui_cases.py`: criar, renomear, cor, arrastar para dentro e para fora, apagar, desfazer, ordenar, MIME do arrasto e seleção múltipla, painel sem pastas igual, reabrir projeto com mídia solta numa pasta e a janela |
 | `tests/test_timeline.py` | montagem sem GPU: dividir, aparar, mover (sobrescreve), apagar com e sem fechar o espaço, ligar/desligar, velocidade, `layers_at` com transições, JSON e histórico; ferramentas de corte: inserir, Q/W, cortes J/L (sobrevivem a mover/dividir/apagar/velocidade/desfazer) e as regras da faixa principal magnética |
 | `tests/test_keyframes.py` | chaves de animação: curvas, limpeza e JSON, âncora em cada edição (mover, aparar, dividir, sobrescrever, velocidade, apagar, relocalizar, colar), uniforms, `decode_size`, grafo do som e envelope medido num tom com o ffmpeg, chaves do look (receita, projeto, fila, CLI) e quadros iguais aos de um clipe/look fixo na GPU |
 | `tests/test_chaves_ui.py` | casos de `chaves_ui_cases.py`: losangos do inspetor (estados, chave no cursor, chave automática, arrastar = um passo do desfazer, setas, menu de curvas, apagar/limpar), do look, da linha do tempo (juntos, dica, clique vai até a chave, arrastar com ímã no cursor, Shift, Delete, desfazer), `KeyStrip` e a janela (faixas sob a barra e "Look" na Edição) |
@@ -406,6 +439,11 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_tempo_ui.py` | casos de `tempo_ui_cases.py`: seção da rampa no cartão Velocidade, aplicar/tirar com desfazer, menu do clipe, Reverso (caixa e menu), congelado sem rampa, "Congelar este quadro…" (duração, inserir/sobrescrever) e Shift+F na janela |
 | `tests/test_fundacao_ui.py` | casos de `fundacao_ui_cases.py`: "Salvar quadro" = exportação (Película e Edição), API de chaves do `TimelineModel` e do `ParamStore` com desfazer, chaves do look e de clipes na janela, transparência |
 | `tests/test_compositor.py` | uniforms do shader CLIP; na GPU: clipe neutro sai idêntico (8 e 16 bits), cada ajuste muda a imagem no sentido certo |
+| `tests/test_geometria.py` | geometria da 1.7: escala por eixo (largura e altura medidas no quadro, antes da rotação), desespremer (tabela, faixas, preencher, esticar, ordem), janela útil (tamanhos pares, retângulo na prévia e na exportação, encaixe e posição, faixas pretas em 8/16 bits com o look por cima, transparência, encaixe da exportação, títulos, legendas, transições), `grab` = `SequenceReader`, exportação = prévia, JSON esparso e formato 5 |
+| `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
+| `tests/test_aninhada.py` | imagem e som da sequência aninhada: a **gêmea** (a montagem e a mesma montagem num único clipe de sequência dão os mesmos bits, em 8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação, em dois níveis, e as mesmas amostras de som), `grab` × `SequenceReader`, fundo transparente × opaco, ajustes no clipe de sequência, janela útil, clipe log com o próprio perfil lá dentro, cache do quadro sem quadro velho, cache de WAVs, cancelar, `pelicula-cli exportar` |
+| `tests/test_aninhar.py` | aninhar e desaninhar: o que vai para onde (ids, faixas, volumes, mudo e solo, fundo, janela, magnética), recusas, legendas presas ao arquivo que atravessam a sequência, e na GPU/ffmpeg a prova de "nada muda" (quadros bit a bit em 8 e 16 bits, com e sem look, prévia reduzida, terminal; som de 24 bits; janela útil; faixas de cima; aninhar o que já tem clipe de sequência) |
+| `tests/test_aninhar_ui.py` | casos de `aninhar_ui_cases.py`: pôr uma sequência da Mídia (e as recusas), dois cliques, Aninhar seleção (menu, atalho, um passo do desfazer), Desaninhar, desenho, forma de onda, inspetor e ferramentas que leem o arquivo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
 | `tests/test_alpha.py` | transparência: detecção (ProRes 4444, PNG, WebM VP9 com `alpha_mode`, paleta), leitura RGBA pré-multiplicada em 8/16 bits, libvpx, e na GPU o fundo da V1 exato onde o alfa é 0, mistura no alfa parcial, opacidade, corte, mesclagens, transição, sem franja escura ao reduzir/girar/ampliar, `grab` = `SequenceReader` |
@@ -446,6 +484,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_entrada_sugestao.py` | perfil sugerido pelos metadados: tabela de dicionários do ffprobe, XML da Sony, etiquetas guardadas, preenchimento dos clipes novos |
 | `tests/test_entrada_ui.py` | casos de `entrada_ui_cases.py`: cartão "Câmera" do inspetor, aviso da sugestão (um clique, nunca ao reabrir), clipes novos preenchidos num passo do desfazer |
 | `tests/test_ofx.py` | plugin OpenFX: código gerado em dia, `.ofx` (pontos de entrada), paridade da cor e do quadro com o app, LUT rápido, `.json`, efeito num host de teste (`ofxhost.py`); compila na hora (pula sem compilador) |
+| `tests/test_sem_efeitos.py` | `frame.Recipe.no_effects` e `ExportSettings.no_effects` sem GPU (receita, padrões, JSON antigo); na GPU: igual à montagem com os ajustes de imagem no padrão e o preset "original" (8 e 16 bits), a edição continua, campo desligado igual, arquivo direto, `grab` = `SequenceReader`, exportação |
+| `tests/test_sem_efeitos_ui.py` | casos de `sem_efeitos_ui_cases.py`: botão, etiqueta e Shift+D nos dois modos; desligar e religar não muda valores, chaves, montagem, desfazer, alterações nem imagem; slider movido desligado, leitura de log e de perfil do clipe, obturador, miniaturas, abrir religa, `.plc` igual, a pergunta ao exportar, trabalho guarda o campo; seletores de modo e de comparação (rótulos, ícones, estilos, tecla C) |
+| `tests/test_correcoes_17_ui.py` | casos de `correcoes_17_ui_cases.py`: botão, telas e `self.mode` iguais ao abrir projetos e Ctrl+Z no histórico certo (#50), a prévia toca o som do que ficou depois de apagar, mover, mudar volume e faixa (#51), âncora do zoom pelo marcador, pelo ponteiro e pelo centro (#53), Exportar com a fila ocupada e destino repetido (#59) |
+| `tests/test_fila_exportacao.py` | fila de exportação sem GPU: trabalho novo não mexe no que está rodando, destino repetido (`queue_clash`), nome livre (`free_output`) |
 | `tests/test_edit_ui.py` | widgets da edição em subprocesso *offscreen* (modelo, linha do tempo, inspetor, mídia, medidores) |
 | `tests/test_main_window_edit.py` | janela inteira: abrir, trocar de modo, dividir, apagar, ajustar, exportar a montagem e salvar o projeto |
 
@@ -571,6 +613,12 @@ muda `start`, `src_in` ou a velocidade de um clipe precisa manter as chaves de a
 Operação nova que mexe na estrutura: no modelo, rode-a dentro de `with self.seq.keep_main():` para a faixa
 principal magnética valer (sem ela não faz nada) e monte-a com as primitivas (`_cut`, `split`, `trim_*`,
 `move`, `delete`, `_clear_range`, `open_space`); regras em `docs/ARQUITETURA.md`, seção 13.8.
+Mudou o que um clipe faz na imagem ou no som? Vale também dentro de uma sequência aninhada, sem regra nova: rode
+`tests/test_aninhada.py`, em que a gêmea (a montagem dentro de um único clipe de sequência) precisa dar os mesmos bits. Um dado novo
+em `LayerImage` precisa descer pelos níveis (`Recipe._blend_layers`, `_NestedStream`, `Engine._canvas`; seção 41.5). Operação que leva clipes de uma sequência para outra (`pelicula/aninhar.py`, seção 41.7)
+mantém os ids dos clipes (a semente das transições e do grão sai do id), confere tudo antes de mexer em qualquer coisa (uma
+recusa não muda nada) e entra em `tests/test_aninhar.py`, onde "nada muda" é medido; legenda presa a arquivo atravessa a
+sequência pelo `subtitles.Chained`.
 
 ### Legendas (editar, gravar, entregar, tirar tempo)
 

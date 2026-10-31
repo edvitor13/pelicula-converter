@@ -13,6 +13,7 @@ Mesmas convenções de `shaders.py`: coordenadas de imagem com y para baixo (lin
   junto com a opacidade, o corte e a transição; cada modo de mesclagem mistura com a tela por essa cobertura.
 - `OUT`: converte a tela (f4) para inteiros de 8 ou 16 bits (arredondamento exato) lidos de volta; com
   `u_offset` lê só um recorte da tela (exportação num quadro de outra proporção com "cortar", `fit.py`).
+- `NEST_PREMUL` (1.7): a tela de uma sequência com "Fundo transparente" vira a textura pré-multiplicada que o `CLIP` lê.
 
 Os valores vêm de `compositor.clip_uniforms()`; a interpretação de cada ajuste está lá.
 """
@@ -688,5 +689,29 @@ uniform sampler2D t_canvas;
 uniform ivec2 u_offset;
 void main() {
     f_out = vec4(texelFetch(t_canvas, ivec2(gl_FragCoord.xy) + u_offset, 0).rgb, 1.0);
+}
+"""
+
+
+# ------------------------------------------------------------------ 1.7: sequência aninhada
+# A tela de uma sequência transparente é cor direta + cobertura; o clipe dela no `CLIP` quer RGBA pré-multiplicado com
+# `u_tex_alpha = 1`. Diferente de `alphashaders.PREMUL`, a cor não é cortada em 0–1 (a tela pode trazer log com
+# super-brancos) e o alfa já sai na conta inversa de `clipAlpha`: as "pontas firmes" são para os alfas gravados em arquivo,
+# e sem isso uma tela com 20% de cobertura chegaria a 19,8%. Sem cobertura fica zero, para a filtragem não trazer cor.
+NEST_PREMUL = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_canvas;
+void main() {
+    const float E = 1.0 / 256.0;
+    vec4 c = texelFetch(t_canvas, ivec2(gl_FragCoord.xy), 0);
+    float a = clamp(c.a, 0.0, 1.0);
+    if (a <= 0.0) {
+        f_out = vec4(0.0);
+        return;
+    }
+    float s = E + a * (1.0 - 2.0 * E);
+    f_out = vec4(c.rgb * s, s);
 }
 """

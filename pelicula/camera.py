@@ -12,6 +12,9 @@ log são lidos em ponto flutuante com os super-brancos (`media.float_input`), a 
 vai ao look em float32, sem cortar em 1,0 nem arredondar a 8 ou 16 bits (`Engine.compose(float_out=True)`).
 Montagens sem perfil de clipe ficam exatamente como antes.
 
+Um clipe dentro de um clipe de sequência (1.7) converte igual, com o perfil dele. O perfil no próprio clipe de sequência
+não faz nada: a imagem dele já está no espaço do look.
+
 Funções puras (sem GPU nem Qt), como `compositor.py`.
 """
 
@@ -42,11 +45,17 @@ def clip_profile(values: dict[str, Any] | None) -> str | None:
 
 
 def uses_profiles(seq) -> bool:
-    """Algum clipe de vídeo da sequência tem perfil de câmera próprio? (liga a conversão e a tela em float)"""
+    """Algum clipe de vídeo da sequência, em qualquer nível, tem perfil de câmera próprio? (liga a conversão e a tela
+    em float). Um clipe de sequência não conta: a imagem dele já está no espaço do look."""
     if seq is None:
         return False
     from . import timeline
-    return any(c.kind == timeline.VIDEO and clip_profile(c.values) is not None for c in seq.clips)
+    return any(c.kind == timeline.VIDEO and clip_profile(c.values) is not None and not _nested_source(s.sources.get(c.src))
+               for s in seq.closure() for c in s.clips)
+
+
+def _nested_source(source) -> bool:
+    return bool(getattr(source, "is_nested", False))
 
 
 def read_profile(values: dict[str, Any] | None) -> str | None:
@@ -73,8 +82,8 @@ def clip_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def uniforms(values: dict[str, Any], source, target: Target) -> dict[str, Any] | None:
     """Uniforms de `editshaders.CAMERA` para o clipe (`values`, os ajustes dele; `source`, a `timeline.Source`
-    do arquivo, que dá a faixa), ou None se ele segue o look (nada muda)."""
-    if clip_profile(values) is None:
+    do arquivo, que dá a faixa), ou None se ele segue o look ou é um clipe de sequência (nada muda)."""
+    if clip_profile(values) is None or _nested_source(source):
         return None
     from . import look, media
     cv = clip_values(values)

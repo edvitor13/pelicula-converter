@@ -201,6 +201,7 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
         # com os ajustes deles
         alone = ("pele_centro", "alvo_matiz", "alvo_largura") + tuple(k for k in editparams.VIDEO.params
                                                                   if k.startswith("degrade_") and k in GEOMETRY)
+        alone += ("desespremer_taxa",)  # 1.7: só vale com o desespremer em "Taxa manual"
         if key not in ("vinheta_tamanho", "mesclagem", "encaixe") + alone:
             assert not np.array_equal(out, test_rgb), f"{key} não mudou a imagem"
 

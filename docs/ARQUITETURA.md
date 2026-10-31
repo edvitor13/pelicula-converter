@@ -42,6 +42,12 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 32. [Laboratório na 1.6](#32-laboratório-na-16)
 33. [Câmera, formato e montagem na 1.6](#33-câmera-formato-e-montagem-na-16)
 35. [Luz por plano e fotômetro da película](#35-luz-por-plano-e-fotômetro-da-película)
+36. [Base da 1.7: formato 5](#36-base-da-17-formato-5)
+37. [Geometria do clipe e da sequência](#37-geometria-do-clipe-e-da-sequência)
+38. [Filtro de busca nos ajustes (1.7)](#38-filtro-de-busca-nos-ajustes-17)
+39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
+40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
+41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
 
 ---
 
@@ -924,7 +930,10 @@ de onda (com cache por arquivo).
 - O `FrameLoader` e o `Player` aceitam arquivo ou sequência (`sequence.grab` / `SequenceReader`);
   a montagem (`Engine.compose`) acontece na thread principal, com o mesmo contexto da prévia.
 - Som da prévia da sequência: `audiomix.render_mix` num WAV temporário em segundo plano (troca de nome
-  a cada versão, porque o player segura o arquivo aberto), refeito quando `mix_key()` muda.
+  a cada versão, porque o player segura o arquivo aberto), refeito quando `mix_key()` muda. A chave olha só o
+  que muda o som (clipes de áudio em ordem de tempo e as fontes deles) e sai igual no modelo e numa cópia
+  (`Sequence.copy()` tira as fontes sem clipe e grava em ordem de tempo): `_start_mix` e `_mix_done` a calculam
+  na cópia. Se as duas divergissem, toda mixagem nova seria descartada e a prévia ficaria no WAV antigo (#51).
 - O que a prévia mostra é o que sai: no modo Edição sem *Com película*, exportar e salvar quadro
   saem só com a montagem (look "Original").
 - Marcadores: `M` põe um no cursor no modo Edição (no Película o `M` continua sendo o som; `Shift+M` é o
@@ -1046,6 +1055,11 @@ o cinza 18% ao código 0,45 em todos os canais, para toda combinação negativo 
 diafonia × chave (no Technicolor 2 cores, só duas camadas de corante: sobra um tom mínimo, < 0,006).
 `look.lab_eval()` é a referência em numpy usada nos testes. Com `lab_on` desligado o plano só leva
 `u_lab_on = 0` e a imagem não muda.
+
+**Limite conhecido:** em Rec.709, `dispToStops` leva o código 1,0 ao teto de +12 stops (254/255 dá cerca de +8,6) e
+as linhas de `sens` passam parte disso às outras camadas: `(255, 40, 30)` sai perto de `(225, 205, 145)`, contra
+`(193, 54, 26)` para `(220, 40, 30)`. Mudar o teto muda a cor de projetos salvos com o Laboratório, do LUT exportado e
+do plugin do Resolve, então fica para uma decisão à parte.
 
 ## 15. Plugin do DaVinci Resolve (`resolve.py`)
 
@@ -1471,7 +1485,7 @@ Ferramentas de IA não cabem num pacote só: precisam de um código num commit f
 Python próprio (PyTorch com CUDA) e de modelos de gigabytes. Uma **receita** (`Tool.recipe`,
 `backend="receita"`) descreve tudo isso com versões e hashes fixos no código; `tools.download()` chama
 `install_recipe()`. A primeira receita é o **CorridorKey 2.0** (Corridor Digital), no módulo Beta
-`recorte_ia`; a 1.8 reaproveita a mesma receita para o ambiente PyTorch próprio da "Cor por planos".
+`recorte_ia`; a 1.9 reaproveita a mesma receita para o ambiente PyTorch próprio da "Cor por planos".
 
 ```python
 Recipe(version="2.0-485f5e9",
@@ -3458,7 +3472,7 @@ compara os dois na GPU.
 
 - **"cor_planos"** (Beta, começa desligado, fora dos perfis): esconde o cartão "Cor por planos" do look. A máscara
   da pele só por cor ainda erra em madeira clara e areia, e a separação frente/fundo é só um degradê (a
-  profundidade fica para a 1.8), por isso Beta.
+  profundidade fica para a 1.9), por isso Beta.
 - **"cor_simples"** (estável, grupo "cor", nos perfis Criador, Cinema e Tudo; fora do Simples): esconde a barra
   "Cor simples" do inspetor e os cartões "Pele natural", "Cor escolhida" e "Degradê". Estável porque cada
   ferramenta só preenche ajustes comuns do clipe (temperatura, HSL, exposição…), que o usuário vê e desfaz, e os
@@ -3813,3 +3827,502 @@ Laboratorio deles é conferido em `test_laboratorio_node_matches_the_app`).
 `tests/test_luz_plano.py` (luz por plano: neutra no padrão, quadros certos, transições, V2, 12 pontos = 1 stop da
 cópia, JSON e formato 4, desfazer, prévia = exportação, GPU), `tests/test_fotometro.py` (latitude e zonas),
 `tests/test_presets_16.py` e os casos de janela em `tests/luz_fotometro_ui_cases.py` (`test_luz_fotometro_ui.py`).
+
+## 36. Base da 1.7: formato 5
+
+A 1.6 lê projetos até o formato 4 (bloco `"edicao"` até o 3) e descarta, sem avisar, o que não conhece, como a 1.5
+fazia. A regra é a da [seção 28](#28-base-da-16-formato-4), um degrau acima: a 1.7 grava o **formato 5** quando o
+projeto usa algo dela, e a 1.6 recusa com "O projeto foi salvo por uma versão mais nova do app".
+
+- **Retrato da 1.6** (`pelicula/data/conhecidos_1_6.json`, `params.known_1_6()`): gerado rodando o código da tag
+  `v1.6.0`. Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção dele sumiu do app e
+  que ele contém o da 1.5.
+- `params.beyond_1_6(schema, known, values, keys)`: a regra de `beyond_1_5` com esse retrato. Um ajuste da 1.7 também
+  está fora do retrato da 1.5, então `"recursos"` lista `ajustes_1_6` e `ajustes_1_7` juntos; é só informativo, e
+  quem decide o formato é o registro mais novo.
+- **Registros:** `project.FEATURES_V5` (do projeto; já tem `"ajustes_1_7"`) e `timeline.FEATURES_V5` (da montagem; já
+  tem `"ajustes_clipe_1_7"`). Uma **estrutura nova** no JSON ganha uma linha num deles, com o campo só quando usado.
+  Os da 1.6 continuam em `FEATURES_V4` nos dois módulos.
+- **Formatos:** projeto 5 (`project.FORMAT`; `FORMAT_16` = 4 para algo da 1.6); bloco `"edicao"` 4 (`timeline.FORMAT`;
+  `FORMAT_16` = 3), escolhido por `Sequence.block_format()`. Os passos `project._v4_to_v5` e `timeline._seq_v3_to_v4`
+  só trocam o número: a 1.7 só acrescenta campos.
+- **Projetos gravados pela 1.6** (`tests/data/projetos_1_6/`): os dois projetos da referência da 1.4 com recursos da
+  1.6 por cima, gravados pela 1.6.0 com `gerar.py`, junto do que ela fez ao abri-los (`referencia.json`).
+  `tests/test_project_migration.py` roda as mesmas conferências nas duas pastas.
+
+## 37. Geometria do clipe e da sequência
+
+Três pedidos que mexem na mesma conta (#54, #52, #55). Sem usar nenhum, todo número é o de antes, bit a bit: as
+referências (`cor_base`, `grao_base`, `entrada_base`, `transicoes_base`, projetos da 1.4 e da 1.6) passam sem regravar.
+
+**Ordem no clipe:** desespremer → encaixe → escala do usuário → rotação → posição.
+
+| Ajuste | Onde | Conta |
+|---|---|---|
+| `desespremer`, `desespremer_taxa` | `compositor.desqueeze`, `fit_box` | a largura da fonte é multiplicada pela taxa **antes** do encaixe, e por isso "Mostrar inteiro" e "Preencher" usam a proporção desespremida. "Esticar" ocupa a área e ignora. Tabela própria (`DESQUEEZE`, com 1,55): `anamorfico.SQUEEZES` é do look e não muda. Não anima (a lente não muda). |
+| `escala_x`, `escala_y` | `compositor.axis_scale`, `transform`, `u_px_per_uv` | `escala × escala_x` e `escala × escala_y`, nos eixos do clipe (a matriz gira depois). Animáveis. Sem cadeado: a própria `escala` é o controle proporcional. |
+| `decode_size` | `sequence.py` | um fator por eixo, com a maior chave de `escala` vezes a maior chave do eixo (um limite de cima: `keyframes.max_value`), e continua limitado ao tamanho do arquivo. |
+
+Com os padrões, `sw *= 1.0` e `s * 1.0` não mudam nenhum bit, e as quatro chaves ficam fora do JSON (`SPARSE_KEYS`). Fora
+do padrão, o retrato da 1.6 (seção 36) leva o projeto ao formato 5 (recurso `ajustes_clipe_1_7`), sem registro novo.
+
+### 37.1 Proporção da sequência
+
+"Quadro real" (`ui/sequence_dialog.py`) só preenche largura × altura com `timeline.aspect_size`: nada novo é guardado e
+o projeto abre na 1.6. `aspect_size` arredonda o lado calculado para par e trata como igual ao quadro uma proporção a
+menos de `RATIO_TOLERANCE` = 0,005 (1,78 em 1920 × 1080 continua 1920 × 1080, sem uma faixa de um pixel; o mesmo para
+1,33 em 4:3).
+
+"Faixas pretas no quadro" guarda `Sequence.window` (a proporção; 0 = sem janela), campo `"janela"` do bloco `"edicao"`
+só quando usado, recurso `"janela_util"` em `timeline.FEATURES_V5`. `Sequence.is_trivial()` devolve None com janela (as
+faixas só existem na montagem). É um campo comum da sequência, de propósito: várias sequências com proporções próprias
+(#57) só herdam o campo.
+
+**Uma conta só:** `Sequence.window_rect(canvas_w, canvas_h)` dá o retângulo em px da tela. Quem decide entre letterbox e
+pillarbox é a proporção do quadro da sequência (não a da tela), para a prévia reduzida e a exportação concordarem mesmo
+quando o arredondamento da tela muda a proporção dela. Sem janela, devolve a tela como veio, sem converter.
+
+| Quem usa | Como |
+|---|---|
+| `compositor.fit_box`, `transform` | o encaixe é na janela; `pos_x`/`pos_y` são frações dela e o centro é o dela. |
+| clipes sem arquivo | com janela, a caixa é a janela (a fonte virtual guarda o tamanho do quadro de quando foi criada, que não é a proporção do conteúdo); `decode_size` reduz os dois lados juntos se passar da fonte, para não deformar. Sem janela, nada muda. |
+| `transitions.apply` | centros, percursos de cortina e empurrar, emenda e ponta na janela. `u_tr_scale` continua pela altura da tela (px@1080). |
+| `Engine.compose` | desenha as camadas como sempre e, no fim, `_window_bars` limpa com preto opaco o que está fora da janela (`clear` com `viewport`). Assim camadas e fundo ficam limitados sem tocar nos shaders. |
+| `frame.Recipe` | `window_area` converte a janela para a imagem montada (descontando o recorte de "cortar"); no fim de `look`, `window_bars` pinta as faixas de novo, em preto exato, por cima do quadro final. |
+| `subtitles.Burn.apply(area=)` | a legenda é medida e posicionada na janela. |
+| `colorsimple.clip_point` | um clique nas faixas não acha clipe. |
+| `ui/viewer.safe_geometry` | a área segura fica na janela (`geometria_ui.sync_safe_window`, só na tela). |
+
+**Por que as faixas são pintadas duas vezes.** O look roda sobre o quadro inteiro, e cópia, grão e halação levantam o
+preto (com `vision3_500t` a faixa chega a 12/255 sem o último passo). Pintar só no fim deixaria o clipe de fora da janela
+entrar na halação e no desfoque; pintar só na montagem deixaria o look sujar a faixa. O look lê a montagem já com as
+faixas, e a receita, que é o caminho único de prévia e exportação, fecha com preto exato.
+
+**Decisões:**
+
+- Com "Fundo transparente" as faixas continuam pretas e **opacas** (alfa cheio, nos dois passos): são parte da imagem e
+  a escolha conservadora; só o que está dentro da janela fica transparente.
+- `fit.py` trata o quadro inteiro, com as faixas dentro dele: "cortar" corta as faixas junto, "bordas" e "desfocado"
+  põem o quadro com faixas na caixa (`Fit.box`), e o fundo desfocado sai da imagem com as faixas.
+- O tamanho de títulos e legendas segue a altura da janela (é a altura que `decode_size` e `Burn.apply` passam), como num
+  quadro real do mesmo formato: o mesmo projeto dá o mesmo texto nos dois jeitos de aplicar.
+- A *Moldura e proporção* do look é outra coisa: barras por cima do look, sem reenquadrar. Continua independente.
+
+**Fora desta versão:** legenda na faixa preta, guia da janela na prévia (as faixas são de verdade) e uma opção da janela
+na linha de comando (o projeto já leva o campo).
+
+## 38. Filtro de busca nos ajustes (1.7)
+
+Um campo "Filtrar ajustes…" no alto do painel de ajustes (Película) e do inspetor do clipe (Edição, páginas de imagem
+e de som). A busca é pura (`pelicula/busca_ajustes.py`, sem Qt); a interface é `pelicula/ui/filtro_ajustes.py`, com uma
+API pequena em `SectionCard`. O filtro só muda o que aparece: não toca valores, render, `look`, `compositor`, formato do
+projeto nem catálogos, e não é gravado em lugar nenhum (nem em `QSettings`).
+
+### 38.1 Índice e busca (`busca_ajustes.py`)
+
+- **Índice por seção** (`build_index`/`index_of`, guardado por lista de seções e montado no primeiro uso): o texto da
+  **seção** = título, subtítulo, `KEYWORDS[chave]` e os textos do parâmetro que liga a seção (`Section.toggle`, que não
+  tem linha); o texto de cada **controle** = rótulo, dica (`tip`), rótulos das opções (`choices`) e a chave interna
+  (também com `_` trocado por espaço). `Section` e `Param` não mudam.
+- **Idiomas:** cada texto entra em pt_BR (o texto-fonte) e nas traduções de `en` e `es` lidas com `i18n.load_catalog`
+  (guardadas no módulo; o idioma ativo da interface não muda e não importa). Texto sem tradução entra só em português.
+- **Normalização:** minúsculas e sem acentos (`norm`, a mesma de `ui/looks._norm`).
+- **Termos:** o texto digitado vira palavras; cada uma precisa aparecer, em qualquer ordem, como pedaço do texto da
+  seção **ou** de algum controle (uma palavra pode bater no título e outra num controle). `search(query, sections)` devolve
+  `{chave da seção: Match(section, keys)}`: `section` = todas as palavras bateram no texto da seção; `keys` = chaves dos
+  controles que bateram alguma palavra, mesmo que a seção também a tenha (são os destacados: "aberração" está no subtítulo
+  de Lente e nitidez, e a linha da aberração cromática fica destacada). O cartão mostra as linhas todas nos dois casos.
+- **Tolerância:** só se a busca exata não achou **nada**, repete com um erro de digitação (Levenshtein ≤ 1, `within_one`,
+  sem dependência) em palavras de 5 letras ou mais, comparadas com as palavras do texto e com o começo delas; assim
+  o resultado exato nunca ganha ruído.
+- **Sinônimos:** `KEYWORDS = {chave da seção: (termos…)}` (tabela no fim da lista de constantes; um teste confere que as
+  chaves existem). Palavra-chave nova de uma seção nova: acrescente à tabela.
+
+### 38.2 Cartões (`SectionCard.set_filter`)
+
+`set_filter(keys)`: `None` desliga; um conjunto (vazio = só a seção bateu) abre o cartão, destaca as linhas de `keys`
+(`objectName` "FiltroHit" com folha de estilo própria na linha, desfeitos ao desligar), mostra as linhas avançadas
+escondidas que bateram e, na cor por faixa (`layout == "hsl"`), escolhe a faixa do primeiro controle que bateu.
+Ao ligar o primeiro filtro o cartão guarda o que a pessoa tinha (aberto/fechado, faixa de cor); ao desligar devolve tudo.
+`set_advanced` guarda o último valor (`_advanced`) e, com filtro, volta a mostrar as linhas que bateram.
+
+### 38.3 Campo e painéis (`ui/filtro_ajustes.py`)
+
+- `install(layout, painel, [cartões…], index=None)` põe um `FiltroAjustes` no layout e liga **Ctrl+F**
+  (`WidgetWithChildrenShortcut`, no painel inteiro: não briga com o Ctrl+F do painel de legendas, que fica no dock
+  dele). Cada lista de cartões é uma página (o look; imagem e som do inspetor); o campo do inspetor é um só e vale para
+  as duas páginas, então o filtro sobrevive à troca de clipe (os cartões do inspetor são fixos; só os valores
+  mudam). O inspetor esconde o campo quando não há clipe (`_show`).
+- **Resultado:** cartões sem relação ficam escondidos (`setVisible(False)`), os que batem aparecem com `set_filter`. Ao
+  começar o filtro a página guarda a visibilidade natural de cada cartão e a posição da rolagem; ao apagar o texto, volta
+  tudo (rolagem também num `QTimer.singleShot(0)`, depois do layout).
+- **Módulos desligados:** o filtro não tem tabela própria: pergunta à janela (`MainWindow._module_tools()` e
+  `modules.enabled_ids`, mais o cartão `lights_card`) quais cartões e linhas são de módulo desligado. Eles nunca
+  reaparecem; se a busca só bate neles, a mensagem é "Está no módulo {nome}: ligue em Configurações › Recursos" (nomes
+  por `module_notice.module_names`); sem nada, "Nenhum ajuste encontrado". Fora da janela principal (testes do
+  inspetor sozinho) não há módulos. `MainWindow.apply_modules` chama `reapply()` no fim, porque ele mexe na
+  visibilidade dos mesmos cartões.
+- **Tecla `/`:** `MainWindow.keyPressEvent` chama `filtro_ajustes.focus_current(win, focusWidget)`, que ignora a tecla
+  quando o foco está num campo de texto (`typing_in_text`) e leva ao filtro do painel do modo atual.
+- **Ganchos fora do módulo novo:** `main_window._right_panel` (`self.look_filter`), `main_window.apply_modules` (`reapply`),
+  `keyPressEvent` (`/`), `show_shortcuts` (uma linha); `edit_panels.ClipInspector.__init__` (`self.filtro`) e `_show`.
+- **Testes:** `tests/test_busca_ajustes.py` (busca, sem Qt) e `tests/busca_ajustes_ui_cases.py` + `tests/test_busca_ajustes_ui.py`
+  (cartões, destaque, avançados, restauração, mensagens, módulo desligado, inspetor, atalhos, valores intactos).
+
+## 39. Pastas no painel de mídia
+
+Pastas coloridas para organizar a Mídia do modo Edição (#58). Só organização: nada aqui entra em `is_trivial()`,
+`layers_at`, no som, no render ou nos arquivos do disco.
+
+- **Modelo puro** (`pelicula/pastas.py`, sem Qt e sem `timeline`): `Folder(id, name, color, parent)` e `Folders`
+  (`folders`: id → pasta, na ordem de criação; `items`: chave do item → id da pasta, fora dele = raiz). Ids `p1`, `p2`…
+  de um contador do objeto (sem aleatório nem relógio; `from_json` continua depois do maior). Operações que devolvem se
+  mudaram algo: `create`, `rename`, `set_color`, `move` (recusa ciclo, mãe que não existe e a própria pasta), `delete`
+  (subpastas e itens sobem para a mãe; `to_root=True` leva para a raiz), `assign`, `unassign`, `rename_item`,
+  `keep_items`. Cor: `""` (padrão), id de `PALETTE` (= `timeline.MARKER_COLORS`, conferido em
+  `tests/test_pastas.py`) ou `#rrggbb`. O item é uma chave genérica (hoje o caminho da fonte): uma sequência da fase
+  3 (#57) poderá entrar com a chave dela.
+- **JSON** (`Folders.to_json`/`from_json`; tolerante: mãe desconhecida vai para a raiz, ciclos se desfazem, chave
+  desconhecida some). Na montagem: `Sequence.folders`, bloco `"pastas"` do `"edicao"` só quando há pasta, e a linha
+  `"pastas"` em `timeline.FEATURES_V5` (projeto 5, bloco 4; a 1.6 recusa com o aviso de sempre):
+  `{"lista": [{"id","nome","cor","pai"}], "midia": {caminho: id da pasta}, "fontes": [Source.to_json()…]}`.
+- **A armadilha:** `"fontes"` do bloco só traz as fontes que algum clipe usa, e a Mídia guarda as dela à parte, então um
+  arquivo importado e ainda fora da linha do tempo não voltava ao reabrir. Por isso `"pastas"."fontes"` traz o JSON
+  das fontes que estão numa pasta e nenhum clipe usa (`Sequence._folders_json`); `from_json` põe essas fontes em
+  `Sequence.sources` (sem clipe) e descarta itens sem fonte. Sem pasta nenhuma nada muda: o arquivo fora da linha do
+  tempo e fora de pastas continua não sendo guardado.
+- **Projeto:** `Project.to_json` põe `"relativo"` também nas fontes de `"pastas"."fontes"`, e `_relink_sequence` as
+  reencontra pelo caminho relativo como as de `"fontes"` (arquivo que falta: a janela pergunta, como já fazia);
+  `Sequence.relink` leva o item da pasta junto (`Folders.rename_item`). `main_window._seq_json` grava a montagem
+  mesmo trivial ou sem clipes quando há pastas.
+- **Desfazer:** `TimelineModel.folder_create/rename/color/move/delete`, `media_to_folder`, `folder_with_media` (pasta
+  nova já com itens) e `folder_drop` (arrastar vários itens e pastas), cada uma um passo (`History` por JSON, que leva
+  o bloco), com `changed("pastas")`. Desfazer/refazer que só mudam as pastas também emitem `"pastas"` (a prévia e o
+  som não recarregam; `_without_folders`). `media_to_folder` leva a `Source` ainda fora da montagem para
+  `seq.sources` (assim o projeto a guarda); `media_forget` tira o item da pasta quando ele sai da Mídia.
+- **Painel** (`ui/pastas_ui.py`; `edit_panels.MediaBin` só liga): `FolderTree` (QTreeWidget com miniaturas do mesmo
+  tamanho) no lugar da lista; o API de lista (`count`, `item`, `row`, `setCurrentRow`, `paths`, `selected_paths`,
+  `current_path`, `place`) conta só os itens de mídia, na ordem em que aparecem; sem pasta nenhuma é plano. O arrasto
+  para a linha do tempo mantém `MIME_SOURCE` (só caminhos de itens); pastas arrastadas levam `MIME_FOLDERS`, que só vale
+  dentro do painel, e o drop interno nunca usa `MoveAction` (o Qt apagaria os itens). O destino do drop é a pasta sob o
+  cursor, a pasta do item sob o cursor ou a raiz; arquivos do sistema sobre uma pasta emitem `filesDroppedIn`, e a janela
+  (`MainWindow._bin_files(paths, folder)`) importa nela; uma pasta do sistema vira uma pasta com os arquivos de mídia
+  dela (`media_in_dir`, sem recursão). `FolderActions` cuida de botões, menus, ordenar (`ordem`/`nome`/`tipo`/`data`,
+  só no painel) e liga o painel ao modelo (`model.changed` → `refresh`); a abertura das pastas fica em
+  `FolderTree._expanded`.
+- **Atalho:** Ctrl+Shift+N (no modo Edição). F2 renomeia a pasta escolhida.
+- **Testes:** `tests/test_pastas.py` (modelo, ciclos, apagar dos dois jeitos, JSON quebrado, fonte solta que volta por
+  `project.save`/`load` com caminho relativo, desfazer, formato 5 só com pastas, `is_trivial`) e
+  `tests/test_pastas_ui.py` (casos de `pastas_ui_cases.py`).
+- **Limites:** a cor da pasta não aparece nos clipes da linha do tempo; sequências em pastas ficam para a fase 3 (#57);
+  sem "entrar na pasta" em grade (só árvore); soltar uma pasta do sistema não desce nas subpastas; a ordenação e a
+  abertura das pastas não são guardadas.
+
+## 40. Desligar todos os efeitos
+
+"Desligar todos os efeitos" (1.7, `ui/sem_efeitos_ui.py`) é **um booleano lido onde a receita é montada**; nenhum valor,
+chave, clipe ou modelo muda. Religar dá os mesmos quadros bit a bit, sem passo no desfazer, sem "alterações não salvas"
+e sem nada no `to_json`.
+
+- **Quem ajusta medindo a imagem recusa** (`sem_efeitos_ui.refuses_tool`, com o aviso na barra de status): os conta-gotas do
+  clipe e da pele, o "Automático" e o "Igualar". O resultado não apareceria, e o quadro lido vem sem o perfil de câmera. Desligar
+  com um conta-gotas ligado cancela. Zebra, falsa cor e fotômetro só leem a tela e continuam.
+- **`frame.Recipe.no_effects`** (o último campo): em `__post_init__`, `keys = {}`, `lut = None` e `values` vira
+  `presets.builtin_values("original")`, o caminho "sem película" de `_export_look`; `values` None (prévia do modo Edição
+  sem película) continua None. Daí `Recipe.profile` é `rec709`, `Recipe.shutter` é 0 e `light_of`/`target_of` são os do
+  Rec.709. `Recipe.montage` passa `neutral=True` ao `Engine.compose`, pula `camera.uses_profiles` (nem `camera`, nem
+  `float_out`) e ignora a pilha do obturador de um quadro lido antes de desligar.
+- **O que sai**: tudo sob `u_cc_on`/`u_det_on` (`compositor.clip_uniforms(neutral=True)`: cor, detalhe, vinheta, desbotar e,
+  dentro de `cc`, a cor simples: pele, cor escolhida, degradê), o perfil de câmera do clipe (o passo `CAMERA` e a leitura)
+  e a luz da copiadora (`luz_plano` só age com `lab_on`, e o "original" não tem). O `compositor` não mudou.
+- **O que fica**: geometria (`u_xf`, `u_crop`), opacidade, mesclagem, `u_fade`, transições (`transitions.apply`, na luz
+  Rec.709), tempo (`layers_at`, manivela), títulos, geradores, legendas gravadas (`Recipe.burn`) e o som (`audiomix` não
+  vê o campo).
+- **Leitura**: o perfil do clipe muda o que se lê (log em float32), então `sequence.grab` e `SequenceReader` recebem
+  `no_effects` e pedem `prof = None`. Sem isso o quadro não seria o de um clipe no padrão. No arquivo direto a leitura segue
+  `Recipe.profile` (`rec709`); na janela, `sem_efeitos_ui.read_entrada`.
+- **Exportação**: `ExportSettings.no_effects` (padrão False; JSON antigo sem ele abre em `from_dict`) vai por
+  `frame_pipeline` a `open_reader`/`preview_frame`. O trabalho guarda os ajustes como vieram (`ExportJob.to_dict`), mas a
+  receita usa o caminho sem película: um trabalho na fila fica como foi criado, seja qual for o botão depois. Vale também
+  para a medição de velocidade e a prévia da janela (`ExportDialog(no_effects=)` → `settings()`).
+- **Janela**: `MainWindow.no_effects`, ganchos curtos em `frame_recipe`, `_shutter`, `_export_look`, `_export_keys`,
+  `_update_label_proc`, `render_now` (sem o aviso do LUT), `request_frame`/`start_play` (`FrameLoader`/`Player` levam
+  `no_effects`), `still_frame`, `_on_param`, `new_export` (`confirm_export`, a pergunta), `load_media`, `show_project` e
+  `new_project` (`reset`). Ao trocar, `_toggled` remonta (`_compose_current`), desenha de novo e, se a leitura muda
+  (`_reading`: obturador, log em float32, perfis dos clipes), lê o quadro de novo ou reinicia o leitor da reprodução.
+- **Projeto**: `_make_project` não vê o campo. A miniatura viria da tela, então `_thumbnail` usa
+  `sem_efeitos_ui.thumbnail_image`: lê e desenha o quadro atual como ele sai com os efeitos ligados, e o `.plc` é o mesmo
+  JSON nos dois estados. As miniaturas dos presets usam uma receita própria e continuam mostrando os looks.
+- **Testes**: `tests/test_sem_efeitos.py` (sem GPU: receita e JSON; na GPU: igual à montagem com os ajustes no padrão e o
+  "original", em 8 e 16 bits, `grab` = `SequenceReader`, exportação) e `tests/sem_efeitos_ui_cases.py` (janela).
+
+Na mesma barra, o seletor de comparação (`Segmented(name="SegQuiet")`) tem a marca discreta e o rótulo "Resultado" (a chave
+continua `"proc"`, gravada nos projetos), e o âmbar fica para o seletor de modo (`name="SegMode"`, com `item_icons`, que
+usa `icons.two_state`; na janela estreita, só o ícone, pela `AdaptiveBar`).
+
+## 41. Várias sequências e sequência aninhada
+
+Issue #57. Um projeto pode ter mais de uma sequência, e uma pode entrar em outra como clipe. Esta seção descreve o formato e
+o modelo (`timeline.py`, sem Qt nem GPU; testes em `tests/test_sequencias.py`).
+
+### 41.1 Modelo
+
+- **`timeline.SequenceSet`**: as sequências do projeto, na ordem das abas. Todas apontam para o **mesmo** `sources` e o mesmo
+  `folders`: a Mídia é uma só, relocalizar um arquivo vale para todas (`Sequence.relink`) e uma pasta pode guardar sequências.
+- **`Sequence.siblings`** é o conjunto, e `None` é a sequência sozinha, como sempre foi. Um projeto de uma sequência nem
+  ganha conjunto: `Sequence.family()` devolve `[seq]`. A interface pede o conjunto com `ensure_set()` ao criar a segunda.
+- **`Sequence.name` continua vazio até alguém dar um nome**: é ele que nomeia a saída da exportação (`sequence.media_info`),
+  então um projeto antigo sai com o mesmo nome de arquivo. Na tela, `display_name` mostra "Sequência 1".
+- **Fonte de uma sequência** (`Source.for_sequence`): `kind = SOURCE_SEQUENCE`, chave `sequencia:<id>`, tamanho e fps da
+  sequência e `frames` até o fim do último clipe. Por isso o tempo do clipe não tem regra nova: entrada, velocidade, rampa,
+  reverso e fps diferente passam por `src_frame`, e o quadro que sai é um quadro da sequência interna. `SequenceSet.sync` atualiza
+  essas fontes no mesmo objeto e `Sequence.to_json` a chama, então cada passo do desfazer e cada cópia saem em dia. Uma
+  sequência sozinha não tem fonte, porque não há onde usá-la.
+- **`Source.is_file`, `is_nested` e `is_generated`**: uma fonte é exatamente uma das três. Antes da 1.7, "não é arquivo" queria
+  dizer "gerada"; quem precisa do gerador pergunta `is_generated`.
+
+### 41.2 Regras
+
+- **Sem ciclos:** `Sequence.can_contain(fonte)` recusa a própria sequência, uma que já a use em algum nível e o que passar de
+  `MAX_NEST` níveis (cada nível usa telas próprias na GPU). `insert_media` devolve `[]` nesses casos e nada muda; quem mostra o
+  aviso é a interface. Ao abrir, `SequenceSet.validate` tira os clipes de uma sequência que sumiu ou que fecharia um ciclo
+  (arquivo mexido à mão) e guarda o aviso em `problems`.
+- **Fundo:** a fonte tem `has_alpha = Sequence.transparent`. Com "Fundo transparente" desligado, as áreas sem clipe mostram o
+  fundo da sequência, como um vídeo opaco; ligado, o que está embaixo aparece.
+- **Sequência encurtada:** a fonte encolhe e o clipe de fora não muda; ele segura o último quadro, como um clipe cujo
+  arquivo é mais curto.
+- **Só som:** uma sequência sem clipe de vídeo tem `has_video = False` e vira só um clipe de áudio.
+- **`is_trivial()`** vale para a sequência aberta: um clipe de sequência nunca é trivial, e uma sequência trivial com irmãs
+  continua lendo o arquivo direto no modo Película. A janela grava o bloco mesmo assim (`MainWindow._seq_json`).
+
+### 41.3 Formato
+
+O bloco `"edicao"` continua sendo o bloco da sequência aberta. Com mais de uma sequência, ele ganha:
+
+```json
+{"formato": 4, "id": "a1b2", "sequencia_pos": 1, "...": "os campos de sempre",
+ "sequencias": [{"id": "c3d4", "formato": 4, "...": "o bloco de outra sequência, sem \"pastas\""}]}
+```
+
+- **As irmãs vão sempre juntas.** `to_json` leva todas, e não só as que a sequência usa: `copy()`, a exportação na fila, a
+  recuperação e o desfazer ficam completos sem ninguém precisar lembrar. Sozinha, a sequência grava o JSON de antes, byte a byte.
+- **`"pastas"` fica só no bloco de cima**, porque a Mídia é uma só. Os itens valem para fontes de qualquer sequência, inclusive
+  as `sequencia:<id>`, por isso `keep_items` roda depois de montar o conjunto, em `from_json`.
+- **Recursos** (`timeline.FEATURES_V5`): `"varias_sequencias"` e `"sequencia_aninhada"` levam o bloco ao formato 4 e o projeto
+  ao 5, que a 1.6 recusa. `features()` conta as irmãs.
+- **Caminhos relativos:** `project._block_sources` percorre as fontes de todos os blocos, ao gravar e ao abrir.
+
+### 41.4 Desfazer
+
+`History` guarda o projeto inteiro, porque "Aninhar seleção" mexe em duas sequências e é um passo só. O instantâneo sai sempre a
+partir da primeira aba, então trocar de aba não vira passo. Desfazer volta à sequência em que a mudança foi feita (`_active`) e,
+se ela ainda não existia naquele estado, à que estava aberta.
+
+### 41.5 Imagem e som da sequência aninhada
+
+A regra é a do resto do programa: um caminho só para a prévia e a exportação, sem regra de tempo nova. Testes em
+`tests/test_aninhada.py`; o coração deles é a **gêmea**: uma montagem e a mesma montagem dentro de uma sequência, num único
+clipe sem ajuste, dão os mesmos bits em todo quadro (8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação) e
+as mesmas amostras de 24 bits (diferença medida: zero).
+
+**Leitura** (`sequence.py`). `LayerImage.nested` traz um `Nested(seq, layers, size)` no lugar da imagem: o `FrameLayers` do quadro
+interno, lido por `grab` (acesso aleatório) ou por um `_NestedStream` dentro do `SequenceReader` (que usa um `SequenceReader`
+interno). O quadro interno vem de `src_frame`, como o de um arquivo. `image` guarda só um quadradinho preto, porque nada lê pixels
+de um clipe de sequência. Quem precisa da montagem inteira atravessa os níveis: `Sequence.deep_sources` (arquivos que faltam,
+`export.job_inputs`), `closure` (`anyp` de `media_info`, `camera.uses_profiles`, `modules.used_by`) e `_video_sources`.
+
+**Tamanho da tela interna** (`nested_canvas`). A regra de um vídeo: nunca maior que a sequência, com lados pares. A diferença
+para `decode_size` é que, na proporção da tela de fora (mesmo depois de arredondar para lados pares), a tela é **exatamente** a de
+fora; é o que permite a identidade numa prévia de 180×100 de um quadro 16:9. Em `compositor.fit_box`, uma sequência da mesma
+proporção da de fora ocupa a tela inteira, sem a conta de encaixe que daria 159,75 em vez de 160 linhas.
+
+**Composição** (`Engine.compose` → `_canvas` → `_nested_texture`). `_canvas` é a parte recursiva. Cada clipe de sequência monta
+a tela de dentro em float32, sem arredondar, e ela vira a textura do clipe: sem leitura da GPU e sem passar por 8 bits; só o `OUT`
+final arredonda, uma vez. Alvos e texturas levam o **caminho** do clipe na montagem (`""`, `"/2"`, `"/2/0"`), então dois clipes da
+mesma sequência no mesmo quadro nunca dividem tela. A memória é de duas telas f4 por caminho, reaproveitadas de quadro a quadro.
+
+- **Identidade exata:** `CLIP` calcula a cobertura com `u_px_per_uv`. Com os erros de float32 ela dava 0,99998 na última coluna e o
+  fundo de fora vazava. Como o texto de `CLIP` está preso pelo hash de `tests/test_transitions.py`, um clipe de sequência sem ajuste
+  de geometria usa `EXACT_PX_PER_UV`, e a cobertura dá 1 exato.
+- **Sequência transparente:** a tela sai pré-multiplicada por `NEST_PREMUL` (`editshaders.py`). `alphashaders.PREMUL` não serve:
+  ele corta o RGB em 0–1, perdendo os super-brancos de um clipe log, e `clipAlpha` distorceria a cobertura (20% viraria 19,8%).
+  `NEST_PREMUL` compensa `clipAlpha`. Sobre um V1, contra os mesmos clipes fora, **não é bit a bit**: medido em 18 quadros, no
+  máximo 1 passo, em 1% dos valores em 8 bits (empates de arredondamento com opacidade 50%) e em 0,2% em 16 bits. Vem do ponto
+  flutuante de tirar e repor o alfa. Uma sequência opaca não passa por isso.
+- **Câmera:** cada clipe de dentro converte com o próprio perfil para a entrada do look (`Target` é passado para baixo). O clipe de
+  sequência em si não tem perfil: `camera.uniforms` devolve `None`. Sem clipe de perfil em nível nenhum, a tela de dentro é a de sempre.
+- **Cache do quadro** (câmera lenta repete o quadro interno): `_nested_tex` guarda a tela por caminho e só reaproveita com o
+  **mesmo objeto** `FrameLayers`, a mesma sequência e os mesmos `neutral`, `light`, `camera` e tamanho. Quadro lido de novo é outro
+  objeto e monta de novo: no pior caso custa tempo, nunca mostra quadro velho. `_NestedStream` entrega o mesmo objeto quando o
+  quadro se repete.
+- **Obturador e mesclagem** (`Recipe._blend_layers`) descem pelos níveis com `dataclasses.replace`, na mesma conta. A mistura do
+  obturador é dos clipes de dentro, com a janela deles; o clipe de sequência acelerado não tem pilha própria.
+
+**Som** (`audiomix.py`). A sequência é mixada antes, pela mesma `render_mix` (recursiva), num WAV que vira a entrada da cadeia do
+clipe como um arquivo qualquer: aparar, velocidade, rampa, reverso, equalização, fades e transição não têm regra nova. `Clip.src`
+continua `sequencia:<id>`; o caminho vai em `seg["path"]`.
+
+- **Nome do WAV** (`nested_mix_path`): a versão do app + `mix_key` da sequência + a duração + data e tamanho dos arquivos de som
+  em qualquer nível. `mix_key` ganha `"aninhadas"` só quando há clipe de sequência, então a chave e o grafo de uma montagem sem
+  isso continuam os de antes, byte a byte (conferido contra a BASE com cortes, transição, reverso, rampa e faixas).
+- **Cache** (`nested_dir`, no temporário do sistema): sobrevive à sessão, porque mixar de novo é o que custa, e `_prune_nested`
+  segura o total em `NEST_MAX_BYTES`, tirando os mais antigos, nunca os da mixagem atual nem os usados há menos de `NEST_KEEP_S`.
+  Grava num parcial e troca no fim (`os.replace`). Não há limpeza ao sair: o limite é o que segura o disco.
+- **Cancelar e erro:** o `cancel` chega à mixagem de dentro (`False`, sem deixar nada) e o `RuntimeError` dela sobe como erro da de fora.
+- **Forma de onda:** `source_peaks` lê o WAV, se já existe.
+- **Bipe da ponta** dentro de uma sequência: fica no WAV dela, no mesmo número de amostra.
+
+**Limites conhecidos** (nada aqui é um bug a corrigir sem decidir antes):
+
+- **Legendas gravadas e marcadores** de dentro não sobem: só os da sequência exportada contam.
+- **O look que lê cortes** (`montagem_filme`, `luz_plano`) vê um clipe de sequência como um plano só.
+- **Mesclagem dentro de uma sequência transparente** mistura com a tela de dentro, não com o que está embaixo dela.
+- **Janela útil da sequência de dentro sob um look:** a receita só pinta de preto exato as faixas da sequência exportada. As de dentro
+  são imagem, e o grão passa por elas; dentro da janela o quadro segue bit a bit. Sem look, tudo igual.
+- **Saída maior que a sequência:** a tela de dentro para no tamanho dela e é ampliada de uma vez, e os clipes fora de uma sequência seriam
+  ampliados um a um. Fica perto (`tests/test_aninhada.py`), não bit a bit.
+- **Clipe de sequência acelerado** não ganha borrão do obturador: a mistura é só dos clipes de dentro.
+- **Som posto depois** dentro de uma sequência que já é clipe só de vídeo em outra: o clipe de fora não ganha clipe de áudio; é preciso
+  colocar de novo.
+- **Quem lê a imagem do clipe** (conta-gotas, ajuste automático) vê o quadradinho preto; **legendas automáticas e corte por texto**
+  (`subauto.spans_for`) pulam clipes de sequência, porque olham só arquivos (as legendas presas a um arquivo, em compensação, atravessam a sequência: §41.7).
+
+### 41.6 Interface das várias sequências
+
+Frente "abas" da fase 3 (#57): criar, duplicar, renomear, apagar e trocar de sequência na janela, na exportação e no
+terminal. O formato e o `timeline` não mudam (nenhum recurso novo em `FEATURES_V5`); tudo abaixo é interface em volta do
+modelo da §41.
+
+- **Modelo** (`ui/edit_model.TimelineModel`): uma operação para cada coisa, cada uma um passo do desfazer (que é um só para o
+  projeto): `new_sequence` (com os valores da janela de criar e, opcionalmente, uma `source` que entra no mesmo passo),
+  `duplicate_sequence`, `rename_sequence` (recusa nome vazio e nome igual ao de outra: o terminal escolhe pelo nome),
+  `remove_sequence` (devolve os clipes que saíram das outras; a última fica: -1; apagando a aberta, abre a vizinha),
+  `move_sequence`. `activate_sequence(id)` **não é passo**: fecha o que estava pendente (`commit`), troca `self.seq`, limpa a
+  seleção e emite `"*"`. `sequence_users(id)` dá a quem usa a sequência (a pergunta antes de apagar) e `sequence_by(chave)`
+  acha por id ou nome. A primeira operação chama `ensure_set()`: a sequência de um projeto antigo ganha um id aí.
+- **Tipo de mudança novo**, `changed("sequencias")`: só nomes e ordem (abas e Mídia; a prévia e o som não recarregam). Desfazer
+  e refazer também o emitem quando só isso difere (`_without_tabs`: o projeto sem os nomes e a ordem, com a mesma aba
+  aberta); senão `"*"`. Criar, apagar e abrir uma aba emitem `"*"`.
+- **Abas** (`ui/sequence_tabs.SequenceTabs`): widget pintado à mão (tema do app), uma fileira acima da barra de ferramentas
+  da linha do tempo (`TimelineEditor.add_header`). Sinais `activated`, `addRequested`, `renamed`, `duplicateRequested`,
+  `settingsRequested`, `deleteRequested`, `moved`; não conhece o modelo. `set_tabs` não faz nada quando nada mudou (a janela
+  avisa a cada edição). Ícone `sequence` em `icons.py`.
+- **Ligação com a janela** (`ui/sequencias_ui.SequencesUI`, `MainWindow.seqs_ui`; padrão de `cor_ui`): cria as abas, os
+  atalhos Ctrl+Tab / Ctrl+Shift+Tab (só no modo Edição), os diálogos (criar, pergunta de apagar), a Mídia (`sync_bin`,
+  `bin_menu`) e os alvos da exportação (`export_targets`). Ganchos em `main_window.py`: `_model_changed` chama
+  `seqs_ui.model_changed(kind)` **antes** de recarregar a fonte da prévia; `reset()` depois de cada `set_sequence` com
+  `_loading` (novo projeto, abrir projeto, abrir arquivo); `problems()` depois de abrir.
+- **Estado por sequência**, só na sessão (`View`: quadro do cursor, entrada e saída, zoom e rolagem da linha do tempo), por id.
+  `model_changed` percebe que a sequência aberta é outra (`seq.id` diferente: aba escolhida **ou** um desfazer que voltou a
+  outra), guarda a vista da que saiu e põe a da que entrou, uma aba nova com o zoom de agora. Uma sequência só usa a vaga
+  `LONE` (o id dela some do JSON). Fonte da prévia, som (a mixagem da aba nova sai na hora, `_schedule_mix(immediate=True)`)
+  e escopos seguem o caminho de sempre de `_refresh_source`.
+- **Sequência vazia aberta**: `info` None, como num projeto vazio (texto de boas-vindas, sem prévia, som nem escopos; a hora e
+  a barra de status voltam ao zero). No modo Película, `_film_info()` não mostra o arquivo de antes: com várias sequências, a
+  aberta vazia é uma edição vazia. Uma sequência trivial com `file_info` igual segue lendo o arquivo direto. `_has_project()`
+  (algo aberto **ou** várias sequências) libera salvar e o "alterações não salvas" mesmo com a aberta vazia, e o botão
+  Exportar vale enquanto alguma sequência tem clipes.
+- **Alterações não salvas**: `_state()` compara o projeto a partir da **primeira** aba (`family()[0].to_json()`), não o bloco
+  da aberta (`_seq_json`, que é o que o `.plc` grava: a aberta ao salvar abre no topo). Assim trocar de aba não parece mudança.
+- **Mídia**: as fontes `sequencia:<id>` (que existem só com 2 ou mais sequências, `SequenceSet.sync`) viram itens do tipo
+  `"sequencia"` (`edit_panels.source_kind`), com o ícone e a duração; sem miniatura de imagem. `sync_bin` entra e tira os
+  itens e atualiza o texto a cada mudança. Dois cliques emitem `MediaBin.openRequested` (abre a aba) em vez de `addRequested`;
+  podem ir para pastas (a chave `sequencia:<id>` já vale em `Folders`); o botão de tirar da lista apaga a sequência (com a
+  pergunta). `MIME_SOURCE` não mudou. **Pôr uma sequência na linha do tempo é recusado** em `MainWindow._insert`, com uma
+  mensagem curta (a interface do aninhar é da frente seguinte). O menu de um item ganha **Nova sequência a partir deste
+  vídeo** (`MediaBin.extra_menu`; vale o primeiro vídeo dos escolhidos e `Sequence.for_source`).
+- **Janela de criar** (`ui/sequence_dialog.SequenceDialog(parent, seq, name=…, reference=…, taken=…)`): a de configurar, com o
+  campo do nome, sem as referências aos clipes e, com `reference`, a opção "Igual ao vídeo". Os valores de partida são os da
+  sequência aberta (com os fades curtos ligados, como toda sequência nova) ou os de `Sequence.for_source`.
+- **Exportar** (`ui/export_dialog`): `ExportTarget` (id, nome, `info`, a cópia da sequência, entrada e saída, capítulos,
+  legendas e quadro da prévia) é o que a janela entrega por sequência (`SequencesUI.export_targets`; as vazias não saem). Com
+  duas ou mais, a linha **Sequência** escolhe a que sai (`_set_target` refaz título, duração, trecho, capítulos, legendas,
+  transparência, qualidades prontas, rótulos de tamanho, nome proposto e prévia); o nome que a pessoa digitou fica. **Pôr várias
+  na fila**: `jobs()` devolve uma `ExportJob` por sequência marcada, com as mesmas opções, `sequence` = a cópia (`Sequence.copy`,
+  com as irmãs) e o nome `<nome da sequência>_pelicula.<ext>` na pasta do destino; o que já existe na fila ou no disco vira
+  `nome_2`. Uma sequência sozinha não muda: o nome proposto continua `<arquivo>_edicao_pelicula`. `Project.problems`
+  (avisos de `SequenceSet.validate`, que o `project.load` já não repassava) chega à janela por `seqs_ui.problems`.
+- **Terminal** (`cli.py`): `--sequencia NOME` em `exportar` e `quadro` (`pick_sequence`: id ou nome sem maiúsculas e minúsculas;
+  padrão, a aberta ao salvar; nome errado: erro com a lista), `info projeto.plc` (`project_info`). `--trecho`, a entrada e a
+  saída e o quadro padrão do projeto são da sequência aberta ao salvar: com outra, `--trecho` é recusado e o quadro padrão é o 0.
+- **Testes**: `tests/test_sequencias.py` (operações do modelo, sem GPU), `tests/sequencias_ui_cases.py` +
+  `tests/test_sequencias_ui.py` (abas, janela de criar, trocas entre vazia/só o arquivo/montagem/fps e tamanho diferentes nos
+  dois modos, estado por aba, desfazer entre abas, "não salvas", reabrir, Mídia, exportação em fila e uma exportação real de
+  duas sequências), `tests/test_sequencias_cli.py` (terminal, com exportação e quadro de verdade).
+- **Limites**: (sequência da Mídia na linha do tempo, duplo clique num clipe aninhado e "Aninhar seleção": §41.7); a miniatura da sequência na Mídia é só o ícone; o estado das abas (cursor, zoom) não vai para o `.plc`; sem arrastar
+  uma aba para fora; "Pôr várias na fila" usa o trecho inteiro de cada sequência (entrada e saída marcadas valem só para a
+  aberta, quando é a única escolhida).
+
+
+### 41.7 Aninhar na interface
+
+Frente "aninhar" da fase 3 (#57): pôr uma sequência na linha do tempo, abrir a de um clipe, **Aninhar seleção** e
+**Desaninhar**. As contas são puras (`pelicula/aninhar.py`, sem Qt nem GPU); a janela está em `ui/aninhar_ui.py`
+(`NestUI`, ponto único de ligação como `SequencesUI`). O formato não muda: nenhuma chave nova no JSON, nenhum id novo em
+`FEATURES_V5`.
+
+**A promessa: aninhar não muda a imagem nem o som.** Onde ela não se sustenta, a operação recusa (`aninhar.Refusal`, com o
+motivo e o que fazer, na barra de status; nada muda, nem uma sequência nova) ou avisa (`NestResult.warnings`).
+
+- **Do que `nest` faz** (`TimelineModel.nest_selection`, um passo do desfazer, que é um só para o projeto): a seleção mais os
+  clipes ligados (`Sequence.expand`) vai para uma sequência criada por `SequenceSet.create`, **os mesmos objetos `Clip`, com os
+  mesmos ids** (a semente das transições e do grão sai do id), com o tempo deslocado de `-a` (`a` = o começo mais cedo) e só as
+  faixas usadas, na mesma ordem e com nome, escondida e solo. As chaves de animação são relativas ao clipe (`key_off`) e não
+  andam. Fora ficam todas as faixas; entram um clipe de vídeo (na mais baixa selecionada que não está escondida) e um de som
+  (idem, não muda), ligados, em `a` com a duração inteira, sem nenhum ajuste (`fit_box` dá a tela toda ou a janela). A sequência
+  de dentro tem o tamanho de `window_rect` quando a de fora tem janela útil (e não tem janela), o mesmo `micro_fade`, e é
+  `magnetic` só se a de fora é e a V1 de dentro não tem buraco (nada anda: `settle_main` não roda).
+- **Recusas**: nada selecionado; clipe em faixa travada (também o par ligado); um clipe fora da seleção sobre o intervalo numa
+  faixa que tem clipe selecionado ("no meio"), ou numa faixa de vídeo visível entre a mais baixa e a mais alta selecionadas
+  (a ordem das camadas mudaria); uma transição que usa o vizinho (`dissolver` e `editparams.EXTRA_TWO_CLIP`: o clipe de dentro
+  não tem sobra além das pontas) ou uma transição de som (`audiomix.crossfades`) ligando um clipe da seleção a um de fora;
+  passar de `MAX_NEST` níveis; volumes de faixa tão diferentes que o de dentro sairia de -60 a +12 dB.
+- **Fundo**: sem nada de fora embaixo da seleção no intervalo e com a de fora não transparente, a de dentro é **opaca** com o
+  fundo da de fora (mesclagem e caminho bit a bit como antes). Senão, `transparent` (limite conhecido da 41.5: até 1 passo). Uma
+  mesclagem com a de dentro transparente avisa que ela passa a valer dentro da sequência.
+- **Som**: `volume da faixa de dentro = o de antes - o da faixa onde o clipe de fora cai` (a mais baixa que soa; sem tons, ver
+  abaixo), então o ganho vale uma vez. Mudo e solo: as faixas que o solo de fora já silenciava ficam mudas dentro, e o clipe de
+  fora só cai numa faixa que soa. O bipe de uma ponta (`audiomix.TONES`) não passa pela faixa: com ele, só uma faixa a 0 dB
+  serve (ou uma faixa nova no fim). Com volume na faixa de fora e efeitos que dependem da ordem do ganho (voz, ruído,
+  normalizar) o som pode mudar um pouco: avisa. O `micro_fade` de fora não age nas pontas do clipe de som (`src_in` 0 e a
+  duração inteira); a emenda de uma seleção que **continuava** o vizinho sem corte ganha o fade curto de 5 ms nas duas pontas
+  (limite aceito, avisa).
+- **Legendas presas a um arquivo** (`subtitles.mapped`, `carriers`, `Chained`): antes o clipe de sequência era pulado e a
+  legenda sumia ao aninhar. Agora a legenda passa pelo clipe de dentro (segundos do arquivo → da sequência de dentro) e pelo
+  clipe de sequência (→ da de fora), com a mesma conta de um clipe de arquivo; `Chained` responde como `Mapping`, então
+  `subedit` (editar texto, mover, aparar, dividir) funciona sem saber a diferença. Quem não tem clipe de sequência passa
+  exatamente pelo mesmo caminho de antes. Legendas da sequência (tempo fixo) e marcadores ficam na de fora. Legendas
+  automáticas e corte por texto (`subauto`, `subedit.anchor_at`) continuam olhando só arquivos.
+- **Avisa** (não recusa): o look que lê os cortes (`mfilme_on`; luz por plano com `lab_on`) passa a ver um plano só; título ou
+  gerador dentro de uma janela útil de fora (o gerador se encaixa na janela lá e na tela inteira de dentro).
+- **Desaninhar** (`unnest_clip`, um passo): recusa velocidade diferente de 1, rampa, reverso, congelar, faixa travada e outro
+  fps de dentro (arredondar mudaria o tempo). Pergunta antes quando o clipe de sequência tem ajuste (`unnest_loss`: opacidade,
+  mesclagem, transições, enquadramento, cor, volume, fades, chaves) ou a sequência tem fundo, janela ou proporção diferentes.
+  Os clipes de dentro que cruzam o trecho `[src_in, src_in + dur)` são cortados com a conta de `Sequence._cut` (a ponta cortada
+  perde a transição daquele lado), deslocados para o tempo de fora e voltam com os ids de dentro (novos só se já existem aqui).
+  Faixas de vídeo: a partir da do clipe, reaproveitando as livres e do mesmo estado; senão entram faixas novas **no meio**
+  (as de cima sobem), então nada de fora muda de camada. Faixas de som: a primeira livre com o mesmo volume e estado, senão
+  uma nova no fim; o volume volta a ser o de antes (`volume de dentro + o da faixa de fora`). Só volta o vídeo se só há o clipe
+  de vídeo de fora (e só o som se só há o de som). A sequência de dentro fica no projeto.
+- **Pôr da Mídia** (`MainWindow._insert`): `aninhar.refusal_for` diz por que não (ela mesma, ciclo, níveis, vazia, sumiu) e
+  nada muda; a sequência **não** impõe o formato dela (`_adopt_format` não roda). O menu de uma sequência na Mídia tem
+  "Adicionar ao fim", "Inserir no cursor" e "Sobrescrever no cursor". Uma sequência que ganha som depois de posta só com
+  vídeo **não** cria sozinha o clipe de som de fora (fica muda até pôr de novo).
+- **Dois cliques** num clipe de sequência (`TimelineCanvas.openNestedRequested`): abre a aba com o cursor no quadro de dentro
+  que estava sob o clique (`Sequence.src_frame`, preso à sequência). A aba de fora guarda o estado dela, como em toda troca.
+- **Desenho**: cores próprias (`theme.CLIP_NESTED*`), o ícone da sequência e o nome de agora. **Forma de onda**: o WAV da
+  mixagem de dentro (`audiomix.nested_mix_path`), lido quando existe (`NestUI.peaks`; a chave muda com qualquer edição de
+  dentro e a lista é limpa a cada mudança); o refresco vem quando a mixagem de fora termina (`mix_finished`).
+- **Inspetor e ferramentas**: o cartão "Câmera" some, o "Automático" e os conta-gotas/Igualar ficam desligados com o motivo
+  na dica, `auto_adjust_clip` recusa com mensagem, `corridorkey_dialog.current_source` e `TimelineModel.set_source_data` só
+  aceitam arquivo / gerador. O painel do gerador já não abria (sem gerador para o tipo).
+- **Atalho**: Ctrl+Shift+G (aninhar seleção). Menu de contexto do clipe: "Aninhar seleção", e no clipe de sequência "Abrir a
+  sequência" e "Desaninhar".
+- **Testes**: `tests/test_aninhar.py` (modelo sem GPU e, na GPU e no ffmpeg, a prova de "nada muda": quadros bit a bit em 8 e
+  16 bits, com e sem look, prévia reduzida, terminal; som amostra a amostra), `tests/aninhar_ui_cases.py` +
+  `tests/test_aninhar_ui.py`.
+- **Medido** (ver `tests/test_aninhar.py`): selecionando tudo, quadros **idênticos** antes, depois de aninhar e depois de
+  desaninhar; som: aninhar com volume de faixa difere **1 passo de 24 bits** em parte das amostras (o ganho passa por um WAV de
+  24 bits no meio), desaninhar volta **exato**. Faixas de cima sobre uma V1 de fora (dentro transparente): 1 passo em 8 bits e
+  em 16 bits sem look; com look, até 15 passos de 16 bits. Janela útil de fora: sem clipe gerado, 1 passo em 8 bits (205 de 65535
+  em 16); com o título, 4 a 9 passos em 8 bits (999 a 2240 em 16). Fade curto de 5 ms nas pontas de uma emenda sem corte.

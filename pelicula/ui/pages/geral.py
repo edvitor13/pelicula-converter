@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton
 
 from ... import i18n, luts, presets, system
 from ...i18n import _
+from ..timeline_view import ZOOM_PLAYHEAD_KEY, zoom_playhead_tip
 from ._base import PageBase
 
 
@@ -39,6 +40,13 @@ class Page(PageBase):
             lambda on: self.settings.setValue("show_welcome", "true" if on else "false"))
         self.body.addWidget(self.chk_welcome)
 
+        self.kicker(_("Linha do tempo"))
+        self.chk_zoom = QCheckBox(_("Zoom pelo marcador de reprodução"))
+        self.chk_zoom.setToolTip(zoom_playhead_tip())
+        self.chk_zoom.setChecked(str(self.settings.value(ZOOM_PLAYHEAD_KEY, "true")) != "false")
+        self.chk_zoom.toggled.connect(self._set_zoom)
+        self.body.addWidget(self.chk_zoom)
+
         self.kicker(_("Pastas"))
         row = QHBoxLayout()
         b = QPushButton(_("Meus presets"))
@@ -50,6 +58,10 @@ class Page(PageBase):
         row.addStretch(1)
         self.body.addLayout(row)
         self.finish()
+
+    def _set_zoom(self, on: bool) -> None:
+        self.settings.setValue(ZOOM_PLAYHEAD_KEY, "true" if on else "false")
+        self.dialog.settings_changed.emit(ZOOM_PLAYHEAD_KEY)
 
     def _set_update(self, on: bool) -> None:
         self.settings.setValue("auto_update", "true" if on else "false")

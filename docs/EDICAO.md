@@ -31,7 +31,8 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 └──────────┴─────────────────────────────────────────────┴───────────────┘
 ```
 
-- **Mídia** (esquerda): os arquivos importados — vídeos, imagens e músicas (MP3, WAV, AAC, FLAC…).
+- **Mídia** (esquerda): os arquivos importados — vídeos, imagens e músicas (MP3, WAV, AAC, FLAC…), que podem ficar
+  em pastas coloridas (veja *Pastas na Mídia*).
 - **Prévia** (centro): mostra a montagem no ponto do cursor. A opção **Com película / Sem película**
   liga ou desliga o look de película na prévia enquanto você edita.
 - **Linha do tempo** (embaixo): as faixas de vídeo (V1, V2…) ficam em cima e as de áudio (A1, A2…)
@@ -130,7 +131,7 @@ exportado não tem transparência (sai sempre com a cor por baixo), e sequência
 | Apagar e juntar | **Excluir e fechar o espaço** (Shift+Delete) puxa o que vem depois |
 | Juntar os clipes da faixa | Botão direito → **Remover espaços da faixa** |
 | Ímã | Liga/desliga com **N**: os clipes grudam no cursor, nas bordas dos outros e na entrada/saída. Segure **Shift** enquanto arrasta para inverter o ímã naquele momento |
-| Zoom | **+ / −**, Ctrl + roda do mouse, o controle de zoom ou **Ajustar** (sequência inteira) |
+| Zoom | **+ / −**, Ctrl + roda do mouse, o controle de zoom ou **Ajustar** (sequência inteira). O zoom mantém o marcador de reprodução parado na tela; se ele estiver fora da vista, vem para o centro. Com **Zoom pelo marcador de reprodução** desmarcado (botão direito nos controles de zoom ou Configurações › Geral), Ctrl + roda aproxima pelo ponteiro e o resto, pelo centro da vista |
 | Rolar | Roda do mouse (para os lados); Shift + roda (para cima e para baixo) |
 | Ir para um ponto | Clique ou arraste na régua de tempo |
 
@@ -146,6 +147,34 @@ Cada faixa tem botões no cabeçalho:
 
 **+ Vídeo** e **+ Áudio** criam faixas novas. Arrastar um clipe de vídeo para cima da última faixa de
 vídeo também cria uma faixa nova. Para apagar uma faixa: botão direito nela → **Remover esta faixa**.
+
+### Pastas na Mídia (1.7)
+
+A Mídia aceita **pastas coloridas** para organizar os arquivos importados. É só organização: as pastas não mexem nos
+arquivos do disco, nem na imagem, nem no som, e ficam guardadas no projeto. Sem nenhuma pasta, a Mídia é a lista de
+sempre.
+
+- **Criar:** o botão de pasta na linha do título da Mídia, o botão direito (*Nova pasta*) ou **Ctrl+Shift+N**. Com uma
+  pasta escolhida, a nova nasce dentro dela (subpasta). O nome já abre para você digitar.
+- **Abrir e fechar:** a Mídia vira uma árvore; a seta de cada pasta abre e fecha. Qual pasta está aberta vale
+  enquanto o painel está aberto (não vai para o projeto).
+- **Renomear:** **F2** ou dois cliques no nome da pasta.
+- **Cor:** botão direito na pasta › *Cor*: as mesmas oito cores dos marcadores, *Padrão* ou *Personalizada…*. A cor
+  pinta o ícone da pasta.
+- **Mover:** arraste itens e pastas para dentro de uma pasta, para fora (solte sobre um item da raiz ou no vazio) ou
+  de uma pasta para outra; o botão direito num item tem *Mover para ›*. Uma pasta não entra nela mesma nem numa
+  subpasta dela. Arrastar um item para a linha do tempo continua igual, também com vários escolhidos.
+- **Apagar:** botão direito › *Apagar pasta*. Se ela não está vazia, o app pergunta; *Apagar só a pasta* faz os itens
+  e as subpastas subirem para a pasta de cima. Nenhum arquivo sai do projeto nem do disco.
+- **Importar numa pasta:** solte arquivos do sistema sobre a pasta. Soltar uma **pasta do sistema** na Mídia cria uma
+  pasta com o mesmo nome e os vídeos, imagens e áudios dela (só os da própria pasta, sem as subpastas; uma pasta de
+  imagens numeradas continua perguntando se é uma sequência).
+- **Ordenar:** o botão ao lado das pastas ordena por *Ordem de importação* (padrão), *Nome*, *Tipo* ou *Data* do
+  arquivo (mais novo primeiro). Vale só para o painel; não é guardado.
+- **Desfazer:** criar, renomear, mudar a cor, mover e apagar pastas são passos do **Ctrl+Z**.
+- **Projeto:** um arquivo importado, colocado numa pasta e que nenhum clipe usa **volta** quando o projeto é aberto
+  de novo (sem pasta, um arquivo fora da linha do tempo continua não sendo guardado, como antes). Um projeto com
+  pastas pede a 1.7 ou mais nova para abrir.
 
 ### Marcadores e capítulos
 
@@ -231,6 +260,14 @@ escala, opacidade e as chaves de animação do clipe (painel Imagem) continuam v
 Selecione um clipe e use o painel da direita. Quando o vídeo tem som ligado, escolha **Imagem** ou **Som**
 no topo do painel.
 
+### Filtrar ajustes
+
+O campo **Filtrar ajustes…** fica no alto do painel Clipe, acima dos cartões, nas páginas **Imagem** e **Som**. Ele
+procura em português, inglês e espanhol (sem diferença de acentos) nos títulos das seções, nos nomes e dicas dos
+controles e nos nomes das opções, e deixa só os cartões que têm a ver, com o controle encontrado destacado. O filtro
+continua ligado ao trocar de clipe. **Ctrl+F** com o foco no painel ou **/** fora de um campo de texto levam ao
+campo; **Esc** limpa e devolve o painel como estava. Detalhes em [Efeitos e ajustes](EFEITOS.md).
+
 ### Ajustes rápidos
 
 Um clique resolve o mais comum:
@@ -257,7 +294,7 @@ Um clique resolve o mais comum:
 | **Pele natural** *(cor simples)* | A pele não acompanha as mudanças de cor do clipe e fica com a cor mais uniforme (veja *Cor simples*, abaixo) |
 | **Cor escolhida** *(cor simples)* | Uma cor só (a que você clicou): matiz, saturação e luminância |
 | **Degradê** *(cor simples)* | Céu ou chão com luz e cor próprias |
-| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), escala, posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
+| **Enquadrar e posicionar** | Encaixe no quadro (inteiro com barras, preencher ou esticar), desespremer (veja *Desespremer o clipe*, abaixo), escala (também só na horizontal ou só na vertical: veja *Escala por eixo*, abaixo), posição, rotação, espelhar, cortes nas bordas, opacidade e mesclagem com a faixa de baixo (tela, multiplicar, sobrepor…) |
 | **Velocidade** | Câmera lenta (abaixo de 1×), acelerado (acima de 1×) e **congelar quadro**. A duração do clipe muda junto, e o som ligado acompanha. No fim do cartão: **Reverso** e **Rampa de velocidade** (veja *Tempo do clipe*, abaixo) |
 | **Transições** | Entrada: corte seco, **dissolver com o clipe anterior**, surgir do preto ou do branco. Saída: corte, sumir no preto, no branco ou mostrar a faixa de baixo. Cada uma com a sua duração |
 | **Câmera** (1.6) | O **perfil do clipe**: como ele foi gravado (S-Log3, V-Log, Canon Log 3, HLG do celular, Rec.709…), para misturar câmeras diferentes numa montagem. O padrão, **Igual ao do look**, deixa o clipe como sempre. Avançado: *Log reescalado* e *EI do ARRI LogC3*, como no look (veja *Câmeras diferentes na mesma montagem*, abaixo) |
@@ -356,6 +393,29 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
   projetos reabertos nunca mudam.
 - Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
+### Escala por eixo
+
+No cartão **Enquadrar e posicionar**, **Escala horizontal** e **Escala vertical** esticam o clipe só em um eixo, de
+10% a 400%, com 100% de padrão. O tamanho final de cada lado é a **Escala** vezes a escala daquele eixo, sempre nos
+eixos do próprio clipe: com rotação, primeiro a escala, depois o giro. Os dois aceitam chaves de animação, como a
+Escala. Não há um cadeado "proporcional": a própria **Escala** já é esse controle.
+
+### Desespremer o clipe
+
+Vídeo filmado com lente ou adaptador anamórfico chega espremido na horizontal. **Desespremer**, no cartão
+**Enquadrar e posicionar**, deixa o clipe mais largo **antes** de ele se encaixar no quadro: Não, 1,33×, 1,5×, 1,55×,
+1,8×, 2× ou **Taxa manual** (de 1,00× a 2,50×, de 0,01 em 0,01). A ordem é sempre desespremer, depois a sua escala,
+depois a rotação.
+
+- **Mostrar inteiro** e **Preencher** usam a proporção já desespremida: um clipe 16:9 com 2× num quadro 16:9 ganha
+  faixas em cima e embaixo; com *Preencher*, as laterais ficam de fora.
+- **Esticar** ocupa o quadro e ignora o desespremer.
+- Fica preso ao clipe e não aceita chaves de animação (a lente não muda no meio do plano).
+
+Ele não tem nada a ver com a **Lente anamórfica** do modo Película (*Efeitos*), que continua igual e vale para a
+imagem inteira da montagem. Se o clipe está desespremido e a lente do look também está comprimindo, os dois valem e o
+cartão mostra um aviso: quase sempre você quer só um deles.
+
 ### Animar com chaves (losangos)
 
 Todo ajuste que pode mudar ao longo do clipe (luz, cor, rodas, enquadramento, opacidade, volume…) tem um
@@ -453,6 +513,7 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 
 - **Resolução**: 4K, 2K, Full HD, HD, **vertical 1080 × 1920** (Reels, TikTok, Shorts), quadrado, retrato 4:5,
   igual ao primeiro clipe ou personalizada;
+- **Proporção** e **Como aplicar**: veja *Proporção da sequência*, abaixo;
 - **Quadros por segundo**: 23,976 / 24 / 25 / 29,97 / 30 / 50 / 59,94 / 60 — mudar mantém o tempo dos cortes;
 - **Cor do fundo**: o que aparece onde não há imagem (barras, clipes menores que o quadro);
 - **Fades curtos nas emendas de som**: veja *Som*, acima;
@@ -461,7 +522,126 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
   prévia mostra um xadrez nesses lugares; para gravar a transparência, exporte em um formato com alfa (veja
   *Depois da edição*).
 
+### Várias sequências (1.7)
+
+Um projeto pode ter mais de uma **sequência**: uma abertura e um corte final, as versões vertical e horizontal do mesmo
+vídeo, cenas para montar à parte. Cada uma tem o seu tamanho, os seus quadros por segundo, a sua proporção, as suas
+faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são uma só para o projeto todo.
+
+- **As abas** ficam logo acima da linha do tempo, sempre à vista no modo Edição, também com uma sequência só. O **+** no
+  fim cria uma sequência nova; **clique** abre uma, **dois cliques** (ou *Renomear*) trocam o nome ali mesmo, e
+  **arrastar** muda a ordem. O **botão direito** abre *Renomear*, *Duplicar*, *Configurar…* (a janela de sempre, para
+  aquela sequência) e *Apagar*. Nomes compridos se cortam com "…" e a dica da aba mostra o nome inteiro, o tamanho e os
+  quadros por segundo. **Ctrl+Tab** e **Ctrl+Shift+Tab** passam para a aba seguinte e a anterior.
+- **Criar**: no **+** a janela já vem com os valores da sequência aberta (nome, resolução, quadros por segundo, fundo…).
+  Na **Mídia**, o botão direito num vídeo ou imagem tem **Nova sequência a partir deste vídeo**: a janela vem com a
+  resolução e os quadros por segundo dele (uma imagem fica com o tamanho dela e 24 quadros/s), o vídeo entra na
+  sequência nova ao confirmar, e dá para mudar qualquer coisa antes. Escolhidos vários itens, vale o primeiro vídeo.
+- **Apagar** pergunta antes e se desfaz com **Ctrl+Z**. Se outras sequências usam a que vai embora como clipe, a pergunta diz
+  em quais e quantos clipes saem junto. A última sequência do projeto não se apaga.
+- **A que está aberta** é a que o modo Película usa e a que a exportação oferece primeiro. Cada sequência guarda a posição do
+  cursor, a entrada e a saída e o zoom da linha do tempo enquanto o app está aberto; uma aba aberta pela primeira vez
+  começa no quadro 0. O projeto grava a que estava aberta ao salvar. **Trocar de aba não é uma mudança** (não pede para
+  salvar nem entra no desfazer); **Ctrl+Z** é um só para o projeto inteiro e, se a última mudança foi em outra aba,
+  volta para ela.
+- **Sequência vazia**: uma sequência nova não tem clipes, e a janela fica como num projeto vazio do modo Edição (sem
+  prévia nem som). Dá para salvar o projeto assim e exportar outra sequência.
+- **Na Mídia** as sequências aparecem, com um ícone próprio, quando o projeto tem **duas ou mais**: dois cliques abrem a aba
+  e elas podem ir para pastas como qualquer item. Uma sequência da Mídia também pode ser posta na linha do tempo de outra
+  (veja *Sequências dentro de sequências*, logo abaixo).
+- **Exportar**: com duas ou mais sequências a janela ganha a linha **Sequência**, com a aberta escolhida. Trocar de sequência
+  refaz o que depende dela: a duração, o trecho (volta para a sequência inteira), os capítulos, as legendas, a transparência,
+  o nome e o tamanho do arquivo e a prévia. **Pôr várias sequências na fila** deixa marcar quais saem: uma tarefa para
+  cada, com as mesmas opções, cada arquivo com o nome da sequência na pasta do destino (sem sobrescrever nada: se já
+  existe, vira `nome_2`). Uma sequência sozinha exporta como sempre, inclusive o nome do arquivo.
+- **No terminal**, `pelicula-cli info projeto.plc` lista as sequências (a aberta ao salvar vem marcada) e `exportar` e
+  `quadro` aceitam `--sequencia NOME` (o nome ou o id; sem ela vale a que estava aberta ao salvar). Um nome que não existe
+  é um erro que lista os válidos.
+
+### Sequências dentro de sequências (1.7)
+
+Uma sequência pode entrar em outra **como um clipe**: a abertura montada à parte vira um clipe só na montagem final, e
+mexer na abertura muda o clipe. Ele tem imagem e som ligados, como um arquivo de vídeo.
+
+- **Pôr uma sequência na linha do tempo**: arraste-a da **Mídia**, ou use o botão direito nela (*Adicionar ao fim da linha
+  do tempo*, *Inserir no cursor*, *Sobrescrever no cursor*; também `,` e `.`). A sequência **não impõe o formato dela** a
+  quem a recebe: tamanho e quadros por segundo da de fora ficam como estão. Não dá para pôr uma sequência nela mesma, numa
+  que já a usa (formaria um ciclo), passando de 8 níveis, nem uma sequência vazia: a barra de status diz o motivo e nada muda.
+- **Abrir a sequência de um clipe**: **dois cliques** nele (ou *Abrir a sequência* no botão direito). A aba abre com o cursor
+  no quadro de dentro que estava sob o clique. Voltar para a outra aba devolve o cursor e o zoom que ela tinha.
+- **Aninhar seleção** (botão direito num clipe, ou **Ctrl+Shift+G**): os clipes selecionados (e os ligados a eles) viram uma
+  sequência nova, sem janela e sem perguntas; a aba continua a de fora, com o clipe novo selecionado. É um passo só do
+  **Ctrl+Z**. *Aninhar não muda a imagem nem o som.* Para isso, a ação **recusa**, dizendo o que fazer, quando: não há nada
+  selecionado ou há clipe em faixa travada; um clipe que não está na seleção ficaria no meio dela (na mesma faixa, ou numa
+  faixa de vídeo entre a mais baixa e a mais alta da seleção); uma transição (inclusive de som) liga um clipe da seleção a um
+  de fora; passaria de 8 níveis. Ela **avisa**, mas aninha, quando: uma mesclagem passa a valer só dentro da sequência (há
+  clipes de fora por baixo); o look de película lê os cortes da montagem (*A montagem na película*, luz por plano) e passa a
+  ver a seleção como um plano só; um título ou gerador está numa janela útil; ou uma emenda de som sem corte ganha o fade
+  curto de 5 ms nas pontas.
+- **Desaninhar** (botão direito no clipe de sequência): os clipes de dentro voltam para esta linha do tempo, no trecho que o
+  clipe mostrava e com os mesmos ids; a sequência de dentro **continua no projeto**. Aninhar e desaninhar sem mexer em nada dá
+  a mesma imagem e o mesmo som. Se o clipe de sequência tem ajustes (opacidade, cor, enquadramento, transições, volume…), a
+  janela pergunta antes, porque eles se perdem. Com velocidade diferente de 1×, rampa, reverso ou quadro congelado, ou se a
+  sequência de dentro tem outros quadros por segundo, **não dá**: a mensagem diz por quê.
+- **O clipe na linha do tempo** tem cor própria (azul-violeta), o ícone de sequência e o nome atual dela; o som mostra a forma
+  de onda da mixagem de dentro, que aparece quando o som da montagem termina de ser preparado.
+- **No painel do clipe**: velocidade, rampa, cor, enquadramento, opacidade e transições valem no clipe de sequência. O perfil
+  de câmera do clipe some, e *Automático*, os conta-gotas e *Igualar* ficam desligados (eles leem o quadro de um arquivo):
+  use-os nos clipes de dentro.
+- **Legendas presas a um arquivo** continuam aparecendo (e dá para editá-las) depois de aninhar. As legendas da sequência e
+  os marcadores ficam na sequência de fora.
+
+Limites que vale conhecer:
+
+- Com **clipes de fora por baixo** da seleção, a sequência de dentro é transparente e o resultado pode diferir em **1 passo**
+  de cor (de 255) em parte dos pixels; sem nada por baixo, é idêntico bit a bit.
+- Com **janela útil** na de fora, a de dentro tem o tamanho da janela; títulos e geradores dentro podem mudar alguns passos de
+  cor nas bordas das letras.
+- Com **volume de faixa** de som diferente de 0 dB, o som aninhado pode diferir **1 passo de 24 bits** (inaudível); desaninhar
+  volta ao som exato. Voz, redução de ruído e normalizar num clipe com volume de faixa podem soar um pouco diferente.
+- Uma sequência que **ganha som depois** de posta como clipe só de vídeo não ganha o clipe de som de fora sozinha: ela fica
+  muda até você pôr de novo.
+- Sequências de dentro **não mostram as legendas gravadas nem os marcadores** delas na sequência de fora; *Gerar legendas* e
+  *Cortar pelo texto* ignoram os clipes de sequência.
+- A janela de **Exportar** e o terminal tratam o clipe de sequência como qualquer clipe: a sequência exportada é a de fora.
+
+### Proporção da sequência
+
+**Proporção** muda o formato da imagem do vídeo montado para cinema: *Do tamanho escolhido* (o padrão, nada muda), 1,33,
+1,37, 1,43, 1,78, 1,85, 2,00, 2,20, 2,39 (Scope), 2,76 ou **Personalizada** (um número de 1,00 a 4,00). **Como aplicar**
+decide como ela sai, e a janela mostra na hora o tamanho que vai dar:
+
+- **Quadro real**: o arquivo muda de tamanho e sai sem faixas; quem toca o vídeo põe as faixas. A largura fica e a altura
+  muda (1920 × 1080 a 2,39 dá 1920 × 804); numa proporção mais estreita que o quadro, a altura fica e a largura muda.
+  Sempre em tamanhos pares. Isso só preenche largura × altura: nada novo fica no projeto, que continua abrindo nas
+  versões anteriores.
+- **Faixas pretas no quadro**: o tamanho do quadro não muda e as faixas são gravadas na imagem, em cima e embaixo
+  (proporção mais larga que o quadro) ou nas laterais (mais estreita). Bom para quem espera 16:9, como as redes. O que
+  sobra é a **janela útil**:
+  - o **Encaixe**, a **Escala** e a **Posição** dos clipes valem dentro da janela: a posição é uma fração dela e o meio
+    dela é o centro, então dá para subir e descer o plano dentro do Scope;
+  - as faixas ficam sempre em **preto exato**, por cima de tudo: o look (grão, halação, tremor) não passa nelas, e a cor
+    do fundo só aparece dentro da janela. Com **Fundo transparente**, as faixas continuam pretas e opacas: só o que está
+    dentro da janela pode ser transparente;
+  - **títulos** e clipes sem arquivo (cor, degradê, ponta) ocupam a janela, e **legendas gravadas** ficam dentro dela. O
+    tamanho do texto segue a altura da janela, como aconteceria num quadro real do mesmo formato;
+  - a **área segura** das plataformas, na prévia, fica dentro da janela;
+  - o **Encaixe** da exportação (cortar, bordas, fundo desfocado) trata o quadro inteiro: as faixas fazem parte dele.
+
+A proporção da sequência é diferente de **Moldura e proporção** do modo Película: a moldura desenha barras no look, por
+cima da imagem, sem reenquadrar nada, e continua igual e independente. A janela útil é da montagem: os clipes se
+encaixam nela. Dá para usar as duas, embora quase sempre baste uma.
+
 ## 5. Monitores
+
+**Desligar todos os efeitos** (o botão com o brilho riscado na barra da prévia, **Shift+D**): a montagem aparece sem o
+look e sem os ajustes de imagem dos clipes (cor, detalhe, perfil de câmera, pele, cor escolhida, degradê). Cortes,
+tempo, enquadramento, opacidade, mesclagem, transições, títulos, legendas gravadas e o som continuam. Ao religar, tudo
+volta exatamente como estava; não entra no desfazer nem no projeto, e abrir outro arquivo ou projeto religa. A exportação
+segue a prévia e pergunta antes (*Exportar sem efeitos*, *Religar e exportar*, *Cancelar*). Enquanto eles estão desligados,
+os conta-gotas, o *Automático* e o *Igualar* pedem para religar: eles ajustam pela imagem, e o resultado não apareceria.
+Zebra, falsa cor e fotômetro continuam e medem o que a tela mostra. O seletor da comparação é
+**Resultado / Dividido / Lado a lado / Original**: *Resultado* é o que sai, com ou sem película.
 
 Acima dos ajustes há um monitor com quatro vistas:
 
@@ -534,6 +714,10 @@ desligue **Medidor de som** em Configurações › Recursos.
 |---|---|
 | Ctrl+1 / Ctrl+2 | Modo Película / modo Edição |
 | Ctrl+I | Importar mídia |
+| Ctrl+F (no painel) / / | Filtrar ajustes do clipe (Esc limpa) |
+| Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
+| Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
+| Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

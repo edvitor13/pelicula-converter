@@ -13,6 +13,7 @@ FAINT = "#6b6258"
 ACCENT = "#f0a63a"
 ACCENT_HI = "#ffc76b"
 ACCENT_DIM = "#7a5320"
+SEG_CHECKED_TEXT = "#1b1205"  # texto na pílula âmbar dos seletores
 DANGER = "#e5534b"
 OK = "#5cc48a"
 
@@ -22,6 +23,10 @@ CLIP_VIDEO_HI = "#d18a3f"
 CLIP_IMAGE = "#8c6a3c"
 CLIP_AUDIO = "#2c7a70"
 CLIP_AUDIO_HI = "#3fa597"
+CLIP_NESTED = "#5e5fa8"          # clipe de uma sequência (1.7): azul-violeta, longe do âmbar do vídeo e do verde do som
+CLIP_NESTED_HI = "#8587d6"
+CLIP_NESTED_AUDIO = "#3f6485"
+CLIP_NESTED_AUDIO_HI = "#6a96bd"
 TRACK_BG = "#141210"
 TRACK_BG2 = "#181513"
 PLAYHEAD = "#ffcf7a"
@@ -130,6 +135,12 @@ QToolButton#Flat:checked {{ background: {PANEL3}; border-color: {ACCENT_DIM}; co
 QToolButton#Seg {{ background: transparent; border: none; border-radius: 6px; padding: 5px 10px; color: {MUTED}; }}
 QToolButton#Seg:hover {{ color: {TEXT}; background: {PANEL3}; }}
 QToolButton#Seg:checked {{ color: #1b1205; background: {ACCENT}; font-weight: 600; }}
+QToolButton#SegMode {{ background: transparent; border: none; border-radius: 6px; padding: 6px 13px; color: {MUTED}; }}
+QToolButton#SegMode:hover {{ color: {TEXT}; background: {PANEL3}; }}
+QToolButton#SegMode:checked {{ color: {SEG_CHECKED_TEXT}; background: {ACCENT}; font-weight: 600; }}
+QToolButton#SegQuiet {{ background: transparent; border: none; border-radius: 6px; padding: 5px 10px; color: {MUTED}; }}
+QToolButton#SegQuiet:hover {{ color: {TEXT}; background: {PANEL3}; }}
+QToolButton#SegQuiet:checked {{ color: {TEXT}; background: {PANEL3}; font-weight: 600; }}
 QFrame#SegBox {{ background: {PANEL2}; border: 1px solid {BORDER}; border-radius: 8px; }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
 
@@ -158,6 +169,8 @@ QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSp
 QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #4a423a; background: {PANEL2}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QListWidget::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #4a423a; background: {PANEL2}; }}
+QListWidget::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 1px solid #4a423a; background: {PANEL2}; }}
 QRadioButton::indicator:checked {{ background: {ACCENT}; border: 3px solid {PANEL2}; outline: 1px solid {ACCENT}; }}
 

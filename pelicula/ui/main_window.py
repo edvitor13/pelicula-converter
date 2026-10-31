@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSplitter,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import (APP_NAME, __version__, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
+from .. import (APP_NAME, __version__, aninhar, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
                loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, textrender,
                timeline, titles, updater)
 from ..i18n import N_, _
@@ -43,12 +43,18 @@ from .edit_panels import ClipInspector, MediaBin
 from .keyframes_ui import KeyRows, KeyStrip
 from . import generators_ui, titles_panel
 from .scopes import Scopes
-from .timeline_view import HEADER_W, TimelineEditor
+from .timeline_view import HEADER_W, ZOOM_PLAYHEAD_KEY, TimelineEditor
 from . import notifier, prefs, welcome
 from .subtitles_ui import SubtitlesUI
 from . import cor_ui, grao_fisico_ui
 from . import filme_ui
+from . import geometria_ui, luz_fotometro_ui
+from . import filtro_ajustes
+from . import pastas_ui
+from . import sequencias_ui
+from . import aninhar_ui
 from . import luz_fotometro_ui
+from . import sem_efeitos_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -114,11 +120,13 @@ class FrameLoader(QObject):
         self._pending = None
         self._busy = False
 
-    def request(self, source, frame, w, h, profile: str | None = None, shutter: float = 0.0) -> None:
+    def request(self, source, frame, w, h, profile: str | None = None, shutter: float = 0.0,
+                no_effects: bool = False) -> None:
         """Pede o quadro `frame` de `source` em w × h; `profile`: o perfil de entrada do look (a leitura de um
-        arquivo log em faixa legal vem em float32, `media.float_input`); `shutter` (1.6): o ângulo do obturador."""
+        arquivo log em faixa legal vem em float32, `media.float_input`); `shutter` (1.6): o ângulo do obturador;
+        `no_effects` (1.7): sem o perfil de câmera dos clipes."""
         with self._lock:
-            self._pending = (source, frame, w, h, profile, shutter)
+            self._pending = (source, frame, w, h, profile, shutter, no_effects)
             if self._busy:
                 return
             self._busy = True
@@ -132,10 +140,10 @@ class FrameLoader(QObject):
                 if job is None:
                     self._busy = False
                     return
-            source, frame, w, h, profile, shutter = job
+            source, frame, w, h, profile, shutter, no_effects = job
             try:
                 if isinstance(source, timeline.Sequence):
-                    img = sequence.grab(source, frame, w, h, 8, shutter=shutter)
+                    img = sequence.grab(source, frame, w, h, 8, shutter=shutter, no_effects=no_effects)
                 else:
                     img = media.grab_frame(source, frame, w, h, 8, profile=profile)
             except Exception as exc:  # noqa: BLE001
@@ -152,7 +160,7 @@ class Player:
         self._stop = threading.Event()
 
     def start(self, source, start, end, w, h, loop, loop_start, profile: str | None = None,
-              shutter: float = 0.0) -> None:
+              shutter: float = 0.0, no_effects: bool = False) -> None:
         self.stop()
         stop = threading.Event()
         q: queue.Queue = queue.Queue(maxsize=8)
@@ -170,7 +178,7 @@ class Player:
 
         def open_reader(f):
             if is_seq:
-                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1, shutter=shutter)
+                return sequence.SequenceReader(source, w, h, 8, f, end - f + 1, shutter=shutter, no_effects=no_effects)
             return media.FrameReader(source, w, h, 8, f, profile=profile)
 
         def run():
@@ -336,6 +344,7 @@ class MainWindow(QMainWindow):
         self.cur_layers = None
         self.cur_neutral_q: QImage | None = None
         self.edit_film = str(self.settings.value("edit_film", "false")) == "true"
+        self.no_effects = False  # 1.7: "Desligar todos os efeitos" (só nesta sessão, `sem_efeitos_ui`)
         self._sources: dict[str, timeline.Source] = {}
         self._file_infos: dict[str, media.MediaInfo] = {}  # 1.6: metadados de câmera (`media.suggest_input`)
         self.model.clip_profile_for = self._clip_profile_for
@@ -344,6 +353,7 @@ class MainWindow(QMainWindow):
         self._mix_key = ""
         self._mix_path = ""
         self._mix_files: list[str] = []
+        self._mix_running: dict[str, str] = {}  # chave → WAV das mixagens a caminho (uma por chave)
         self._mix_token = 0
         self._peaks: dict[str, object] = {}
         self._peaks_pending: set[str] = set()
@@ -376,6 +386,9 @@ class MainWindow(QMainWindow):
         cor_ui.install(self)  # 1.6: ferramentas de cor (planos, cor simples, zebra, falsa cor e referência)
         filme_ui.install(self)  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
         luz_fotometro_ui.install(self)  # 1.6: luz por plano e fotômetro da película (`ui/luz_fotometro_ui.py`)
+        geometria_ui.install(self)  # 1.7: desespremer do clipe e janela útil da sequência (`ui/geometria_ui.py`)
+        self.seqs_ui = sequencias_ui.install(self)  # 1.7: abas das sequências do projeto (`ui/sequencias_ui.py`)
+        self.nest_ui = aninhar_ui.install(self)  # 1.7: aninhar, desaninhar e abrir a sequência de um clipe (`ui/aninhar_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -468,11 +481,13 @@ class MainWindow(QMainWindow):
         self.split.setHandleWidth(1)
         self.looks = LooksPanel()
         self.looks.presetChosen.connect(self.apply_preset)
-        self.bin = MediaBin()
+        self.bin = MediaBin(model=self.model)
         self.bin.importRequested.connect(self.import_dialog)
         self.bin.addRequested.connect(self.add_to_timeline)
+        self.bin.openRequested.connect(self._open_sequence_entry)
         self.bin.removeRequested.connect(self._bin_remove)
         self.bin.filesDropped.connect(self._bin_files)
+        self.bin.filesDroppedIn.connect(lambda paths, folder: self._bin_files(paths, folder))
         self.bin.placeRequested.connect(self.place_at_cursor)
         self.bin.set_new_menu(generators_ui.new_menu(self, self.new_generated))
         self._generated_seen: dict[str, str] = {}  # dados de cada clipe sem arquivo na Mídia (para atualizar)
@@ -560,7 +575,7 @@ class MainWindow(QMainWindow):
         self.mode_switch = Segmented([
             ("pelicula", _("Película"), _("Aplicar o look de película no vídeo ou na montagem (Ctrl+1)")),
             ("edicao", _("Edição"), _("Cortar, juntar clipes e ajustar cor e som antes do look de película (Ctrl+2)")),
-        ])
+        ], name="SegMode", item_icons={"pelicula": "film", "edicao": "scissors"})
         self.mode_switch.set_current("pelicula")
         self.mode_switch.changed.connect(self.set_mode)
         hl.addWidget(self.mode_switch)
@@ -630,7 +645,8 @@ class MainWindow(QMainWindow):
         self.btn_settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         hl.addWidget(self.btn_settings)
         # Janela estreita: os botões ficam só com o ícone e o nome do app some.
-        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue, self.btn_subs],
+        bar.set_adaptive(compact=[self.btn_project, self.btn_open, self.btn_frame, self.btn_queue, self.btn_subs,
+                                  *self.mode_switch.buttons.values()],
                          optional=[self._brand])
         return bar
 
@@ -645,15 +661,16 @@ class MainWindow(QMainWindow):
         hl = FlowLayout(bar, 8, 6)
         hl.setContentsMargins(12, 8, 12, 8)
         self.compare = Segmented([
-            ("proc", _("Película"), _("Só o resultado")),
+            ("proc", _("Resultado"), _("Só o resultado")),
             ("split", _("Dividido"), _("Arraste a linha para comparar. Segure o botão direito para ver o original.")),
             ("side", _("Lado a lado"), _("Original e resultado lado a lado")),
             ("orig", _("Original"), _("Só o vídeo original")),
-        ])
+        ], name="SegQuiet")  # o âmbar da barra fica para o modo
         mode = str(self.settings.value("compare", "split"))
         self.compare.set_current(mode)
         self.compare.changed.connect(self._set_compare)
         hl.addWidget(self.compare)
+        sem_efeitos_ui.install(self, hl)
         hl.add_spacing(2)
         self.btn_zoom_out = self._flat("zoom_out", _("Menos zoom (−). A roda do mouse também dá zoom."))
         self.btn_zoom_out.clicked.connect(lambda: self.viewer.zoom_step(-1))
@@ -919,6 +936,7 @@ class MainWindow(QMainWindow):
         il.addStretch(1)
         scroll.setWidget(inner)
         vl.addWidget(scroll, 1)
+        self.look_filter = filtro_ajustes.install(vl, w, [self.cards], index=vl.indexOf(scroll))  # 1.7: "Filtrar ajustes…"
         # Losangos das chaves do look (o alvo é o próprio store; quadros do arquivo ou da montagem).
         self.look_keys = KeyRows(self.store, self.store, self.cards, self)
         self.look_keys.seekRequested.connect(self.seek)
@@ -967,6 +985,7 @@ class MainWindow(QMainWindow):
         sc("Ctrl+1", lambda: self.set_mode("pelicula"))
         sc("Ctrl+Alt+C", lambda: self.mode == "edicao" and self.inspector.copy_values())
         sc("Ctrl+Alt+V", lambda: self.mode == "edicao" and self.inspector.paste_values())
+        sc("Ctrl+Shift+N", lambda: self.mode == "edicao" and self.bin.pastas.new_folder())  # pasta na Mídia
         sc("Ctrl+L", lambda: self.btn_loop.toggle())  # o L sozinho é do J/K/L (reproduzir para a frente)
         sc("F11", self.toggle_preview_fullscreen)
         sc("Shift+F11", self.toggle_window_fullscreen)
@@ -1094,6 +1113,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, _("Não foi possível abrir o arquivo.\n\n{erro}").format(erro=exc))
             return
         self.stop_play()
+        sem_efeitos_ui.reset(self)
         self._file_infos[info.path] = info
         if detect:
             self._detect_profile(info)
@@ -1114,6 +1134,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(timeline.Sequence.for_source(src))
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         self._refresh_source(reset=True)
 
     def _detect_profile(self, info) -> None:
@@ -1177,9 +1198,10 @@ class MainWindow(QMainWindow):
         for b in (self.btn_back, self.btn_play, self.btn_fwd, self.btn_in, self.btn_out, self.btn_clear, self.btn_loop):
             b.setEnabled(video)
         self.timeline.setEnabled(video)
-        self.btn_export.setEnabled(on)
+        seqs = getattr(self, "seqs_ui", None)  # 1.7: com a aberta vazia, outra sequência ainda pode sair
+        self.btn_export.setEnabled(on or (seqs is not None and seqs.can_export_other()))
         self.btn_frame.setEnabled(on)
-        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full):
+        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_full, self.btn_no_effects):
             b.setEnabled(on)
 
     def preview_size(self) -> tuple[int, int]:
@@ -1200,11 +1222,11 @@ class MainWindow(QMainWindow):
         self.frame_idx = f
         self._update_time()
         w, h = self.preview_size()
-        prof = self.store.get("entrada")
+        prof = sem_efeitos_ui.read_entrada(self)
         self._float_source = self.src_seq is None and media.float_input(self.info, prof)
         self._shutter_read = self._shutter()
         self.loader.request(self.src_seq if self.src_seq is not None else self.info, f, w, h, prof,
-                            self._shutter_read)
+                            self._shutter_read, self.no_effects)
 
     def _frame_loaded(self, source, frame: int, img) -> None:
         expected = self.src_seq if self.src_seq is not None else self.info
@@ -1241,7 +1263,7 @@ class MainWindow(QMainWindow):
             clip = seq.find(li.layer.clip.id)
             if clip is not None:  # com as chaves de animação do clipe atual avaliadas neste quadro
                 layer = dataclasses.replace(li.layer, clip=clip, values=seq.values_at(clip, fl.frame))
-                out.append(sequence.LayerImage(layer, li.image, li.stack))
+                out.append(dataclasses.replace(li, layer=layer))
         return sequence.FrameLayers(fl.frame, out)
 
     def frame_recipe(self, depth: int = 8, full: bool = False, alpha: bool | None = None) -> Recipe:
@@ -1263,11 +1285,13 @@ class MainWindow(QMainWindow):
             alpha = not full and seq is not None and seq.transparent
         return Recipe.for_source(values, fps, depth, legal=self._source_legal(), seq=seq, dither=not full,
                                  size=size, keys=self._export_keys(), burn=self._subtitle_burn(full),
-                                 alpha=bool(alpha) and seq is not None)
+                                 alpha=bool(alpha) and seq is not None, no_effects=self.no_effects)
 
     def _shutter(self) -> float:
         """1.6: o ângulo do obturador do look da prévia (0 = desligado ou sem película; `tempo_camera`)."""
         from .. import tempo_camera
+        if self.no_effects:
+            return 0.0
         return tempo_camera.shutter_angle(None if (self.mode == "edicao" and not self.edit_film) else self.store.values)
 
     def _subtitle_burn(self, full: bool = False):
@@ -1318,14 +1342,15 @@ class MainWindow(QMainWindow):
             self.request_frame(self.frame_idx)
 
     # ================================================================ modos Película / Edição
-    def set_mode(self, mode: str) -> None:
-        """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes)."""
+    def set_mode(self, mode: str, force: bool = False) -> None:
+        """Troca entre o modo Película (look) e o modo Edição (montagem, cor e som dos clipes).
+        `force`: aplica a tela mesmo sem mudar o modo (projeto aberto por cima da mesma tela)."""
         if mode not in MODES:
             return
         if mode == "edicao" and not modules.is_enabled(self.settings, "edicao"):
             mode = "pelicula"  # módulo desligado: a montagem continua sendo a entrada do look
         self.mode_switch.set_current(mode)
-        if mode == self.mode:
+        if mode == self.mode and not force:
             return
         if self.preview_fullscreen:
             self.toggle_preview_fullscreen()
@@ -1351,6 +1376,8 @@ class MainWindow(QMainWindow):
 
     def _update_label_proc(self) -> None:
         self.viewer.label_proc = _("EDIÇÃO") if (self.mode == "edicao" and not self.edit_film) else _("PELÍCULA")
+        if self.no_effects:
+            self.viewer.label_proc = _("SEM EFEITOS")
         self.viewer.update()
 
     def _set_edit_film(self, on: bool) -> None:
@@ -1371,6 +1398,13 @@ class MainWindow(QMainWindow):
             return True
         return seq.direct_file() != self.file_info.path  # arquivo com transparência: sempre pela montagem
 
+    def _film_info(self) -> media.MediaInfo | None:
+        """O arquivo que o modo Película mostra quando não há montagem para mostrar. Com várias sequências, a aberta
+        estar vazia é uma edição vazia (não o arquivo que estava aberto antes)."""
+        if self.mode != "pelicula" or (not self.model.seq.clips and len(self.model.seq.family()) > 1):
+            return None
+        return self.file_info
+
     def _refresh_source(self, reset: bool = False) -> None:
         """Escolhe a fonte da prévia (arquivo ou montagem) e atualiza linha do tempo, rótulos e som."""
         was_seq = self.src_seq is not None
@@ -1379,7 +1413,8 @@ class MainWindow(QMainWindow):
             info = sequence.media_info(self.src_seq)
         else:
             self.src_seq = None
-            info = self.file_info if self.mode == "pelicula" else None
+            info = self._film_info()
+        geometria_ui.sync_safe_window(self)
         if self.playing:
             self.stop_play()
         self.info = info
@@ -1395,6 +1430,9 @@ class MainWindow(QMainWindow):
             self._sync_film_markers()
             self.tl_editor.set_playhead(0)
             self.file_label.setText("")
+            self.time_label.setText("00:00:00:00")   # nada do que estava aberto (outra sequência, por exemplo) fica
+            self.st_prev.setText("")
+            self.st_render.setText("")
             self.st_file.setText(_("Nenhum arquivo aberto") if self.mode == "pelicula"
                                  else _("Importe vídeos, imagens ou músicas para começar a edição"))
             self._set_media_enabled(False)
@@ -1417,8 +1455,9 @@ class MainWindow(QMainWindow):
         if self.src_seq is not None:
             seq = self.src_seq
             n = sum(1 for c in seq.clips if c.kind == timeline.VIDEO)
-            self.st_file.setText(_("Montagem {w}×{h} • {fps} fps • {n} clipes de imagem • {dur}").format(
-                w=seq.width, h=seq.height, fps=i18n.fmt_decimal(seq.fps, 3), n=n,
+            clips = _("1 clipe de imagem") if n == 1 else _("{n} clipes de imagem").format(n=n)
+            self.st_file.setText(_("Montagem {w}×{h} • {fps} fps • {clipes} • {dur}").format(
+                w=seq.width, h=seq.height, fps=i18n.fmt_decimal(seq.fps, 3), clipes=clips,
                 dur=timecode(seq.duration, seq.fps)))
             self.file_label.setText(_("Montagem da edição"))
             self._schedule_mix(immediate=not was_seq or reset)
@@ -1434,7 +1473,14 @@ class MainWindow(QMainWindow):
         """A linha do tempo mudou: ajuste de clipe só remonta o quadro; o resto recarrega a fonte."""
         if self._loading:
             return
-        if kind == "markers":
+        switched = self.seqs_ui.model_changed(kind)  # outra sequência aberta: o estado dela entra antes da prévia
+        if kind == "sequencias":
+            # Nomes e ordem das sequências: só as abas e a Mídia mudam (nada de recarregar a prévia).
+            self._adopt_folder_sources()
+        elif kind == "pastas":
+            # Pastas da Mídia são só organização: a prévia e o som não mudam (a Mídia se refaz sozinha).
+            self._adopt_folder_sources()
+        elif kind == "markers":
             # Marcadores não mudam a imagem nem o som: nada de recarregar (nem parar a reprodução).
             self._sync_film_markers()
         elif kind == "subtitles":
@@ -1449,10 +1495,20 @@ class MainWindow(QMainWindow):
                 self.request_frame(self.frame_idx)
             self._schedule_mix()
         else:
+            self._adopt_folder_sources()
             self._refresh_source()
+            if switched:
+                self._schedule_mix(immediate=True)  # o som da aba nova, sem esperar
         self._update_title()
         self._update_history()
         self._generated_timer.start()  # clipe sem arquivo mudado (ou desfeito): nome e miniatura na Mídia
+
+    def _adopt_folder_sources(self) -> None:
+        """Item de pasta que a Mídia ainda não mostra (um desfazer trouxe de volta): entra na lista."""
+        seq = self.model.seq
+        for path in list(seq.folders.items):
+            if path in seq.sources and path not in self._sources:
+                self.adopt_source(seq.sources[path])
 
     # ---------------------------------------------------------------- marcadores e capítulos
     def _sync_film_markers(self) -> None:
@@ -1522,9 +1578,12 @@ class MainWindow(QMainWindow):
             self._mix_key, self._mix_path = key, ""
             self._set_audio("seq", "")
             return
+        if key in self._mix_running:
+            return  # esta mesma mixagem já está a caminho
         self._mix_token += 1
         path = os.path.join(tempfile.gettempdir(), f"pelicula_previa_{os.getpid()}_{self._mix_token}.wav")
         self._mix_files.append(path)
+        self._mix_running[key] = path
 
         def run():
             try:
@@ -1536,15 +1595,18 @@ class MainWindow(QMainWindow):
         threading.Thread(target=run, daemon=True, name="mixagem-previa").start()
 
     def _mix_done(self, key: str, path: str) -> None:
-        if self.src_seq is None or key != audiomix.mix_key(self.model.seq):
+        self._mix_running.pop(key, None)
+        if self.src_seq is None or key != audiomix.mix_key(self.model.seq.copy()):  # a mesma forma de `_start_mix`
             return  # já existe uma mixagem mais nova a caminho
         self._mix_key, self._mix_path = key, path
         self._set_audio("seq", path)
         self._clean_mixes(keep=path)
+        self.nest_ui.mix_finished()  # os WAVs das sequências de dentro nasceram com a mixagem: a forma de onda deles
 
     def _clean_mixes(self, keep: str = "") -> None:
+        running = set(self._mix_running.values())  # a mixagem a caminho ainda vai ser entregue
         for f in list(self._mix_files):
-            if f == keep:
+            if f == keep or f in running:
                 continue
             try:
                 if os.path.exists(f):
@@ -1558,6 +1620,7 @@ class MainWindow(QMainWindow):
             from PySide6.QtCore import QUrl
             self.audio.stop()
             self.audio.setSource(QUrl())
+        self._mix_running.clear()
         self._clean_mixes()
         self._meter_close()
 
@@ -1566,6 +1629,8 @@ class MainWindow(QMainWindow):
         if path in self._peaks:
             return self._peaks[path]
         src = self.model.seq.sources.get(path)
+        if src is not None and src.is_nested:
+            return self.nest_ui.peaks(src)  # o WAV da mixagem da sequência, se já existe
         if src is not None and not src.is_file:
             return None  # clipe sem arquivo: sem som
         if path not in self._peaks_pending:
@@ -1648,7 +1713,7 @@ class MainWindow(QMainWindow):
     def _sync_generated_sources(self) -> None:
         """Clipes sem arquivo mudados no inspetor (ou num desfazer): a Mídia mostra o nome e a miniatura novos."""
         for path, src in self.model.seq.sources.items():
-            if src.is_file or path not in self._sources:
+            if src.is_file or src.is_nested or path not in self._sources:
                 continue
             data = json.dumps(src.data, sort_keys=True)
             if self._generated_seen.get(path) == data:
@@ -1659,7 +1724,7 @@ class MainWindow(QMainWindow):
             self._request_thumb(src)
 
     def _request_thumb(self, src: timeline.Source) -> None:
-        if not src.has_video:
+        if not src.has_video or src.is_nested:  # uma sequência na Mídia mostra o ícone dela
             return
 
         def run():
@@ -1695,7 +1760,13 @@ class MainWindow(QMainWindow):
                 insert: bool = False):
         """Põe o arquivo na montagem; `insert` (com um ponto `at`) empurra o que vem depois em vez de cobrir."""
         seq = self.model.seq
-        self._adopt_format(src)
+        if src.is_nested:  # 1.7: uma sequência não impõe o formato dela a quem a recebe (nada de `_adopt_format`)
+            why = aninhar.refusal_for(seq, src)
+            if why:
+                self.statusBar().showMessage(why, 7000)
+                return []
+        else:
+            self._adopt_format(src)
         if not src.has_video:
             if at is None:
                 # Música: começa no início, na primeira faixa de áudio vazia.
@@ -1774,16 +1845,33 @@ class MainWindow(QMainWindow):
         elif side == "start":
             self.seek(max(0, self.frame_idx - n))
 
-    def _bin_files(self, paths: list) -> None:
-        """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo)."""
-        paths = self._offer_sequences([str(p) for p in paths])
+    def _bin_files(self, paths: list, folder: str = "") -> None:
+        """Arquivos soltos na Mídia: ficam só na lista (arraste depois para a linha do tempo). `folder`: a pasta da
+        Mídia onde eles entram. Uma pasta do sistema vira uma pasta da Mídia com o mesmo nome e os arquivos dela
+        (sem descer nas subpastas), a não ser que seja de imagens numeradas (aí vale a pergunta da sequência)."""
+        paths = [str(p) for p in paths]
+        dirs = [p for p in paths if os.path.isdir(p) and media.find_sequence(p) is None]
+        paths = self._offer_sequences([p for p in paths if p not in dirs])
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            for p in paths:
-                if os.path.isfile(str(p)) or p in self._sources:
-                    self._probe_source(str(p))
+            adopted = self._probe_all(paths)
+            if folder:
+                self.model.media_to_folder(adopted, folder, self._sources)
+            for d in dirs:
+                inside = self._probe_all(pastas_ui.media_in_dir(d))
+                self.model.folder_with_media(Path(d).name, folder, inside, self._sources)
         finally:
             QApplication.restoreOverrideCursor()
+
+    def _probe_all(self, paths: list[str]) -> list[str]:
+        """Põe os arquivos na Mídia; devolve os caminhos que entraram."""
+        out: list[str] = []
+        for p in paths:
+            if os.path.isfile(str(p)) or p in self._sources:
+                src = self._probe_source(str(p))
+                if src is not None:
+                    out.append(src.path)
+        return out
 
     # ---------------------------------------------------------------- sequências de imagens numeradas
     def _ask_sequence(self, path: str, single: bool = True):
@@ -1877,16 +1965,24 @@ class MainWindow(QMainWindow):
             return
         seq.relink(path, new)
 
+    def _open_sequence_entry(self, path: str) -> None:
+        """Dois cliques numa sequência da Mídia: abre a aba dela."""
+        src = self._sources.get(path)
+        if src is not None and src.is_nested:
+            self.seqs_ui.activate(src.nested_id)
+
     def _bin_remove(self, path: str) -> None:
+        src = self._sources.get(path)
+        if src is not None and src.is_nested:  # 1.7: tirar uma sequência da Mídia é apagá-la (pergunta antes)
+            self.seqs_ui.delete(src.nested_id)
+            return
         if any(c.src == path for c in self.model.seq.clips):
             QMessageBox.information(self, _("Mídia"), _("Este arquivo está na linha do tempo. Apague os clipes dele "
                                                        "antes de tirá-lo da Mídia."))
             return
         self._sources.pop(path, None)
-        thumbs = getattr(self.bin, "_thumbs", None)
-        self.bin.clear()
-        for src in self._sources.values():
-            self.bin.add_source(src, (thumbs or {}).get(src.path))
+        self.bin.remove(path)
+        self.model.media_forget(path)  # sai também da pasta onde estava
 
     def sequence_settings(self) -> None:
         from .sequence_dialog import SequenceDialog
@@ -1894,16 +1990,23 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             w, h, fps, bg = dlg.values()
             self.model.set_settings(w, h, fps, bg, micro_fade=dlg.micro_fade(), magnetic=dlg.magnetic(),
-                                    transparent=dlg.transparent())
+                                    transparent=dlg.transparent(), window=dlg.window())
 
     def auto_adjust_clip(self, cid: str, whole: bool = True) -> None:
         """Cor automática: analisa o quadro do clipe (sem os ajustes) e preenche exposição, níveis e balanço.
         `whole`: 1.6, o clipe inteiro (`colorsimple.sample_frames`; vídeo de arquivo) em vez do quadro atual."""
+        if sem_efeitos_ui.refuses_tool(self):
+            return
         if whole and cor_ui.auto_whole_clip(self, cid):
             return
         seq = self.model.seq
         clip = seq.find(cid)
         if clip is None or clip.kind != timeline.VIDEO:
+            return
+        src = seq.sources.get(clip.src)
+        if src is not None and src.is_nested:  # a imagem dele é a da sequência: não há quadro de arquivo para analisar
+            self.statusBar().showMessage(_("A cor automática lê o quadro de um arquivo. Ajuste a cor nos clipes dentro "
+                                           "da sequência."), 7000)
             return
         img = None
         if self.cur_layers is not None:
@@ -1961,7 +2064,7 @@ class MainWindow(QMainWindow):
         self.st_render.setText(f"{ms:.0f} ms")
         self.st_prev.setText(_("Prévia {w}×{h}").format(w=w, h=h))
         cor_ui.after_render(self, recipe)
-        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None:
+        if v["lut_on"] and v["lut_arquivo"] and recipe.lut is None and not recipe.no_effects:
             self.statusBar().showMessage(_("O LUT escolhido não pôde ser lido."), 5000)
 
     def _render_thumbs(self) -> None:
@@ -2003,7 +2106,7 @@ class MainWindow(QMainWindow):
         if timer is not None and self.store.get("entrada") != getattr(self, "_thumb_entrada", None):
             timer.start()  # as miniaturas dos presets usam o perfil do arquivo
         if (key in ("entrada", "*") and self.info is not None and self.src_seq is None and not self.playing
-                and media.float_input(self.info, self.store.get("entrada")) != getattr(self, "_float_source", False)):
+                and media.float_input(self.info, sem_efeitos_ui.read_entrada(self)) != getattr(self, "_float_source", False)):
             self.request_frame(self.frame_idx)  # log ↔ Rec.709: o quadro é lido de novo (super-brancos em float)
         elif (self.src_seq is not None and not self.playing and key in ("obturador_on", "obturador_angulo", "*")
               and self._shutter() != getattr(self, "_shutter_read", 0.0)):
@@ -2104,7 +2207,7 @@ class MainWindow(QMainWindow):
             f = loop_start
         w, h = self.preview_size()
         self.player.start(self.src_seq if self.src_seq is not None else self.info, f, end, w, h, self.loop,
-                          loop_start, self.store.get("entrada"), self._shutter())
+                          loop_start, sem_efeitos_ui.read_entrada(self), self._shutter(), self.no_effects)
         self._play_t0 = None
         self._play_f0 = f
         self._play_last = f
@@ -2667,51 +2770,77 @@ class MainWindow(QMainWindow):
 
     # ================================================================ exportação
     def export_dialog(self) -> None:
-        if self.info is None:
+        """Botão Exportar e Ctrl+E. Com exportação em andamento mostra a fila: outra exportação só de propósito,
+        por "Adicionar outra exportação…" de lá (`new_export`)."""
+        if self.queue.busy:
+            self.show_queue()
+            return
+        self.new_export()
+
+    def new_export(self) -> None:
+        # 1.7, várias sequências: a aberta é a que sai, e a janela deixa escolher outra (ou várias, na fila). Com a
+        # aberta vazia, abre pela primeira que tem o que exportar.
+        targets = self.seqs_ui.export_targets()
+        first = targets[0] if (self.info is None and targets) else None
+        if self.info is None and first is None:
             self.open_dialog()
+            return
+        if not sem_efeitos_ui.confirm_export(self):
             return
         self.store.commit()
         inout = None
-        if self.inp is not None or self.outp is not None:
-            inout = (self.inp or 0, self.outp if self.outp is not None else self.info.frames - 1)
+        if first is not None:
+            info, inout, seq, frame, chapters_, subs, cues = (first.info, first.in_out, first.sequence, first.frame,
+                                                              first.chapters, first.subtitles, first.cues)
+        else:
+            info = self.info
+            if self.inp is not None or self.outp is not None:
+                inout = (self.inp or 0, self.outp if self.outp is not None else self.info.frames - 1)
+            seq = self.src_seq.copy() if self.src_seq is not None else None
+            frame, chapters_ = self.frame_idx, self._export_chapters()
+            subs, cues = self.model.seq.subtitles, self.subs_ui.ctl.cues()
         try:
             perf = json.loads(self.settings.value("export_perf", "") or "{}")
         except ValueError:
             perf = {}
         values, look_name = self._export_look()
-        seq = self.src_seq.copy() if self.src_seq is not None else None
-        dlg = ExportDialog(self, self.info, values, look_name, inout,
+        dlg = ExportDialog(self, info, values, look_name, inout,
                            str(self.settings.value("export_dir", "")), str(self.settings.value("export_quality", "")),
-                           perf, self.engine.renderer.split("/")[0], sequence=seq, frame=self.frame_idx,
+                           perf, self.engine.renderer.split("/")[0], sequence=seq, frame=frame,
                            last_platform=str(self.settings.value("export_platform", "")),
-                           chapters=self._export_chapters(), look_keys=self._export_keys(),
-                           subtitles=self.model.seq.subtitles, subtitle_cues=self.subs_ui.ctl.cues())
+                           chapters=chapters_, look_keys=self._export_keys(),
+                           subtitles=subs, subtitle_cues=cues,
+                           queue_jobs=list(self.queue.jobs), no_effects=self.no_effects, targets=targets,
+                           target_id=first.id if first is not None else self.model.seq.id)
         if not dlg.exec():
             return
-        job = dlg.job()
-        self.settings.setValue("export_dir", str(Path(job.out_path).parent))
+        jobs = dlg.jobs()
+        self.settings.setValue("export_dir", str(Path(jobs[0].out_path).parent))
         self.settings.setValue("export_quality", dlg.quality.currentData())
         self.settings.setValue("export_platform", dlg.platform_id())
         self.settings.setValue("export_perf", json.dumps(dlg.perf_dict()))
-        self.queue.add(job)
+        for job in jobs:
+            self.queue.add(job)
         self._recovery_point()
         self.show_queue()
 
     def _export_look(self) -> tuple[dict, str]:
         """O que sai na exportação é o que a prévia mostra: no modo Edição sem película, só a montagem."""
+        if self.no_effects:
+            return presets.builtin_values("original"), _("Sem efeitos")
         if self.mode == "edicao" and not self.edit_film:
             return presets.builtin_values("original"), _("Sem película (só a edição)")
         return self.store.snapshot(), self.preset_name(self.preset_id)
 
     def _export_keys(self) -> dict:
         """As chaves de animação do look que vão com `_export_look` ({} no modo Edição sem película)."""
-        if self.mode == "edicao" and not self.edit_film:
+        if self.no_effects or (self.mode == "edicao" and not self.edit_film):
             return {}
         return self.store.keys_json()
 
     def show_queue(self) -> None:
         if self.queue_dialog is None:
-            self.queue_dialog = QueueDialog(self, self.queue)
+            self.queue_dialog = QueueDialog(self, self.queue, on_add=self.new_export)
         self.queue_dialog.show()
         self.queue_dialog.raise_()
         self.queue_dialog.activateWindow()
@@ -2731,6 +2860,10 @@ class MainWindow(QMainWindow):
             self.btn_queue.setText(_("Fila ({n})").format(n=len(active)))
         else:
             self.btn_queue.setText(_("Fila"))
+        tip = _("Há uma exportação em andamento: mostra a fila (Ctrl+E)") if active \
+            else _("Exportar com o look atual (Ctrl+E)")
+        if self.btn_export.toolTip() != tip:
+            self.btn_export.setToolTip(tip)
         finished = []
         for j in self.queue.jobs:
             if j.status in ("concluido", "erro") and j.id not in self._seen_done:
@@ -2776,7 +2909,8 @@ class MainWindow(QMainWindow):
         w, h = self.info.width, self.info.height
         recipe = self.frame_recipe(16, full=True, alpha=alpha)
         if self.src_seq is not None:
-            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True, shutter=recipe.shutter))
+            img = self._live_layers(sequence.grab(self.src_seq, frame, w, h, 16, hq=True, shutter=recipe.shutter,
+                                                  no_effects=recipe.no_effects))
         else:
             img = None
         if img is None:
@@ -2790,20 +2924,30 @@ class MainWindow(QMainWindow):
 
         Marcadores e legendas contam como edição: com eles a montagem vai para o projeto mesmo sendo trivial."""
         seq = self.model.seq
+        if len(seq.family()) > 1:  # 1.7: a sequência aberta pode ser trivial; as outras vão junto
+            return seq.to_json()
         subs = seq.subtitles is not None and not seq.subtitles.is_default()
-        if not seq.clips or (self.file_info is not None and seq.is_trivial() == self.file_info.path
-                             and not seq.markers and not subs and not getattr(self.file_info, "is_sequence", False)):
+        if (not seq.clips and not seq.folders.has_folders()) or (
+                self.file_info is not None and seq.is_trivial() == self.file_info.path and not seq.markers
+                and not subs and not seq.folders.has_folders() and not getattr(self.file_info, "is_sequence", False)):
             return None  # sequência de imagens: a montagem guarda a velocidade escolhida ao importar
         return seq.to_json()
 
     def _state(self) -> dict:
-        seq = self._seq_json()
+        # Várias sequências: o estado é o do projeto a partir da primeira aba, para trocar de aba não parecer mudança.
+        many = len(self.model.seq.family()) > 1
+        seq = self.model.seq.family()[0].to_json() if many else self._seq_json()
         return {"media": self.file_info.path if self.file_info else "", "values": dict(self.store.values),
-                "keys": self.store.keys_json(), "preset": self.preset_id, "in": self.inp, "out": self.outp,
+                "keys": self.store.keys_json(), "preset": self.preset_id,
+                "in": self.seqs_ui.in_out_state() if many else self.inp, "out": None if many else self.outp,
                 "seq": json.dumps(seq, sort_keys=True) if seq else ""}
 
+    def _has_project(self) -> bool:
+        """Há o que salvar: algo aberto ou, com várias sequências, mesmo com a aberta vazia."""
+        return self.info is not None or len(self.model.seq.family()) > 1
+
     def is_dirty(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             return False
         return self._state() != self._saved_state
 
@@ -2839,7 +2983,7 @@ class MainWindow(QMainWindow):
         return box.clickedButton() is discard
 
     def _thumbnail(self) -> bytes:
-        img = self.viewer.proc
+        img = sem_efeitos_ui.thumbnail_image(self) if self.no_effects else self.viewer.proc
         if img is None:
             return b""
         small = img.scaled(320, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -2867,7 +3011,7 @@ class MainWindow(QMainWindow):
             look_keys=self.store.keys_json())
 
     def save_project(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
             return False
         if not self.project_path:
@@ -2875,10 +3019,11 @@ class MainWindow(QMainWindow):
         return self._write_project(self.project_path)
 
     def save_project_as(self) -> bool:
-        if self.info is None:
+        if not self._has_project():
             QMessageBox.information(self, _("Salvar projeto"), _("Abra um vídeo ou uma imagem antes de salvar um projeto."))
             return False
-        start = self.project_path or str(Path(self.info.path).with_suffix(project.EXT))
+        start = self.project_path or str(Path(self.info.path if self.info is not None
+                                              else Path.home() / "projeto").with_suffix(project.EXT))
         path, _f = QFileDialog.getSaveFileName(self, _("Salvar projeto"), start,
                                                _("Projeto do PeliculaConverter (*.plc)"))
         if not path:
@@ -2904,6 +3049,7 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard():
             return
         self.stop_play()
+        sem_efeitos_ui.reset(self)
         self.project_path = None
         self.file_info = None
         self.cur = None
@@ -2917,6 +3063,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(timeline.Sequence(micro_fade=True))
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         self._refresh_source(reset=True)
         self.apply_preset(presets.DEFAULT_ID, keep_source=False)
         self._saved_state = self._state()
@@ -2943,6 +3090,7 @@ class MainWindow(QMainWindow):
         """Mostra um projeto já lido (de um .plc ou de uma cópia da recuperação automática, sem `p.path`).
         `remember`: entra nos projetos recentes."""
         self.input_notice.offer(None)  # 1.6: um projeto salvo nunca recebe sugestão de perfil
+        sem_efeitos_ui.reset(self)
         if p.sequence:
             self._open_sequence_project(p, remember)
             return
@@ -3021,6 +3169,7 @@ class MainWindow(QMainWindow):
             self.model.set_sequence(seq)
         finally:
             self._loading = False
+        self.seqs_ui.reset()
         if p.preset_id and self.preset_values(p.preset_id) is not None:
             self.preset_id = p.preset_id
         self.store.set_all(p.values, keys=p.look_keys)
@@ -3029,8 +3178,7 @@ class MainWindow(QMainWindow):
         self.preset_combo.blockSignals(False)
         self.looks.set_selected(self.preset_id)
         self._update_modified()
-        self.mode = "pelicula"
-        self.set_mode(p.mode if p.mode in MODES else "edicao")
+        self.set_mode(p.mode if p.mode in MODES else "edicao", force=True)
         self._refresh_source(reset=True)
         if self.info is not None:
             self.inp, self.outp = p.in_point, p.out_point
@@ -3048,6 +3196,7 @@ class MainWindow(QMainWindow):
             welcome.add_recent(self.settings, p.path)
         self._update_title()
         self._check_modules()
+        self.seqs_ui.problems(p.problems)  # 1.7: o que não coube ao abrir (uma sequência que sumiu ou fecharia um ciclo)
 
     def _fill_project_menu(self) -> None:
         m = self.project_menu
@@ -3245,6 +3394,8 @@ class MainWindow(QMainWindow):
             self.act_auto_update.blockSignals(False)
         elif key == "modulos":
             self.apply_modules()
+        elif key == ZOOM_PLAYHEAD_KEY:
+            self.tl_editor.canvas.load_zoom_pref()
 
     # ================================================================ módulos (Configurações › Recursos)
     def _module_tools(self) -> dict[str, list]:
@@ -3305,6 +3456,9 @@ class MainWindow(QMainWindow):
         for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
             editor.set_allowed("titulos_geradores" in on)
         self._check_modules()
+        for filtro in (getattr(self, "look_filter", None), getattr(self.inspector, "filtro", None)):
+            if filtro is not None:
+                filtro.reapply()  # o filtro de ajustes não mostra de volta cartão de módulo desligado
 
     def _check_modules(self) -> None:
         """Aviso discreto se o look ou a montagem usam módulos desligados (a imagem não muda)."""
@@ -3368,7 +3522,16 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+L — painel de legendas (nele: Ctrl+F buscar • Ctrl+Enter aplicar o texto • "
             "Ctrl+Shift+Enter legenda nova)") + "\n\n" + _(
             "Edição: Alt+R / G / B / D — +1 ponto de luz vermelha / verde / azul / densidade da copiadora no "
-            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)"))
+            "plano (com Shift: −1; clipes selecionados ou o plano da V1 no cursor)") + "\n\n" + _(
+            "Ctrl+F (com o foco nos ajustes) ou / — filtrar ajustes (Esc limpa o filtro)") + "\n\n" + _(
+            "Edição, Mídia: Ctrl+Shift+N pasta nova • F2 (ou dois cliques no nome) renomeia a pasta • "
+            "arrastar leva itens e pastas para dentro e para fora das pastas") + "\n\n" + _(
+            "Shift+D — desligar / religar todos os efeitos") + "\n\n" + _(
+            "Edição, sequências: Ctrl+Tab / Ctrl+Shift+Tab — próxima / anterior sequência (abas sobre a linha do tempo; "
+            "\"+\" cria uma, dois cliques na aba renomeiam, arrastar muda a ordem, botão direito duplica, "
+            "configura ou apaga)") + "\n\n" + _(
+            "Edição: Ctrl+Shift+G aninha a seleção numa sequência nova (Ctrl+Z desfaz) • dois cliques num clipe de "
+            "sequência abrem a dela • botão direito nele: Desaninhar"))
 
     def about(self) -> None:
         try:
@@ -3392,6 +3555,8 @@ class MainWindow(QMainWindow):
         shift = bool(mod & Qt.KeyboardModifier.ShiftModifier)
         if mod & Qt.KeyboardModifier.ControlModifier:
             return super().keyPressEvent(e)
+        if (k == Qt.Key.Key_Slash or e.text() == "/") and filtro_ajustes.focus_current(self, QApplication.focusWidget()):
+            return  # 1.7: "/" leva ao filtro de ajustes (fora de campos de texto)
         fps = int(round(self.info.fps)) if self.info else 24
         if self.mode == "edicao" and k == Qt.Key.Key_S:
             self.model.split_at(self.frame_idx)
@@ -3412,6 +3577,9 @@ class MainWindow(QMainWindow):
             return
         if self.mode == "edicao" and k in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
             self.bin.place(k == Qt.Key.Key_Comma)  # inserir / sobrescrever no cursor
+            return
+        if k == Qt.Key.Key_D and mod == Qt.KeyboardModifier.ShiftModifier:
+            sem_efeitos_ui.toggle(self)
             return
         if k in (Qt.Key.Key_J, Qt.Key.Key_K, Qt.Key.Key_L) and not shift:
             if k == Qt.Key.Key_K:

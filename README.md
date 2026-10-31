@@ -218,7 +218,7 @@ quadros vizinhos:
   LUTs de todos os presets, instalados com um clique.
 
 ### Visualização
-- Comparação **Película / Dividido / Lado a lado / Original**, botão direito para espiar o original.
+- Comparação **Resultado / Dividido / Lado a lado / Original**, botão direito para espiar o original.
 - **Zoom** de 100% e 200%, roda do mouse até 1600%, arrastar para mover.
 - **Linha do tempo** com reprodução, entrada e saída (I/O), repetição e quadro a quadro.
 - **Histograma** RGB, **desfazer/refazer** (até 300 passos), **atalhos de teclado**, arrastar e
@@ -654,7 +654,7 @@ bloom, defeitos e moldura não cabem num LUT e ficam só no PeliculaConverter.
 
 ### 6. Comparar, dar zoom e reproduzir
 
-- **Película / Dividido / Lado a lado / Original** (tecla `C` alterna). No modo *Dividido*, arraste
+- **Resultado / Dividido / Lado a lado / Original** (tecla `C` alterna). No modo *Dividido*, arraste
   a linha; segure o **botão direito** sobre o vídeo para ver o original em qualquer modo.
 - **Zoom livre, de 10% a 1600%**: lupas **−** e **+** na barra da prévia, teclas `−` e `+` ou a
   **roda do mouse** (aproxima no ponto do cursor). Ao passar pelo tamanho que cabe na janela, o zoom
@@ -801,7 +801,9 @@ Y quadros/s medidos agora nesta máquina com estas opções"*. O arquivo tempor�
 
 **Fila**: *Adicionar à fila e exportar* põe o trabalho na fila (botão **Fila** no topo mostra o
 progresso). Cada item mostra quadros feitos, porcentagem, velocidade e tempo restante, com
-*Cancelar* e *Abrir pasta*. Pode continuar ajustando e enfileirando outros vídeos enquanto exporta.
+*Cancelar* e *Abrir pasta*. Pode continuar ajustando enquanto exporta. Com uma exportação em andamento, o botão
+**Exportar** (Ctrl+E) mostra a fila; outra exportação entra por *Adicionar outra exportação…*, e um destino que
+já está na fila pede outro nome (`video_2.mp4`) em vez de sobrescrever.
 Ao fechar o app com exportações em andamento, ele pergunta antes de cancelar.
 
 ### 8. Atalhos do teclado

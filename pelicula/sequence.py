@@ -11,6 +11,10 @@ por `Engine.compose()`, na thread dona do contexto OpenGL.
   o quadro N lido em sequência é igual ao quadro N buscado direto. Um clipe em reverso (`Clip.reverse`) usa
   `_ReverseStream`: lê blocos do arquivo para a frente e entrega de trás para a frente, com o próximo bloco
   (o de antes, no arquivo) decodificado ao fundo; a memória fica limitada a dois blocos (`REVERSE_BUDGET`).
+
+Um clipe cuja fonte é outra sequência (1.7, `Source.is_nested`) não tem imagem própria: a camada traz as camadas
+decodificadas da sequência interna (`LayerImage.nested`), pegas recursivamente por `grab` e por `_NestedStream`, e
+`Engine.compose` monta a tela dela e usa essa tela como textura do clipe (ARQUITETURA §41.5).
 """
 
 from __future__ import annotations
@@ -39,12 +43,28 @@ class LayerImage:
     # 1.6, obturador do look (`tempo_camera`): ((imagens…), (pesos…)) dos quadros do arquivo que a janela aberta cobre;
     # `frame.Recipe.montage` mistura na luz linear antes da montagem. None = só `image` (o de sempre).
     stack: tuple | None = None
+    # 1.7, clipe de uma sequência: o que ela mostra neste quadro. A imagem da camada é a tela que `Engine.compose`
+    # monta com isto (`image` é só `_NO_IMAGE`). None = um clipe comum.
+    nested: "Nested | None" = None
 
 
 @dataclass
 class FrameLayers:
     frame: int
     layers: list[LayerImage]
+
+
+@dataclass
+class Nested:
+    """A sequência interna de um clipe num quadro: as camadas dela, sem GPU, e o tamanho da tela (`nested_canvas`)."""
+    seq: timeline.Sequence
+    layers: FrameLayers
+    size: tuple[int, int]
+
+
+# `LayerImage.image` de um clipe de sequência: quem amostra a imagem de uma camada (conta-gotas, cor automática) vê preto.
+_NO_IMAGE = np.zeros((2, 2, 3), np.uint8)
+_NO_IMAGE.setflags(write=False)
 
 
 # ------------------------------------------------------------------ tamanhos
@@ -58,17 +78,36 @@ def canvas_size(seq: timeline.Sequence, height: int | None = None) -> tuple[int,
 
 
 def decode_size(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int) -> tuple[int, int]:
-    """Tamanho em que o clipe é decodificado: a caixa do encaixe na tela (× escala, se ampliado),
+    """Tamanho em que o clipe é decodificado: a caixa do encaixe na tela (× escala de cada eixo, se ampliado),
     sem passar da resolução do arquivo. Com a escala animada, a maior escala do clipe (decodifica uma vez só,
     no tamanho em que ele mais aparece)."""
     from . import compositor, keyframes
     src = seq.sources[clip.src]
     sw, sh = (src.width or canvas_w), (src.height or canvas_h)
     bw, bh = compositor.fit_box(seq, clip, canvas_w, canvas_h)
-    k = max(1.0, keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0))))
-    w = min(int(round(bw * k)), sw)
-    h = min(int(round(bh * k)), sh)
+    k = keyframes.max_value(clip.keys.get("escala"), float(clip.values.get("escala", 1.0)))
+    kx = max(1.0, k * keyframes.max_value(clip.keys.get("escala_x"), float(clip.values.get("escala_x", 1.0))))
+    ky = max(1.0, k * keyframes.max_value(clip.keys.get("escala_y"), float(clip.values.get("escala_y", 1.0))))
+    if seq.window and src.is_generated:  # clipe gerado na janela útil: a proporção da janela, não a da fonte
+        c = min(1.0, sw / (bw * kx), sh / (bh * ky))
+        return max(2, int(round(bw * kx * c))), max(2, int(round(bh * ky * c)))
+    w = min(int(round(bw * kx)), sw)
+    h = min(int(round(bh * ky)), sh)
     return max(2, w), max(2, h)
+
+
+def nested_canvas(inner: timeline.Sequence, w: int, h: int) -> tuple[int, int]:
+    """Tamanho da tela da sequência interna para um clipe decodificado em `w` × `h` (`decode_size`): a proporção dela e
+    lados pares, sem passar do tamanho dela (como um vídeo, nunca maior que a caixa nem que o arquivo). Assim a prévia
+    reduzida monta uma tela reduzida (px@1080 já acompanha) e "Esticar" estica a imagem em vez de reencaixar lá dentro.
+    Uma caixa que já tem a proporção dela, a menos do arredondamento, fica como está: é a tela de fora, pixel a pixel."""
+    w, h = int(w), int(h)
+    k = max(w / inner.width, h / inner.height)
+    if k >= 1.0:
+        return inner.width, inner.height
+    near = abs(w * inner.height - h * inner.width) <= 2 * max(inner.width, inner.height)
+    cw, ch = (w, h) if near else (int(round(inner.width * k)), int(round(inner.height * k)))
+    return max(2, cw - cw % 2), max(2, ch - ch % 2)
 
 
 def _blank(w: int, h: int, depth: int) -> np.ndarray:
@@ -124,7 +163,9 @@ THUMBNAIL_FRAME: dict[str, Callable[[timeline.Source], int]] = {}
 def source_thumbnail(src: timeline.Source, w: int, h: int, rgba: bool = False) -> np.ndarray:
     """Miniatura RGB (8 bits) de uma fonte sem arquivo para a Mídia: o gerador no quadro 0 (ou o de
     `THUMBNAIL_FRAME`), sobre preto. `rgba`: a imagem do gerador (RGBA pré-multiplicado), para mostrar sobre o
-    xadrez (`ui/alphaview.py`)."""
+    xadrez (`ui/alphaview.py`). Uma sequência não tem miniatura aqui (montá-la pede a GPU): imagem vazia."""
+    if src.is_nested:
+        return np.zeros((h, w, 4 if rgba else 3), np.uint8)
     seq = timeline.Sequence.for_source(src)
     pick = THUMBNAIL_FRAME.get(src.kind)
     frame = max(0, int(pick(src))) if pick is not None else 0
@@ -174,21 +215,30 @@ def _cached_grab(src: timeline.Source, frame: int, w: int, h: int, depth: int, h
 
 
 def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth: int = 8,
-         hq: bool = False, shutter: float = 0.0) -> FrameLayers:
+         hq: bool = False, shutter: float = 0.0, no_effects: bool = False) -> FrameLayers:
     """Imagens das camadas do quadro `frame` (pode ser chamado de qualquer thread). `shutter` (1.6): o ângulo do
-    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`)."""
+    obturador do look (`tempo_camera.shutter_angle`); os clipes rápidos trazem os quadros da janela (`stack`).
+    `no_effects` (1.7, `frame.Recipe.no_effects`): a leitura de sempre, sem o perfil de câmera do clipe. Um clipe de
+    sequência traz as camadas dela no quadro `Layer.src_frame` (`LayerImage.nested`), sem tocar na GPU."""
     out = []
     for layer in seq.layers_at(frame):
         src = seq.sources.get(layer.clip.src)
         if src is None or not src.has_video:
             continue
         w, h = decode_size(seq, layer.clip, canvas_w, canvas_h)
+        if src.is_nested:
+            inner = seq.nested(layer.clip)
+            if inner is not None:
+                size = nested_canvas(inner, w, h)
+                got = grab(inner, layer.src_frame, size[0], size[1], depth, hq, shutter, no_effects)
+                out.append(LayerImage(layer, _NO_IMAGE, nested=Nested(inner, got, size)))
+            continue
         if not src.is_file:
             out.append(LayerImage(layer, render_source(seq, layer.clip, layer.src_frame, w, h, depth)))
             continue
         if not present(src):
             continue
-        prof = camera.read_profile(layer.clip.values)
+        prof = None if no_effects else camera.read_profile(layer.clip.values)
         win = seq.src_window(layer.clip, frame, shutter) if shutter > 0 else None
         stack = None
         if win is not None:
@@ -332,18 +382,80 @@ class _ReverseStream:
             self._pool = None
 
 
+class _NestedStream:
+    """Um clipe de sequência: as camadas da interna (`FrameLayers`) com o mesmo `get(f, jump)` de `_ClipStream`. O mesmo
+    quadro devolve o mesmo objeto (`Engine.compose` reaproveita a tela montada numa câmera lenta); para trás ou num salto
+    grande o leitor interno é reaberto, para a frente ele anda. Em reverso, `grab` quadro a quadro: lento, mas exato."""
+
+    def __init__(self, inner: timeline.Sequence, start: int, w: int, h: int, depth: int, hq: bool, perf,
+                 shutter: float = 0.0, no_effects: bool = False, backward: bool = False):
+        self.inner, self.depth, self.hq, self.perf = inner, depth, hq, perf
+        self.shutter, self.no_effects, self.backward = shutter, no_effects, backward
+        self.size = nested_canvas(inner, w, h)
+        self.reader: SequenceReader | None = None
+        self.next = 0
+        self.last: FrameLayers | None = None
+        self.last_idx = -1
+        self.past = ""  # erros dos leitores internos já fechados
+        self.get(max(0, start), 0)  # o primeiro quadro já pronto: sem engasgo no corte (`SequenceReader._prefetch`)
+
+    @property
+    def error(self) -> str:
+        now = self.reader.error if self.reader is not None else ""
+        return "\n".join(e for e in dict.fromkeys((self.past, now)) if e)
+
+    def _open(self, f: int) -> None:
+        self.close()
+        self.reader = SequenceReader(self.inner, self.size[0], self.size[1], self.depth, f, None, hq=self.hq,
+                                     perf=self.perf, shutter=self.shutter, no_effects=self.no_effects, private=True)
+        self.next = f
+
+    def get(self, f: int, jump: int) -> FrameLayers:
+        if f == self.last_idx and self.last is not None:
+            return self.last
+        if self.backward:
+            try:
+                self.last = grab(self.inner, f, self.size[0], self.size[1], self.depth, self.hq, self.shutter,
+                                 self.no_effects)
+            except Exception as exc:  # noqa: BLE001 — a exportação continua; o erro aparece no fim
+                self.past = self.past or str(exc)
+                self.last = FrameLayers(f, [])
+            self.last_idx = f
+            return self.last
+        if self.reader is None or f < self.next or f - self.next > jump:
+            self._open(f)
+        while self.next <= f:
+            got = self.reader.read()
+            if got is None:
+                break
+            self.last, self.last_idx = got, self.next
+            self.next += 1
+        if self.last_idx != f:  # sequência vazia (ou sem nada neste quadro): nenhuma camada, como em `grab`
+            self.last, self.last_idx = FrameLayers(f, []), f
+        return self.last
+
+    def close(self) -> None:
+        if self.reader is not None:
+            self.past = self.error
+            self.reader.close()
+            self.reader = None
+
+
 class SequenceReader:
     """Lê os quadros da sequência em ordem: `read()` devolve um `FrameLayers` ou None no fim.
 
     `start`/`count` em quadros da sequência; com `fps_out` (texto "30000/1001", "25"...) o quadro i
-    da saída mostra o quadro `start + floor(i·fps_seq/fps_out)` da sequência.
+    da saída mostra o quadro `start + floor(i·fps_seq/fps_out)` da sequência. `private`: `seq` já é uma cópia só
+    deste leitor (a sequência interna de `_NestedStream`, tirada da cópia do leitor de fora).
     """
 
     def __init__(self, seq: timeline.Sequence, canvas_w: int, canvas_h: int, depth: int = 8, start: int = 0,
                  count: int | None = None, hq: bool = False, perf: media.Perf | None = None,
-                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0):
-        self.seq = seq.copy()
+                 fps_out: str | None = None, lookahead: float = 1.5, shutter: float = 0.0,
+                 no_effects: bool = False, private: bool = False):
+        self.seq = seq if private else seq.copy()
         self.shutter = float(shutter)  # 1.6: ângulo do obturador do look (0 = o quadro de sempre)
+        self.no_effects = bool(no_effects)  # 1.7: a leitura de sempre, sem o perfil de câmera dos clipes
         self.w, self.h, self.depth, self.hq = int(canvas_w), int(canvas_h), depth, hq
         self.perf = perf or media.Perf()
         self.start = max(0, int(start))
@@ -352,7 +464,7 @@ class SequenceReader:
         self.i = 0
         self.lookahead = max(1, int(round(lookahead * self.seq.fps)))
         self.jump = max(8, int(round(2 * self.seq.fps)))
-        self._streams: dict[str, _ClipStream] = {}
+        self._streams: dict[str, _ClipStream | _ReverseStream | _NestedStream] = {}
         self._pending: dict[str, Future] = {}
         self._images: dict[tuple, np.ndarray] = {}
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="seq-prefetch")
@@ -373,13 +485,16 @@ class SequenceReader:
     def _size(self, clip: timeline.Clip) -> tuple[int, int]:
         return decode_size(self.seq, clip, self.w, self.h)
 
-    def _new_stream(self, clip: timeline.Clip, first: int) -> _ClipStream | _ReverseStream:
+    def _new_stream(self, clip: timeline.Clip, first: int) -> _ClipStream | _ReverseStream | _NestedStream:
         w, h = self._size(clip)
+        if self.seq.sources[clip.src].is_nested:
+            return _NestedStream(self.seq.nested(clip), first, w, h, self.depth, self.hq, self.perf, self.shutter,
+                                 self.no_effects, clip.reverse and not clip.frozen)
         kind = _ReverseStream if clip.reverse and not clip.frozen else _ClipStream
         return kind(self.seq.sources[clip.src], first, w, h, self.depth, self.hq, self.perf,
-                    camera.read_profile(clip.values))
+                    None if self.no_effects else camera.read_profile(clip.values))
 
-    def _stream(self, clip: timeline.Clip, f: int) -> _ClipStream:
+    def _stream(self, clip: timeline.Clip, f: int):
         st = self._streams.get(clip.id)
         if st is None:
             fut = self._pending.pop(clip.id, None)
@@ -409,7 +524,7 @@ class SequenceReader:
         return img
 
     def _render(self, layer: timeline.Layer) -> np.ndarray:
-        """Clipe sem arquivo: o mesmo gerador de `grab` (`render_source`); um erro vira camada transparente."""
+        """Clipe gerado: o mesmo gerador de `grab` (`render_source`); um erro vira camada transparente."""
         w, h = self._size(layer.clip)
         try:
             return render_source(self.seq, layer.clip, layer.src_frame, w, h, self.depth)
@@ -425,8 +540,8 @@ class SequenceReader:
                     or not (t < c.start <= horizon)):
                 continue
             src = self.seq.sources.get(c.src)
-            if (src is None or src.is_image or not src.has_video or not src.is_file
-                    or not present(src)):
+            if (src is None or src.is_image or not src.has_video or src.is_generated
+                    or (src.is_file and not present(src)) or (src.is_nested and self.seq.nested(c) is None)):
                 continue
             self._pending[c.id] = self._pool.submit(self._new_stream, c, self.seq.src_frame(c, c.start))
 
@@ -445,6 +560,14 @@ class SequenceReader:
             c = layer.clip
             src = self.seq.sources.get(c.src)
             if src is None or not src.has_video:
+                continue
+            if src.is_nested:
+                inner = self.seq.nested(c)
+                if inner is not None:
+                    active.add(c.id)
+                    stream = self._stream(c, layer.src_frame)
+                    got = stream.get(layer.src_frame, self.jump)
+                    out.append(LayerImage(layer, _NO_IMAGE, nested=Nested(inner, got, stream.size)))
                 continue
             if not src.is_file:
                 out.append(LayerImage(layer, self._render(layer)))
@@ -471,7 +594,10 @@ class SequenceReader:
             c = self.seq.find(cid)
             # Fecha quem já passou (o "dissolver" mantém o anterior aberto enquanto aparece).
             if c is None or c.end + self.lookahead < t or c.start > t + self.lookahead:
-                self._streams.pop(cid).close()
+                st = self._streams.pop(cid)
+                st.close()
+                if isinstance(st, _NestedStream) and st.error:
+                    self._errors.append(st.error)
         self._prefetch(t)
         return FrameLayers(t, out)
 
@@ -487,16 +613,23 @@ class SequenceReader:
 
 
 # ------------------------------------------------------------------ informação virtual
-def _file_sources(seq: timeline.Sequence) -> set[str]:
-    return {p for p, s in seq.sources.items() if s.is_file}
+def _video_sources(seq: timeline.Sequence) -> list[timeline.Source]:
+    """As fontes dos clipes de vídeo na ordem da linha do tempo; um clipe de sequência entra como os clipes dela, então
+    uma montagem e a mesma montagem dentro de uma sequência dão a mesma lista."""
+    out: list[timeline.Source] = []
+    for c in sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track)):
+        src = seq.sources.get(c.src)
+        inner = seq.nested(c)
+        if inner is not None:
+            out += _video_sources(inner)
+        elif src is not None and not src.is_nested:
+            out.append(src)
+    return out
 
 
 def first_video_source(seq: timeline.Sequence) -> timeline.Source | None:
-    """O arquivo do primeiro clipe de vídeo (clipes sem arquivo não contam)."""
-    files = _file_sources(seq)
-    vids = sorted((c for c in seq.clips if c.kind == timeline.VIDEO and c.src in files),
-                  key=lambda c: (c.start, c.track))
-    return seq.sources.get(vids[0].src) if vids else None
+    """O arquivo do primeiro clipe de vídeo, em qualquer nível (clipes sem arquivo não contam)."""
+    return next((s for s in _video_sources(seq) if s.is_file), None)
 
 
 def legal_range(seq: timeline.Sequence) -> bool:
@@ -507,10 +640,10 @@ def legal_range(seq: timeline.Sequence) -> bool:
     faixa da maioria dos clipes de vídeo (empate: a do primeiro na linha do tempo); imagens paradas e
     clipes sem arquivo (RGB de faixa cheia) só contam numa montagem sem vídeo. Clipes log de faixas diferentes
     na mesma montagem usam uma faixa só, a não ser que tenham perfil de câmera próprio (1.6, `camera.py`): esses
-    são convertidos com a faixa do próprio arquivo para a entrada do look nesta faixa.
+    são convertidos com a faixa do próprio arquivo para a entrada do look nesta faixa. Os clipes de dentro de um
+    clipe de sequência contam como se estivessem fora dele (1.7).
     """
-    clips = sorted((c for c in seq.clips if c.kind == timeline.VIDEO), key=lambda c: (c.start, c.track))
-    srcs = [seq.sources[c.src] for c in clips if c.src in seq.sources and seq.sources[c.src].has_video]
+    srcs = [s for s in _video_sources(seq) if s.has_video]
     flags = ([media.legal_range(s) for s in srcs if s.is_file and not s.is_image]
              or [media.legal_range(s) for s in srcs])
     if not flags:
@@ -522,8 +655,8 @@ def legal_range(seq: timeline.Sequence) -> bool:
 def media_info(seq: timeline.Sequence) -> media.MediaInfo:
     """`MediaInfo` da sequência para a exportação (tamanho, fps, duração, som e formato do 1º vídeo)."""
     first = first_video_source(seq)
-    files = _file_sources(seq)
-    anyp = first.path if first else next(iter(c.src for c in seq.clips if c.src in files), "")
+    anyp = first.path if first else next((c.src for s in seq.closure() for c in s.clips
+                                          if c.src in s.sources and s.sources[c.src].is_file), "")
     base = Path(anyp) if anyp else Path.home() / "sequencia.mp4"
     video = first is not None and not first.is_image
     ext = base.suffix if (video and base.suffix) else ".mp4"
@@ -543,9 +676,9 @@ def media_info(seq: timeline.Sequence) -> media.MediaInfo:
 
 
 def missing_sources(seq: timeline.Sequence) -> list[str]:
-    """Arquivos usados pela sequência que não existem mais no disco (clipes sem arquivo não contam)."""
-    used = {c.src for c in seq.clips} & _file_sources(seq)
-    return sorted(p for p in used if not present(seq.sources[p]))
+    """Arquivos usados pela sequência, em qualquer nível, que não existem mais no disco (clipes sem arquivo não
+    contam)."""
+    return sorted(s.path for s in seq.deep_sources() if s.is_file and not present(s))
 
 
 # ------------------------------------------------------------------ geradores que vêm com o app

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMenu, QToolBut
 
 from .. import colorsimple, media, timeline
 from ..i18n import _
-from . import icons, theme
+from . import icons, sem_efeitos_ui, theme
 from .flow import flow_widget
 
 NEW_CARDS = ("pele", "alvo", "degrade")
@@ -97,6 +97,7 @@ class ColorTools:
         self.act_protect.toggled.connect(lambda on: setattr(self, "protect_skin", bool(on)))
         self.match_menu.addAction(self.act_protect)
         self.btn_match.setMenu(self.match_menu)
+        self.tips = {b: b.toolTip() for b in (self.btn_wb, self.btn_color, self.btn_match)}
         self.btn_group = self._button(_("Grupo"), "link", _("Clipes do mesmo grupo mudam a cor juntos"))
         self.btn_group.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         gm = QMenu(self.btn_group)
@@ -133,8 +134,13 @@ class ColorTools:
     def refresh(self) -> None:
         c = self.insp.current_clip()
         video = c is not None and c.kind == timeline.VIDEO
+        nested = video and self.is_nested(c)
         for b in (self.btn_wb, self.btn_color, self.btn_match):
-            b.setEnabled(video)
+            b.setEnabled(video and not nested)  # a imagem de uma sequência não é um arquivo para amostrar
+            b.setToolTip(self.tips[b] if not nested else _("Não vale para um clipe de sequência: use nos clipes de "
+                                                           "dentro dela."))
+        if nested and self._picking:
+            self.win.viewer.cancel_pick()
         n = len(self.model.color_group_of(c.id)) if video and c.color_group else 0
         self.group_label.setText(_("Grupo de cor: {n} clipes").format(n=n) if n else "")
         self.group_label.setVisible(bool(n))
@@ -143,6 +149,9 @@ class ColorTools:
     def _toggle(self, kind: str, on: bool) -> None:
         viewer = self.win.viewer
         other = self.btn_color if kind == "wb" else self.btn_wb
+        if on and sem_efeitos_ui.refuses_tool(self.win):
+            self._pick_done()
+            return
         if on:
             if other.isChecked():
                 other.blockSignals(True)
@@ -164,11 +173,16 @@ class ColorTools:
             b.setChecked(False)
             b.blockSignals(False)
 
+    def is_nested(self, clip) -> bool:
+        """O clipe mostra outra sequência do projeto (1.7)? A imagem dele não é a de um arquivo."""
+        src = self.model.seq.sources.get(clip.src)
+        return src is not None and src.is_nested
+
     def clip_color_at(self, fx: float, fy: float):
         """(clipe, cor do arquivo no ponto) do clipe selecionado sob o clique, ou (clipe, None)."""
         win = self.win
         c = self.insp.current_clip()
-        if c is None or c.kind != timeline.VIDEO or win.cur_layers is None or win.cur is None:
+        if c is None or c.kind != timeline.VIDEO or win.cur_layers is None or win.cur is None or self.is_nested(c):
             return c, None
         li = next((x for x in win.cur_layers.layers if x.layer.clip.id == c.id and not x.layer.extension), None)
         if li is None:
@@ -232,8 +246,11 @@ class ColorTools:
             return None
 
     def current_frame_of(self, clip):
-        """O quadro do arquivo do clipe: o da prévia, se o cursor está nele; senão, o do meio."""
+        """O quadro do arquivo do clipe: o da prévia, se o cursor está nele; senão, o do meio. Um clipe de sequência não
+        tem quadro de arquivo (None)."""
         win = self.win
+        if self.is_nested(clip):
+            return None
         if win.cur_layers is not None:
             li = next((x for x in win.cur_layers.layers if x.layer.clip.id == clip.id and not x.layer.extension),
                       None)
@@ -307,7 +324,7 @@ class ColorTools:
 
     def match_clip(self, cid: str) -> bool:
         other = self.model.seq.find(cid)
-        if other is None:
+        if other is None or sem_efeitos_ui.refuses_tool(self.win):
             return False
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -318,6 +335,8 @@ class ColorTools:
         return self._apply_match(ref, other.values, other.name or (src.name if src else "-"))
 
     def match_image(self, path: str | None = None) -> bool:
+        if sem_efeitos_ui.refuses_tool(self.win):
+            return False
         if path is None:
             path, _f = QFileDialog.getOpenFileName(self.win, _("Igualar a uma imagem"), "",
                                                    _("Imagens") + " (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp)")

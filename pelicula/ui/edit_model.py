@@ -8,9 +8,16 @@ histórico e avisa a interface pelo sinal `changed` com o tipo da mudança:
 - "settings": resolução, fps, fundo, fades curtos nas emendas de som ou faixa principal magnética;
 - "markers": só os marcadores mudaram (a imagem e o som não mudam: a prévia não recarrega),
   inclusive ao desfazer/refazer uma mudança só de marcadores;
+- "pastas": só as pastas do painel de mídia (a imagem e o som não mudam: a prévia não recarrega),
+  inclusive ao desfazer/refazer;
+- "sequencias": só os nomes ou a ordem das sequências do projeto (abas e Mídia; a imagem e o som não mudam),
+  inclusive ao desfazer/refazer;
 - "subtitles": só as legendas mudaram (`edit_subtitles`; a montagem e o som não mudam, só o desenho das
   legendas gravadas no vídeo), inclusive ao desfazer/refazer;
-- "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer).
+- "*": a sequência inteira foi trocada (abrir projeto, desfazer, refazer, criar, apagar ou trocar de sequência).
+
+Várias sequências (#57): o histórico é um só para o projeto inteiro (`timeline.History`); criar, duplicar, renomear,
+apagar e mover sequências são um passo cada, e `activate_sequence` (trocar de aba) não é passo.
 
 A seleção de clipes (`selection`) e a de um marcador (`marker_sel`) não convivem: escolher um tira o
 outro, e "Excluir" apaga o que estiver selecionado.
@@ -26,7 +33,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import editparams, timeline, timemap
+from .. import aninhar, editparams, timeline, timemap
 from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
@@ -39,6 +46,32 @@ def _without_markers(seq: Sequence) -> dict[str, Any]:
     d = seq.to_json()
     d.pop("marcadores", None)
     return d
+
+
+def _without_folders(seq: Sequence) -> dict[str, Any]:
+    d = seq.to_json()
+    d.pop("pastas", None)
+    d.pop("formato", None)  # o recurso "pastas" muda o formato do bloco
+    return d
+
+
+def _without_tabs(seq: Sequence) -> dict[str, Any] | None:
+    """O projeto sem os nomes e a ordem das sequências (None: uma sequência só). Dois estados iguais assim diferem só
+    no que as abas e a Mídia mostram."""
+    group = seq.family()
+    if len(group) < 2:
+        return None
+    group[0].siblings.sync()
+    fmt = seq.block_format()
+    blocks = {}
+    for s in group:
+        b = s._block_json(fmt, False)
+        b["nome"] = ""
+        for src in b.get("fontes", []):
+            if src.get("tipo") == timeline.SOURCE_SEQUENCE:
+                src.get("dados", {}).pop("nome", None)
+        blocks[s.id] = b
+    return {"blocos": blocks, "pastas": seq.folders.to_json(), "aberta": seq.id}
 
 
 def _without_subtitles(seq: Sequence) -> dict[str, Any]:
@@ -97,10 +130,15 @@ class TimelineModel(QObject):
             return
         only_markers = _without_markers(seq) == _without_markers(self.seq)
         only_subtitles = not only_markers and _without_subtitles(seq) == _without_subtitles(self.seq)
+        only_folders = not (only_markers or only_subtitles) and _without_folders(seq) == _without_folders(self.seq)
+        tabs = _without_tabs(seq)
+        only_tabs = (not (only_markers or only_subtitles or only_folders) and tabs is not None
+                     and tabs == _without_tabs(self.seq))
         self.seq = seq
         self._filter_selection()
-        # Desfazer um marcador ou uma legenda não recarrega a prévia.
-        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles else "*")
+        # Desfazer um marcador, uma legenda, uma pasta ou o nome de uma sequência não recarrega a prévia.
+        self.changed.emit("markers" if only_markers else "subtitles" if only_subtitles
+                          else "pastas" if only_folders else "sequencias" if only_tabs else "*")
         self.selectionChanged.emit()
         self.historyChanged.emit()
 
@@ -380,7 +418,7 @@ class TimelineModel(QObject):
         todos os clipes da fonte; recusa (False) se algum está numa faixa travada. `record=False` (arrastando um
         controle) agrupa o histórico em 400 ms, como `set_clip_values`. Avisa com "values" (só a imagem muda)."""
         src = self.seq.sources.get(path)
-        if src is None or src.is_file:
+        if src is None or not src.is_generated:  # arquivo, ou outra sequência (1.7): os dados dela não são deste editor
             return False
         if any(self.seq.locked(c) for c in self.seq.clips if c.src == path):
             return False
@@ -521,13 +559,15 @@ class TimelineModel(QObject):
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,
                      micro_fade: bool | None = None, magnetic: bool | None = None,
-                     transparent: bool | None = None) -> None:
+                     transparent: bool | None = None, window: float | None = None) -> None:
         """Resolução, fps, fundo, fades curtos nas emendas de som e faixa principal magnética. Ao mudar o fps,
         os clipes mantêm o tempo (em segundos); ao ligar a faixa magnética, a V1 se fecha na hora.
-        `transparent`: "Fundo transparente" (None = como está)."""
+        `transparent`: "Fundo transparente"; `window`: proporção da janela útil (0 = sem janela). None = como está."""
         seq = self.seq
         if transparent is not None:
             seq.transparent = bool(transparent)
+        if window is not None:
+            seq.window = timeline.clean_window(window)
         if micro_fade is not None:
             seq.micro_fade = bool(micro_fade)
         if magnetic is not None:
@@ -618,6 +658,247 @@ class TimelineModel(QObject):
             self.marker_sel = None
             self.selectionChanged.emit()
             self._done("markers")
+
+    # ------------------------------------------------------------ pastas da Mídia (pastas.py)
+    # Só organização: cada operação é um passo do desfazer e emite "pastas" (a prévia e o som não recarregam).
+    def folder_create(self, name: str, parent: str = "", color: str = "") -> str:
+        """Pasta nova (dentro de `parent`); devolve o id."""
+        f = self.seq.folders.create(name, parent, color)
+        self._done("pastas")
+        return f.id
+
+    def folder_rename(self, fid: str, name: str) -> bool:
+        if self.seq.folders.rename(fid, name):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_color(self, fid: str, color: str) -> bool:
+        if self.seq.folders.set_color(fid, color):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_move(self, fid: str, parent: str) -> bool:
+        """Pasta para dentro de outra ("" = raiz); False se faria um ciclo."""
+        if self.seq.folders.move(fid, parent):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_delete(self, fid: str, to_root: bool = False) -> bool:
+        """Apaga só a pasta: o que havia nela sobe para a mãe (ou vai para a raiz); nenhuma mídia sai do projeto."""
+        if self.seq.folders.delete(fid, to_root):
+            self._done("pastas")
+            return True
+        return False
+
+    def media_to_folder(self, paths: Iterable[str], fid: str, sources: dict[str, Source] | None = None) -> bool:
+        """Põe itens da Mídia numa pasta ("" = raiz). `sources`: as fontes da Mídia que a montagem ainda não tem
+        (importadas e fora da linha do tempo); entram em `seq.sources` para o projeto guardá-las com a pasta."""
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        if self.seq.folders.assign(paths, fid):
+            self._done("pastas")
+            return True
+        return False
+
+    def folder_with_media(self, name: str, parent: str, paths: Iterable[str],
+                          sources: dict[str, Source] | None = None) -> str:
+        """Pasta nova já com itens (soltar uma pasta do sistema na Mídia): um passo só do desfazer."""
+        f = self.seq.folders.create(name, parent)
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        self.seq.folders.assign(paths, f.id)
+        self._done("pastas")
+        return f.id
+
+    def folder_drop(self, paths: Iterable[str], fids: Iterable[str], target: str,
+                    sources: dict[str, Source] | None = None) -> bool:
+        """Arrastar na Mídia: itens e pastas para dentro da pasta `target` ("" = raiz), num passo só do desfazer.
+        Pasta para dentro dela mesma ou de uma subpasta (ciclo) fica onde está."""
+        paths = [p for p in paths if p in self.seq.sources or (sources and p in sources)]
+        for p in paths:
+            if p not in self.seq.sources:
+                self.seq.sources[p] = sources[p]
+        changed = False
+        for fid in fids:
+            changed |= self.seq.folders.move(fid, target)
+        changed |= self.seq.folders.assign(paths, target)
+        if changed:
+            self._done("pastas")
+        return changed
+
+    def media_forget(self, path: str) -> None:
+        """O item saiu da Mídia: sai também da pasta (sem passo do desfazer quando não estava em nenhuma)."""
+        if self.seq.folders.unassign(path):
+            self._done("pastas")
+
+    # ------------------------------------------------------------ várias sequências do projeto (#57)
+    # Cada operação é um passo do desfazer (que é um só para o projeto: `timeline.History`). Trocar de aba não é passo.
+    def sequences(self) -> list[Sequence]:
+        """As sequências do projeto, na ordem das abas (uma só: a lista de um item)."""
+        return self.seq.family()
+
+    def sequence_by(self, key: str) -> Sequence | None:
+        """A sequência pelo id ou pelo nome mostrado (sem maiúsculas e minúsculas)."""
+        group = self.seq.family()
+        hit = next((s for s in group if s.id and s.id == key), None)
+        if hit is None:
+            low = str(key).strip().casefold()
+            hit = next((s for s in group if s.display_name.casefold() == low), None)
+        return hit
+
+    def name_taken(self, name: str, sid: str = "") -> bool:
+        """Outra sequência (que não a `sid`) já usa o nome? Nomes iguais atrapalhariam a escolha no terminal."""
+        low = name.strip().casefold()
+        return any(s.display_name.casefold() == low for s in self.seq.family() if not (sid and s.id == sid))
+
+    def _switch_to(self, seq: Sequence) -> None:
+        self.seq = seq
+        self.selection = []
+        self.marker_sel = None
+
+    def activate_sequence(self, sid: str) -> bool:
+        """Abre a aba da sequência: não é um passo do desfazer (o que estava pendente é fechado antes) e a seleção
+        de clipes some. Devolve False se ela já estava aberta ou não existe."""
+        target = next((s for s in self.seq.family() if s.id == sid), None)
+        if target is None or target is self.seq:
+            return False
+        self.commit()
+        self._switch_to(target)
+        self.changed.emit("*")
+        self.selectionChanged.emit()
+        self.historyChanged.emit()
+        return True
+
+    def new_sequence(self, width: int, height: int, fps_str: str, name: str = "", background=None,
+                     micro_fade: bool | None = None, magnetic: bool | None = None, transparent: bool | None = None,
+                     window: float | None = None, source: Source | None = None) -> str:
+        """Sequência nova, vazia (ou só com `source` no começo, no mesmo passo), no fim das abas e já aberta.
+        Devolve o id. `name` vazio = o primeiro "Sequência N" livre."""
+        self.commit()
+        group = self.seq.ensure_set()
+        new = group.create(width, height, fps_str, name.strip())
+        if background is not None:
+            new.background = tuple(min(max(float(x), 0.0), 1.0) for x in list(background)[:3])
+        if micro_fade is not None:
+            new.micro_fade = bool(micro_fade)
+        if magnetic is not None:
+            new.magnetic = bool(magnetic)
+        if transparent is not None:
+            new.transparent = bool(transparent)
+        if window is not None:
+            new.window = timeline.clean_window(window)
+        if source is not None:
+            with new.keep_main():
+                new.insert_media(source, 0)
+        self._switch_to(new)
+        self._done("*")
+        self.selectionChanged.emit()
+        return new.id
+
+    def duplicate_sequence(self, sid: str = "", name: str = "") -> str:
+        """Cópia da sequência (a da aba aberta, sem `sid`) logo depois dela, já aberta. Devolve o id ("" = nada)."""
+        src = next((s for s in self.seq.family() if s.id == sid), None) if sid else self.seq
+        if src is None:
+            return ""
+        self.commit()
+        dup = src.ensure_set().duplicate(src, name.strip())
+        self._switch_to(dup)
+        self._done("*")
+        self.selectionChanged.emit()
+        return dup.id
+
+    def rename_sequence(self, sid: str, name: str) -> bool:
+        """Dá o nome à sequência. Vazio ou igual ao de outra: nada (False). Só as abas e a Mídia mudam."""
+        target = next((s for s in self.seq.family() if s.id == sid), None) if sid else self.seq
+        name = name.strip()
+        if target is None or not name or name == target.display_name or self.name_taken(name, target.id):
+            return False
+        self.commit()
+        target.name = name
+        self._done("sequencias")
+        return True
+
+    def sequence_users(self, sid: str) -> list[tuple[Sequence, int]]:
+        """Quem usa a sequência como clipe: [(sequência, número de clipes)] (apagá-la tira esses clipes)."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None)
+        if target is None or len(group) < 2:
+            return []
+        key = Source.for_sequence(target).path
+        return [(s, sum(1 for c in s.clips if c.src == key)) for s in target.siblings.users(target)]
+
+    def can_remove_sequence(self) -> bool:
+        return len(self.seq.family()) > 1
+
+    def remove_sequence(self, sid: str = "") -> int:
+        """Apaga a sequência (a aberta, sem `sid`) com os clipes dela nas outras: um passo do desfazer. Devolve quantos
+        clipes saíram; -1 se não dá (a última fica). Apagando a aberta, abre a vizinha."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None) if sid else self.seq
+        if target is None or len(group) < 2:
+            return -1
+        self.commit()
+        at = next(i for i, s in enumerate(group) if s is target)
+        users = [s for s, _n in self.sequence_users(target.id)]  # só quem perdeu clipes se acerta
+        gone = target.siblings.remove(target)
+        for s in users:
+            if s.magnetic:
+                s.settle_main()
+        if target is self.seq:
+            rest = target.siblings.items
+            self._switch_to(rest[min(at, len(rest) - 1)])
+        self._done("*")
+        self.selectionChanged.emit()
+        return gone
+
+    def move_sequence(self, sid: str, to: int) -> bool:
+        """Muda a sequência de aba (`to` = a posição nova, de 0)."""
+        group = self.seq.family()
+        target = next((s for s in group if s.id == sid), None)
+        if target is None or len(group) < 2:
+            return False
+        self.commit()
+        before = [s.id for s in group]
+        target.siblings.move(target, to)
+        if [s.id for s in target.siblings.items] == before:
+            return False
+        self._done("sequencias")
+        return True
+
+    # ------------------------------------------------------------ aninhar e desaninhar (#57, `aninhar.py`)
+    def nest_selection(self, name: str = "", look: dict | None = None) -> "aninhar.NestResult":
+        """"Aninhar seleção": os clipes selecionados (e os ligados) vão para uma sequência nova do projeto, e a de fora
+        fica com um clipe só que a mostra; a aba aberta continua sendo a de fora, com o clipe novo selecionado. Um passo
+        só do desfazer (que é um só para o projeto). `aninhar.Refusal` quando não dá, sem ter mudado nada."""
+        self.commit()
+        res = aninhar.nest(self.seq, self.selection, name, look)
+        self.selection = [c.id for c in res.clips]
+        self.marker_sel = None
+        self.selectionChanged.emit()
+        self._done("structure")
+        return res
+
+    def unnest_loss(self, cid: str) -> list[str]:
+        """O que "Desaninhar" perderia no clipe de sequência (vazio: nada). `aninhar.Refusal` se não dá."""
+        return aninhar.unnest_loss(self.seq, cid)
+
+    def unnest_clip(self, cid: str) -> "aninhar.UnnestResult":
+        """"Desaninhar": os clipes de dentro voltam para esta sequência, no trecho que o clipe de sequência mostrava. Quem
+        chama já perguntou sobre `unnest_loss`. Um passo do desfazer; a sequência de dentro fica no projeto."""
+        self.commit()
+        res = aninhar.unnest(self.seq, cid)
+        self.selection = [c.id for c in res.clips]
+        self.marker_sel = None
+        self.selectionChanged.emit()
+        self._done("structure")
+        return res
 
     # ------------------------------------------------------------ chaves de animação (keyframes.py)
     # Tempos em quadros da sequência; cada mudança é um passo do desfazer. A interface da linha do tempo

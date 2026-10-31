@@ -18,8 +18,8 @@ Como cada ajuste é interpretado (valores de vídeo Rec.709 de 0 a 1, chamados "
   HSL de 8 faixas (partição suave entre as faixas vizinhas, sem efeito em cinzas).
 - **Detalhe**: redução de ruído bilateral 5×5, desfoque por mipmap, nitidez (máscara de nitidez) e
   clareza (contraste local contra um mipmap bem desfocado). Raios proporcionais à altura do clipe.
-- **Enquadramento**: encaixe (mostrar inteiro, preencher, esticar), escala, posição (fração da tela,
-  y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
+- **Enquadramento**: desespremer (`desqueeze`), encaixe (mostrar inteiro, preencher, esticar), escala (e por eixo:
+  `axis_scale`), posição (fração da tela, y para baixo), rotação (graus, positivo = horário na tela), espelhos e corte.
 """
 
 from __future__ import annotations
@@ -38,6 +38,10 @@ W709 = (0.2126, 0.7152, 0.0722)
 
 _DEFAULTS = editparams.VIDEO.defaults()
 _COLOR_KEYS = [k for k in editparams.color_keys() if k not in DETAIL_KEYS]
+# Taxas do desespremer do clipe. Tabela própria: a da Lente anamórfica do look (`anamorfico.SQUEEZES`) não tem 1,55.
+DESQUEEZE = {"nao": 1.0, "1.33": 1.33, "1.5": 1.5, "1.55": 1.55, "1.8": 1.8, "2.0": 2.0}
+# 1.7: `u_px_per_uv` de um clipe de sequência que cobre a tela pixel a pixel: a cobertura de todo pixel dá 1 exato.
+EXACT_PX_PER_UV = 1.0e7
 
 
 def mat3_uniform(m: np.ndarray) -> tuple:
@@ -87,18 +91,44 @@ def detail_active(v: dict[str, Any]) -> bool:
     return any(v.get(k) != _DEFAULTS[k] for k in DETAIL_KEYS)
 
 
+def desqueeze(v: dict[str, Any]) -> float:
+    """Quanto o clipe fica mais largo antes do encaixe (1 = sem desespremer); a taxa manual só vale com "manual"."""
+    kind = v.get("desespremer", "nao")
+    if kind == "manual":
+        return min(max(float(v.get("desespremer_taxa", 1.0)), 1.0), 2.5)
+    return DESQUEEZE.get(kind, 1.0)
+
+
 def fit_box(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
             values: dict[str, Any] | None = None) -> tuple[float, float]:
-    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe. `values`: os ajustes no quadro
+    """Tamanho (px da tela) do clipe com escala 1, conforme o encaixe e na proporção já desespremida ("Esticar"
+    ocupa a área e ignora o desespremer), dentro da janela útil da sequência (sem janela, a tela). Um clipe gerado
+    (título, cor…) não tem proporção própria: com janela, ele nasce do tamanho dela. `values`: os ajustes no quadro
     (`Layer.values`, com as chaves de animação); None = os do clipe."""
     src = seq.sources.get(clip.src)
-    sw = float(src.width if src and src.width else canvas_w)
-    sh = float(src.height if src and src.height else canvas_h)
-    mode = (values if values is not None else clip.values).get("encaixe", "ajustar")
+    _x, _y, aw, ah = seq.window_rect(canvas_w, canvas_h)
+    sw = float(src.width if src and src.width else aw)
+    sh = float(src.height if src and src.height else ah)
+    if seq.window and src is not None and src.is_generated:
+        sw, sh = float(aw), float(ah)
+    v = values if values is not None else clip.values
+    mode = v.get("encaixe", "ajustar")
     if mode == "esticar":
-        return float(canvas_w), float(canvas_h)
-    f = min(canvas_w / sw, canvas_h / sh) if mode == "ajustar" else max(canvas_w / sw, canvas_h / sh)
+        return float(aw), float(ah)
+    if (src is not None and src.is_nested and not seq.window and desqueeze(v) == 1.0
+            and src.width * seq.height == src.height * seq.width):
+        # 1.7: uma sequência da mesma proporção é a tela inteira. Os lados pares de uma tela reduzida não são outra
+        # proporção: encaixar pela tela deixaria um clipe sem ajustes reamostrado em menos de um pixel.
+        return float(aw), float(ah)
+    sw *= desqueeze(v)
+    f = min(aw / sw, ah / sh) if mode == "ajustar" else max(aw / sw, ah / sh)
     return sw * f, sh * f
+
+
+def axis_scale(v: dict[str, Any]) -> tuple[float, float]:
+    """Escala final de cada eixo do clipe, antes da rotação: `escala × escala_x` e `escala × escala_y`."""
+    s = float(v["escala"])
+    return s * float(v.get("escala_x", 1.0)), s * float(v.get("escala_y", 1.0))
 
 
 def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas_h: int,
@@ -106,16 +136,17 @@ def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas
     """Matriz 3×3 que leva um pixel da tela (x, y, 1) ao uv do clipe (0 a 1)."""
     v = values if values is not None else clip.values
     bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
-    s = float(v["escala"])
+    sx, sy = axis_scale(v)
     th = math.radians(float(v["rotacao"]))
     cs, sn = math.cos(th), math.sin(th)
-    cx = canvas_w / 2.0 + float(v["pos_x"]) * canvas_w
-    cy = canvas_h / 2.0 + float(v["pos_y"]) * canvas_h
+    ax0, ay0, aw, ah = seq.window_rect(canvas_w, canvas_h)  # a posição é fração da janela útil (sem janela, da tela)
+    cx = ax0 + aw / 2.0 + float(v["pos_x"]) * aw
+    cy = ay0 + ah / 2.0 + float(v["pos_y"]) * ah
     fx = -1.0 if v["espelhar_h"] else 1.0
     fy = -1.0 if v["espelhar_v"] else 1.0
-    ax = fx / (s * bw)
-    ay = fy / (s * bh)
-    # q = R(-θ)(p - c);  u = 0,5 + fx·q.x / (s·bw);  v = 0,5 + fy·q.y / (s·bh)
+    ax = fx / (sx * bw)
+    ay = fy / (sy * bh)
+    # q = R(-θ)(p - c);  u = 0,5 + fx·q.x / (sx·bw);  v = 0,5 + fy·q.y / (sy·bh)
     return np.array([
         [ax * cs, ax * sn, 0.5 - ax * (cs * cx + sn * cy)],
         [-ay * sn, ay * cs, 0.5 - ay * (-sn * cx + cs * cy)],
@@ -150,12 +181,12 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     # Os ajustes neste quadro: com chaves de animação, já avaliados (`Sequence.values_at` → `Layer.values`).
     v = layer.values if layer.values is not None else clip.values
     bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
-    s = float(v["escala"])
+    sx, sy = axis_scale(v)
     U: dict[str, Any] = {
         "u_canvas": (float(canvas_w), float(canvas_h)),
         "u_clip_px": (float(tex_w), float(tex_h)),
         "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h, v)),
-        "u_px_per_uv": (float(s * bw), float(s * bh)),
+        "u_px_per_uv": (float(sx * bw), float(sy * bh)),
         "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
