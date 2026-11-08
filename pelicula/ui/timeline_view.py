@@ -1660,6 +1660,13 @@ class TimelineEditor(QWidget):
                                       _("Silêncios"))
         self.btn_silences.setVisible(False)
         hl.addWidget(self.btn_silences)
+        # 1.8: o mixer (`ui/mixer_ui.py` liga e troca o inspetor por ele) e o som ao arrastar o cursor (`ui/scrub_ui.py`)
+        self.btn_mixer = self._btn("mixer", _("Mixer: volume, balanço, mudo e solo de cada faixa de som, com "
+                                              "medidores (Ctrl+Alt+M)"), _("Mixer"), checkable=True)
+        hl.addWidget(self.btn_mixer)
+        self.btn_scrub = self._btn("scrub", _("Som ao arrastar o cursor: um pedacinho do som no quadro, ao arrastar o "
+                                              "cursor na régua ou andar quadro a quadro"), checkable=True)
+        hl.addWidget(self.btn_scrub)
         hl.add_stretch()
         zo = self.btn_zoom_out = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
         zo.clicked.connect(lambda: c.zoom_to(c.ppf * 0.8))
@@ -1677,7 +1684,7 @@ class TimelineEditor(QWidget):
             b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             b.customContextMenuRequested.connect(lambda pos, w=b: self.zoom_menu().exec(w.mapToGlobal(pos)))
         # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
-        bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit],
+        bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit, self.btn_mixer],
                          optional=[self.zoom])
         return bar
 

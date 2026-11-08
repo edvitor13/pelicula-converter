@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import (APP_NAME, __version__, aninhar, audiomix, chapters, compositor, deps, editparams, export, i18n, look,
-               loudness, luts, media, modules, notify, params, presets, project, sequence, system, testimage, textrender,
-               timeline, titles, updater)
+               loudness, luts, media, modules, notify, params, presets, project, sequence, somcache, system, testimage,
+               textrender, timeline, titles, updater)
 from ..i18n import N_, _
 from ..engine import Engine
 from ..frame import Recipe
@@ -55,6 +55,7 @@ from . import sequencias_ui
 from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
+from . import mixer_ui, scrub_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -390,6 +391,8 @@ class MainWindow(QMainWindow):
         self.seqs_ui = sequencias_ui.install(self)  # 1.7: abas das sequências do projeto (`ui/sequencias_ui.py`)
         self.nest_ui = aninhar_ui.install(self)  # 1.7: aninhar, desaninhar e abrir a sequência de um clipe (`ui/aninhar_ui.py`)
         self.seq_look = look_sequencia_ui.install(self)  # 1.8: look próprio de cada sequência (`ui/look_sequencia_ui.py`)
+        self.mixer = mixer_ui.install(self)  # 1.8: mixer das faixas de som (`ui/mixer_ui.py`)
+        self.scrub = scrub_ui.install(self)  # 1.8: som ao arrastar o cursor (`ui/scrub_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1590,7 +1593,7 @@ class MainWindow(QMainWindow):
 
         def run():
             try:
-                ok = audiomix.render_mix(seq, path)
+                ok = audiomix.render_mix(seq, path, track_peaks=True)  # 1.8: os picos das faixas para o mixer
             except Exception:  # noqa: BLE001
                 ok = False
             self._mix_bridge.done.emit(key, path if ok else "")
@@ -1614,6 +1617,8 @@ class MainWindow(QMainWindow):
             try:
                 if os.path.exists(f):
                     os.remove(f)
+                if os.path.exists(f + somcache.PEAKS_SUFFIX):  # 1.8: os picos das faixas, ao lado do WAV
+                    os.remove(f + somcache.PEAKS_SUFFIX)
                 self._mix_files.remove(f)
             except OSError:
                 pass  # ainda aberto pelo player; tenta de novo depois
@@ -2514,10 +2519,12 @@ class MainWindow(QMainWindow):
             self.start_play(f)
         else:
             self.request_frame(f)
+            self.scrub.on_seek(self.frame_idx)  # 1.8: arrastando o cursor na régua, um grão do som
 
     def step(self, n: int) -> None:
         self.stop_play()
         self.request_frame(self.frame_idx + n)
+        self.scrub.on_step(self.frame_idx)  # 1.8: quadro a quadro, um grão do som
 
     def mark_in(self) -> None:
         if self.info is None or self.info.is_image:
@@ -3544,7 +3551,8 @@ class MainWindow(QMainWindow):
             "\"+\" cria uma, dois cliques na aba renomeiam, arrastar muda a ordem, botão direito duplica, "
             "configura ou apaga)") + "\n\n" + _(
             "Edição: Ctrl+Shift+G aninha a seleção numa sequência nova (Ctrl+Z desfaz) • dois cliques num clipe de "
-            "sequência abrem a dela • botão direito nele: Desaninhar"))
+            "sequência abrem a dela • botão direito nele: Desaninhar") + "\n\n" + _(
+            "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)"))
 
     def about(self) -> None:
         try:
