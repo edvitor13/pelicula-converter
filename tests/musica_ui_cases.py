@@ -256,3 +256,96 @@ def test_fit_music_refusals_and_the_simple_fade():
     menu = QMenu()
     musica_ui.add_clip_actions(menu, ed.canvas, m.seq.find(music.id))
     assert not _actions(menu)["fit_music"].isEnabled()
+
+
+# ------------------------------------------------------------------ abaixar a música sob a voz
+def _voice(secs, bursts, rate=R):
+    t = np.arange(int(secs * rate)) / rate
+    ph = 2 * np.pi * np.cumsum(140 * (1 + 0.03 * np.sin(2 * np.pi * 5 * t))) / rate
+    vowel = sum(np.sin(k * ph) / k for k in range(1, 12))
+    x = 0.002 * np.random.default_rng(4).standard_normal(len(t))
+    for a, b in bursts:
+        m = (t >= a) & (t < b)
+        x[m] += 0.25 * vowel[m]
+    return x
+
+
+def test_duck_music_under_the_voice_in_one_undo_step(tmp_path):
+    _ffmpeg()
+    t = np.arange(3 * R) / R
+    song = _wav(tmp_path / "musica.wav", 0.3 * np.sin(2 * np.pi * 440 * t))
+    speech = _wav(tmp_path / "voz.wav", _voice(3.0, [(1.0, 2.0)]))
+    seq = tl.Sequence(640, 360, f"{FPS}/1")
+    seq.add_source(_music(song, 3.0))
+    seq.add_source(_music(speech, 3.0))
+    seq.ensure_track(tl.AUDIO, 1)
+    music = tl.Clip(tl.new_id(), tl.AUDIO, song, 0, 0, 72, 0.0)
+    talk = tl.Clip(tl.new_id(), tl.AUDIO, speech, 1, 0, 72, 0.0)
+    seq.clips += [music, talk]
+    m, ed = _editor(seq)
+    ctl = musica_ui.controller_for(ed.canvas)
+    seen, asked, said = [], [], []
+    ctl.duck_dialog = lambda tracks, checked: seen.append((tracks, checked)) or (-12.0, 0.3, 0.4, checked)
+    ctl.ask = lambda text: asked.append(text) or False
+    ctl.inform = said.append
+    menu = QMenu()
+    musica_ui.add_clip_actions(menu, ed.canvas, music)
+    _actions(menu)["duck_music"].trigger()
+    assert seen == [([1], [1])] and ctl.busy_duck() and not ctl.bar.isHidden()
+    _wait(ctl.duck_job)
+    assert not ctl.busy_duck() and not said
+    keys = m.seq.keys_of(m.seq.find(music.id), "volume")
+    assert len(keys) == 4 and abs(keys[1][0] - 24) <= 1 and keys[1][1] == -12.0 and keys[0][1] == 0.0
+    assert keys[0][0] == keys[1][0] - round(0.3 * FPS)
+    m.undo()
+    assert m.seq.keys_of(m.seq.find(music.id), "volume") == [] and not m.can_undo()
+    # chave que já estava dentro da descida: pergunta; "não" deixa tudo como estava
+    m.seq.set_key(music.id, "volume", 36, -3.0)
+    m.commit()
+    _wait(ctl.duck(music.id))
+    assert asked and m.seq.keys_of(m.seq.find(music.id), "volume")[0][:2] == (36, -3.0)
+    ctl.ask = lambda text: True
+    _wait(ctl.duck(music.id))
+    frames = [f for f, _v, _e in m.seq.keys_of(m.seq.find(music.id), "volume")]
+    assert 36 not in frames and len(frames) == 4
+    # sem faixa de voz (só a música na sequência): mensagem, nada a fazer
+    m.seq.clips.remove(m.seq.find(talk.id))
+    ctl.duck_dialog = lambda tracks, checked: (-12.0, 0.3, 0.4, tracks)
+    _wait(ctl.duck(music.id))
+    assert said and "Nenhuma fala" in said[-1]
+
+
+def test_duck_dialog_remembers_the_numbers():
+    seq = tl.Sequence(640, 360, f"{FPS}/1")
+    seq.add_source(_music("musica.wav", 60.0))
+    seq.ensure_track(tl.AUDIO, 2)
+    music = tl.Clip(tl.new_id(), tl.AUDIO, "musica.wav", 0, 0, 480, 0.0)
+    seq.clips.append(music)
+    m, ed = _editor(seq)
+    ctl = musica_ui.controller_for(ed.canvas)
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QDialog, QDoubleSpinBox
+
+    def fill():
+        dlg = next(w for w in APP.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible())
+        spins = dlg.findChildren(QDoubleSpinBox)
+        assert spins[0].value() == -12.0 and spins[1].value() == 0.3 and spins[2].value() == 0.6
+        spins[0].setValue(-18.0)
+        spins[2].setValue(1.0)
+        dlg.accept()
+
+    QTimer.singleShot(50, fill)
+    got = ctl.duck_dialog([1, 2], [2])
+    assert got == (-18.0, 0.3, 1.0, [2])
+    assert float(prefs.settings().value(musica_ui.PREF_DUCK_DB)) == -18.0
+
+    def check():
+        dlg = next(w for w in APP.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible())
+        spins = dlg.findChildren(QDoubleSpinBox)
+        assert spins[0].value() == -18.0 and spins[2].value() == 1.0
+        dlg.reject()
+
+    QTimer.singleShot(50, check)
+    assert ctl.duck_dialog([1, 2], [2]) is None
+    for k in (musica_ui.PREF_DUCK_DB, musica_ui.PREF_DUCK_ATTACK, musica_ui.PREF_DUCK_RELEASE):
+        prefs.settings().remove(k)

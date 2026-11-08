@@ -6,6 +6,12 @@ abaixar a música sob a voz.
   ligada por padrão). A análise roda na fila de tarefas (`jobs.CPU`, chave `DETECT_KEY`), com Cancelar na barra de
   status; o resultado fica no cache de `batidas` (pelo carimbo do arquivo), então reabrir o projeto mostra as batidas
   sem analisar de novo.
+- **Marcas e ímã**: as batidas aparecem no pé do clipe (`paint_beats`); o botão "Ímã nas batidas" (`snap_button`,
+  preferência `PREF_SNAP`) junta as batidas das outras músicas aos pontos do ímã (`snap_points`).
+- **Encaixar** (`MusicUI.fit`): `musica.fit_plan` + `musica.apply_fit` num passo do desfazer.
+- **Abaixar sob a voz** (`MusicUI.duck`): diálogo (profundidade, descida, volta, faixas com voz; preferências
+  `PREF_DUCK_*`), mixagem só das faixas de voz e detecção de fala numa thread de trabalho (chave `DUCK_KEY`), e as
+  chaves de volume (`musica.apply_duck`) num passo do desfazer.
 
 Ganchos: a janela chama `install` (`MainWindow.musica`); o menu da linha do tempo chama `add_clip_actions`. Sem a
 janela (testes da linha do tempo sozinha), `controller_for` prende um controlador à linha do tempo.
@@ -13,19 +19,28 @@ janela (testes da linha do tempo sozinha), `controller_for` prende um controlado
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
+
 from PySide6.QtCore import QObject, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QMessageBox, QProgressBar, QToolButton, QWidget
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel,
+                               QMenu, QMessageBox, QProgressBar, QToolButton, QVBoxLayout, QWidget)
 
-from .. import batidas, jobs, musica
+from .. import audiomix, batidas, jobs, musica
 from ..i18n import _, fmt_decimal
 from ..timeline import AUDIO
 from . import prefs
 from .job_bridge import bridge
 
 DETECT_KEY = "detectar_batidas"
+DUCK_KEY = "abaixar_musica"
 PREF_AUTO = "musica/batidas_auto"        # "true"/"false"; sem valor = ligado
 PREF_SNAP = "musica/ima_batidas"         # "true"/"false"; sem valor = ligado (só vale com o ímã ligado)
+PREF_DUCK_DB = "musica/ducking_db"       # quanto abaixar (dB, negativo); sem valor = musica.DUCK_DB
+PREF_DUCK_ATTACK = "musica/ducking_ataque"      # segundos; sem valor = musica.ATTACK_S
+PREF_DUCK_RELEASE = "musica/ducking_liberacao"  # segundos; sem valor = musica.RELEASE_S
 AUTO_MIN_S = 20.0                        # clipe de música mais longo que isto é analisado sozinho
 TICK_PX, TICK_DOWN_PX = 4, 8             # altura das marcas das batidas e dos começos de compasso
 TICK_MIN_PX = 4                          # marcas mais juntas que isto não são desenhadas
@@ -60,6 +75,7 @@ class MusicUI(QObject):
         self.canvas = canvas
         self.beats: dict[str, batidas.Beats] = {}
         self.jobs: dict[str, jobs.Job] = {}
+        self.duck_job: jobs.Job | None = None
         self._looked: set[str] = set()      # arquivos já procurados no cache (para não ler o disco a cada mudança)
         self._refused: set[str] = set()     # análise automática que falhou: não tenta de novo sozinha
         self.bar = QWidget()
@@ -140,13 +156,13 @@ class MusicUI(QObject):
         return job
 
     def cancel(self) -> None:
-        for job in list(self.jobs.values()):
+        for job in list(self.jobs.values()) + [j for j in (self.duck_job,) if j is not None]:
             job.cancel()
 
     def _detected(self, job: jobs.Job, path: str, auto: bool, then) -> None:
         if self.jobs.get(path) is job:
             del self.jobs[path]
-        self.bar.setVisible(self.busy())
+        self.bar.setVisible(self.busy() or self.busy_duck())
         if job.state == jobs.ERRO:
             self._refused.add(path)
             if not auto:
@@ -208,6 +224,160 @@ class MusicUI(QObject):
         if plan.added:
             return _("Música encaixada em {s} s: {n} compassos repetidos no meio.").format(s=secs, n=plan.added)
         return _("Música encaixada em {s} s, com saída suave.").format(s=secs)
+
+    # ------------------------------------------------------------ abaixar a música sob a voz
+    def music_clips(self, clip) -> list:
+        """Os clipes de música da ação: os clipes de som selecionados (se `clip` está entre eles) ou só `clip`."""
+        seq = self.model.seq
+        sel = set(self.model.selection)
+        if clip.id in sel:
+            chosen = [c for c in seq.clips if c.id in sel and c.kind == AUDIO]
+        else:
+            chosen = [clip]
+        return [c for c in chosen if not seq.locked(c)]
+
+    def duck(self, cid: str):
+        """"Abaixar a música sob a voz": pergunta as medidas e as faixas com voz, acha as falas numa thread de trabalho
+        e escreve as chaves de volume. Devolve o trabalho (ou None se nada foi feito)."""
+        seq = self.model.seq
+        clip = seq.find(cid)
+        if clip is None or clip.kind != AUDIO or self.busy_duck():
+            return None
+        music = self.music_clips(clip)
+        if not music:
+            self.inform(_("A faixa da música está travada."))
+            return None
+        own = {c.track for c in music}
+        tracks = [i for i in range(len(seq.kind_tracks(AUDIO))) if i not in own]
+        if not tracks:
+            self.inform(_("Não há outra faixa de som com voz: ponha a narração ou o diálogo numa faixa separada da "
+                          "música."))
+            return None
+        got = self.duck_dialog(tracks, musica.voice_tracks_for(seq, music))
+        if got is None:
+            return None
+        depth, attack, release, voice = got
+        if not voice:
+            return None
+        ids = [c.id for c in music]
+        a, b = min(c.start for c in music), max(c.end for c in music)
+        mix = musica.voice_mix(seq, voice, ids)
+        fps = seq.fps
+
+        def run(job: jobs.Job):
+            job.report(_("Procurando a voz…"))
+            work = tempfile.mkdtemp(prefix="pelicula_voz_")
+            try:
+                wav = os.path.join(work, "voz.wav")
+                ok = audiomix.render_mix(mix, wav, a, b, job.cancel_event)
+                if job.cancel_event.is_set():
+                    raise jobs.Cancelled()
+                if not ok:
+                    return []
+                r = audiomix.WavReader(wav)
+                regions = musica.speech_regions(r.read(0, r.frames), r.rate)
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+            return [(a / fps + t0, a / fps + t1) for t0, t1 in regions]
+
+        self.duck_job = bridge().submit(run, _("Abaixar a música sob a voz"), kind=jobs.CPU, key=DUCK_KEY,
+                                        on_finished=lambda j: self._ducked(j, ids, depth, attack, release))
+        self.label.setText(_("Procurando a voz…"))
+        self.bar.show()
+        return self.duck_job
+
+    def busy_duck(self) -> bool:
+        return self.duck_job is not None and self.duck_job.active
+
+    def _ducked(self, job: jobs.Job, ids: list[str], depth: float, attack: float, release: float) -> None:
+        self.duck_job = None
+        self.label.setText(_("Procurando as batidas…"))
+        self.bar.setVisible(self.busy())
+        if job.state == jobs.ERRO:
+            self.inform(job.error)
+            return
+        if job.state != jobs.CONCLUIDO:
+            return
+        regions = job.result
+        if not regions:
+            self.inform(_("Nenhuma fala encontrada nas faixas de voz escolhidas."))
+            return
+        seq = self.model.seq
+        plans = []
+        clash = 0
+        for cid in ids:
+            c = seq.find(cid)
+            if c is None or seq.locked(c):
+                continue
+            ducks = musica.duck_spans(c, regions, seq.fps, attack, release)
+            if ducks:
+                plans.append((cid, ducks))
+                clash += len(musica.duck_conflicts(seq, c, ducks))
+        if not plans:
+            self.inform(_("Nenhuma fala encontrada sob a música."))
+            return
+        if clash and not self.ask(_("A música já tem {n} chave(s) de volume onde ela vai abaixar. Substituir essas "
+                                    "chaves?").format(n=clash)):
+            return
+        n = sum(len(d) for _cid, d in plans)
+        if self.model.apply_edit(lambda s: [musica.apply_duck(s, cid, d, depth) for cid, d in plans], "values"):
+            self.message.emit(_("Música abaixada {db} dB em {n} trecho(s) com voz.").format(
+                db=fmt_decimal(-abs(depth), 1), n=n))
+
+    def duck_dialog(self, tracks: list[int], checked: list[int]):
+        """(profundidade em dB, descida s, volta s, faixas com voz) ou None (cancelado). Lembra as três medidas."""
+        st = prefs.settings()
+
+        def num(key, default):
+            try:
+                return float(st.value(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        dlg = QDialog(self.canvas.window())
+        dlg.setWindowTitle(_("Abaixar a música sob a voz"))
+        lay = QVBoxLayout(dlg)
+        form = QFormLayout()
+        depth = QDoubleSpinBox()
+        depth.setRange(-40.0, -1.0)
+        depth.setDecimals(1)
+        depth.setSuffix(" dB")
+        depth.setValue(-abs(num(PREF_DUCK_DB, musica.DUCK_DB)))
+        attack = QDoubleSpinBox()
+        attack.setRange(0.0, 3.0)
+        attack.setDecimals(2)
+        attack.setSingleStep(0.05)
+        attack.setSuffix(" s")
+        attack.setValue(num(PREF_DUCK_ATTACK, musica.ATTACK_S))
+        release = QDoubleSpinBox()
+        release.setRange(0.0, 5.0)
+        release.setDecimals(2)
+        release.setSingleStep(0.05)
+        release.setSuffix(" s")
+        release.setValue(num(PREF_DUCK_RELEASE, musica.RELEASE_S))
+        form.addRow(_("Abaixar"), depth)
+        form.addRow(_("Descida antes da voz"), attack)
+        form.addRow(_("Volta depois da voz"), release)
+        lay.addLayout(form)
+        lay.addWidget(QLabel(_("Faixas com voz:")))
+        boxes = {}
+        for i in tracks:
+            tr = self.model.seq.track(AUDIO, i)
+            name = (tr.name if tr is not None and tr.name else "") or f"A{i + 1}"
+            box = QCheckBox(name)
+            box.setChecked(i in checked)
+            lay.addWidget(box)
+            boxes[i] = box
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        st.setValue(PREF_DUCK_DB, depth.value())
+        st.setValue(PREF_DUCK_ATTACK, attack.value())
+        st.setValue(PREF_DUCK_RELEASE, release.value())
+        return depth.value(), attack.value(), release.value(), [i for i, b in boxes.items() if b.isChecked()]
 
     # ------------------------------------------------------------ perguntas (os testes trocam)
     def inform(self, text: str) -> None:
@@ -322,6 +492,11 @@ def add_clip_actions(menu: QMenu, canvas, clip) -> None:
     act.setToolTip(_("Tira ou repete compassos inteiros no meio da música para ela acabar junto com a imagem (ou no "
                      "Out do trecho marcado), com uma transição de som em cada emenda."))
     act.setEnabled(not ctl.busy(path) and not canvas.model.seq.locked(clip))
+    act = menu.addAction(_("Abaixar a música sob a voz…"), lambda: ctl.duck(clip.id))
+    act.setObjectName("duck_music")
+    act.setToolTip(_("Acha as falas nas outras faixas de som e abaixa o volume da música enquanto alguém fala, com "
+                     "chaves de volume comuns (dá para ajustar depois)."))
+    act.setEnabled(not ctl.busy_duck() and not canvas.model.seq.locked(clip))
 
 
 def install(win) -> MusicUI:

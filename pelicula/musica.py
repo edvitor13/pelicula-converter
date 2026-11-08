@@ -10,7 +10,9 @@ import copy
 from dataclasses import dataclass
 from typing import Iterable
 
-from . import batidas, timeline
+import numpy as np
+
+from . import batidas, editparams, timeline
 from .i18n import _
 from .timeline import AUDIO, VIDEO
 
@@ -246,5 +248,174 @@ def apply_fit(seq: timeline.Sequence, cid: str, plan: Plan) -> list[str]:
     return ids
 
 
+# ------------------------------------------------------------------ abaixar a música sob a voz
+DUCK_DB = -12.0         # quanto abaixar (dB), o padrão do diálogo
+ATTACK_S = 0.3          # a música desce nesse tempo antes da voz
+RELEASE_S = 0.6         # e volta nesse tempo depois dela
+MERGE_S = 1.0           # falas separadas por menos que isto viram uma só (a música não sobe e desce no meio)
+VOICE_RATE = 16000      # a detecção de fala olha o som nesta taxa
+VOICE_FRAME_S = 0.02    # janelas de 20 ms, a cada 10 ms
+VOICE_HOP_S = 0.01
+VOICE_RANGE_DB = 30.0   # fala = até 30 dB abaixo das partes mais fortes da voz...
+VOICE_FLOOR_DB = -55.0  # ...e nunca abaixo disto (dBFS)
+VOICE_FLAT_MAX = 0.35   # planura espectral (100 Hz a 4 kHz) acima disto é ruído (o branco dá ~0,56), não fala
+VOICE_HANG_S = 0.2      # a fala continua por este tempo depois da última janela com voz (consoantes, respiro)
+VOICE_MIN_S = 0.1       # trechos mais curtos que isto não são fala (estalos)
+
+
+def _decimate(x: np.ndarray, rate: int) -> np.ndarray:
+    """Mono em `VOICE_RATE` (média por blocos e interpolação linear: a fala está bem abaixo de 8 kHz)."""
+    x = np.asarray(x, np.float64)
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    if rate == VOICE_RATE or not len(x):
+        return x
+    k = max(1, int(rate // VOICE_RATE))
+    if k > 1:
+        n = len(x) // k * k
+        x = x[:n].reshape(-1, k).mean(axis=1)
+        rate = rate / k
+    n = int(len(x) * VOICE_RATE / rate)
+    return np.interp(np.arange(n) * rate / VOICE_RATE, np.arange(len(x)), x)
+
+
+def speech_regions(x: np.ndarray, rate: int) -> list[tuple[float, float]]:
+    """Trechos com fala [(começo, fim)] em segundos desde o começo de `x` (amostras, mono ou n × canais): janelas
+    com energia perto da das partes fortes da voz (`VOICE_RANGE_DB`, nunca abaixo de `VOICE_FLOOR_DB`) e espectro
+    com tom (planura < `VOICE_FLAT_MAX`: chiado e vento não contam), mais `VOICE_HANG_S` depois de cada uma; falas a
+    menos de `MERGE_S` uma da outra viram uma."""
+    y = _decimate(x, rate)
+    n_win, hop = int(VOICE_FRAME_S * VOICE_RATE), int(VOICE_HOP_S * VOICE_RATE)
+    if len(y) < n_win:
+        return []
+    frames = np.lib.stride_tricks.sliding_window_view(y, n_win)[::hop]
+    energy = 10.0 * np.log10(np.maximum((frames ** 2).mean(axis=1), 1e-12))
+    loud = energy[energy > -80.0]
+    if not loud.size:
+        return []
+    thr = max(float(np.percentile(loud, 95)) - VOICE_RANGE_DB, VOICE_FLOOR_DB)
+    freqs = np.fft.rfftfreq(512, 1.0 / VOICE_RATE)
+    band = (freqs >= 100) & (freqs <= 4000)
+    win = np.hanning(n_win)
+    flat = np.ones(len(frames))
+    for i in range(0, len(frames), 4096):
+        p = np.abs(np.fft.rfft(frames[i:i + 4096] * win, 512, axis=1)[:, band]) ** 2 + 1e-12
+        flat[i:i + 4096] = np.exp(np.log(p).mean(axis=1)) / p.mean(axis=1)
+    active = (energy > thr) & (flat < VOICE_FLAT_MAX)
+    regions: list[list[float]] = []
+    for i in np.flatnonzero(active):
+        t0 = i * VOICE_HOP_S
+        t1 = t0 + VOICE_FRAME_S + VOICE_HANG_S
+        if regions and t0 <= regions[-1][1] + MERGE_S:
+            regions[-1][1] = max(regions[-1][1], t1)
+        else:
+            regions.append([t0, t1])
+    dur = len(y) / VOICE_RATE
+    return [(a, min(b, dur)) for a, b in regions if b - a - VOICE_HANG_S >= VOICE_MIN_S]
+
+
+@dataclass(frozen=True)
+class Duck:
+    """Uma descida da música: começa a descer em `k0`, está embaixo de `fa` a `fb` e volta ao normal em `k3`
+    (quadros da sequência; `k0`/`k3` None = a ponta está fora do clipe e o clipe começa/acaba embaixo)."""
+    k0: int | None
+    fa: int
+    fb: int
+    k3: int | None
+
+
+def duck_spans(clip: timeline.Clip, regions: Iterable[tuple[float, float]], fps: float,
+               attack: float = ATTACK_S, release: float = RELEASE_S) -> list[Duck]:
+    """As descidas de um clipe de música para as falas `regions` (segundos da sequência). Descidas que se tocariam
+    (a subida de uma passando da descida da outra) viram uma."""
+    att, rel = max(0, int(round(attack * fps))), max(0, int(round(release * fps)))
+    spans: list[list[int]] = []
+    for a, b in sorted(regions):
+        fa, fb = int(np.floor(a * fps)), int(np.ceil(b * fps))
+        if fb <= clip.start or fa >= clip.end:
+            continue
+        if spans and fa - att <= spans[-1][1] + rel:
+            spans[-1][1] = max(spans[-1][1], fb)
+        else:
+            spans.append([fa, fb])
+    last = clip.end - 1
+    out = []
+    for fa, fb in spans:
+        k0, k3 = fa - att, fb + rel
+        out.append(Duck(k0 if k0 >= clip.start and att else None, max(fa, clip.start), min(fb, last),
+                        k3 if k3 <= last and rel else None))
+    return out
+
+
+def duck_conflicts(seq: timeline.Sequence, clip: timeline.Clip, ducks: list[Duck]) -> list[float]:
+    """Quadros das chaves de volume que o clipe já tem dentro de alguma descida (de `k0` a `k3`)."""
+    hit = []
+    for f, _v, _e in seq.keys_of(clip, "volume"):
+        for d in ducks:
+            lo = d.k0 if d.k0 is not None else clip.start
+            hi = d.k3 if d.k3 is not None else clip.end - 1
+            if lo - 1e-6 <= f <= hi + 1e-6:
+                hit.append(f)
+                break
+    return hit
+
+
+def apply_duck(seq: timeline.Sequence, cid: str, ducks: list[Duck], depth_db: float = DUCK_DB) -> int:
+    """Escreve as chaves de volume das descidas (as chaves que já estavam dentro delas saem: quem chama perguntou
+    antes, `duck_conflicts`). O volume embaixo é o de cada ponto menos `depth_db`; as chaves das pontas guardam o
+    volume de antes. Use dentro de `TimelineModel.apply_edit`. Devolve quantas chaves escreveu."""
+    c = seq.find(cid)
+    if c is None or not ducks or seq.locked(c):
+        return 0
+    for f in duck_conflicts(seq, c, ducks):
+        seq.remove_key(cid, "volume", f)
+    p = editparams.AUDIO.params["volume"]
+    depth = abs(float(depth_db))
+
+    def level(f: int) -> float:
+        return float(seq.values_at(c, f)["volume"])
+
+    keys: list[tuple[int, float]] = []
+    for d in ducks:                             # todos os valores primeiro: uma chave nova não muda a conta da próxima
+        if d.k0 is not None:
+            keys.append((d.k0, level(d.k0)))
+        keys.append((d.fa, max(p.min, level(d.fa) - depth)))
+        if d.fb != d.fa:
+            keys.append((d.fb, max(p.min, level(d.fb) - depth)))
+        if d.k3 is not None:
+            keys.append((d.k3, level(d.k3)))
+    n = 0
+    for f, v in keys:
+        n += bool(seq.set_key(cid, "volume", f, round(v, 2)))
+    return n
+
+
+def voice_mix(seq: timeline.Sequence, voice_tracks: Iterable[int], skip: Iterable[str] = ()) -> timeline.Sequence:
+    """Cópia da sequência só com o som das faixas de voz (sem `skip`, os clipes de música), sem solo: o que
+    `audiomix.render_mix` mixa para achar as falas."""
+    tracks = set(voice_tracks)
+    skip = set(skip)
+    mix = seq.copy()
+    mix.clips = [c for c in mix.clips if c.kind != AUDIO or (c.track in tracks and c.id not in skip)]
+    for tr in mix.kind_tracks(AUDIO):
+        tr.solo = False
+    return mix
+
+
+def voice_tracks_for(seq: timeline.Sequence, music: Iterable[timeline.Clip]) -> list[int]:
+    """As faixas de som que tocam junto com a música (o padrão do diálogo): as que têm clipes de som que se
+    sobrepõem a ela, menos as próprias faixas da música."""
+    music = list(music)
+    ids = {c.id for c in music}
+    own = {c.track for c in music}
+    out = set()
+    for c in seq.clips:
+        if c.kind == AUDIO and c.id not in ids and c.track not in own:
+            if any(c.start < m.end and c.end > m.start for m in music):
+                out.add(c.track)
+    return sorted(out)
+
+
 __all__ = ["beat_frames", "snap_frames", "Piece", "Plan", "fit_plan", "fade_plan", "fit_target", "fit_blockers",
-           "apply_fit"]
+           "apply_fit", "speech_regions", "Duck", "duck_spans", "duck_conflicts", "apply_duck", "voice_mix",
+           "voice_tracks_for"]

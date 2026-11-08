@@ -187,3 +187,125 @@ def test_apply_fit_is_one_undo_step():
     m.undo()
     assert len(m.seq.clips) == 1 and m.seq.find(c.id).dur == 60 * FPS and not m.can_undo()
     assert not m.apply_edit(lambda s: None)                 # nada mudou: nenhum passo
+
+
+# ------------------------------------------------------------------ abaixar a música sob a voz
+VR = 48000
+
+
+def voice(secs: float, bursts, seed: int = 3, noise=()) -> np.ndarray:
+    """Fala sintética: vogais (harmônicos de 140 Hz com vibrato, sílabas a 4 Hz) nos trechos `bursts`, um chiado
+    fraco por baixo e rajadas de ruído branco forte (que não são fala) em `noise`."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(secs * VR)) / VR
+    x = 0.002 * rng.standard_normal(len(t))
+    f0 = 140 * (1 + 0.03 * np.sin(2 * np.pi * 5 * t))
+    ph = 2 * np.pi * np.cumsum(f0) / VR
+    vowel = sum(np.sin(k * ph) / k for k in range(1, 12))
+    syll = 0.55 + 0.45 * np.sin(2 * np.pi * 4 * t) ** 2
+    for a, b in bursts:
+        m = (t >= a) & (t < b)
+        x[m] += 0.25 * vowel[m] * syll[m]
+    for a, b in noise:
+        m = (t >= a) & (t < b)
+        x[m] += 0.3 * rng.standard_normal(m.sum())
+    return x
+
+
+def test_speech_regions_find_voice_and_skip_noise():
+    x = voice(12.0, [(1.0, 3.0), (3.5, 4.5), (8.0, 9.2)], noise=[(6.0, 6.8)])
+    regions = musica.speech_regions(x, VR)
+    assert len(regions) == 2, regions                        # 3,0 → 3,5: menos de 1 s, viram uma; o ruído não conta
+    (a0, b0), (a1, b1) = regions
+    assert abs(a0 - 1.0) < 0.05 and 4.5 <= b0 <= 4.5 + musica.VOICE_HANG_S + 0.05
+    assert abs(a1 - 8.0) < 0.05 and 9.2 <= b1 <= 9.2 + musica.VOICE_HANG_S + 0.05
+    stereo = np.repeat(x[:, None], 2, axis=1).astype(np.float32)
+    assert musica.speech_regions(stereo, VR) == pytest.approx(regions, abs=0.02)
+    assert musica.speech_regions(np.zeros(VR), VR) == []
+    assert musica.speech_regions(voice(4.0, []), VR) == []  # só o chiado de fundo
+
+
+def test_duck_keys_frames_and_depth():
+    seq, c = music_seq(60.0, start=24, dur=480)            # quadros 24 a 503
+    c.values = {**c.values, "volume": -4.0}
+    ducks = musica.duck_spans(c, [(5.0, 8.0), (8.5, 9.0), (30.0, 40.0)], FPS, attack=0.5, release=1.0)
+    assert ducks == [musica.Duck(108, 120, 216, 240)]      # 8,5 s: a subida tocaria a descida seguinte; 30 s: fora
+    assert musica.apply_duck(seq, c.id, ducks, -12.0) == 4
+    assert [(f, v) for f, v, _e in seq.keys_of(c, "volume")] == [(108, -4.0), (120, -16.0), (216, -16.0), (240, -4.0)]
+    assert seq.values_at(c, 168)["volume"] == pytest.approx(-16.0)
+    assert seq.values_at(c, 300)["volume"] == pytest.approx(-4.0)
+    # descida que passa do começo do clipe: o clipe já começa embaixo
+    seq, c = music_seq(60.0, start=24, dur=480)
+    ducks = musica.duck_spans(c, [(0.5, 2.0)], FPS)
+    assert ducks[0].k0 is None and ducks[0].fa == 24
+    musica.apply_duck(seq, c.id, ducks, 12.0)               # o sinal da profundidade não importa
+    assert seq.keys_of(c, "volume")[0][:2] == (24, -12.0)
+
+
+def test_duck_existing_keys_are_conflicts_and_get_replaced():
+    seq, c = music_seq(60.0, start=0, dur=480)
+    seq.set_key(c.id, "volume", 10, -2.0)
+    seq.set_key(c.id, "volume", 130, -8.0)                 # dentro da descida
+    seq.set_key(c.id, "volume", 400, -2.0)
+    ducks = musica.duck_spans(c, [(5.0, 6.0)], FPS)
+    assert musica.duck_conflicts(seq, c, ducks) == [130]
+    musica.apply_duck(seq, c.id, ducks, -12.0)
+    frames = [f for f, _v, _e in seq.keys_of(c, "volume")]
+    assert 130 not in frames and 10 in frames and 400 in frames
+    lvl = seq.values_at(c, 113)["volume"]                  # o volume de fora volta a valer nas pontas
+    assert lvl == pytest.approx(-2.0) and seq.values_at(c, 132)["volume"] == pytest.approx(-14.0)
+
+
+def test_voice_tracks_and_voice_mix():
+    seq, music = music_seq(60.0, start=0, dur=480)
+    seq.add_source(tl.Source("voz.wav", fps=24.0, frames=240, duration=10.0, has_video=False, has_audio=True))
+    seq.ensure_track(tl.AUDIO, 2)
+    v = tl.Clip(tl.new_id(), tl.AUDIO, "voz.wav", 1, 100, 100, 0.0)
+    far = tl.Clip(tl.new_id(), tl.AUDIO, "voz.wav", 2, 600, 100, 0.0)
+    seq.clips += [v, far]
+    seq.track(tl.AUDIO, 1).solo = True
+    assert musica.voice_tracks_for(seq, [music]) == [1]
+    mix = musica.voice_mix(seq, [1], skip=[music.id])
+    assert [c.id for c in mix.clips] == [v.id] and not any(t.solo for t in mix.kind_tracks(tl.AUDIO))
+    assert seq.track(tl.AUDIO, 1).solo                      # a original não muda
+
+
+def test_ducked_mix_is_lower_under_the_voice(ffmpeg_ok, tmp_path):
+    import wave
+
+    from pelicula import audiomix
+
+    def wav(path, x):
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(VR)
+            w.writeframes(np.repeat((np.clip(x, -1, 1) * 32767).astype("<i2")[:, None], 2, axis=1).tobytes())
+        return str(path)
+
+    t = np.arange(3 * VR) / VR
+    song = wav(tmp_path / "musica.wav", 0.3 * np.sin(2 * np.pi * 440 * t))
+    speech = wav(tmp_path / "voz.wav", voice(3.0, [(1.0, 2.0)]))
+    seq = tl.Sequence(640, 360, f"{FPS}/1")
+    seq.add_source(tl.Source(song, fps=24.0, frames=72, duration=3.0, has_video=False, has_audio=True))
+    seq.add_source(tl.Source(speech, fps=24.0, frames=72, duration=3.0, has_video=False, has_audio=True))
+    seq.ensure_track(tl.AUDIO, 1)
+    music = tl.Clip(tl.new_id(), tl.AUDIO, song, 0, 0, 72, 0.0)
+    talk = tl.Clip(tl.new_id(), tl.AUDIO, speech, 1, 0, 72, 0.0)
+    seq.clips += [music, talk]
+    out = str(tmp_path / "voz_mix.wav")
+    assert audiomix.render_mix(musica.voice_mix(seq, [1], [music.id]), out)
+    regions = musica.speech_regions(audiomix.WavReader(out).read(0, 3 * VR), VR)
+    assert len(regions) == 1 and abs(regions[0][0] - 1.0) < 0.06
+    ducks = musica.duck_spans(music, regions, FPS, 0.3, 0.4)
+    musica.apply_duck(seq, music.id, ducks, -12.0)
+    seq.track(tl.AUDIO, 1).muted = True                     # ouvir só a música
+    out = str(tmp_path / "mix.wav")
+    assert audiomix.render_mix(seq, out)
+    y = audiomix.WavReader(out).read(0, 3 * VR)[:, 0]
+
+    def rms(a, b):
+        return 20 * np.log10(np.sqrt(np.mean(y[int(a * VR):int(b * VR)] ** 2)))
+
+    assert rms(1.2, 1.8) - rms(0.1, 0.6) == pytest.approx(-12.0, abs=1.0)
+    assert rms(2.6, 2.9) - rms(0.1, 0.6) == pytest.approx(0.0, abs=1.0)
