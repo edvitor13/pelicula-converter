@@ -220,7 +220,9 @@ def test_speech_regions_find_voice_and_skip_noise():
     assert abs(a0 - 1.0) < 0.05 and 4.5 <= b0 <= 4.5 + musica.VOICE_HANG_S + 0.05
     assert abs(a1 - 8.0) < 0.05 and 9.2 <= b1 <= 9.2 + musica.VOICE_HANG_S + 0.05
     stereo = np.repeat(x[:, None], 2, axis=1).astype(np.float32)
-    assert musica.speech_regions(stereo, VR) == pytest.approx(regions, abs=0.02)
+    got = musica.speech_regions(stereo, VR)
+    assert len(got) == len(regions)
+    assert np.allclose(np.asarray(got, float), np.asarray(regions, float), atol=0.02)
     assert musica.speech_regions(np.zeros(VR), VR) == []
     assert musica.speech_regions(voice(4.0, []), VR) == []  # só o chiado de fundo
 
