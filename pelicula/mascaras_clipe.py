@@ -37,7 +37,7 @@ FX_KEY = "mascara"          # `Clip.fx[FX_KEY]` = {"pontos": [[x, y], …]}
 POINTS_KEY = "pontos"
 MAX_POINTS = 32
 SHAPES = {"retangulo": 1, "elipse": 2, "poligono": 3}
-USES = ("recortar", "desfocar", "pixelar")
+USES = ("recortar", "desfocar", "pixelar", "so_forma")  # "so_forma": só a forma (para o desfoque de lente)
 KEYS = ("mascara_forma", "mascara_x", "mascara_y", "mascara_largura", "mascara_altura", "mascara_rotacao",
         "mascara_suavidade", "mascara_expandir", "mascara_inverter", "mascara_uso", "mascara_forca")
 
@@ -207,6 +207,8 @@ def passes(ctx: vfx.Ctx) -> list[vfx.Pass]:
     if u is None:  # polígono ainda sem pontos: nada a fazer
         return []
     use = ctx.values["mascara_uso"]
+    if use == "so_forma":  # a forma só serve a outro efeito (o desfoque de lente dentro ou fora dela, §52.5)
+        return []
     if use == "desfocar":
         return [vfx.Pass("mascara_desfoque", kind="blur", sigma=ctx.px(ctx.values["mascara_forca"]), dtype="f2"),
                 vfx.Pass("mascara", BLUR_MIX, uniforms=u, inputs={"t_in": "in", "t_soft": "pass:mascara_desfoque"})]

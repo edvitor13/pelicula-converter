@@ -228,6 +228,24 @@ def test_shape_mask_hook_for_the_masks_front(gl_engine, renderer, monkeypatch):
     assert not np.array_equal(got[:, :W // 2 - 8], plain[:, :W // 2 - 8])
 
 
+@pytest.mark.gpu
+def test_lens_blur_inside_or_outside_the_clip_shape_mask(gl_engine, renderer):
+    """A máscara de forma da F2 ligada ao gancho (integração): um retângulo na metade esquerda com o uso "Nada (só a
+    forma)" não recorta nada sozinho; "dentro" desfoca só a esquerda e "fora" só a direita."""
+    shape = {"mascara_forma": "retangulo", "mascara_uso": "so_forma", "mascara_x": -2000.0, "mascara_y": 0.0,
+             "mascara_largura": 4000.0, "mascara_altura": 4000.0, "mascara_suavidade": 0.0}
+    plain = compose(gl_engine, one_clip()[0])
+    assert np.array_equal(compose(gl_engine, one_clip(shape)[0]), plain)  # só a forma: nenhum passo
+    inside = compose(gl_engine, one_clip({**DOF, **shape, "desfoque_lente_mascara": "dentro_mascara"})[0])
+    assert np.array_equal(inside[:, W // 2 + 1:], plain[:, W // 2 + 1:])
+    assert not np.array_equal(inside[:, :W // 2 - 8], plain[:, :W // 2 - 8])
+    outside = compose(gl_engine, one_clip({**DOF, **shape, "desfoque_lente_mascara": "fora_mascara"})[0])
+    assert np.array_equal(outside[:, :W // 2 - 1], plain[:, :W // 2 - 1])
+    assert not np.array_equal(outside[:, W // 2 + 8:], plain[:, W // 2 + 8:])
+    no_shape = compose(gl_engine, one_clip({**DOF, "desfoque_lente_mascara": "dentro_mascara"})[0])
+    assert np.array_equal(no_shape, compose(gl_engine, one_clip(DOF)[0]))  # sem forma: a imagem inteira
+
+
 INVERT = "void main() { vec4 c = texture(t_prev, v_uv); f_out = vec4(1.0 - c.rgb, c.a); }"
 
 

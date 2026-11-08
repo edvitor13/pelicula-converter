@@ -396,3 +396,31 @@ FLARE_EFFECT = vfx.register(vfx.Effect("flare", MODULE, vfx.ORDER["luz"] + 10, a
                                        passes=flare_passes, keys=FLARE_KEYS))
 RAYS_EFFECT = vfx.register(vfx.Effect("raios", MODULE, vfx.ORDER["luz"] + 20, active=rays_active, passes=rays_passes,
                                       keys=RAYS_KEYS))
+
+
+# ------------------------------------------------------------------ máscara de forma da F2 (§52.5)
+SHAPE_MASK = """
+uniform int u_out_invert;  // 1 = fora da forma
+void main() {
+    float m = mkMask(v_uv);
+    m = u_out_invert != 0 ? 1.0 - m : m;
+    f_out = vec4(m, m, m, 1.0);
+}
+"""
+
+
+def _shape_mask(invert: bool) -> Callable[[vfx.Ctx], list[vfx.Pass] | None]:
+    """O passo que desenha a máscara de forma do clipe (`mascaras_clipe`) no canal r; None se o clipe não tem forma (o
+    desfoque cai na imagem inteira)."""
+    def make(ctx: vfx.Ctx) -> list[vfx.Pass] | None:
+        from . import mascaras_clipe
+        u = mascaras_clipe.uniforms(ctx)
+        if u is None:
+            return None
+        return [vfx.Pass("forma", mascaras_clipe.GLSL + SHAPE_MASK, uniforms={**u, "u_out_invert": int(invert)},
+                         dtype="f2")]
+    return make
+
+
+MASK_SOURCES["dentro_mascara"] = _shape_mask(False)
+MASK_SOURCES["fora_mascara"] = _shape_mask(True)

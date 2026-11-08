@@ -347,9 +347,9 @@ VIDEO_SECTIONS += [
         B("mascara_inverter", "Inverter", False, "Troca o dentro pelo fora."),
         C("mascara_uso", "O que fazer dentro", "recortar", [
             ("recortar", N_("Mostrar só o que está dentro")), ("desfocar", N_("Desfocar")),
-            ("pixelar", N_("Pixelar"))],
+            ("pixelar", N_("Pixelar")), ("so_forma", N_("Nada (só a forma, para o desfoque de lente)"))],
           "Recortar deixa ver as faixas de baixo fora da forma; desfocar e pixelar escondem o que está dentro (um "
-          "rosto, uma placa)."),
+          "rosto, uma placa); \"Nada\" guarda a forma para o desfoque de lente usar."),
         _anim(F("mascara_forca", "Força", 20.0, 1, 200, 1, 0, " px",
                 "Raio do desfoque ou tamanho dos quadradinhos do pixelado (pixels de um quadro de 1080 linhas).")),
     ], "Retângulo, elipse ou polígono para recortar, desfocar ou pixelar"),
@@ -369,7 +369,8 @@ VIDEO_SECTIONS += [
             ("disco", N_("Disco (redondo)")), ("hexagono", N_("Hexágono (seis lâminas)"))],
           "A forma das luzes desfocadas."),
         C("desfoque_lente_mascara", "Onde desfocar", "tudo", [
-            ("tudo", N_("A imagem inteira")), ("degrade", N_("Pelo degradê (foco perto ou longe)"))],
+            ("tudo", N_("A imagem inteira")), ("degrade", N_("Pelo degradê (foco perto ou longe)")),
+            ("dentro_mascara", N_("Dentro da máscara do clipe")), ("fora_mascara", N_("Fora da máscara do clipe"))],
           "Com o degradê, o lado marcado fica desfocado e o outro continua nítido."),
         C("desfoque_lente_degrade", "Forma do degradê", "linear", [
             ("linear", N_("Linear (fundo ou frente)")), ("radial", N_("Radial (fora do círculo)"))]),

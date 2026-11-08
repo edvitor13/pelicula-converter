@@ -5474,11 +5474,12 @@ luz cortada da entrada (uma área chapada, mesmo estourada, fica igual). Máscar
 
 `luzes_clipe.MASK_SOURCES: dict[escolha, fn(ctx) -> [Pass] | None]`. Quando `desfoque_lente_mascara` é uma escolha
 registrada aqui, os passos de `fn` entram antes do desfoque e o último deles é lido como máscara (canal r, 0 a 1, no uv
-do clipe; `u_mask = 2`). Tem prioridade sobre `"degrade"`/`"tudo"` (o teste usa isso). Para ligar a máscara de forma da
-F2 depois da integração: (1) acrescentar no **fim** das opções de `desfoque_lente_mascara` `("dentro_mascara",
-N_("Dentro da máscara do clipe"))` e `("fora_mascara", N_("Fora da máscara do clipe"))`; (2) no módulo da máscara,
-registrar `MASK_SOURCES["dentro_mascara"]` e `["fora_mascara"]` com passos que desenham a máscara do clipe (a segunda
-invertida). Sem isso, nada muda.
+do clipe; `u_mask = 2`). Tem prioridade sobre `"degrade"`/`"tudo"` (o teste usa isso). Ligado na integração: as
+opções `dentro_mascara` e `fora_mascara` (no fim de `desfoque_lente_mascara`) usam `_shape_mask`, um passo f2 com
+`mascaras_clipe.GLSL` + `uniforms(ctx)` que escreve `mkMask` (ou `1 − mkMask`) no canal r; sem forma no clipe, o
+provedor devolve None e o desfoque vale para a imagem inteira. Para a forma não recortar o clipe ao mesmo tempo, a
+máscara ganhou o uso `so_forma` ("Nada (só a forma, para o desfoque de lente)", no fim de `mascara_uso`): o efeito
+"mascara" não gera passos e a forma fica só para o gancho.
 
 ### 52.6 Atmosfera: névoa e partículas
 
