@@ -37,6 +37,7 @@ ADJUSTMENT_HIDE_CARDS = ("camera",)
 # A interface de cada frente (`pelicula.ui.<nome>`, com `install(vfx_ui)`), chamada no fim de `VfxUI.__init__`. Frente
 # nova: **uma linha** aqui.
 FRONT_UIS: tuple[str, ...] = (
+    "movimento_ui",  # 1.9 F3: estabilizar e rastrear ponto
 )  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 

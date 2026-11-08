@@ -212,6 +212,13 @@ pelicula/
                              (matriz tela → uv do clipe), WINDOWS (quadros misturados), EFFECT_MODULES, camada de ajuste
                              (is_adjustment, new_adjustment), modules_used, pack/unpack/stamp/stale das análises
   mesclagem.py               1.9, modos de mesclagem novos (ids 7 a 16, §49.6): GLSL da variante do CLIP e referência numpy
+  movimento.py               1.9 F3, núcleo do movimento em numpy (§51.1): read_gray, phase_correlate, ncc_map,
+                             frame_motion/estimate (semelhança robusta), trajectory/smooth/corrections, auto_zoom
+  estabilizacao.py           1.9 F3, estabilização (§51.2): analyze (vidstabdetect em texto ou numpy; parse_trf), análise
+                             em Source.analysis["estabilizacao"], vfx.GEOMETRY["estabilizar"] (corrections_for, zoom_of)
+  rastreio.py                1.9 F3, rastreio de ponto (§51.3): track/run (NCC + modelo-chave), Track em
+                             Clip.fx["rastros"], TARGETS (proprio, acima; máscara da F2 com uma linha), apply/reapply
+                             (chaves simplificadas por RDP), canvas_point/clip_uv com a geometria dos efeitos
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -263,6 +270,8 @@ pelicula/
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
                              1.9, efeitos visuais (§49.10): vfx_ui (VfxUI: Novo ▸ Camada de ajuste, inspetor da camada
                              de ajuste, add_section/add_overlay/pick_point/clip_point para as frentes);
+                             1.9 F3 (§51.4): movimento_ui (MotionUI: cartões Estabilizar com Analisar e Rastrear ponto
+                             com Aplicar a…/Reaplicar/Apagar, progresso e Cancelar na barra de status, marca na prévia);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -535,6 +544,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_camada_ajuste.py` | mesclagens novas (ids, variantes do CLIP, pontos conhecidos, cada modo na GPU == `mesclagem.apply`) e camada de ajuste: fonte e formato 7, módulo, desfazer, aninhar recusado; neutra bit a bit, exposição nela == no clipe de tela cheia, só no tempo dela, opacidade, tela transparente |
 | `tests/test_vfx_dados.py` | `Clip.fx` ("efeitos") e `Source.analysis` ("analise", fora do desfazer) no JSON e no formato 7, dividir/aninhar/desaninhar, `frame_window` e `neighbor_frames`, vizinhos de `grab` == leitor, passo que lê "n-1" |
 | `tests/test_vfx_ui.py` | casos de `vfx_ui_cases.py`: módulo Beta e Novo ▸ Camada de ajuste (um passo do desfazer), inspetor sem o enquadramento, cartão e camada de prévia de uma frente seguindo o módulo |
+| `tests/test_movimento.py` | núcleo do movimento (1.9 F3): correlação de fase subpixel (deslocamento de Fourier exato), `ncc_map`, matriz ida e volta, semelhança robusta com 30% de pontos errados, `frame_motion` < 0,5 px@1080 com tremor de 0,5° e 30 px, `estimate`, trajetória, suavização (panorâmica mantida), correções, `auto_zoom` (usa `movimento_sinteticos.py`) |
+| `tests/test_estabilizacao.py` | estabilização: `.trf` em texto (`data/estabilizacao/`) sem ffmpeg e o tremor conhecido, recusas (formato, taxa variável, imagem/gerado), estado do cartão, desligado/neutro = uniforms de sempre, ponto da cena liso na tela, zoom sem bordas, igual ao dividir/aparar/velocidade, sem rotação; com ffmpeg: análise numpy e vid.stab (pulada sem o filtro), cancelar; na GPU: tremor corrigido e prévia == exportação |
+| `tests/test_rastreio.py` | rastreio de ponto: alvo andando e girando a < 1 px@1080, perdido com aviso, recusas, cancelar, RDP, JSON no clipe e formato 7, aplicar no próprio clipe (ponto parado) e num título acima (segue o ponto), chaves depois de aparar e de mudar a velocidade, um passo do desfazer e Reaplicar, chaves fora do trecho ficam, gancho de alvo em uv (máscara), ponto da tela com a estabilização; com ffmpeg, `run` num arquivo |
+| `tests/test_movimento_ui.py` | casos de `movimento_ui_cases.py`: cartões seguem o módulo "movimento" (depois de Transformar), clipe gerado sem Analisar, Analisar grava a análise e liga (desfazer só o ligar), rastrear + Aplicar a… em passos do desfazer, marca do ponto na prévia |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

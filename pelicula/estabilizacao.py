@@ -260,7 +260,9 @@ def corrections_for(src, values: dict) -> np.ndarray | None:
     rot = bool(values.get("estab_rotacao", True))
     borders = str(values.get("estab_bordas", "ampliar"))
     extra = max(0.0, float(values.get("estab_zoom_extra", 0.0)))
-    key = (id(motions), round(sigma, 6), rot, borders, round(extra, 6), int(src.width), int(src.height))
+    # o texto do pacote (não o id do array: um id pode voltar para outro array depois de liberado)
+    key = (str(entry["movimento"].get("dados")), round(sigma, 6), rot, borders, round(extra, 6), int(src.width),
+           int(src.height))
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
     if hit is not None:
