@@ -719,7 +719,8 @@ para um programa de DCP (ex.: DCP-o-matic).
   passadas do x264/x265 — leva cerca do dobro do tempo, e a estimativa já conta isso.
 - **Volume alvo** e **Pico real**: o som é medido e acertado em duas passadas (EBU R 128): −14 LUFS nas
   redes, −16 em podcast, −23 na TV e no festival; pico −1 dBTP. Com *Copiar original*, o som passa a ser
-  recodificado (a janela avisa).
+  recodificado (a janela avisa). O mesmo vale com o **Som de película** do look ligado: a janela diz, embaixo do
+  *Áudio*, em que formato o som sai.
 - **Grão para redes**: grão com tamanho mínimo no quadro de saída e um pouco mais forte, para sobreviver
   à recompressão das redes (desligado por padrão; a prévia do resultado mostra o efeito).
 - **Avisos**: vídeo mais longo que o limite (com *Exportar só os primeiros N s*), tamanho estimado acima

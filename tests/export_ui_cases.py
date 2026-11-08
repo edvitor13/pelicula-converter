@@ -310,3 +310,39 @@ def test_safe_area_is_drawn_only_on_screen():
     over = v.grab().toImage()
     assert plain != over                  # escurece onde a interface do TikTok fica
     assert img.pixelColor(0, 0) == QColor(200, 200, 200)  # a imagem (o que seria exportado) não muda
+
+
+# ------------------------------------------------------------------ 1.8: som de película com "Copiar original"
+def test_film_sound_note_next_to_the_audio_choice():
+    """Com "Copiar original" e o som de película do look ligado, a nota ao lado do áudio diz em que formato o som sai;
+    some com outra escolha de áudio, sem som, com o som de película desligado e com "Desligar todos os efeitos"."""
+    from pelicula import params
+    on, off = params.sanitize({"somf_on": True}), params.sanitize({"somf_on": False})
+
+    def copy(d):
+        d.audio.setCurrentIndex(d.audio.findData("copy"))
+        return d
+
+    dlg = copy(dialog(values=on))
+    s = dlg.settings()
+    assert s.audio == "copy" and s.container == "mp4"
+    assert not dlg.audio_note.isHidden()
+    assert dlg.audio_note.text() == "O som de película está ligado: o som será recodificado em AAC 320 kb/s."
+    assert dlg.job().settings.audio == "copy", "só informa: a escolha não muda"
+    dlg.audio.setCurrentIndex(dlg.audio.findData("aac192"))
+    assert dlg.audio_note.isHidden()
+    copy(dlg)
+    assert not dlg.audio_note.isHidden()
+    dlg.container.setCurrentIndex(dlg.container.findData("mkv"))
+    assert dlg.audio_note.text() == ("O som de película está ligado: o som será recodificado em "
+                                     "PCM 24 bits (sem perdas).")
+    plain = copy(dialog(values=off))
+    assert plain.audio_note.isHidden() and plain.audio_note.text() == ""
+    plain.values = on  # outro look (outra sequência com look próprio): a nota acompanha
+    plain._summary()
+    assert not plain.audio_note.isHidden()
+    ne = ExportDialog(None, info(), on, "Teste", None, last_dir=os.getcwd(), last_quality="mp4", no_effects=True)
+    ne._est_timer.stop()
+    ne._preview_timer.stop()
+    assert copy(ne).audio_note.isHidden()
+    assert copy(dialog(src=info(audio=False), values=on)).audio_note.isHidden()

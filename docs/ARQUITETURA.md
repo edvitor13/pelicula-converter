@@ -621,7 +621,8 @@ o mesmo croma; senão x264 com o mesmo croma.
 converte: WebM → Opus, AVI → MP3, MOV → PCM 24 bits, demais → AAC 320. PCM em MP4 vira AAC. GIF,
 imagens e sequências não têm áudio. Com volume alvo ou tamanho alvo o som nunca é copiado
 (`_audio_mode`): "Copiar original" vira o formato do recipiente (AAC 128 kb/s no tamanho alvo) e a janela
-avisa (`audio_reencoded_for_volume`).
+avisa (`audio_reencoded_for_volume`). Com o som de película do look ligado o som do arquivo também nunca é copiado, e a
+janela diz em que formato ele sai (`audio_reencoded_for_film`, §45.8).
 
 ### 9.5 Plataformas (`platforms.py`)
 
@@ -4741,6 +4742,64 @@ As chaves de animação do look não entram no som (o motor lê os valores fixos
 Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
 preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
 de 48 kHz com o contrato do contexto (`before`).
+
+### 45.6 Presets com som de película
+
+Frente P2 da 1.8. Quatro presets novos no **fim** de `presets.BUILTIN`, depois dos da 1.6 (o índice dos antigos no
+*Preset* do OpenFX e a ordem dos nós DCTL não mudam; `tests/test_presets_16.py` confere os da 1.6 logo depois de
+"original"). A parte da imagem é **copiada** (valores escritos de novo, não `{**BY_ID[...]}`) do preset mais parecido:
+
+| Id | Imagem de | A mais na imagem | Som (`somf_*`) |
+|---|---|---|---|
+| `super8_caseiro_som` | `super8_kodachrome` | — | `magnetica_s8`; estalos 0,5, poeira 0,35, wow 0,6, projetor 0,4, sala 0,1 |
+| `16mm_arquivo_som` | `16mm_doc` | Defeitos (poeira 0,2, riscos 0,08) | `otica_16`; estalos 0,5, poeira 0,55, wow 0,4, projetor 0,15, sala 0,2 |
+| `cinema_anos_30` | `noir` | Defeitos (riscos 0,12, *Emendas* 0,2) | `otica_antiga`; estalos 0,6, poeira 0,5, wow 0,5, projetor 0,15, sala 0,3 |
+| `cine_de_bairro` | `copia_70` | — | `otica_35`; estalos 0,45, poeira 0,4, wow 0,35, projetor 0,25, sala 0,55 |
+
+A trilha é escrita (não `auto`) para o preset soar igual se a pessoa trocar a bitola. Os níveis são moderados e foram
+escolhidos **sem escuta**: confira de ouvido antes de mexer. Nenhum liga *A montagem na película* (os rolos de Super 8
+mudam a imagem e a taxa do projetor). O plugin do DaVinci e o OpenFX recebem os quatro como presets de imagem (o som não
+existe lá; `plugins/ofx/generated` refeito por `tools/gerar_ofx.py`). `modules.used_by` reconhece `somf_on`: aplicar um
+deles com o módulo desligado mostra o aviso de sempre. Testes: `tests/test_presets_som.py`.
+
+### 45.7 Estalo na troca de rolo de Super 8
+
+O único evento de troca de rolo que a imagem tem é o dos **Rolos de Super 8** (*A montagem na película*,
+`montagem_filme.apply`): no primeiro quadro do rolo novo o quadro **pula** (`u_shift`, `JUMP_PX` × 1,4) e o velamento do
+começo do rolo aparece. (As *Marcas de troca de rolo* dos Defeitos são os círculos do aviso ao projecionista do 35 mm, um
+desenho periódico sem troca de rolo; o som não usa.) Funções puras novas, com a mesma conta de `apply` (que passou a usar
+`roll_at` sem mudar um bit; as referências de ouro passam):
+
+- `montagem_filme.roll_at(v, quadro, fps)` → (rolo, segundos desde o começo dele).
+- `montagem_filme.reel_jump(v, quadro, fps)`: rolo > 0 e `tr × fps < 0,5` (a condição do pulo em `apply`).
+- `montagem_filme.reel_frames(v, fps, a, b)`: os quadros de [a, b) que pulam, com `mfilme_on` e `rolo_on`; um por troca, ou
+  nenhum quando nenhum quadro cai na primeira meia duração de quadro do rolo novo (pode acontecer, por exemplo, com
+  rolos de 150 s a 29,97 qps; a imagem também não pula).
+
+`somfilme.events_for` junta `reel_frames(v, fps, 0, quadros)` às emendas; os rolos contam o tempo da saída, então valem
+também no arquivo direto (sem `seq`). O estalo é o mesmo `_pops` das emendas, com o nível de `somf_estalos` (nenhum ajuste
+novo); um quadro que é emenda e troca ao mesmo tempo dá um estalo só. Como a prévia (`ui/som_pelicula_ui`) e a exportação
+(`export_sound`) já pedem os eventos a `events_for`, a troca de rolo entra nas duas pelo mesmo caminho, e `sound_key` já
+tinha `mfilme_on`, `rolo_on` e `rolo_cadencia`. Testes (`tests/test_somfilme_rolo.py`): `reel_frames` = os quadros em que
+`build_plan` desloca o quadro (cadências 18/24, de 18 a 60 qps), estalo na amostra exata, trecho com contexto = pedaço do
+som inteiro, nada sem os rolos, e prévia = exportação com rolos de 1 s (`ROLL_FRAMES` trocado no teste) num arquivo de 2 s.
+
+### 45.8 Aviso de "Copiar original"
+
+Com o som de película ligado o som do arquivo nunca é copiado (§45.4). `export.audio_reencoded_for_film(s, info, valores,
+seq)` devolve o modo que sai de fato — `_audio_mode` para um WAV PCM de 24 bits: AAC 320 no MP4, Opus no WebM, MP3 no AVI e
+"copy" (o PCM do WAV) no MOV e no MKV — ou "" quando não se aplica (outra escolha de áudio, sem som, som de película
+desligado ou *Desligar todos os efeitos*, e a montagem do modo Edição, cujo som já é a mixagem). `film_sound_note(...,
+done=)` monta o texto. Só informa, a exportação não muda:
+
+- **Janela** (`ExportDialog._film_note`, chamado em `_summary` depois de `_sync_rows`): a linha `audio_note` logo abaixo de
+  *Áudio*, escondida quando não se aplica (também com outra sequência escolhida, que traz o look dela).
+- **Terminal**: `cli._export_notes` recebe os valores e a sequência e imprime a nota no começo, com os outros avisos.
+- **Fim do trabalho**: `run_job` guarda a nota (`done=True`) e a junta a `job.note` depois dos créditos dos sons CC0; a fila,
+  a barra de status e o terminal já mostram `job.note`.
+
+Testes: `tests/test_export_film_note.py` (formatos, quando não se aplica, terminal e, na GPU, a nota no fim) e um caso em
+`tests/export_ui_cases.py` (a nota aparece e some).
 
 ## 46. Música: batidas, encaixe e ducking
 

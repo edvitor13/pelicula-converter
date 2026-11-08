@@ -393,7 +393,7 @@ def _platform_overrides(a, s) -> None:
         s.net_grain = True
 
 
-def _export_notes(plat, s, info, duration: float) -> list[str]:
+def _export_notes(plat, s, info, duration: float, values=None, seq=None) -> list[str]:
     """Avisos da exportação (os mesmos da janela): limites da plataforma, duas passadas, som recodificado."""
     from . import export, platforms
     out = []
@@ -406,6 +406,9 @@ def _export_notes(plat, s, info, duration: float) -> list[str]:
     if export.audio_reencoded_for_volume(s, info):
         out.append(_("O som vai ser recodificado: copiar o original não deixa acertar o volume nem o "
                      "tamanho do arquivo."))
+    film = export.film_sound_note(s, info, values, seq)  # 1.8: "Copiar original" com o som de película ligado
+    if film:
+        out.append(film)
     return out
 
 
@@ -552,7 +555,7 @@ def cmd_export(a) -> int:
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
         print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix} • {w}×{h}").format(
             preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
-        for line in _export_notes(plat, s, info, duration):
+        for line in _export_notes(plat, s, info, duration, values, seq):
             print(line, file=sys.stderr)
         if cues:
             print(_("Legendas: {modo} ({n})").format(modo=choice, n=len(cues)), file=sys.stderr)
