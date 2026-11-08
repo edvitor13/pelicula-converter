@@ -5315,4 +5315,87 @@ Reservada para a frente F4 (efeitos com `order` 400 a 700; bloco `# 1.9 F4`).
 
 ## 53. Tempo da imagem (1.9, F5)
 
-Reservada para a frente F5 (`vfx.WINDOWS`, `Effect.radius`; bloco `# 1.9 F5`).
+Três efeitos de clipe que leem o tempo do arquivo, em `pelicula/tempo_imagem.py` (sem Qt nem GPU), módulo Beta
+`tempo_imagem` (grupo "efeitos_visuais"), seção `tempo_imagem` do bloco `# 1.9 F5` de `editparams.py` e o cartão de
+`ui/tempo_imagem_ui.py` (ligado por `vfx_ui.FRONT_UIS`, depois do cartão *Velocidade*). Nada novo em `clip_uniforms`, no
+`CLIP` nem nos FEATURES: os ajustes vão pelo retrato da 1.8 (`ajustes_clipe_1_9`) e a análise por `Source.analysis`
+(`analise_fonte`).
+
+| Chave | Tipo | Padrão | O quê |
+|---|---|---|---|
+| `deflicker` | float 0–1 (%) | 0 | força do deflicker (0 = nenhum passo) |
+| `deflicker_janela` | float s (0,1–5) | 0,5 | janela da média móvel do brilho |
+| `ruido_temporal` | float 0–1 (%) | 0 | força do ruído temporal (0 = nenhum passo, nenhum vizinho) |
+| `ruido_temporal_quadros` | int 1–2 | 2 | vizinhos de cada lado (`Effect.radius`; `vfx.MAX_RADIUS` = 2) |
+| `mistura_quadros` | bool | False | câmera lenta por mistura (`vfx.WINDOWS`) |
+
+Efeitos na pilha (`vfx.ORDER["tempo"]` = 300): `ruido_temporal` (300), `deflicker` (310) e `mistura_quadros` (320, sem
+passo: só leva o clipe ao aviso do módulo, `modules_used`). O ruído vem antes do deflicker porque os vizinhos que ele lê
+são os quadros do arquivo, sem o ganho.
+
+### 53.1 Deflicker
+
+- **Análise** (`analyze(src, cancel, report)`): o arquivo inteiro decodificado pelo `media.FrameReader` com 64 px de
+  largura em 16 bits; para cada quadro, a média do luma Y' (pesos Rec.709 sobre o R'G'B' que o `CLIP` lê). Guardada em
+  `Source.analysis["deflicker"]` = `{"carimbo": vfx.stamp, "fps", "quadros", "media": vfx.pack(float32)}`; roda na fila
+  (`jobs.CPU`, chave `tempo_imagem:deflicker`), nunca na GUI nem no `Engine` da prévia. Fora do desfazer (§49.8); a
+  Mídia é a mesma em todas as sequências do projeto, então vale para todas. `vfx.stale` avisa no cartão quando o arquivo
+  mudou.
+- **Alvo**: a média móvel centrada das médias (`smooth`; `window_frames(janela, fps)` quadros, ímpar; nas pontas do
+  arquivo, só os que existem), em cache por texto da análise e janela (`_targets`, `lru_cache`). Uma cena parada dá o
+  alvo igual à média, bit a bit.
+- **Passo** (`DEFLICKER_GLSL`): leva a média do quadro e o alvo à luz linear pela curva **em que a análise foi medida**
+  (`_gain_curve`: o perfil de câmera do clipe com a faixa do arquivo, senão a entrada do look) e multiplica a luz do
+  quadro (`fxDec`) por `(alvo/média)^força`, limitado a ±1 stop (`GAIN_LIMIT`). Numa curva de potência (vídeo) e numa de
+  log, mudar a exposição do quadro inteiro por um fator muda a média do código como o código de cada pixel: a razão das
+  duas médias levadas à luz é o fator, sem precisar de uma versão numpy das curvas (na curva Rec.709 do app, que não é
+  potência pura, é uma aproximação muito próxima). O ganho entra como diferença (`c + fxEnc(lin·g) − fxEnc(lin)`): ganho
+  1 = o quadro bit a bit.
+- O quadro do arquivo decide (`Layer.src_frame`; com a mistura de quadros, as médias e os alvos dos dois quadros pelos
+  pesos da janela): dividir, aparar ou mover o clipe não muda nada. Nenhuma decodificação a mais no render. Sem análise,
+  `passes` devolve `[]`: nenhum passo.
+
+### 53.2 Ruído temporal
+
+Um passo (`NOISE_GLSL`) com `t_prev` (o quadro) e os vizinhos `n-1`/`n+1` (e `n-2`/`n+2` com 2 quadros; com 1, os
+samplers de ±2 apontam para `orig` e não são lidos) da base (§49.9). Cada vizinho pesa `exp(−|c_n − c_0|² / τ²)` (a
+diferença RGBA no código, pixel a pixel; `τ = 0,1 × força`), o quadro pesa 1, e a média é feita na luz linear da curva
+(`fxDec`/`fxEnc`, de novo como diferença). Sem compensação de movimento: onde algo anda a diferença é grande e o vizinho
+não entra (sem fantasma); onde só há ruído o vizinho entra quase inteiro. A cobertura fica a do quadro atual. Imagem
+parada, congelado e gerado não têm vizinhos (a entrada é o próprio quadro: nada muda). Com "Desligar todos os efeitos"
+nenhum vizinho é decodificado.
+
+### 53.3 Mistura de quadros (câmera lenta)
+
+`blend_window(seq, clip, t)` em `vfx.WINDOWS["mistura_quadros"]` → `Sequence.frame_window` → `grab`/`SequenceReader`
+trazem `LayerImage.stack` → `frame.Recipe._blend_layer` mistura com `Engine.temporal_blend` na luz da curva do clipe
+(o mesmo caminho do obturador, §33.1).
+
+- Só quando o clipe mostra **menos de um quadro do arquivo por quadro da sequência** neste quadro:
+  `|src_time(t+1) − src_time(t)| · fps_arquivo < 1` (velocidade abaixo de 1×, o trecho lento de uma rampa, ou um
+  arquivo de fps menor que a sequência). A 1× ou mais rápido: None (o quadro de sempre; o obturador continua nos
+  rápidos).
+- A posição `u = s · fps_arquivo` é a mesma de `Sequence.src_frame` (no reverso, `src_time(t+1)`; com a manivela, a
+  oscilação somada): `k = ⌊u + EPS⌋` é sempre o `src_frame`, `f = u − k` (arredondado a 9 casas, para o reverso dar os
+  mesmos pesos que o clipe para a frente: o espelho exato). Janela `[(k, 1 − f), (k + 1, f)]`; f ≈ 0 (`BLEND_MIN`), o
+  último quadro do arquivo, congelado, imagem ou sem arquivo: None, bit a bit.
+- O som não muda (a janela é só da imagem). Sem fluxo óptico (o `minterpolate` do ffmpeg não serve no caminho do
+  render: depende do histórico da decodificação).
+
+### 53.4 Testes
+
+`tests/test_tempo_imagem.py` (ajustes neutros e esparsos, módulo, ordem, média móvel, análise de um FFV1 sem perdas e o
+carimbo, janelas a 0,5×/0,25×/1×/rápido/12 qps/rampa/reverso/congelado/imagem, vizinhos só com o ruído; na GPU: a
+cintilação some e a rampa de luz fica, cena parada e sem análise bit a bit, dividir/aparar, prévia == exportação, o ruído
+cai, borda que anda sem fantasma, `grab` == leitor, 0,5× == numpy na luz linear e 1× bit a bit, reverso no leitor e a
+gêmea aninhada) e `tests/test_tempo_imagem_ui.py` (casos em `tempo_imagem_ui_cases.py`: cartão e módulo, posição,
+botão sem arquivo, Analisar fora do desfazer e o aviso do arquivo mudado). `test_compositor.test_compose_every_param_runs`
+pula estas chaves (precisam de análise, vizinhos ou câmera lenta).
+
+### 53.5 Limites
+
+- A análise mede o arquivo decodificado sem o perfil de câmera do clipe (a leitura de sempre, sem os super-brancos do
+  log em ponto flutuante): a diferença só existe nas altas luzes acima do branco nominal.
+- O ruído temporal lê os vizinhos crus: depois de um recorte ou de uma máscara (ordens 100/200 da F2) a cobertura do
+  quadro e a dos vizinhos podem diferir; a diferença de alfa entra no peso (o vizinho sai onde a borda mudou).
+- Num clipe de sequência (aninhada) valem os efeitos dos clipes de dentro (a aninhada não ganha pilha, §41.5).

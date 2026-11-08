@@ -212,6 +212,9 @@ pelicula/
                              (matriz tela → uv do clipe), WINDOWS (quadros misturados), EFFECT_MODULES, camada de ajuste
                              (is_adjustment, new_adjustment), modules_used, pack/unpack/stamp/stale das análises
   mesclagem.py               1.9, modos de mesclagem novos (ids 7 a 16, §49.6): GLSL da variante do CLIP e referência numpy
+  tempo_imagem.py            1.9 F5, tempo da imagem (módulo Beta tempo_imagem, sem Qt, §53): deflicker (análise do arquivo em
+                             Source.analysis["deflicker"], média móvel, ganho na luz pela curva do clipe), ruído temporal
+                             (vizinhos n±1/n±2 pesados pela semelhança) e mistura de quadros na câmera lenta (vfx.WINDOWS)
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -263,6 +266,8 @@ pelicula/
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
                              1.9, efeitos visuais (§49.10): vfx_ui (VfxUI: Novo ▸ Camada de ajuste, inspetor da camada
                              de ajuste, add_section/add_overlay/pick_point/clip_point para as frentes);
+                             1.9 F5, tempo_imagem_ui (cartão "Tempo da imagem" depois de Velocidade; Analisar do deflicker
+                             na fila, estado da análise);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -535,6 +540,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_camada_ajuste.py` | mesclagens novas (ids, variantes do CLIP, pontos conhecidos, cada modo na GPU == `mesclagem.apply`) e camada de ajuste: fonte e formato 7, módulo, desfazer, aninhar recusado; neutra bit a bit, exposição nela == no clipe de tela cheia, só no tempo dela, opacidade, tela transparente |
 | `tests/test_vfx_dados.py` | `Clip.fx` ("efeitos") e `Source.analysis` ("analise", fora do desfazer) no JSON e no formato 7, dividir/aninhar/desaninhar, `frame_window` e `neighbor_frames`, vizinhos de `grab` == leitor, passo que lê "n-1" |
 | `tests/test_vfx_ui.py` | casos de `vfx_ui_cases.py`: módulo Beta e Novo ▸ Camada de ajuste (um passo do desfazer), inspetor sem o enquadramento, cartão e camada de prévia de uma frente seguindo o módulo |
+| `tests/test_tempo_imagem.py` | tempo da imagem (1.9, §53): ajustes neutros e esparsos, módulo, ordem, média móvel, análise (FFV1 sem perdas, carimbo), janela da mistura (0,5×, 1×, rápido com o obturador, fps menor, rampa, reverso = espelho, congelado, imagem), vizinhos só com o ruído; na GPU: cintilação some e a rampa de luz fica, cena parada e sem análise bit a bit, dividir/aparar, prévia == exportação, ruído cai, borda sem fantasma, `grab` == leitor, 0,5× == numpy e 1× bit a bit, reverso, gêmea aninhada |
+| `tests/test_tempo_imagem_ui.py` | casos de `tempo_imagem_ui_cases.py`: cartão seguindo o módulo e depois de Velocidade, botão sem arquivo, Analisar na fila e fora do desfazer, aviso do arquivo mudado |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

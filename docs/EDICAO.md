@@ -515,6 +515,32 @@ duração e o Shift+F usa a última escolhida). O quadro parado leva a cor e o e
 - É um passo só do desfazer. A caixa **Congelar quadro** do cartão continua igual (congela o clipe inteiro no
   primeiro quadro).
 
+### Tempo da imagem: deflicker, ruído temporal e mistura de quadros (1.9, Beta)
+
+O cartão **Tempo da imagem** do clipe (logo depois de *Velocidade*) tem três efeitos que olham os quadros vizinhos do
+vídeo. Ele aparece com o recurso **Tempo da imagem** (Beta, grupo **Efeitos visuais** em Configurações › Recursos),
+desligado no começo; desligá-lo só esconde o cartão (um projeto que já usa os efeitos sai igual).
+
+| Ajuste | O que faz |
+|---|---|
+| **Deflicker** | Tira a **cintilação**: o brilho que pisca de um quadro para o outro (luz fluorescente ou LED filmada com o obturador errado, timelapse, película escaneada). Iguala o brilho de cada quadro à média dos quadros em volta. Precisa da **análise**: clique em **Analisar** no alto do cartão |
+| **Janela do deflicker** (avançado) | O tempo em que o brilho é igualado (padrão 0,5 s). Mais curto segue mudanças de luz de verdade (uma nuvem, uma luz que acende); mais longo tira cintilações lentas |
+| **Ruído temporal** | Tira o ruído do sensor misturando cada pixel com o mesmo pixel nos quadros vizinhos, **só onde a imagem não mudou**: o que se mexe não deixa rastro. Melhor em cenas paradas ou de tripé; numa câmera na mão o efeito diminui sozinho |
+| **Quadros de cada lado** (avançado) | 1 ou 2 quadros antes e depois na média (padrão 2: menos ruído, um pouco mais lento) |
+| **Mistura de quadros** | Na **câmera lenta** (velocidade abaixo de 1×, um trecho lento de uma rampa ou um vídeo de 12/15 qps numa sequência de 24/30), mistura os dois quadros mais próximos em vez de repetir o mesmo: o movimento fica contínuo, sem saltos. A 1× ou mais rápido não faz nada. Não inventa quadros novos (não é interpolação por movimento): objetos rápidos ficam "duplicados" no meio do caminho, como no Premiere e no Resolve |
+
+- **Analisar** mede o brilho de cada quadro do arquivo do clipe numa tarefa em segundo plano (a barra de tarefas mostra o
+  progresso e deixa cancelar). A análise fica guardada no **projeto** e vale para todos os clipes do mesmo arquivo, em
+  todas as sequências; não é passo do desfazer. Se o arquivo mudar depois (outra versão com o mesmo nome), o cartão
+  avisa para analisar de novo. Sem análise o deflicker não muda nada.
+- O deflicker corrige no máximo **1 stop** para cada lado, então um corte para o preto ou um flash continua lá; um
+  **fade** dentro do próprio vídeo, mais curto que a janela, pode ser amaciado: diminua a janela.
+- Tudo vale do mesmo jeito na prévia, no "Salvar quadro" e na exportação, e é igual a cada reprodução. Dividir ou
+  aparar o clipe não muda o resultado (cada quadro do arquivo tem a sua correção). **Desligar todos os efeitos**
+  (Shift+D) desliga os três. O som não muda.
+- Um projeto que usa algum deles é gravado no formato da 1.9. O plugin do DaVinci não tem estes efeitos (o Resolve
+  tem deflicker e redução de ruído próprios).
+
 ### Som
 
 | Seção | O que faz |
