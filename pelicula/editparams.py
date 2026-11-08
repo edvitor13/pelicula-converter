@@ -287,7 +287,8 @@ _N_BASE = len(VIDEO_SECTIONS)
 
 # 1.9 F2: recorte e máscaras (§50)
 # Recorte por cor ou por brilho (`recorte.py`) e máscara de forma do clipe (`mascaras_clipe.py`), módulo Beta
-# "recorte_mascaras". Distâncias em px@1080 do clipe; os números animam (`_anim`). Padrão: nenhum recorte, nenhuma forma.
+# "recorte_mascaras". Distâncias em px@1080 do clipe; os números animam (`_anim`). Padrão: nenhum recorte e nenhuma
+# forma.
 from .params import COR  # noqa: E402
 
 
@@ -325,6 +326,33 @@ VIDEO_SECTIONS += [
         _anim(_pct("chave_luma_max", "Brilho máximo", 1.0, 0.0, 1.0,
                    tip="\"Pelo brilho\": o que é mais claro que isto sai.")),
     ], "Tirar um fundo verde, azul, de uma cor ou pelo brilho"),
+
+    Section("mascara", "Máscara", None, [
+        C("mascara_forma", "Forma", "nenhuma", [
+            ("nenhuma", N_("Nenhuma")), ("retangulo", N_("Retângulo")), ("elipse", N_("Elipse")),
+            ("poligono", N_("Polígono"))],
+          "Uma forma no clipe: arraste as alças na prévia. No polígono, clique para pôr os pontos e dê dois "
+          "cliques para fechar (Esc cancela)."),
+        _anim(F("mascara_x", "Centro horizontal", 0.0, -4000, 4000, 1, 0, " px",
+                "Centro da forma a partir do centro do clipe (pixels de um quadro de 1080 linhas do clipe).")),
+        _anim(F("mascara_y", "Centro vertical", 0.0, -4000, 4000, 1, 0, " px", "Negativo sobe; positivo desce.")),
+        _anim(F("mascara_largura", "Largura", 800.0, 1, 8000, 1, 0, " px", "Largura do retângulo ou da elipse.")),
+        _anim(F("mascara_altura", "Altura", 600.0, 1, 8000, 1, 0, " px", "Altura do retângulo ou da elipse.")),
+        _anim(F("mascara_rotacao", "Rotação", 0.0, -180, 180, 0.5, 1, "°",
+                "Gira a forma (positivo: sentido horário).")),
+        _anim(F("mascara_suavidade", "Suavidade da borda", 10.0, 0, 500, 1, 0, " px",
+                "Largura da borda suave (0 = borda seca).")),
+        _anim(F("mascara_expandir", "Expandir", 0.0, -500, 500, 1, 0, " px",
+                "Aumenta (positivo) ou encolhe (negativo) a forma em todos os lados.")),
+        B("mascara_inverter", "Inverter", False, "Troca o dentro pelo fora."),
+        C("mascara_uso", "O que fazer dentro", "recortar", [
+            ("recortar", N_("Mostrar só o que está dentro")), ("desfocar", N_("Desfocar")),
+            ("pixelar", N_("Pixelar"))],
+          "Recortar deixa ver as faixas de baixo fora da forma; desfocar e pixelar escondem o que está dentro (um "
+          "rosto, uma placa)."),
+        _anim(F("mascara_forca", "Força", 20.0, 1, 200, 1, 0, " px",
+                "Raio do desfoque ou tamanho dos quadradinhos do pixelado (pixels de um quadro de 1080 linhas).")),
+    ], "Retângulo, elipse ou polígono para recortar, desfocar ou pixelar"),
 ]
 
 # 1.9 F3: estabilização e rastreio (§51)

@@ -12,6 +12,8 @@ janela:
   `preview_tools` (`fn(ctx) -> h × w × 4 float | None`); só roda com o módulo ligado. `points_overlay` desenha pontos.
 - **Pontos na prévia**: `pick_point(fn)` liga o conta-gotas da prévia e chama `fn(fx, fy)` (fração da imagem, y para
   baixo) no clique; `clip_point(clipe, fx, fy)` leva o ponto ao uv do clipe (enquadramento e geometria dos efeitos).
+- **Alças arrastáveis** (1.9 F2, `ui/alcas.py`): `add_handles(nome, módulo, alças)` com um `alcas.Handles` (desenhar,
+  clicar, arrastar, soltar, dois cliques, Esc); só as de módulo ligado recebem o mouse, antes da prévia.
 - **Camada de ajuste**: Mídia › Novo › "Camada de ajuste" (módulo "efeitos_clipe"); escolhida, o inspetor esconde o
   enquadramento (fica a opacidade e a mesclagem) e o perfil de câmera.
 
@@ -38,6 +40,7 @@ ADJUSTMENT_HIDE_CARDS = ("camera",)
 # nova: **uma linha** aqui.
 FRONT_UIS: tuple[str, ...] = (
     "recorte_ui",  # 1.9 F2: recorte por cor ou brilho (§50)
+    "mascaras_ui",  # 1.9 F2: máscara de forma e as alças dela na prévia (§50)
 )  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 
@@ -66,6 +69,11 @@ class VfxUI:
         self._adj_shown = False
         win.model.selectionChanged.connect(self._sync_inspector)
         win.model.changed.connect(self._sync_inspector)
+        from . import alcas  # 1.9 F2: alças das frentes na prévia (`add_handles`)
+        self.handles = alcas.HandleStack()
+        win.viewer.set_handles(self.handles)
+        win.model.selectionChanged.connect(win.viewer.update)
+        win.model.changed.connect(lambda *_a: win.viewer.update())
         import importlib
         self.fronts = {name: importlib.import_module(f"{__package__}.{name}").install(self) for name in FRONT_UIS}
 
@@ -96,6 +104,11 @@ class VfxUI:
         tools = getattr(self.win, "preview_tools", None)
         if tools is not None:
             tools.add(name, lambda ctx, m=module_id, fn=provider: fn(ctx) if m in self.on else None)
+
+    def add_handles(self, name: str, module_id: str, handles) -> None:
+        """Alças arrastáveis na prévia (`alcas.Handles`) que só aparecem e recebem o mouse com o módulo ligado."""
+        self.handles.add(name, module_id, handles)
+        self.win.viewer.update()
 
     @staticmethod
     def points_overlay(size: tuple[int, int], points, radius: float = 4.0,
@@ -153,6 +166,8 @@ class VfxUI:
     def apply_modules(self, on: set[str]) -> None:
         """Depois do `SfxUI.apply_modules`: o "Novo" aparece também só com a camada de ajuste."""
         self.on = set(on)
+        self.handles.on = set(on)
+        self.win.viewer.update()
         mine = vfx.ADJUSTMENT_MODULE in on
         if mine:  # o `SfxUI` decidiu pelos geradores e pelos efeitos sonoros; com a camada de ajuste, aparece
             self.win.bin.btn_new.setVisible(True)

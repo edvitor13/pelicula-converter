@@ -1,7 +1,7 @@
 """1.9, recorte por cor ou por brilho do clipe (chroma key e luma key; #68, ARQUITETURA §50). Sem GPU nem Qt.
 
-Um efeito da pilha de clipe (`vfx.py`, ordem "recorte": o primeiro), módulo Beta `recorte_mascaras`. Os ajustes ficam na
-seção "recorte" de `editparams` (bloco `# 1.9 F2`); `chave_tipo = "nenhuma"` (o padrão) não gera passo nenhum.
+Um efeito da pilha de clipe (`vfx.py`, ordem "recorte": o primeiro), módulo Beta `recorte_mascaras`. Os ajustes
+ficam na seção "recorte" de `editparams` (bloco `# 1.9 F2`); `chave_tipo = "nenhuma"` (o padrão) não gera passo nenhum.
 
 **Recorte por cor** ("verde", "azul" ou "cor", a cor do conta-gotas em `chave_cor`): a imagem vai à luz linear da curva
 (`fxDec`, a luz das transições) e cada pixel vira uma **cromaticidade** parecida com o YCbCr, `(B − Y, R − Y)`
@@ -19,7 +19,8 @@ anda σ (Φ(1) ≈ 0,84 para encolher, 0,16 para aumentar): `min` (ou `max`) com
 **Reflexo do fundo** (`chave_spill`): na luz, o canal da cor do fundo fica limitado ao maior dos outros dois (cinzas e
 brancos não mudam; o amarelo não vira laranja). **Luz do fundo na borda** (`chave_luz_borda`, `chave_luz_largura`):
 a tela embaixo do clipe (`fxBelow`, luz até o branco difuso `WRAP_MAX`) desfocada, somada na luz onde o recorte
-desfocado é menor que 1 (só perto da borda). Os dois mexem na cor por diferença (`fxEnc(nova) − fxEnc(antiga)`), então desligados não mudam um bit.
+desfocado é menor que 1 (só perto da borda). Os dois mexem na cor por diferença (`fxEnc(nova) − fxEnc(antiga)`),
+então desligados não mudam um bit.
 
 A saída tem cobertura (`Effect.alpha`): a do clipe vezes o recorte; a pilha grava pré-multiplicado com a conta inversa
 do `clipAlpha` (`editshaders.FX_STORE`). Referência em numpy (`matte`) para a curva de vídeo (Rec.709) e a linear.
@@ -193,7 +194,7 @@ EFFECT = vfx.register(vfx.Effect(EFFECT_ID, MODULE, vfx.ORDER["recorte"], active
 
 # ------------------------------------------------------------------ referência em numpy (testes, conta-gotas)
 def decode(code, light: tuple[int, bool] | None = None) -> np.ndarray:
-    """Código → luz linear da curva (`fxDec`) para a curva de vídeo (id 0, a das transições sem look) e a linear (1)."""
+    """Código → luz linear da curva (`fxDec`), para a curva de vídeo (id 0, a das transições sem look) e a linear."""
     from .look import _disp_to_stops
     curve = 0 if light is None else int(light[0])
     c = np.asarray(code, dtype=np.float64)

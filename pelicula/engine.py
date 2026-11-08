@@ -701,11 +701,12 @@ class Engine:
         prev = orig[0]
         for effect, passes in plan:
             own: dict = {}
+            entry = prev  # 1.9 F2: a entrada deste efeito (`Pass.inputs` "in")
             for i, p in enumerate(passes):
                 textures = {"t_prev": prev, "t_orig": orig[0], "t_below": below}
                 for sampler, ref in p.inputs.items():
-                    textures[sampler] = self._fx_input(ref, base, key, prev, orig[0], below, own, near, neighbors,
-                                                       src_alpha, camera, ctx)
+                    textures[sampler] = entry if ref == "in" else self._fx_input(
+                        ref, base, key, prev, orig[0], below, own, near, neighbors, src_alpha, camera, ctx)
                 out_size = vfx.pass_size(p.size, ctx)
                 name = f"{base}_{effect.id}_{i}"
                 if p.kind == "blur":

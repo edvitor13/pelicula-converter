@@ -50,7 +50,8 @@ class RecorteUI:
             return
         tools = getattr(win, "color_tools", None)
         if tools is None or tools.is_nested(c):
-            win.statusBar().showMessage(_("Não vale para um clipe de sequência: use nos clipes de dentro dela."), 6000)
+            win.statusBar().showMessage(_("Não vale para um clipe de sequência: use nos clipes de dentro dela."),
+                                        6000)
             return
         win.statusBar().showMessage(_("Clique no fundo que deve sair (Esc cancela)."), 6000)
         self.vfx.pick_point(self.picked)

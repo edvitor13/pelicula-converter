@@ -3676,6 +3676,8 @@ class MainWindow(QMainWindow):
             self.viewer.zoom_step(-1)
         elif k == Qt.Key.Key_Escape and cor_ui.cancel_pick(self):
             pass  # 1.6: Esc cancela o conta-gotas
+        elif k == Qt.Key.Key_Escape and self.viewer.escape_handles():
+            pass  # 1.9: Esc cancela o que as alças da prévia faziam (o polígono pela metade, `ui/alcas.py`)
         elif k == Qt.Key.Key_Escape and self.preview_fullscreen:
             self.toggle_preview_fullscreen()
         else:

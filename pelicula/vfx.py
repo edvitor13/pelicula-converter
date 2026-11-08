@@ -13,8 +13,8 @@ exportação e o terminal passam todos por aí (a receita única de `frame.py`).
   partículas.
 - **Passo** (`Pass`): `kind="glsl"` (o código depois de `editshaders.FX_HEAD`: funções e `void main()`), `"blur"`
   (gaussiano separável, com mipmaps para raios grandes) ou `"streak"` (desfoque numa direção). Entradas por nome do
-  sampler: `"prev"` (saída do passo anterior; no primeiro, a imagem do clipe), `"orig"` (a imagem do clipe antes dos
-  efeitos), `"below"` (a tela embaixo do clipe, levada ao espaço do clipe por `fxBelow`), `"n-2"`…`"n+2"` (quadros
+  sampler: `"prev"` (saída do passo anterior; no primeiro, a imagem do clipe), `"in"` (a entrada deste efeito: a
+  saída do efeito de antes), `"orig"` (a imagem do clipe antes dos efeitos), `"below"` (a tela embaixo do clipe, levada ao espaço do clipe por `fxBelow`), `"n-2"`…`"n+2"` (quadros
   vizinhos do arquivo, `LayerImage.neighbors`) e `"pass:<nome>"` (um passo anterior do mesmo efeito; também
   `"pass:<índice>"`). `t_prev`, `t_orig` e `t_below` vêm sempre.
 - **Imagem nos passos**: RGBA de **cor direta e cobertura** (como a tela), nos valores que o `CLIP` lê (o código do
@@ -104,6 +104,7 @@ EFFECTS: dict[str, Effect] = {}
 # `WINDOWS`) ao ser importado. `load_effects` os importa antes do primeiro uso. Frente nova: **uma linha** aqui.
 EFFECT_PACKAGES: tuple[str, ...] = (
     "recorte",  # 1.9 F2: recorte por cor ou brilho (§50)
+    "mascaras_clipe",  # 1.9 F2: máscara de forma do clipe (§50)
 )
 _LOADED = False
 _LOAD_LOCK = threading.Lock()
