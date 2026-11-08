@@ -59,6 +59,7 @@ from . import luz_fotometro_ui
 from . import sem_efeitos_ui
 from . import mixer_ui, narracao_ui, scrub_ui
 from . import musica_ui
+from . import sfx_ui  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`, ARQUITETURA §47)
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -400,6 +401,7 @@ class MainWindow(QMainWindow):
         self.scrub = scrub_ui.install(self)  # 1.8: som ao arrastar o cursor (`ui/scrub_ui.py`)
         self.narracao = narracao_ui.install(self)  # 1.8: gravar narração (`ui/narracao_ui.py`)
         self.musica = musica_ui.install(self)  # 1.8: batidas, encaixar a música, abaixar sob a voz (`ui/musica_ui.py`)
+        self.sfx = sfx_ui.install(self)  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -2899,7 +2901,8 @@ class MainWindow(QMainWindow):
                 self._seen_done.add(j.id)
                 target = export.output_target(j.out_path, j.settings)
                 if j.status == "concluido":
-                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=target), 10000)
+                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=target)
+                                                 + (f"  •  {j.note}" if j.note else ""), 10000)  # 1.8: créditos
                 else:
                     self.statusBar().showMessage(_("Uma exportação falhou. Veja os detalhes na fila."), 10000)
                     self.show_queue()
@@ -3489,6 +3492,7 @@ class MainWindow(QMainWindow):
         self.subs_ui.apply_modules(on)
         for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
             editor.set_allowed("titulos_geradores" in on)
+        self.sfx.apply_modules(on)  # 1.8: depois de "titulos_geradores" (o botão "Novo" é dos dois)
         self._check_modules()
         for filtro in (getattr(self, "look_filter", None), getattr(self.inspector, "filtro", None)):
             if filtro is not None:
@@ -3568,7 +3572,10 @@ class MainWindow(QMainWindow):
             "sequência abrem a dela • botão direito nele: Desaninhar") + "\n\n" + _(
             "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)") + "\n\n" + _(
             "Edição: Ctrl+Shift+R abre o painel de gravar narração (com ele aberto, grava / para; começa no cursor ou na "
-            "entrada e para na saída)"))
+            "entrada e para na saída)")
+            + "\n\n" + _(
+            "Edição: Ctrl+Alt+E — pôr efeitos sonoros (whoosh nas transições, swish e teclas nos títulos, obturador, "
+            "riser nos marcadores com \"!\"; módulo Efeitos sonoros)"))
 
     def about(self) -> None:
         try:

@@ -243,6 +243,8 @@ def run(job) -> None:
         job.stage = ""
         job.status = "concluido"
         ok = True
+        from . import sons_cc0  # 1.8: créditos dos sons CC0 do trecho (§47)
+        sons_cc0.export_credits(job, start, end + 1)
     finally:
         for part, _dest in partials:
             system.remove_file(part)

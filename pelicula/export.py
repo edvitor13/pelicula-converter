@@ -838,6 +838,7 @@ class ExportJob:
     subtitles: dict = field(default_factory=dict)  # legendas em tempo da sequência (`subtitles.job_payload`)
     burn: dict = field(default_factory=dict)       # legendas gravadas no vídeo (`subtitles.Burn.to_json`)
     subtitle_file: dict = field(default_factory=dict)  # .srt/.vtt ao lado (`subtitle_file_payload`)
+    note: str = ""           # 1.8: aviso do fim para a fila, a barra de status e o terminal ("Créditos dos sons em …")
 
     @property
     def progress(self) -> float:
@@ -1026,6 +1027,9 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             else:
                 job.status = "concluido"
                 _write_subtitle_file(job, start, end + 1)
+                if job.status == "concluido":  # 1.8: créditos dos sons CC0 do trecho (`sons_cc0.py`, §47)
+                    from . import sons_cc0
+                    sons_cc0.export_credits(job, start, end + 1)
     finally:
         if job.status != "concluido" and not keep_partial:
             _discard_output(job.out_path, s)

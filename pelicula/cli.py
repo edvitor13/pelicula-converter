@@ -465,6 +465,8 @@ def _export_sound(a, src: str, info, seq, start: int, end: int) -> int:
         if not a.json:
             for d in made:
                 print(_("Pronto: {caminho}").format(caminho=d))
+            if job.note:  # 1.8: créditos dos sons CC0
+                print(job.note)
         return 0
     if job.status == "cancelado":
         print(_("Exportação cancelada."), file=sys.stderr)
@@ -600,6 +602,8 @@ def cmd_export(a) -> int:
         if not a.json:
             print(_("Pronto: {caminho} ({quadros} quadros em {tempo})").format(
                 caminho=export.output_target(out, s), quadros=job.done, tempo=elapsed))
+            if job.note:  # 1.8: créditos dos sons CC0
+                print(job.note)
         return 0
     if job.status == "cancelado":
         print(_("Exportação cancelada."), file=sys.stderr)
@@ -826,8 +830,14 @@ def project_info(path: str, as_json: bool) -> int:
                          "clipes": len(s.clips), "aberta": s is top,
                          "look": "proprio" if s.look is not None else "projeto",
                          "preset": s.look.preset_id if s.look is not None else proj.preset_id})
+    credits = []
+    if proj.sequence:  # 1.8: créditos dos sons CC0 baixados pela busca (`sons_cc0.py`)
+        from . import sons_cc0
+        credits = sons_cc0.project_credits(top)
     data = {"projeto": str(Path(path).resolve()), "nome": proj.name, "formato": proj.to_json()["formato"],
             "modo": proj.mode, "arquivo": proj.media_path or None, "sequencias": rows}
+    if credits:
+        data["creditos"] = credits
     if as_json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
@@ -846,6 +856,11 @@ def project_info(path: str, as_json: bool) -> int:
             + mark)
     if len(rows) > 1:
         print("  " + _("* a que estava aberta ao salvar (a padrão de --sequencia)"))
+    if credits:
+        from . import sons_cc0
+        print(_("Créditos dos sons ({n}):").format(n=len(credits)))
+        for c in credits:
+            print("  " + sons_cc0.credit_line(c))
     return 0
 
 

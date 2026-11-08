@@ -299,7 +299,8 @@ def test_new_title_from_the_menu(win):
     win.new_project()
     win.set_mode("edicao")
     labels = [a.text() for a in win.bin.btn_new.menu().actions()]
-    assert labels == ["Cor sólida", "Degradê", "Ponta com contagem", "Título…"]
+    # 1.8: depois deles vêm o submenu "Efeito sonoro" e "Buscar sons (CC0)…" (módulo efeitos_sonoros)
+    assert labels[:4] == ["Cor sólida", "Degradê", "Ponta com contagem", "Título…"]
     _menu_action(win, "cor").trigger()
     win.seek(24)
     _menu_action(win, "titulo").trigger()  # por cima da cor (V2), no cursor

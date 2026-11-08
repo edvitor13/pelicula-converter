@@ -202,6 +202,13 @@ pelicula/
   narracao.py                1.8, gravar narração (sem Qt, §48): Recorder/BackgroundRecorder (PCM de qualquer taxa, canais e
                              formato → WAV de 48 kHz em 24 bits, Resampler sinc em fluxo, parcial seguro), take_folder,
                              next_take_path, plan_span, free_track/place_take (a faixa "Narração")
+  sfx.py                     1.8, efeitos sonoros feitos pelo app (sem Qt, §47): EFFECTS (whoosh, swish, riser, impacto,
+                             clique, maquina, obturador) com Field, síntese numpy determinística (render), fonte "efeito"
+                             (new_source), entrada derivada do clipe na mixagem (effect_input, render_inputs, effect_dir)
+  sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
+                             "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
+  sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
+                             download, target_dir, crédito (credit_of, credits_for, export_credits → <saída>.creditos.txt)
   sincronia.py               1.8, sincronizar pelo som (sem Qt, §44.5): find_lag (correlação normalizada por FFT, confiança),
                              candidates/reference_of, plan → Move/Plan
   batidas.py                 1.8, batidas da música (sem Qt, §46.1): fluxo espectral, andamento por autocorrelação (60–200
@@ -245,6 +252,9 @@ pelicula/
                              som_export_ui (SoundChoice: "O que exportar" na janela Exportar);
                              1.8, música (§46): musica_ui (MusicUI: Detectar batidas e análise sozinha, marcas no clipe,
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
+                             1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
+                             de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
+                             (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -506,6 +516,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_som_pelicula_ui.py` | casos de `som_pelicula_ui_cases.py`: cartão do módulo Beta, prévia do arquivo = motor da exportação, só o processamento refaz (a mixagem fica), sem efeitos/sem película/desligado voltam ao som de sempre |
 | `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
 | `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
+| `tests/test_sfx.py` | efeitos sonoros (1.8, §47): determinismo e semente de cada tipo, pico (−1 dBFS × intensidade, nunca satura) e RMS, largura/brilho, clique e obturador curtos, teclas nos tempos dados, a fonte "efeito" (só som, duração do tipo), JSON e formato 6, `mix_key`, o segmento aponta para o WAV do efeito e a mixagem toca o efeito igual à síntese (e no grafo antigo) |
+| `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
+| `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
+| `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |
 | `tests/test_somlimpo_ui.py` | casos de `somlimpo_ui_cases.py`: Aprender o ruído (regras do trecho, recusas, um passo do desfazer), Detectar, Predefinições, Sincronizar pelo som pelo menu (move e desfaz num passo, recusa, cancelar) |
 | `tests/test_batidas.py` | batidas (1.8): cliques a 90/120/150 BPM limpos, com ruído e tocados à mão (BPM a 1%, batidas a 15 ms, compasso), mudança de andamento e ruído sem confiança, determinismo e JSON, cache pelo carimbo (memória, disco, arquivo mudado), cancelar |
 | `tests/test_musica.py` | música na montagem: batidas no tempo do clipe (aparar, 2×, reverso, rampa), ímã sem o clipe arrastado, encaixe (compassos inteiros no meio, emendas nos compassos com transição de uma batida, fim exato, grade mantida a 25 qps, velocidade), recusas e saída simples, alvo e impedimentos, um passo do desfazer; fala sintética (ruído não conta), chaves da descida, chaves de antes substituídas, mixagem mais baixa sob a voz |

@@ -64,7 +64,10 @@ FORMAT_17 = 4
 # "sequencia" (1.7): outra sequência do projeto usada como clipe; não é gerada: `Source.is_nested`.
 SOURCE_FILE = "arquivo"
 SOURCE_SEQUENCE = "sequencia"
-SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste", SOURCE_SEQUENCE)
+SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste", SOURCE_SEQUENCE,
+                "efeito")  # 1.8: efeito sonoro feito pelo app (`sfx.py`; só som, numa faixa de áudio)
+# Duração do clipe novo de uma fonte sem fim, por tipo (fn(fonte) -> segundos; sem registro, `IMAGE_SECONDS`).
+DEFAULT_SECONDS: dict[str, Callable[["Source"], float]] = {}
 MAX_NEST = 8  # níveis de sequência dentro de sequência (cada nível usa as suas telas na GPU)
 IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
@@ -129,6 +132,9 @@ class Source:
     # Sequência de imagens numeradas: `path` é o padrão do ffmpeg (plano_%04d.png) e este é o número do primeiro
     # quadro (`media.find_sequence`); -1 = arquivo comum. "sequencia" no JSON, só quando é uma sequência.
     seq_start: int = -1
+    # 1.8: crédito de um som livre baixado pela busca de sons CC0 (`sons_cc0.py`): {"titulo", "autor", "licenca",
+    # "url", "origem"} (texto). "credito" no JSON, só quando há; vira o `<saída>.creditos.txt` da exportação.
+    credit: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_file(self) -> bool:
@@ -254,6 +260,8 @@ class Source:
             out["dados"] = copy.deepcopy(self.data)
         if self.is_sequence:
             out["sequencia"] = {"inicio": self.seq_start}
+        if self.credit:
+            out["credito"] = dict(self.credit)
         return out
 
     @classmethod
@@ -280,7 +288,19 @@ class Source:
                    container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
                    kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
                    data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {},
-                   seq_start=_seq_start(d.get("sequencia")))
+                   seq_start=_seq_start(d.get("sequencia")), credit=clean_credit(d.get("credito")))
+
+
+CREDIT_KEYS = ("titulo", "autor", "licenca", "url", "origem")  # `Source.credit` (1.8, `sons_cc0.py`)
+
+
+def clean_credit(value: Any) -> dict[str, str]:
+    """O crédito de uma fonte conferido: só as chaves de `CREDIT_KEYS`, como texto (até 500 caracteres); sem título nem
+    URL, nada."""
+    if not isinstance(value, dict):
+        return {}
+    out = {k: str(value[k])[:500] for k in CREDIT_KEYS if isinstance(value.get(k), (str, int, float))}
+    return out if out.get("titulo") or out.get("url") else {}
 
 
 def _has_tones(seq: "Sequence") -> bool:
@@ -889,8 +909,9 @@ class Sequence:
         return lo, hi
 
     def default_dur(self, src: Source) -> int:
-        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS
-            return self.frames_for(IMAGE_SECONDS)
+        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS (ou o do tipo, `DEFAULT_SECONDS`)
+            fn = DEFAULT_SECONDS.get(src.kind)
+            return self.frames_for(fn(src) if fn is not None else IMAGE_SECONDS)
         return self.frames_for(src.length)
 
     # -------------------------------------------------------- consulta
@@ -2598,6 +2619,10 @@ FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
     "look_proprio": lambda seq: seq.look is not None,
     # balanço da faixa de áudio (`Track.pan`, "balanco" na faixa): a 1.7 tocaria a faixa no centro
     "balanco_faixa": lambda seq: any(t.pan for t in seq.tracks),
+    # efeito sonoro feito pelo app (`sfx.py`, fonte de tipo "efeito"): a 1.7 leria a fonte como um arquivo que não existe
+    "efeito_sonoro": lambda seq: any(s.kind == "efeito" for s in seq.used_sources()),
+    # crédito de um som CC0 baixado pela busca (`Source.credit`, "credito" na fonte): a 1.7 perderia o crédito ao salvar
+    "credito_som": lambda seq: any(s.credit for s in seq.used_sources()),
 }
 
 
