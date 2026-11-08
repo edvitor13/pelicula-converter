@@ -5159,7 +5159,7 @@ class Pass:
     name: str                       # nome do passo (entrada "pass:<nome>" de um passo seguinte do mesmo efeito)
     glsl: str = ""                  # kind "glsl": funções + void main(), depois de editshaders.FX_HEAD
     uniforms: dict = {}             # uniforms do passo (os que o programa não declara são ignorados)
-    inputs: dict = {}               # sampler → "prev" | "orig" | "below" | "n-2".."n+2" | "pass:<nome ou índice>"
+    inputs: dict = {}               # sampler → "prev" | "in" | "orig" | "below" | "n-2".."n+2" | "pass:<nome ou índice>"
     size: Any = "clip"              # "clip" | "canvas" | (w, h) | fração do clipe (0.5)
     dtype: str = "f4"               # "f4" (padrão) | "f2" (máscaras, brilhos)
     mip: bool = False               # monta mipmaps da saída (para textureLod no passo seguinte)
@@ -5298,12 +5298,109 @@ módulo `pelicula/ui/<frente>_ui.py` com `install(vfx_ui)`, listado em `vfx_ui.F
 `VfxUI.__init__`). Para as frentes:
 `add_section(seção, módulo, after=None) -> SectionCard`, `card(seção)`, `add_overlay(nome, módulo, provedor)` (camada de
 prévia de `preview_tools`, só com o módulo ligado), `points_overlay(size, pontos)`, `pick_point(fn)` e
-`clip_point(clipe, fx, fy)`. Grupo de módulos `"efeitos_visuais"` em Configurações › Recursos. Os efeitos de clipe não vão
+`clip_point(clipe, fx, fy)`; desde a F2 (§50.4), `add_handles(nome, módulo, alças)` (alças arrastáveis na prévia,
+`ui/alcas.py`). Grupo de módulos `"efeitos_visuais"` em Configurações › Recursos. Os efeitos de clipe não vão
 para o plugin do DaVinci.
 
 ## 50. Recorte e máscaras (1.9, F2)
 
-Reservada para a frente F2 (efeitos com `order` 100 e 200; bloco `# 1.9 F2` de `editparams.py`).
+Dois efeitos da pilha (§49), os primeiros dela, do módulo Beta `recorte_mascaras` (grupo "efeitos_visuais"): o
+**recorte** por cor ou pelo brilho (`pelicula/recorte.py`, efeito `"recorte"`, ordem 100) e a **máscara de forma**
+(`pelicula/mascaras_clipe.py`, efeito `"mascara"`, ordem 200). Ajustes nas seções `"recorte"` e `"mascara"` do bloco
+`# 1.9 F2` de `editparams.py` (padrão: nada; nenhum passo), os números animáveis. A interface: `ui/recorte_ui.py`,
+`ui/mascaras_ui.py` e as alças genéricas da prévia, `ui/alcas.py`.
+
+### 50.1 Recorte (`recorte.py`)
+
+```text
+t_prev ─► "recorte" (MATTE, f2) ─┬───────────────────────────────────────────────► "chave" (KEY) ─► cor, cobertura × recorte
+                                 └► [limpar] blur σ=|limpar| ─► "recorte_limpo" (CHOKE) ┘     ▲
+fxBelow ─► [luz na borda] "fundo" (½, f2) ─► blur σ/2 ─────────────────────────────────────────┤
+recorte ─► [luz na borda] blur σ=largura (½, f2) ──────────────────────────────────────────────┘
+```
+
+- **Cromaticidade** `chroma(lin) = (B − Y, R − Y) / (máx(R, G, B) + ε)` na luz linear da curva (`fxDec`): não muda com a
+  exposição (um fundo com luz desigual fica com uma cor só) e o cinza fica na origem. Distância relativa
+  `d = |C − K| / máx(|K|, 0,05)` até a cor do fundo `K` (o cinza fica a 1,0 de qualquer fundo); recorte =
+  `smoothstep(tolerância, tolerância + suavidade, d)`. A cor do fundo vai ao shader em código (`u_ck_key`) e passa pela
+  mesma `fxDec` da imagem. Fundos prontos em `KEY_COLORS` (verde (0,15; 0,70; 0,25), azul (0,10; 0,25; 0,75)).
+- **Pelo brilho**: `stopsToDisp(linToStops(Y))` (a curva de exibição neutra, 0 a 1) entre `chave_luma_min` e
+  `chave_luma_max`, rampa de `chave_suavidade` para fora.
+- **Encolher a borda** (`chave_limpar`, px@1080): o recorte desfocado com σ = |limpar| (passo `blur` da base) e
+  cortado por `smoothstep` em volta de Φ(1) ≈ 0,84 (encolher: `min` com o recorte) ou Φ(−1) ≈ 0,16 (aumentar: `max`):
+  numa borda reta a borda anda σ.
+- **Reflexo do fundo** (`chave_spill`): na luz, o canal maior da cor do fundo fica limitado ao maior dos outros dois,
+  misturado pela força. **Luz na borda** (`chave_luz_borda`, `chave_luz_largura`): a tela embaixo (`fxBelow`, na luz e
+  presa ao branco difuso `WRAP_MAX` = 1,0: na curva de vídeo o código 1,0 é luz sem fim) desfocada em meia resolução,
+  somada onde o recorte desfocado é menor que 1. Os dois mexem na cor pela diferença `fxEnc(nova) − fxEnc(antiga)`.
+- **Cobertura**: `Effect.alpha` ligado; a saída é a cobertura do clipe × recorte (a pilha pré-multiplica com a conta
+  inversa do `clipAlpha`, §49.5). Referência em numpy: `matte(código, valores, luz)` (curvas 0 e 1), `chroma`,
+  `brightness`; `picked_color` recusa uma cor quase cinza.
+- **Conta-gotas** (`ui/recorte_ui.py`): `VfxUI.pick_point` + `ColorTools.clip_color_at` (a cor do **arquivo** no ponto,
+  como o conta-gotas da cor simples) → `chave_tipo = "cor"` e `chave_cor` num passo do desfazer. Um clipe com perfil
+  de câmera próprio é comparado depois da conversão do perfil (a entrada da pilha), e a cor do conta-gotas é a do
+  arquivo: nesses clipes, acerte a cor à mão se o recorte não pegar (limitação conhecida).
+
+### 50.2 Máscara de forma (`mascaras_clipe.py`)
+
+- **Espaço**: px@1080 do clipe a partir do centro da textura, y para baixo (`clip_px`/`clip_uv`; no GLSL `mkPoint(uv) =
+  (uv − 0,5) · u_fx_clip_px / u_fx_scale`). A forma vive na textura do clipe, por isso acompanha enquadramento,
+  rotação, espelhar e a geometria dos efeitos (`vfx.GEOMETRY`) sem conta a mais. Centro (`mascara_x`, `mascara_y`),
+  rotação `mascara_rotacao` (graus, positivo = horário, `q = R(−θ)(p − c)` como `compositor.transform`), meia largura e
+  meia altura.
+- **Polígono**: `Clip.fx["mascara"]["pontos"] = [[x, y], …]` (até `MAX_POINTS` = 32; px@1080 relativos ao centro, antes
+  da rotação; `points_of`/`set_points`). Não é estrutura nova no JSON: vai pelo `"efeitos"` da base (recurso
+  `efeitos_clipe_dados`). Com menos de 3 pontos o efeito não dá passo (`plan` o deixa de fora).
+- **Distância com sinal** (`mkDist`/`distance`): retângulo e polígono exatos (o do polígono é o de Inigo Quilez, MIT,
+  reescrito aqui), elipse aproximada `k0(k0 − 1)/k1` (zero exato na borda). Máscara `1 − smoothstep(−s/2, s/2,
+  d − expandir)` com `s = máx(suavidade, 1 texel)`; `mascara_inverter` = `1 − m`.
+- **Uso**: `recortar` (um passo, `CUT`: cobertura × máscara; `Effect.alpha = cuts`), `desfocar` (`blur` σ = força e
+  `BLUR_MIX` com a entrada do efeito), `pixelar` (cópia `f2` com mipmaps e `PIXEL_MIX`: cada quadradinho de `força` px@1080,
+  grade presa ao centro da forma, lido no nível `log2(lado em texels)`). Fora da forma, `mix(entrada, …, 0)` = a entrada.
+- **Entrada `"in"`** (gancho da F2 em `Engine._fx_stack`, documentado em §49.2): a textura que entrou no efeito (a
+  saída do efeito anterior; o recorte, quando os dois estão ligados). Antes dela só havia `"prev"` (que no segundo passo
+  já é o passo anterior) e `"orig"` (antes de todos os efeitos).
+
+### 50.3 Para as outras frentes
+
+- **Desfoque de lente dentro/fora da forma (F4)**: inclua `mascaras_clipe.GLSL` depois do `FX_HEAD` no passo e some
+  `mascaras_clipe.uniforms(ctx)` (None = o clipe não tem forma) aos uniforms; `mkMask(v_uv)` = 1 dentro (com a passagem,
+  o expandir e o inverter do clipe). Não use os ajustes `mascara_uso`: a máscara do clipe recorta, desfoca ou pixela
+  sozinha; o desfoque de lente só lê a forma.
+- **Rastreio levando a forma (F3)**: o alvo são os ajustes animáveis `mascara_x`/`mascara_y` (px@1080 do clipe, a partir do
+  centro da imagem do clipe). Um ponto rastreado em uv do clipe vira `mascaras_clipe.clip_px(uv, tex_w, tex_h)` (só a
+  proporção da textura importa: `sequence.decode_size`); o polígono anda junto porque os pontos são relativos ao centro.
+
+### 50.4 Alças na prévia (`ui/alcas.py`, `ui/mascaras_ui.py`)
+
+API genérica para qualquer frente desenhar e arrastar pontos por cima do quadro, só na tela:
+
+```python
+class Handles:                                         # padrão: nada
+    def visible(self) -> bool
+    def paint(self, p: QPainter, view: View) -> None
+    def press(self, view, pos: QPointF, modifiers) -> bool    # True = fica com o arrasto até soltar
+    def drag(self, view, pos, modifiers) -> None
+    def release(self, view, pos, modifiers) -> None
+    def double_click(self, view, pos) -> bool
+    def cursor(self, view, pos) -> Qt.CursorShape | None
+    def escape(self) -> bool                            # Esc: cancela o que está pela metade
+View(rect).to_widget(fx, fy) -> QPointF;  View.to_frac(QPointF) -> (fx, fy)   # fração da imagem, y para baixo
+VfxUI.add_handles(nome, módulo, alças)                  # HandleStack: só módulo ligado e visible(); a última por cima
+```
+
+O `Viewer` (`set_handles`, `proc_rect`, `escape_handles`) manda às alças, antes de tudo, o clique esquerdo, o arrasto, o
+soltar e os dois cliques (no "lado a lado", sobre a imagem da direita; nada no "Original" nem segurando o botão direito);
+o Esc chega pela `MainWindow.keyPressEvent`, depois do conta-gotas. `alcas.pen`, `draw_square`, `draw_dot` e `near`
+desenham e testam alças do mesmo jeito.
+
+As da máscara (`MaskHandles`): o clipe do inspetor sob o cursor, no modo Edição, com efeitos ligados e não sendo clipe de
+sequência. A matriz é a da prévia e da exportação (`vfx.geometry(compositor.transform(...))` na tela da sequência, com
+`sequence.decode_size` para a proporção da textura). Mexer em ajustes vai pelo `vstore` do inspetor (`record=False`;
+a chave automática no cursor quando o ajuste está animado, como os sliders) e fecha o passo do desfazer ao soltar
+(`TimelineModel.commit`); os pontos do polígono mudam ao vivo no arrasto e viram um passo só por
+`TimelineModel.apply_edit`. Fechar um polígono desenhado leva o centro ao meio dos pontos (se o centro não tem chaves).
+Testes: `tests/test_recorte.py`, `tests/test_mascaras_clipe.py`, `tests/test_recorte_ui.py` (`recorte_ui_cases.py`).
 
 ## 51. Estabilização e rastreio (1.9, F3)
 

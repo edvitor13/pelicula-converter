@@ -212,6 +212,11 @@ pelicula/
                              (matriz tela → uv do clipe), WINDOWS (quadros misturados), EFFECT_MODULES, camada de ajuste
                              (is_adjustment, new_adjustment), modules_used, pack/unpack/stamp/stale das análises
   mesclagem.py               1.9, modos de mesclagem novos (ids 7 a 16, §49.6): GLSL da variante do CLIP e referência numpy
+  recorte.py                 1.9 F2, recorte por cor (verde, azul, conta-gotas) ou pelo brilho (§50.1): efeito "recorte"
+                             (ordem 100; recorte na luz, encolher a borda, reflexo do fundo, luz na borda), referência numpy
+  mascaras_clipe.py          1.9 F2, máscara de forma do clipe (§50.2): efeito "mascara" (ordem 200; retângulo, elipse,
+                             polígono em Clip.fx["mascara"]["pontos"]; recortar/desfocar/pixelar), GLSL mkMask + uniforms()
+                             reutilizáveis (F4), referência numpy (distance, mask, outline)
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -262,7 +267,9 @@ pelicula/
                              1.8, música (§46): musica_ui (MusicUI: Detectar batidas e análise sozinha, marcas no clipe,
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
                              1.9, efeitos visuais (§49.10): vfx_ui (VfxUI: Novo ▸ Camada de ajuste, inspetor da camada
-                             de ajuste, add_section/add_overlay/pick_point/clip_point para as frentes);
+                             de ajuste, add_section/add_overlay/pick_point/clip_point/add_handles para as frentes),
+                             alcas (View, Handles, HandleStack: alças arrastáveis na prévia, §50.4), recorte_ui (cartão
+                             Recorte e conta-gotas do fundo), mascaras_ui (cartão Máscara, MaskHandles, polígono por cliques);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -535,6 +542,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_camada_ajuste.py` | mesclagens novas (ids, variantes do CLIP, pontos conhecidos, cada modo na GPU == `mesclagem.apply`) e camada de ajuste: fonte e formato 7, módulo, desfazer, aninhar recusado; neutra bit a bit, exposição nela == no clipe de tela cheia, só no tempo dela, opacidade, tela transparente |
 | `tests/test_vfx_dados.py` | `Clip.fx` ("efeitos") e `Source.analysis` ("analise", fora do desfazer) no JSON e no formato 7, dividir/aninhar/desaninhar, `frame_window` e `neighbor_frames`, vizinhos de `grab` == leitor, passo que lê "n-1" |
 | `tests/test_vfx_ui.py` | casos de `vfx_ui_cases.py`: módulo Beta e Novo ▸ Camada de ajuste (um passo do desfazer), inspetor sem o enquadramento, cartão e camada de prévia de uma frente seguindo o módulo |
+| `tests/test_recorte.py` | recorte (1.9 F2, §50.1): ajustes neutros e esparsos, plano de passos; numpy do recorte e `picked_color`; na GPU == numpy (verde, azul, brilho), desligado bit a bit, faixa embaixo aparece, reflexo neutro no cinza, luz só perto da borda, encolher em px@1080, prévia == exportação, sem efeitos, gêmea aninhada |
+| `tests/test_mascaras_clipe.py` | máscara de forma (1.9 F2, §50.2): neutra, distâncias, coordenadas, pontos no JSON e formato 7, polígono sem pontos = nenhum passo; na GPU == numpy, passagem em px@1080 a 540 e 1080 linhas, inverter, desfocar/pixelar só dentro, recorte segue o enquadramento, recorte + máscara pela entrada "in", prévia == exportação com o centro animado |
+| `tests/test_recorte_ui.py` | casos de `recorte_ui_cases.py`: cartões Recorte e Máscara seguindo o módulo, conta-gotas num passo do desfazer (cinza recusado, Esc), alças da máscara (centro num passo, cantos, girar com Shift, chave no cursor com o centro animado), polígono por cliques e dois cliques, Esc cancela, alças fora do quadro renderizado |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

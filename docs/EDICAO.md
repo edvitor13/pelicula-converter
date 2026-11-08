@@ -256,6 +256,49 @@ A camada de ajuste é do recurso **Efeitos de clipe** (Beta, grupo **Efeitos vis
 desligado no começo; desligá-lo só esconde o item do Novo. Um projeto com camada de ajuste é gravado no formato da 1.9
 (versões anteriores não o abrem).
 
+### Recorte (fundo verde) e máscaras (1.9, Beta)
+
+Dois cartões no inspetor do clipe, logo depois de **Enquadrar e posicionar**, do recurso **Recorte e máscaras** (Beta,
+grupo **Efeitos visuais** em Configurações › Recursos; desligado no começo, desligar só esconde os cartões e as alças).
+
+**Tirar um fundo verde ou azul** (cartão **Recorte (chroma/luma)**):
+
+1. Ponha o clipe gravado no fundo verde numa faixa **acima** do fundo novo (uma imagem, outro vídeo ou um gerador).
+2. Em **Recortar**, escolha **Fundo verde** ou **Fundo azul**. Para um fundo de outra cor (ou um verde fora do comum),
+   clique em **Conta-gotas do fundo** e clique no fundo na prévia: o recorte passa a **Uma cor escolhida** com essa cor
+   (Esc cancela; uma cor quase cinza é recusada).
+3. **Tolerância**: aumente se sobrar fundo; diminua se o recorte comer a pessoa. **Suavidade**: a passagem entre o que
+   sai e o que fica (cabelo, desfoque de movimento).
+4. **Encolher a borda** (em pixels de um quadro de 1080 linhas): positivo tira a franja do fundo que ficou em volta;
+   negativo aumenta o recorte.
+5. **Tirar o reflexo do fundo**: tira o verde que respingou no cabelo e nos ombros (cinzas, brancos e amarelos não
+   mudam). **Luz do fundo na borda** e **Largura da luz na borda**: a luz das faixas de baixo entra na borda da pessoa,
+   como se ela estivesse lá.
+
+**Pelo brilho** tira o que é mais escuro que o **Brilho mínimo** ou mais claro que o **Brilho máximo** (um fundo preto
+ou branco), com a **Suavidade** para fora. O recorte vale na prévia, no "Salvar quadro" e na exportação; numa sequência
+com **Fundo transparente**, o que saiu fica transparente no arquivo exportado.
+
+**Máscara** (cartão **Máscara**): uma forma no clipe — **Retângulo**, **Elipse** ou **Polígono** — que acompanha o
+enquadramento dele (escala, posição, rotação, espelhar). Escolha a forma e **o que fazer dentro**:
+
+- **Mostrar só o que está dentro**: fora da forma aparecem as faixas de baixo (um recorte à mão, uma janela).
+- **Desfocar** ou **Pixelar**: esconde o que está dentro (um rosto, uma placa); **Força** é o raio do desfoque ou o
+  tamanho dos quadradinhos.
+- **Suavidade da borda**, **Expandir** (aumenta ou encolhe a forma em todos os lados) e **Inverter** (troca dentro e
+  fora) valem para todos.
+
+Com o clipe escolhido e o cursor nele, a forma aparece na prévia com **alças**: arraste o **centro** (ou o meio da forma)
+para mover, os **cantos** para mudar o tamanho e a **bolinha de cima** para girar (Shift: de 15 em 15°). No
+**polígono**, clique em **Desenhar polígono** (ou clique na prévia com o polígono ainda vazio): cada clique põe um ponto,
+**dois cliques** (ou um clique no primeiro ponto) fecham, **Esc** cancela; depois, arraste um ponto para movê-lo ou o meio
+para mover tudo. **Apagar os pontos** recomeça. Centro, tamanho, rotação, suavidade e força aceitam **chaves de
+animação**: com chaves, arrastar uma alça grava uma chave no cursor (como os sliders), e assim a forma pode seguir algo
+que se move. Cada arrasto é um passo do Ctrl+Z.
+
+O recorte vem antes da máscara: dá para tirar o fundo verde e, com a máscara, cortar um tripé que aparece no canto.
+**Desligar todos os efeitos** (Shift+D) desliga os dois. Um projeto com recorte ou máscara é gravado no formato da 1.9.
+
 ### Títulos
 
 **Novo ▸ Título…** põe um título no cursor, com o texto já escolhido para você digitar por cima. No painel da
@@ -973,7 +1016,8 @@ inserido.
 | Shift+M | Som da prévia liga/desliga (no modo Película, **M** também) |
 | + / − | Aproximar / afastar a linha do tempo |
 | Ctrl+A | Selecionar todos os clipes (com a linha do tempo em foco) |
-| Esc | Tirar a seleção e voltar para Selecionar |
+| Esc | Tirar a seleção e voltar para Selecionar (desenhando um polígono de máscara: cancela o polígono) |
+| Shift ao girar a máscara | Gira de 15 em 15° |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
 | Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |
