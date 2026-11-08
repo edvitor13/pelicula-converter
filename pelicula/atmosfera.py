@@ -49,7 +49,7 @@ TYPES = {
     "poeira": dict(id=3, speed=10.0, dir=(0.0, 1.0), wind=4.0, light=(0.3, 0.27, 0.22), add=True, cell=60.0,
                    count=1.0, size=0.5, soft=1.0, sway=25.0, sway_w=0.5),
     "brasas": dict(id=4, speed=140.0, dir=(0.0, -1.0), wind=1.2, light=(2.6, 0.95, 0.25), add=True, cell=90.0,
-                   count=0.7, size=0.6, soft=0.5, sway=30.0, sway_w=0.9),
+                   count=0.7, size=0.8, soft=0.5, sway=30.0, sway_w=0.9),
 }
 
 PARTICLE_KEYS = ("part_tipo", "part_quantidade", "part_tamanho", "part_velocidade", "part_vento", "part_profundidade",
