@@ -46,6 +46,9 @@ class LayerImage:
     # 1.7, clipe de uma sequência: o que ela mostra neste quadro. A imagem da camada é a tela que `Engine.compose`
     # monta com isto (`image` é só `_NO_IMAGE`). None = um clipe comum.
     nested: "Nested | None" = None
+    # 1.9: quadros vizinhos do arquivo para os efeitos que leem o tempo (`vfx.neighbor_radius`): ((k, imagem), …) com
+    # k = −2…+2 sem o 0 (`Sequence.neighbor_frames`). None = nenhum (o de sempre).
+    neighbors: tuple | None = None
 
 
 @dataclass
@@ -243,12 +246,25 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
         if not present(src):
             continue
         prof = None if no_effects else camera.read_profile(layer.clip.values)
-        win = seq.src_window(layer.clip, frame, shutter) if shutter > 0 else None
+        win = seq.frame_window(layer.clip, frame, shutter, not no_effects)  # 1.9: janelas dos efeitos de tempo
         stack = None
         if win is not None:
             stack = (tuple(_cached_grab(src, k, w, h, depth, hq, prof) for k, _w in win), tuple(wt for _k, wt in win))
-        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq, prof), stack))
+        near = _neighbors_of(seq, layer, frame, no_effects)
+        if near:
+            near = tuple((k, _cached_grab(src, f, w, h, depth, hq, prof)) for k, f in near)
+        out.append(LayerImage(layer, _cached_grab(src, layer.src_frame, w, h, depth, hq, prof), stack, None, near))
     return FrameLayers(int(frame), out)
+
+
+def _neighbors_of(seq: timeline.Sequence, layer: timeline.Layer, t: int, no_effects: bool):
+    """1.9: [(k, quadro do arquivo)] dos vizinhos que os efeitos ligados do clipe leem, ou None."""
+    if no_effects:
+        return None
+    from . import vfx
+    values = layer.values if layer.values is not None else layer.clip.values
+    r = vfx.neighbor_radius(values)
+    return seq.neighbor_frames(layer.clip, t, r) if r > 0 else None
 
 
 # ------------------------------------------------------------------ leitura em sequência
@@ -586,14 +602,17 @@ class SequenceReader:
             else:
                 active.add(c.id)
                 stream = self._stream(c, layer.src_frame)
-                win = self.seq.src_window(c, t, self.shutter) if self.shutter > 0 else None
-                if win is not None:  # 1.6, obturador: os quadros da janela, na ordem em que o leitor anda
+                win = self.seq.frame_window(c, t, self.shutter, not self.no_effects)  # 1.9: e os efeitos de tempo
+                near = _neighbors_of(self.seq, layer, t, self.no_effects)  # 1.9: vizinhos para os efeitos
+                if win is not None or near:  # 1.6, obturador: os quadros da janela, na ordem em que o leitor anda
+                    need = {k for k, _w in (win or ())} | {f for _k, f in (near or ())} | {layer.src_frame}
                     if isinstance(stream, _ClipStream):
-                        stream.keep = max(stream.keep, 2 * len(win) + 2)
-                    order = sorted((k for k, _w in win), reverse=c.reverse)
-                    got = {k: stream.get(k, self.jump) for k in order}
-                    img = stream.get(layer.src_frame, self.jump) if layer.src_frame not in got else got[layer.src_frame]
-                    out.append(LayerImage(layer, img, (tuple(got[k] for k, _w in win), tuple(wt for _k, wt in win))))
+                        stream.keep = max(stream.keep, 2 * len(need) + 2)
+                    got = {k: stream.get(k, self.jump) for k in sorted(need, reverse=c.reverse)}
+                    img = got[layer.src_frame]
+                    stack = (tuple(got[k] for k, _w in win), tuple(wt for _k, wt in win)) if win is not None else None
+                    nb = tuple((k, got[f]) for k, f in near) if near else None
+                    out.append(LayerImage(layer, img, stack, None, nb))
                     continue
                 img = stream.get(layer.src_frame, self.jump)
             out.append(LayerImage(layer, img))

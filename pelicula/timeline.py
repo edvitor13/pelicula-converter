@@ -139,6 +139,10 @@ class Source:
     # 1.8: correção à mão das batidas da música deste arquivo (`batidas.corrected`): {"fator": 2.0 | 0.5, "compasso":
     # 3}; só as chaves que não são neutras. "batidas" no JSON, só quando há; vale em todo lugar que usa as batidas.
     beats_fix: dict[str, float] = field(default_factory=dict)
+    # 1.9: análises feitas pelos efeitos visuais neste arquivo (rastros, estabilização, fluxo…; `vfx.pack` para os
+    # arrays): {tipo: valor de JSON}. "analise" no JSON, só quando há. Não é passo de desfazer (`History` guarda à
+    # parte, como os looks): refazer uma análise demorada não deve sumir com Ctrl+Z.
+    analysis: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_file(self) -> bool:
@@ -268,6 +272,8 @@ class Source:
             out["credito"] = dict(self.credit)
         if self.beats_fix:
             out["batidas"] = dict(self.beats_fix)
+        if self.analysis:  # 1.9
+            out["analise"] = copy.deepcopy(self.analysis)
         return out
 
     @classmethod
@@ -295,7 +301,8 @@ class Source:
                    kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
                    data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {},
                    seq_start=_seq_start(d.get("sequencia")), credit=clean_credit(d.get("credito")),
-                   beats_fix=clean_beats_fix(d.get("batidas")))
+                   beats_fix=clean_beats_fix(d.get("batidas")),
+                   analysis=copy.deepcopy(d["analise"]) if isinstance(d.get("analise"), dict) else {})
 
 
 CREDIT_KEYS = ("titulo", "autor", "licenca", "url", "origem")  # `Source.credit` (1.8, `sons_cc0.py`)
@@ -363,6 +370,9 @@ class Clip:
     # 1.6: grupo de cor (`ui/color_tools.py`): clipes com o mesmo id mudam a cor juntos (`TimelineModel`). Vazio =
     # sozinho; no JSON ("grupo") só quando usado.
     color_group: str = ""
+    # 1.9: dados dos efeitos visuais do clipe que não são ajustes (máscaras desenhadas, pontos de rastreio…):
+    # {id do efeito: valor de JSON}. "efeitos" no JSON, só quando há. Vai junto ao dividir, aninhar e desaninhar.
+    fx: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         schema = editparams.SCHEMAS[self.kind]
@@ -372,6 +382,7 @@ class Clip:
         self.ramp = timemap.clean_ramp(self.ramp)
         self.reverse = bool(self.reverse)
         self.color_group = str(self.color_group or "")
+        self.fx = dict(self.fx) if isinstance(self.fx, dict) else {}
 
     @property
     def retimed(self) -> bool:
@@ -417,6 +428,8 @@ class Clip:
             out["reverso"] = True
         if self.color_group:  # 1.6: só com grupo de cor
             out["grupo"] = self.color_group
+        if self.fx:  # 1.9: só com dados de efeito
+            out["efeitos"] = copy.deepcopy(self.fx)
         return out
 
     @classmethod
@@ -434,7 +447,8 @@ class Clip:
                        key_off=int(d.get("chaves_ref", 0) or 0),
                        ramp=d.get("rampa") if isinstance(d.get("rampa"), list) else [],
                        reverse=d.get("reverso") is True,
-                       color_group=d.get("grupo") if isinstance(d.get("grupo"), str) else "")
+                       color_group=d.get("grupo") if isinstance(d.get("grupo"), str) else "",
+                       fx=copy.deepcopy(d["efeitos"]) if isinstance(d.get("efeitos"), dict) else {})
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -878,6 +892,33 @@ class Sequence:
         from . import tempo_camera
         return tempo_camera.clip_window(s0, s1, src.fps, src.frames, angle, clip.reverse)
 
+    def frame_window(self, clip: Clip, t: int, shutter: float = 0.0,
+                     effects: bool = True) -> list[tuple[int, float]] | None:
+        """1.9: os quadros do arquivo (e os pesos) misturados no quadro t: a janela de um efeito de tempo
+        (`vfx.WINDOWS`, ex.: câmera lenta por mistura) ou, sem ela, a do obturador do look (`src_window`). None = só
+        `src_frame`. `effects=False` ("Desligar todos os efeitos"): só a do obturador. `grab` e `SequenceReader` usam
+        esta (a mesma regra na prévia e na exportação)."""
+        if effects and clip.kind == VIDEO:
+            from . import vfx
+            win = vfx.window(self, clip, t)
+            if win:
+                return [(int(k), float(w)) for k, w in win]
+        return self.src_window(clip, t, shutter) if shutter > 0 else None
+
+    def neighbor_frames(self, clip: Clip, t: int, radius: int) -> list[tuple[int, int]] | None:
+        """1.9: os quadros vizinhos do arquivo para os efeitos que leem o tempo (`vfx.neighbor_radius`): [(k, quadro do
+        arquivo)] para k em −radius…radius sem o 0, presos às pontas do arquivo (no reverso, k segue o tempo da
+        sequência: k = +1 é o quadro que aparece depois). None quando não há vizinhos (imagem, congelado, sem arquivo)."""
+        if radius <= 0 or clip.frozen:
+            return None
+        src = self.sources.get(clip.src)
+        if src is None or src.is_image or not src.is_file or src.frames <= 1:
+            return None
+        f = self.src_frame(clip, t)
+        step = -1 if clip.reverse else 1
+        last = max(0, src.frames - 1)
+        return [(k, min(max(f + k * step, 0), last)) for k in range(-radius, radius + 1) if k]
+
     def max_dur(self, clip: Clip, src_in: float | None = None) -> int:
         """Maior duração (quadros) que o arquivo permite a partir de `src_in` (no sentido em que o clipe toca)."""
         src = self.sources.get(clip.src)
@@ -1164,7 +1205,8 @@ class Sequence:
     def _cut(self, c: Clip, t: int) -> Clip:
         """Divide o clipe no quadro t; devolve a parte da direita (já na sequência)."""
         right = Clip(new_id(), c.kind, c.src, c.track, t, c.end - t, self.src_time(c, t), "", c.name,
-                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start), list(c.ramp), c.reverse)
+                     copy.deepcopy(c.values), copy.deepcopy(c.keys), c.key_off + (t - c.start), list(c.ramp), c.reverse,
+                     fx=copy.deepcopy(c.fx))
         c.dur = t - c.start
         # A transição de entrada fica só na parte da esquerda; a de saída, só na da direita.
         if c.kind == VIDEO:
@@ -2672,6 +2714,8 @@ FEATURES_V7: dict[str, Callable[[Sequence], bool]] = {
     # Camada de ajuste (fonte "ajuste", `vfx.is_adjustment`): a 1.8 a leria como um clipe gerado vazio, sem efeito.
     "camada_ajuste": lambda s: any(c.kind == VIDEO and (src := s.sources.get(c.src)) is not None
                                    and src.kind == "ajuste" for c in s.clips),
+    "efeitos_clipe_dados": lambda s: any(c.fx for c in s.clips),          # `Clip.fx` ("efeitos")
+    "analise_fonte": lambda s: any(src.analysis for src in s.sources.values()),  # `Source.analysis` ("analise")
 }
 
 
@@ -2741,6 +2785,9 @@ def migrate(d: dict[str, Any]) -> dict[str, Any]:
     return d
 
 
+ANALYSIS_KEY = "\0analises"  # chave dos `looks` de `History._dump` com as análises das fontes (nunca um id)
+
+
 class History:
     """Desfazer/refazer por instantâneos JSON (até `limit` passos). O instantâneo é do projeto inteiro, com as sequências
     irmãs: "Aninhar seleção" mexe em duas e é um passo só. Trocar de aba não é edição: ele sai sempre a partir da primeira
@@ -2767,7 +2814,12 @@ class History:
         blocks = [top, *[b for b in top.get("sequencias") or [] if isinstance(b, dict)]]
         looks = {}
         for b in blocks:
-            looks["" if len(blocks) < 2 else str(b.get("id") or "")] = b.pop("look", None)
+            key = "" if len(blocks) < 2 else str(b.get("id") or "")
+            looks[key] = b.pop("look", None)
+            # 1.9: as análises das fontes também ficam fora do passo (`Source.analysis`), como os looks
+            for fonte in [*(b.get("fontes") or []), *((b.get("pastas") or {}).get("fontes") or [])]:
+                if isinstance(fonte, dict) and "analise" in fonte:
+                    looks.setdefault(ANALYSIS_KEY, {})[f"{key}|{fonte.get('caminho')}"] = fonte.pop("analise")
             b["formato"] = FORMAT  # o formato muda com o look; o resto do bloco já está no formato atual
         return json.dumps(top, sort_keys=True, ensure_ascii=False), looks
 
@@ -2777,12 +2829,20 @@ class History:
         text, looks = self._states[pos]
         seq = Sequence.from_json(json.loads(text))
         now = {self._look_key(s): s.look for s in live.family()} if live is not None else {}
+        kept = looks.get(ANALYSIS_KEY) or {}
+        live_src = {(self._look_key(s), p): src for s in live.family() for p, src in s.sources.items()} if live else {}
         for s in seq.family():
             key = self._look_key(s)
             if key in now:
                 s.look = now[key].copy() if now[key] is not None else None
             else:
                 s.look = SeqLook.from_json(looks.get(key))
+            for p, src in s.sources.items():  # 1.9: a análise de agora vale; uma fonte que volta, com a que tinha
+                cur = live_src.get((key, p))
+                if cur is not None:
+                    src.analysis = copy.deepcopy(cur.analysis)
+                elif f"{key}|{p}" in kept:
+                    src.analysis = copy.deepcopy(kept[f"{key}|{p}"])
         for sid in (prefer, self._active[pos]):
             hit = next((s for s in seq.family() if sid and s.id == sid), None)
             if hit is not None:

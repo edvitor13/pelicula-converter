@@ -179,7 +179,7 @@ class Recipe:
             values = camera.clip_values(clip.values)
         imgs, ws = li.stack
         img = self.blend(engine, tempo_camera.Stack(list(imgs), list(ws)), tempo_camera.curve_of(values, legal))
-        return LayerImage(li.layer, img)
+        return replace(li, image=img, stack=None)  # 1.9: os vizinhos dos efeitos (`LayerImage.neighbors`) ficam
 
     def look_values(self, index: int) -> dict:
         """Passo 3: os ajustes do look no quadro `index` da saída (com as chaves de animação avaliadas)."""
