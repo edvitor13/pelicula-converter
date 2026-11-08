@@ -358,6 +358,39 @@ def _vnoise(x: float, s: int) -> float:
     return (_hash(i, s) * (1 - u) + _hash(i + 1, s) * u) * 2 - 1
 
 
+def weave(t: float, frame: int, vel: float) -> tuple[float, float, float]:
+    """O tremor do quadro (Projetor) em unidades de −1 a 1: horizontal, vertical e rotação no instante `t` do quadro
+    `frame` (`vel` = "Velocidade do tremor"). `build_plan` multiplica pelos ajustes e pela bitola; o som de película
+    (1.8, `somfilme.wow_curve`) usa a mesma conta, com a parte de cada quadro alisada entre um quadro e o próximo."""
+    return (0.7 * _vnoise(t * 2.2 * vel, 101) + 0.3 * (_hash(frame, 102) * 2 - 1),
+            0.7 * _vnoise(t * 1.9 * vel, 103) + 0.3 * (_hash(frame, 104) * 2 - 1),
+            0.7 * _vnoise(t * 1.6 * vel, 105) + 0.3 * (_hash(frame, 106) * 2 - 1))
+
+
+def emenda_frame(v: dict[str, Any], ep: int, fps: float) -> int | None:
+    """O quadro da emenda (Defeitos da película → Emendas) da época `ep` (2,5 s), ou None se essa época não tem
+    emenda. A imagem desenha a emenda no quadro em que `floor(quadro / fps / 2,5) == ep` e ele é este; o som de
+    película (1.8) põe o estalo nos mesmos quadros (`emenda_frames`)."""
+    sd = int(v["desgaste_semente"])
+    if _hash(ep, sd + 501) < v["emenda"] * 0.4:
+        return round((ep * 2.5 + _hash(ep, sd + 502) * 2.0) * fps)
+    return None
+
+
+def emenda_frames(v: dict[str, Any], fps: float, first: int, end: int) -> list[int]:
+    """1.8: os quadros de [first, end) em que a imagem mostra a emenda dos defeitos (`u_splice`), na mesma conta
+    de `build_plan` (para o som de película, `somfilme`). Vazio com os defeitos ou as emendas desligados."""
+    if not (v.get("desg_on") and v.get("emenda_on") and v.get("emenda", 0) > 0) or end <= first:
+        return []
+    fps = fps or 24.0
+    out = []
+    for ep in range(math.floor(first / fps / 2.5) - 1, math.floor(end / fps / 2.5) + 2):
+        sf = emenda_frame(v, ep, fps)
+        if sf is not None and first <= sf < end and math.floor(sf / fps / 2.5) == ep:
+            out.append(sf)
+    return out
+
+
 def _hsv_tint(hue_deg: float, amount: float) -> tuple:
     h = (hue_deg % 360) / 60.0
     c = 1.0
@@ -1013,11 +1046,11 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     if v["proj_on"]:
         w = gauge["weave"] * scale
         vel = v["tremor_vel"]
-        dx = v["tremor_x"] * w * (0.7 * _vnoise(t * 2.2 * vel, 101) + 0.3 * (_hash(frame, 102) * 2 - 1))
-        dy = v["tremor_y"] * w * (0.7 * _vnoise(t * 1.9 * vel, 103) + 0.3 * (_hash(frame, 104) * 2 - 1))
+        wx, wy, wr = weave(t, frame, vel)  # 1.8: a mesma função move o som (`somfilme`, wow)
+        dx = v["tremor_x"] * w * wx
+        dy = v["tremor_y"] * w * wy
         shift = (dx, dy)
-        rot = math.radians(v["tremor_rot"] * gauge["weave"]) * (
-            0.7 * _vnoise(t * 1.6 * vel, 105) + 0.3 * (_hash(frame, 106) * 2 - 1))
+        rot = math.radians(v["tremor_rot"] * gauge["weave"]) * wr
         margin = max(v["tremor_x"], v["tremor_y"]) * w * 1.1 + abs(rot) * width * 0.5
         zoom = 1.0 + 2.0 * margin / max(1.0, min(width, height))
         fl = v["cintilacao"] * (0.6 * _vnoise(t * 7.0 * v["cintilacao_vel"], 107)
@@ -1039,10 +1072,9 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
                     for c, g in enumerate(gain)]
         if v["emenda_on"] and v["emenda"] > 0:
             ep = math.floor(t / 2.5)
-            if _hash(ep, sd + 501) < v["emenda"] * 0.4:
-                sf = round((ep * 2.5 + _hash(ep, sd + 502) * 2.0) * fps)
-                if frame in (sf, sf + 1):
-                    shift = (shift[0], shift[1] + (14.0 if frame == sf else 6.0) * scale)
+            sf = emenda_frame(v, ep, fps)
+            if sf is not None and frame in (sf, sf + 1):
+                shift = (shift[0], shift[1] + (14.0 if frame == sf else 6.0) * scale)
     U["u_shift"] = shift
     U["u_rot"] = rot
     U["u_zoom"] = zoom
@@ -1240,10 +1272,8 @@ def build_plan(v: dict[str, Any], width: int, height: int, frame: int, fps: floa
     U["u_splice"] = (0.0, 0.5)
     if dg and v["emenda_on"] and v["emenda"] > 0:
         ep = math.floor(t / 2.5)
-        if _hash(ep, sd + 501) < v["emenda"] * 0.4:
-            sf = round((ep * 2.5 + _hash(ep, sd + 502) * 2.0) * fps)
-            if frame == sf:
-                U["u_splice"] = (1.0, 0.15 + 0.7 * _hash(ep, sd + 503))
+        if frame == emenda_frame(v, ep, fps):
+            U["u_splice"] = (1.0, 0.15 + 0.7 * _hash(ep, sd + 503))
     U["u_dmg_on"] = 1 if (U["u_dust"] > 0 or U["u_scratch"] > 0 or U["u_hair"][0] > 0 or U["u_stain"][0] > 0
                           or U["u_cue"] > 0 or U["u_splice"][0] > 0) else 0
     if v.get("mfilme_on"):  # 1.6: emendas nos cortes e rolos de Super 8 (`montagem_filme.py`)

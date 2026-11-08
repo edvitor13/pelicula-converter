@@ -691,6 +691,43 @@ SECTIONS: list[Section] = [
         F("rolo_velamento", "Velamento no fim do rolo", 0.7, 0, 1, percent=True),
         COR("rolo_cor", "Cor do velamento", (1.0, 0.42, 0.12)),
     ], "Emendas nos cortes e rolos de Super 8"),
+
+    # 1.8 (`somfilme.py`, módulo Beta "som_pelicula"; ARQUITETURA §45): o som final passa pela trilha da cópia.
+    # Os valores só contam com `somf_on`; desligado, o som sai bit a bit igual.
+    Section("som_pelicula", "Som de película", "somf_on", [
+        B("somf_on", "Ativo", False),
+        C("somf_trilha", "Trilha sonora", "auto", [
+            ("auto", "Igual à bitola"), ("otica_35", "Ótica 35 mm"), ("otica_16", "Ótica 16 mm"),
+            ("magnetica_s8", "Magnética Super 8"), ("otica_antiga", "Ótica antiga (anos 30)")],
+          "Onde o som estava gravado na cópia. A trilha ótica é uma faixa de luz ao lado das imagens, lida por uma "
+          "lâmpada e uma célula: a película limitava os agudos e o grão dela virava chiado. A ótica antiga segue a "
+          "curva da Academia de 1938, que cortava os agudos para esconder esse chiado; o 16 mm passava pouco acima "
+          "de 6 kHz. O Super 8 sonoro tinha uma tarja magnética, como uma fita cassete colada na película. "
+          "\"Igual à bitola\": 35 mm, 65 mm e IMAX usam a ótica de 35 mm; 16 mm e Super 16, a de 16 mm; Super 8 e "
+          "8 mm, a magnética."),
+        F("somf_trilha_forca", "Força da trilha", 1.0, 0, 1, percent=True,
+          tip="Quanto da trilha vale: a faixa de frequências, a saturação perto do volume máximo, o som em mono e o "
+              "chiado de fundo. 0% = o som original, só com os estalos, a poeira e o resto."),
+        F("somf_estalos", "Estalos das emendas", 0.6, 0, 1, percent=True,
+          tip="Cada emenda (a fita ou o cimento que junta dois pedaços de película) passa pela leitura do som e dá "
+              "um estalo seco com um baque grave. Os estalos caem nos mesmos quadros em que a imagem mostra a "
+              "emenda: a emenda dos Defeitos da película e os cortes de \"A montagem na película\". No projetor de "
+              "verdade a leitura do som fica antes da janela (21 quadros no 35 mm ótico, 26 no 16 mm, 18 no Super 8 "
+              "magnético) e o estalo vinha antes do pulo da imagem; aqui eles ficam juntos."),
+        F("somf_poeira", "Poeira na trilha", 0.4, 0, 1, percent=True,
+          tip="Pó e arranhões na faixa do som viram cliques e crepitação. Com a Poeira dos Defeitos da película "
+              "ligada, a quantidade dela também conta."),
+        F("somf_wow", "Wow e flutter", 0.5, 0, 1, percent=True,
+          tip="A película nunca corre com velocidade perfeita: o som oscila de afinação devagar (wow) e depressa "
+              "(flutter). A oscilação lenta segue o mesmo tremor do quadro (o do Projetor), então o som balança "
+              "quando a imagem balança, e cresce nas bitolas pequenas."),
+        F("somf_projetor", "Projetor na sala", 0.0, 0, 1, percent=True,
+          tip="O barulho do projetor junto do filme: o mecanismo que puxa cada quadro (na taxa do vídeo, ou na dos "
+              "rolos de Super 8), o motor e a ventoinha da lâmpada."),
+        F("somf_sala", "Sala de cinema", 0.0, 0, 1, percent=True,
+          tip="O som de uma sala pequena de cinema: a reverberação das paredes, cerca de 0,8 s."),
+        I("somf_semente", "Semente", 19, 0, 9999, advanced=True),
+    ], "Trilha ótica ou magnética, estalos, poeira e projetor"),
 ]
 
 LIST_KINDS = ("color", "wheel")  # valores guardados como lista ([r, g, b] ou [x, y])
@@ -771,6 +808,10 @@ ANIMATABLE_KINDS = ("float", "color")
 for _p in PARAMS.values():
     if _p.kind in ANIMATABLE_KINDS:
         _p.animatable = True
+del _p
+# 1.8: o som de película é processado no arquivo de som inteiro, com um valor só (`somfilme.py`): não anima.
+for _p in next(s for s in SECTIONS if s.key == "som_pelicula").params:
+    _p.animatable = False
 del _p
 
 
