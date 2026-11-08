@@ -55,6 +55,11 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 46. [Música: batidas, encaixe e ducking](#46-música-batidas-encaixe-e-ducking)
 47. [Efeitos sonoros e sons CC0](#47-efeitos-sonoros-e-sons-cc0)
 48. [Gravar narração](#48-gravar-narração)
+49. [Pilha de efeitos do clipe](#49-pilha-de-efeitos-do-clipe)
+50. [Recorte e máscaras (1.9, F2)](#50-recorte-e-máscaras-19-f2)
+51. [Estabilização e rastreio (1.9, F3)](#51-estabilização-e-rastreio-19-f3)
+52. [Luz e atmosfera (1.9, F4)](#52-luz-e-atmosfera-19-f4)
+53. [Tempo da imagem (1.9, F5)](#53-tempo-da-imagem-19-f5)
 
 ---
 
@@ -5114,3 +5119,193 @@ Qt) e `pelicula/ui/narracao_ui.py`.
 O som da prévia começa um pouco depois do microfone (o `QMediaPlayer` demora a tocar); por isso o atraso é um número que o
 usuário mede, e não uma constante. A gravação não passa pelo som de película nem por nada da cadeia do clipe antes de entrar:
 ela é o arquivo cru, e é a mixagem (§43) quem a trata. Dois microfones ao mesmo tempo e gravar em várias faixas ficaram de fora.
+
+
+## 49. Pilha de efeitos do clipe
+
+A 1.9 (#68) traz efeitos visuais por clipe no modo Edição: recorte e máscaras, estabilização e rastreio, luz e atmosfera,
+tempo da imagem (§50 a §53, uma frente cada). Esta seção é a base que todos usam: a pilha de passos na GPU
+(`pelicula/vfx.py` + `Engine._fx_stack`), os modos de mesclagem novos (`pelicula/mesclagem.py`), a camada de ajuste, os
+dados dos efeitos no projeto e o ponto de ligação na janela (`ui/vfx_ui.py`).
+
+### 49.1 Onde a pilha entra
+
+No `Engine._canvas`, para cada camada de um clipe comum (não um clipe de sequência): a textura do clipe (e o perfil de
+câmera do clipe, `_camera_pass`) → **pilha** → `editshaders.CLIP` de sempre. O `CLIP` amostra a saída da pilha no lugar
+da imagem do clipe e continua fazendo o enquadramento, a cor do clipe, a opacidade, a mesclagem e as transições. O
+texto fixo do `CLIP` (sha256 nos testes) e os uniforms de `compositor.clip_uniforms` não mudam. Prévia, "Salvar quadro",
+exportação e terminal passam pelo mesmo `Engine.compose` (a receita única de `frame.py`).
+
+```text
+LayerImage ─► _clip_texture ─► _camera_pass ─► _fx_stack ──────────────────────► CLIP(_tr)(_cs)(_bx)(_adj)
+                                               fx_load → passo 1 → … → fx_store
+```
+
+- **Sem efeito ligado não há passo nenhum**: `vfx.plan(ctx)` devolve `[]` e o `_canvas` segue o caminho de antes, bit a
+  bit (nenhum alvo `fx…` é criado; `tests/test_vfx.py`).
+- **Ordem canônica** (`Effect.order`, números com folga em `vfx.ORDER`): recorte (100) → máscara (200) → tempo (300) →
+  desfoque de lente (400) → listra/flare/raios (500, "luz") → névoa (600) → partículas (700). Empate: o id.
+- **"Desligar todos os efeitos"** (Shift+D, §40) e o "Original" da comparação chegam como `neutral`: a pilha fica vazia,
+  a geometria dos provedores não vale e a camada de ajuste não desenha. Com `no_effects`, `grab`/`SequenceReader` também
+  não trazem janelas de tempo nem vizinhos.
+- Os alvos levam o nome do lugar da camada (`fx<chave>_orig`, `fx<chave>_<efeito>_<i>`, `fx<chave>_out`, como
+  `clip_cam<chave>`): nenhum clipe escreve no de outro (inclusive dentro de sequências) e são reaproveitados entre quadros.
+
+### 49.2 API (`pelicula/vfx.py`)
+
+```python
+@dataclass(frozen=True)
+class Pass:
+    name: str                       # nome do passo (entrada "pass:<nome>" de um passo seguinte do mesmo efeito)
+    glsl: str = ""                  # kind "glsl": funções + void main(), depois de editshaders.FX_HEAD
+    uniforms: dict = {}             # uniforms do passo (os que o programa não declara são ignorados)
+    inputs: dict = {}               # sampler → "prev" | "orig" | "below" | "n-2".."n+2" | "pass:<nome ou índice>"
+    size: Any = "clip"              # "clip" | "canvas" | (w, h) | fração do clipe (0.5)
+    dtype: str = "f4"               # "f4" (padrão) | "f2" (máscaras, brilhos)
+    mip: bool = False               # monta mipmaps da saída (para textureLod no passo seguinte)
+    kind: str = "glsl"              # "glsl" | "blur" | "streak"
+    sigma: float = 0.0              # blur/streak: desvio em texels da entrada (use ctx.px para px@1080)
+    angle: float = 0.0              # streak: graus, 0 = horizontal, positivo gira no sentido horário (y para baixo)
+
+@dataclass(frozen=True)
+class Effect:
+    id: str                         # ASCII, nunca renomear
+    module: str                     # modules.MODULES (só interface e aviso; a renderização não consulta)
+    order: int                      # vfx.ORDER
+    active: Callable[[dict], bool]  # valores do clipe neste quadro → ligado? (padrão neutro = False)
+    passes: Callable[[Ctx], list[Pass]]
+    alpha: Callable[[dict], bool] = False    # o efeito recorta (a saída tem cobertura)
+    radius: Callable[[dict], int] = 0        # quadros vizinhos lidos (até vfx.MAX_RADIUS = 2)
+    keys: tuple[str, ...] = ()               # chaves de ajuste (o aviso de módulo olha também as chaves de animação)
+
+register(effect) -> Effect;  unregister(id);  active_effects(values);  plan(ctx) -> [(Effect, [Pass])]
+makes_alpha(values) -> bool;  neighbor_radius(values) -> int;  is_adjustment(seq, clip) -> bool
+modules_used(seq) -> set[str];  new_adjustment(seq) -> Source;  pass_size(size, ctx);  streak_steps(sigma)
+GEOMETRY: dict[str, fn(seq, layer, M) -> M];  WINDOWS: dict[str, fn(seq, clip, t) -> [(quadro, peso)] | None]
+EFFECT_MODULES: dict[módulo, [ids]];  pack(arr) / unpack(d);  stamp(path) / stale(src, tipo)
+```
+
+`Ctx(seq, layer, t, tex_w, tex_h, canvas_w, canvas_h, light, adjustment, neutral)`: `clip`, `values` (com as chaves de
+animação já avaliadas), `src`, `scale` (= `tex_h / 1080`), `px(v)`, `frame` e `seconds` (tempo do clipe das chaves,
+`Sequence.clip_time`: não muda ao cortar ou aparar), `fx` (`Clip.fx`), `analysis(tipo)` (`Source.analysis`) e
+`light_curve`.
+
+### 49.3 Passos GLSL e `FX_HEAD`
+
+`editshaders.FX_HEAD` = o `COMMON` do look até as curvas (`pcg`/`rnd`/`vnoise2`/`fbm2`, `toLinear` e as inversas) +
+`t_prev`, `t_orig`, `t_below` + os uniforms `u_fx_size` (saída do passo, px), `u_fx_clip_px`, `u_fx_canvas`,
+`u_fx_scale` (texels do clipe por px@1080), `u_fx_below` (uv do clipe → uv da tela), `u_fx_input`/`u_fx_cv` (a luz,
+a mesma das transições: `transitions.light_of`), `u_fx_frame`, `u_fx_time` + `fxDec(c)` (código → luz linear da curva),
+`fxEnc(n)` (a volta) e `fxBelow(uv)`. Samplers extras (`inputs`) o passo declara. A imagem nos passos é **RGBA de cor
+direta e cobertura**, nos valores que o `CLIP` lê (o código do vídeo; com perfil de câmera, a entrada do look).
+`fxEnc(fxDec(c))` não volta exato nas pontas da curva de vídeo (como o `trEnc`): some só o que o efeito mexe.
+
+Exemplo, um passo GLSL (brilho que soma na luz, px@1080 no espaço do clipe):
+
+```python
+GLOW = """
+uniform float u_amount;
+uniform float u_radius;   // texels
+void main() {
+    vec4 c = texture(t_prev, v_uv);
+    vec4 b = texture(t_soft, v_uv);
+    f_out = vec4(fxEnc(fxDec(c.rgb) + fxDec(b.rgb) * u_amount), c.a);
+}
+"""
+
+def passes(ctx):
+    v = ctx.values
+    return [vfx.Pass("suave", kind="blur", sigma=ctx.px(v["brilho_raio"]), dtype="f2"),     # um passo de desfoque
+            vfx.Pass("soma", "uniform sampler2D t_soft;\n" + GLOW, inputs={"t_soft": "pass:suave", "t_prev": "orig"},
+                     uniforms={"u_amount": v["brilho"]})]
+
+vfx.register(vfx.Effect("brilho", "luz_atmosfera", vfx.ORDER["luz"], active=lambda v: v["brilho"] > 0, passes=passes))
+```
+
+### 49.4 Passos prontos: `blur` e `streak`
+
+- `kind="blur"`: gaussiano separável em RGBA pré-multiplicado (a cor de um pixel transparente não entra). Com `sigma`
+  grande, parte de um nível de mipmap (`sigma/2^nível ≤ 6`, como as cadeias do look) e volta ao tamanho do passo. Entrada:
+  o sampler `t_src` de `inputs` (padrão: o passo anterior).
+- `kind="streak"`: desfoque numa direção (`angle`), em passos de 13 amostras que crescem 3× até a variância bater
+  (`vfx.streak_steps`); bom para listras de luz e desfoque de movimento.
+
+### 49.5 Cobertura e alfa
+
+`fx_load` lê a textura do clipe em f4: arquivo com transparência (RGBA pré-multiplicado) vira cor direta com as "pontas
+firmes" do `clipAlpha` já aplicadas; opaco, cobertura 1. `fx_store` grava a textura que o `CLIP` amostra: com cobertura
+(clipe com transparência ou `makes_alpha`), pré-multiplicada com a conta inversa das pontas (`E + a(1 − 2E)`, como o
+`NEST_PREMUL`), e o `CLIP` volta exatamente à cobertura da pilha; sem, opaca. Um efeito que recorta declara
+`alpha=lambda v: …`: o `CLIP` passa a usar a cobertura (`u_tex_alpha`). A saída tem o tamanho da textura do clipe (um
+passo pode ter outro tamanho; o último é reamostrado).
+
+### 49.6 Mesclagens novas (`mesclagem.py`)
+
+Dez modos acrescentados no fim das opções de `mesclagem` (ids 7 a 16 em `compositor.BLEND_IDS`): diferença, exclusão,
+luz suave, luz forte, subtrair, dividir, matiz, saturação (`saturacao_m`), cor e luminosidade. Fórmulas da especificação
+de composição do W3C com a luminância Rec.709; referência em numpy (`mesclagem.apply`) e GLSL (`mesclagem.GLSL`). Só uma
+camada com id ≥ 7 usa a variante (`editshaders._with_blend`: o `blend` de sempre vira `blendBase`); as de sempre usam o
+programa de sempre.
+
+### 49.7 Camada de ajuste
+
+Fonte do tipo `"ajuste"` (reservado em `timeline.SOURCE_KINDS` desde a 1.5; `vfx.new_adjustment`), Mídia › Novo ›
+"Camada de ajuste" (módulo Beta `efeitos_clipe`). Não tem imagem própria (`LayerImage(layer, _NO_IMAGE)` em `grab` e no
+leitor): no `_canvas` a textura dela é a **tela embaixo**, com a geometria identidade (`vfx.geometry`; o enquadramento
+some no inspetor e ela cobre a tela pixel a pixel). A cor do clipe, o detalhe e a pilha valem para tudo o que está
+embaixo, no tempo dela; opacidade, mesclagem e transições funcionam como em qualquer clipe. Sem nada que mude (sem cor,
+efeitos, fade nem transição, mesclagem normal), não desenha: a tela sai bit a bit. Numa tela transparente a cobertura fica
+a da tela (`editshaders._with_adjust`). `aninhar` recusa uma seleção com a camada de ajuste sem o que está embaixo dela.
+Recurso do formato 7: `"camada_ajuste"`.
+
+### 49.8 Dados no projeto
+
+- `Clip.fx` (JSON `"efeitos"`, só quando há): o que não é ajuste (máscaras desenhadas, pontos de rastreio), por id do
+  efeito; vai junto ao dividir, aninhar e desaninhar. Recurso `"efeitos_clipe_dados"`.
+- `Source.analysis` (JSON `"analise"`, só quando há): as análises de um arquivo (`vfx.pack` para arrays: zlib + base64,
+  `stamp`/`stale` para saber se o arquivo mudou). **Não é passo de desfazer**: `History._dump` guarda à parte, como os looks,
+  e desfazer mantém a análise de agora. Recurso `"analise_fonte"`. Análises rodam na CPU, num job fora da GUI.
+- Ajustes novos dos efeitos: nas seções dos blocos `# 1.9 F2` a `# 1.9 F5` de `editparams.py` (depois de `_N_BASE`), com
+  padrão neutro; vão ao JSON só fora do padrão (`SPARSE_KEYS`) e um 1.8 que abre o projeto é recusado pelo formato 7
+  (`"ajustes_clipe_1_9"`, pelo retrato `params.known_1_8`).
+
+- **Formato 7** (a base da 1.9, como a §36 foi a da 1.7): `project.FORMAT` = 7 (`FORMAT_18` = 6) e `timeline.FORMAT` = 6
+  (`FORMAT_18` = 5), passos puros `_v6_to_v7` e `_seq_v5_to_v6`. Retrato da 1.8 em `pelicula/data/conhecidos_1_8.json`
+  (`params.known_1_8()`/`beyond_1_8`, gerado com o código de 6de08de; nunca editar); `project.FEATURES_V7["ajustes_1_9"]`,
+  `timeline.FEATURES_V7["ajustes_clipe_1_9"]` e `["look_proprio_1_9"]` pegam todo ajuste ou opção nova da 1.9. Projetos
+  gravados pela 1.8 em `tests/data/projetos_1_8/` (`gerar.py`), que a 1.9 grava de novo igual.
+
+### 49.9 Tempo e geometria
+
+- **Vizinhos**: `Effect.radius` > 0 → `grab` e `SequenceReader` trazem `LayerImage.neighbors` (`((k, imagem), …)`, k = −2…+2
+  sem o 0; `Sequence.neighbor_frames`: presos às pontas do arquivo; no reverso, k segue o tempo da sequência). Imagem
+  parada, congelado e gerado não têm vizinhos (a entrada vira o próprio quadro). O leitor guarda os quadros recentes
+  (`_ClipStream.keep`) e lê na ordem do arquivo.
+- **Janelas**: `vfx.WINDOWS[id](seq, clip, t)` → `[(quadro, peso)]` substitui a janela do obturador
+  (`Sequence.frame_window`); a mistura é a do obturador (`frame.Recipe._blend_layer`, na luz da curva do clipe).
+- **Geometria**: `vfx.GEOMETRY[id](seq, layer, M)` muda a matriz tela → uv do clipe em `compositor.clip_uniforms` (antes de
+  `is_identity` e das transições); sem provedor, os uniforms são os de sempre.
+
+### 49.10 Interface (`ui/vfx_ui.py`)
+
+`VfxUI` é o único ponto na `MainWindow` (`install`, `module_tools`, `apply_modules`). Para as frentes:
+`add_section(seção, módulo, after=None) -> SectionCard`, `card(seção)`, `add_overlay(nome, módulo, provedor)` (camada de
+prévia de `preview_tools`, só com o módulo ligado), `points_overlay(size, pontos)`, `pick_point(fn)` e
+`clip_point(clipe, fx, fy)`. Grupo de módulos `"efeitos_visuais"` em Configurações › Recursos. Os efeitos de clipe não vão
+para o plugin do DaVinci.
+
+## 50. Recorte e máscaras (1.9, F2)
+
+Reservada para a frente F2 (efeitos com `order` 100 e 200; bloco `# 1.9 F2` de `editparams.py`).
+
+## 51. Estabilização e rastreio (1.9, F3)
+
+Reservada para a frente F3 (`vfx.GEOMETRY`, análises em `Source.analysis`; bloco `# 1.9 F3`).
+
+## 52. Luz e atmosfera (1.9, F4)
+
+Reservada para a frente F4 (efeitos com `order` 400 a 700; bloco `# 1.9 F4`).
+
+## 53. Tempo da imagem (1.9, F5)
+
+Reservada para a frente F5 (`vfx.WINDOWS`, `Effect.radius`; bloco `# 1.9 F5`).

@@ -14,6 +14,9 @@ O PeliculaConverter leva o look para o DaVinci Resolve de dois jeitos:
 
 ## Plugin OpenFX (funciona no Resolve gratuito)
 
+Os efeitos de clipe do modo Edição da 1.9 (camada de ajuste, mesclagens novas, recorte, estabilização, luz e tempo) não
+vão para o plugin: ele leva só o look.
+
 Efeitos **DCTL** só rodam no Resolve Studio, mas plugins **OpenFX** de terceiros funcionam também na
 versão gratuita. O `PeliculaConverter.ofx.bundle` é um plugin OpenFX próprio do app, em C++, que já vem
 **compilado dentro de todo pacote do app** (`.msi`, `.zip`, `.deb`, `.tar.gz`): ninguém precisa compilar.

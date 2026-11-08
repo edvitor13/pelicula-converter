@@ -237,6 +237,25 @@ Cor, degradê e título começam com 5 s e esticam como uma imagem. Para esconde
 desligue **Títulos e geradores** em Configurações › Recursos (os clipes que já estão na montagem continuam
 iguais na imagem e na exportação).
 
+### Camada de ajuste (1.9, Beta)
+
+**Novo › Camada de ajuste** cria um clipe sem imagem: a cor, o detalhe e os efeitos dele valem para **tudo o que está
+embaixo**, só no tempo em que ela aparece. Serve para corrigir ou dar um efeito a vários clipes de uma vez (estique a
+camada por cima deles). Ela entra no cursor, por cima do que já aparece, com 5 s, e estica como uma imagem.
+
+- Cobre sempre o quadro inteiro: no cartão **Enquadrar e posicionar** ficam só a **Opacidade** (meia opacidade = metade
+  do efeito) e a **Mesclagem**. O perfil de câmera não aparece (o que está embaixo já foi lido).
+- Transições de entrada e saída, chaves de animação, dividir e desfazer funcionam como em qualquer clipe.
+- Sem nenhum ajuste, não muda nada. Com **Desligar todos os efeitos** (Shift+D) ou no "Original" da comparação, ela não
+  vale.
+- Numa sequência com **Fundo transparente**, ela muda a cor do que está embaixo e não cria imagem onde não há nada.
+- **Aninhar** uma camada de ajuste sem o que está embaixo dela é recusado (dentro da sequência nova ela não teria o que
+  mudar).
+
+A camada de ajuste é do recurso **Efeitos de clipe** (Beta, grupo **Efeitos visuais** em Configurações › Recursos),
+desligado no começo; desligá-lo só esconde o item do Novo. Um projeto com camada de ajuste é gravado no formato da 1.9
+(versões anteriores não o abrem).
+
 ### Títulos
 
 **Novo ▸ Título…** põe um título no cursor, com o texto já escolhido para você digitar por cima. No painel da
@@ -397,6 +416,15 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
   HLG/PQ, um vídeo marcado como comum (BT.709/sRGB) entra como Rec.709. Clipes que já estão na montagem e
   projetos reabertos nunca mudam.
 - Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
+
+### Modos de mesclagem novos (1.9)
+
+Além de Normal, Tela, Multiplicar, Sobrepor, Adicionar, Só o mais claro e Só o mais escuro, a **Mesclagem** do cartão
+**Enquadrar e posicionar** tem: **Diferença** (a distância entre as duas imagens; igual = preto), **Exclusão** (a
+diferença mais suave), **Luz suave** e **Luz forte** (contraste: o clipe clareia onde é mais claro que o cinza médio e
+escurece onde é mais escuro), **Subtrair** (tira o clipe do que está embaixo), **Dividir** (clareia o que está embaixo pelo
+clipe), **Matiz**, **Saturação** e **Cor** (pegam só a cor, a saturação ou as duas do clipe, mantendo a luz de baixo) e
+**Luminosidade** (a luz do clipe com a cor de baixo). Escolher um deles grava o projeto no formato da 1.9.
 
 ### Escala por eixo
 

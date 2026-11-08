@@ -207,6 +207,11 @@ pelicula/
   sfx.py                     1.8, efeitos sonoros feitos pelo app (sem Qt, §47): EFFECTS (whoosh, swish, riser, impacto,
                              clique, maquina, obturador) com Field, síntese numpy determinística (render), fonte "efeito"
                              (new_source), entrada derivada do clipe na mixagem (effect_input, render_inputs, effect_dir)
+  vfx.py                     1.9, pilha de efeitos do clipe (sem Qt nem GPU, §49): Pass, Effect, Ctx, register/plan (ordem
+                             canônica em ORDER; efeito inativo = nenhum passo), makes_alpha, neighbor_radius, GEOMETRY
+                             (matriz tela → uv do clipe), WINDOWS (quadros misturados), EFFECT_MODULES, camada de ajuste
+                             (is_adjustment, new_adjustment), modules_used, pack/unpack/stamp/stale das análises
+  mesclagem.py               1.9, modos de mesclagem novos (ids 7 a 16, §49.6): GLSL da variante do CLIP e referência numpy
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -256,6 +261,8 @@ pelicula/
                              som_export_ui (SoundChoice: "O que exportar" na janela Exportar);
                              1.8, música (§46): musica_ui (MusicUI: Detectar batidas e análise sozinha, marcas no clipe,
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
+                             1.9, efeitos visuais (§49.10): vfx_ui (VfxUI: Novo ▸ Camada de ajuste, inspetor da camada
+                             de ajuste, add_section/add_overlay/pick_point/clip_point para as frentes);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -382,20 +389,21 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (6) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (7) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
     mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
-    algo da 1.6; 5 = usa algo da 1.7; 6 = usa algo da 1.8 (listados em `"recursos"`). **Ajuste ou opção nova** (look
-    ou clipe) não precisa de registro: o retrato do que a 1.7 lê (`pelicula/data/conhecidos_1_7.json`,
-    `params.beyond_1_7`; nunca editar, nem os da 1.5 e da 1.6) faz o projeto ir para o 6 quando o valor sai do padrão
+    algo da 1.6; 5 = usa algo da 1.7; 6 = usa algo da 1.8; 7 = usa algo da 1.9 (listados em `"recursos"`). **Ajuste ou
+    opção nova** (look ou clipe) não precisa de registro: o retrato do que a 1.8 lê (`pelicula/data/conhecidos_1_8.json`,
+    `params.beyond_1_8`; nunca editar, nem os da 1.5, 1.6 e 1.7) faz o projeto ir para o 7 quando o valor sai do padrão
     ou é uma opção nova. **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam:
-    **uma linha** em `timeline.FEATURES_V6` (da montagem) ou `project.FEATURES_V6` (do projeto) — os da 1.7 ficam em
-    `FEATURES_V5`, os da 1.6 em `FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
+    **uma linha** em `timeline.FEATURES_V7` (da montagem) ou `project.FEATURES_V7` (do projeto) — os da 1.8 ficam em
+    `FEATURES_V6`, os da 1.7 em `FEATURES_V5`, os da 1.6 em `FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e
+    `project.FEATURES_V3` — e o
     campo dele no JSON só quando usado. O look próprio de uma sequência (`Sequence.look`, 1.8) é o primeiro
     registro de `timeline.FEATURES_V6` (`"look_proprio"`). Assim um projeto que não usa nada novo continua abrindo nas versões
     antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos
-    puros de `project.MIGRATIONS` e `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 e pela 1.6 em
-    `tests/data/projetos_1_4/` e `tests/data/projetos_1_6/`);
+    puros de `project.MIGRATIONS` e `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4, pela 1.6 e pela
+    1.8 em `tests/data/projetos_1_4/`, `tests/data/projetos_1_6/` e `tests/data/projetos_1_8/`);
     aumente um formato só com um passo novo. Valores passam por `params.sanitize()`.
 14. **Atualizações só com SHA-256.** `updater.download()` exige o `SHA256SUMS.txt` da release e
     recusa arquivo que não confere. Os nomes dos pacotes (`PATTERNS` em `updater.py`) precisam bater
@@ -523,6 +531,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
 | `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
 | `tests/test_sfx.py` | efeitos sonoros (1.8, §47): determinismo e semente de cada tipo, pico (−1 dBFS × intensidade, nunca satura) e RMS, largura/brilho, clique e obturador curtos, teclas nos tempos dados, a fonte "efeito" (só som, duração do tipo), JSON e formato 6, `mix_key`, o segmento aponta para o WAV do efeito e a mixagem toca o efeito igual à síntese (e no grafo antigo) |
+| `tests/test_vfx.py` | pilha de efeitos (1.9, §49) com um efeito só dos testes: plano e ordem, neutro, px@1080 e tempo do clipe, passos de desfoque (variância), pack/unpack, matriz da tela embaixo, sem provedor de geometria os uniforms de sempre; na GPU: GLSL == numpy em 8 e 16 bits, inativo = nenhum alvo e bit a bit, fxBelow, fxDec/fxEnc, blur gaussiano e com mipmaps, streak só na direção, gêmea aninhada bit a bit, prévia == exportação |
+| `tests/test_camada_ajuste.py` | mesclagens novas (ids, variantes do CLIP, pontos conhecidos, cada modo na GPU == `mesclagem.apply`) e camada de ajuste: fonte e formato 7, módulo, desfazer, aninhar recusado; neutra bit a bit, exposição nela == no clipe de tela cheia, só no tempo dela, opacidade, tela transparente |
+| `tests/test_vfx_dados.py` | `Clip.fx` ("efeitos") e `Source.analysis` ("analise", fora do desfazer) no JSON e no formato 7, dividir/aninhar/desaninhar, `frame_window` e `neighbor_frames`, vizinhos de `grab` == leitor, passo que lê "n-1" |
+| `tests/test_vfx_ui.py` | casos de `vfx_ui_cases.py`: módulo Beta e Novo ▸ Camada de ajuste (um passo do desfazer), inspetor sem o enquadramento, cartão e camada de prévia de uma frente seguindo o módulo |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |
