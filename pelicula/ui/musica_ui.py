@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QProgressBar, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QMessageBox, QProgressBar, QToolButton, QWidget
 
 from .. import batidas, jobs, musica
 from ..i18n import _, fmt_decimal
@@ -163,6 +163,60 @@ class MusicUI(QObject):
         if then is not None:
             then(b)
 
+    # ------------------------------------------------------------ encaixar na duração do vídeo
+    def fit(self, cid: str) -> None:
+        """"Encaixar a música na duração do vídeo": acha as batidas (se preciso) e troca o clipe pelos pedaços do
+        plano (`musica.fit_plan`) num passo do desfazer. Recusa com a mensagem do motivo; quando só os compassos não
+        servem e a música é mais longa que o alvo, oferece a saída simples (acabar no alvo com "diminuir no fim")."""
+        seq = self.model.seq
+        clip = seq.find(cid)
+        path = music_path(seq, clip)
+        if path is None:
+            return
+        span = musica.fit_target(seq, clip, getattr(self.canvas, "inp", None), getattr(self.canvas, "outp", None))
+        if span is None:
+            self.inform(_("Não há imagem na montagem para a música acompanhar. Marque um trecho (In e Out) para "
+                          "dizer onde ela deve acabar."))
+            return
+        why = musica.fit_blockers(seq, clip, *span)
+        if why:
+            self.inform(why)
+            return
+        b = self.beats_for(path)
+        if b is None:
+            self.detect(path, then=lambda _b: self.fit(cid))
+            return
+        start, end = span
+        plan = musica.fit_plan(b, clip, end - start, seq.fps, start)
+        if not plan.ok:
+            fade = musica.fade_plan(clip, end - start, seq.fps, start) if plan.can_fade else None
+            if fade is None or not fade.ok:
+                self.inform(plan.reason)
+                return
+            if not self.ask(plan.reason + "\n\n" + _("Acabar a música no ponto pedido com uma saída suave "
+                                                     "(\"Diminuir no fim\")?")):
+                return
+            plan = fade
+        if self.model.apply_edit(lambda s: musica.apply_fit(s, cid, plan)):
+            self.message.emit(self.describe_fit(plan, seq.fps))
+
+    @staticmethod
+    def describe_fit(plan: musica.Plan, fps: float) -> str:
+        secs = fmt_decimal((plan.end - plan.pieces[0].start) / fps, 1)
+        if plan.removed:
+            return _("Música encaixada em {s} s: {n} compassos tirados do meio.").format(s=secs, n=plan.removed)
+        if plan.added:
+            return _("Música encaixada em {s} s: {n} compassos repetidos no meio.").format(s=secs, n=plan.added)
+        return _("Música encaixada em {s} s, com saída suave.").format(s=secs)
+
+    # ------------------------------------------------------------ perguntas (os testes trocam)
+    def inform(self, text: str) -> None:
+        QMessageBox.information(self.canvas.window(), _("Música"), text)
+
+    def ask(self, text: str) -> bool:
+        box = QMessageBox.question(self.canvas.window(), _("Música"), text)
+        return box == QMessageBox.StandardButton.Yes
+
     @staticmethod
     def describe(b: batidas.Beats) -> str:
         if not b.times:
@@ -263,6 +317,11 @@ def add_clip_actions(menu: QMenu, canvas, clip) -> None:
         act = menu.addAction(ctl.describe(b))
         act.setObjectName("beats_info")
         act.setEnabled(False)
+    act = menu.addAction(_("Encaixar a música na duração do vídeo"), lambda: ctl.fit(clip.id))
+    act.setObjectName("fit_music")
+    act.setToolTip(_("Tira ou repete compassos inteiros no meio da música para ela acabar junto com a imagem (ou no "
+                     "Out do trecho marcado), com uma transição de som em cada emenda."))
+    act.setEnabled(not ctl.busy(path) and not canvas.model.seq.locked(clip))
 
 
 def install(win) -> MusicUI:

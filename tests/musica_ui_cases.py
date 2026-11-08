@@ -190,3 +190,69 @@ def test_snap_to_beats_of_other_music_clips():
     ed.btn_snap.setChecked(True)
     assert btn.isEnabled()
     prefs.settings().remove(musica_ui.PREF_SNAP)
+
+
+# ------------------------------------------------------------------ encaixar a música
+def _with_video(music_secs=60.0, video_frames=30 * FPS):
+    seq = tl.Sequence(640, 360, f"{FPS}/1")
+    seq.add_source(_music("musica.wav", music_secs))
+    seq.add_source(tl.Source("video.mp4", 640, 360, 24.0, "24/1", 2400, 100.0, has_video=True, has_audio=False))
+    seq.clips.append(tl.Clip(tl.new_id(), tl.VIDEO, "video.mp4", 0, 0, video_frames, 0.0))
+    music = tl.Clip(tl.new_id(), tl.AUDIO, "musica.wav", 0, 0, int(music_secs * FPS), 0.0)
+    seq.clips.append(music)
+    return seq, music
+
+
+def test_fit_music_from_the_menu_in_one_undo_step():
+    seq, music = _with_video()
+    m, ed = _editor(seq)
+    ctl = musica_ui.controller_for(ed.canvas)
+    ctl.beats["musica.wav"] = _grid(120)
+    told, said = [], []
+    ctl.inform = told.append
+    ctl.message.connect(said.append)
+    menu = QMenu()
+    musica_ui.add_clip_actions(menu, ed.canvas, music)
+    _actions(menu)["fit_music"].trigger()
+    parts = sorted((c for c in m.seq.clips if c.kind == tl.AUDIO), key=lambda c: c.start)
+    assert not told and len(parts) == 2 and parts[-1].end == 30 * FPS
+    assert parts[1].values["transicao"] > 0 and "compassos tirados" in said[-1]
+    m.undo()
+    assert len([c for c in m.seq.clips if c.kind == tl.AUDIO]) == 1 and not m.can_undo()
+    # com In/Out marcado, a música vai do In ao Out
+    ed.canvas.inp, ed.canvas.outp = 48, 48 + 40 * FPS - 1
+    ctl.fit(music.id)
+    parts = sorted((c for c in m.seq.clips if c.kind == tl.AUDIO), key=lambda c: c.start)
+    assert parts[0].start == 48 and parts[-1].end == 48 + 40 * FPS
+    m.undo()
+    ed.canvas.inp = ed.canvas.outp = None
+
+
+def test_fit_music_refusals_and_the_simple_fade():
+    seq, music = _with_video(video_frames=6 * FPS)        # 6 s: menos que a introdução e o final juntos
+    m, ed = _editor(seq)
+    ctl = musica_ui.controller_for(ed.canvas)
+    ctl.beats["musica.wav"] = _grid(120)
+    asked, told = [], []
+    ctl.inform = told.append
+    ctl.ask = lambda text: asked.append(text) or False
+    ctl.fit(music.id)
+    assert asked and "introdução" in asked[-1] and m.seq.find(music.id).dur == 60 * FPS and not m.can_undo()
+    ctl.ask = lambda text: True
+    ctl.fit(music.id)
+    c = m.seq.find(music.id)
+    assert c.end == 6 * FPS and c.values["fade_out"] == 2.0
+    m.undo()
+    # batidas sem confiança e a música mais curta que o vídeo: só a mensagem
+    seq, music = _with_video(music_secs=20.0, video_frames=40 * FPS)
+    m.set_sequence(seq)
+    shaky = _grid(120, secs=20.0)
+    ctl.beats["musica.wav"] = batidas.Beats(shaky.times, 120.0, shaky.downbeats, 0.1)
+    ctl.fit(music.id)
+    assert told and "confiáveis" in told[-1] and m.seq.find(music.id).dur == 20 * FPS
+    # faixa travada: a ação nem fica disponível
+    m.seq.ensure_track(tl.AUDIO, 0)
+    m.seq.track(tl.AUDIO, 0).locked = True
+    menu = QMenu()
+    musica_ui.add_clip_actions(menu, ed.canvas, m.seq.find(music.id))
+    assert not _actions(menu)["fit_music"].isEnabled()
