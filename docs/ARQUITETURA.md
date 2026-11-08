@@ -49,6 +49,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
 42. [Look próprio de cada sequência](#42-look-próprio-de-cada-sequência)
+45. [Som de película](#45-som-de-película)
 
 ---
 
@@ -4388,3 +4389,120 @@ estado). A chave do look é o id da sequência ou `""` quando ela está sozinha.
   próprio mudou), `choose`. Lugares: a linha "Look de …" no topo do painel de ajustes (só com mais de uma sequência ou com a
   aberta tendo look próprio), o submenu *Look de película* da aba (`SequenceTabs.lookRequested`, `TabInfo.own_look`, o ponto
   na aba) e o da sequência na Mídia (`add_menu`). O aviso de `nested_note` aparece no painel do clipe e ao inserir.
+
+## 45. Som de película
+
+Frente P da 1.8 (#39, "Som de película (módulo)"). Uma seção nova do look, "som_pelicula" (`somf_*`, a última de
+`params.SECTIONS`), módulo Beta `som_pelicula` (grupo "pelicula", começa desligado e só esconde o cartão). É pós-processo
+do **som final**: nunca entra em `audiomix` (a mixagem e o cache por clipe da §43 não mudam) nem no plano da imagem.
+Testes: `tests/test_somfilme.py` (motor puro), `tests/test_somfilme_export.py` (exportação e prévia com o ffmpeg; dois
+casos na GPU) e `tests/som_pelicula_ui_cases.py` (janela).
+
+### 45.1 Parâmetros
+
+| Chave | Tipo | Padrão | |
+|---|---|---|---|
+| `somf_on` | liga/desliga | falso | chave da seção; desligado o som sai bit a bit igual |
+| `somf_trilha` | escolha | `auto` | `auto`, `otica_35`, `otica_16`, `magnetica_s8`, `otica_antiga` (opções novas só no fim) |
+| `somf_trilha_forca` | 0–1 | 1,0 | a curva em dB × força, a saturação, o mono e o chiado |
+| `somf_estalos` | 0–1 | 0,6 | estalos das emendas |
+| `somf_poeira` | 0–1 | 0,4 | cliques da poeira |
+| `somf_wow` | 0–1 | 0,5 | profundidade do wow e do flutter |
+| `somf_projetor` | 0–1 | 0,0 | projetor na sala |
+| `somf_sala` | 0–1 | 0,0 | reverberação da sala |
+| `somf_semente` | inteiro (avançado) | 19 | sorteios |
+
+Os valores só contam com `somf_on` (como os outros cartões), então os padrões não precisam ser zero. **Não animam**
+(`params` desmarca `animatable` da seção: o motor processa o som inteiro com um valor só). Nenhum registro de formato: ajuste
+novo cai no `ajustes_1_8` (§42.1). `modules.used_by` reconhece `somf_on`.
+
+### 45.2 O motor (`somfilme.py`, numpy)
+
+`process(amostras, taxa, valores, fps, amostra_inicial, eventos, before=)`. Ordem: mono (trilhas mono, × força) → wow e
+flutter → saturação da trilha (`_soft`, joelho por trilha) → chiado, ronco, poeira e estalos (estão na película, então
+passam pela curva) → curva de leitura (`track_filter`) → projetor (`_projector`) → sala (`room_ir`) → limite suave
+(`LIMIT_KNEE` 0,85, teto 0,98 ≈ −0,2 dBFS: um seno de −1 dBFS com tudo no máximo não satura).
+
+- **Determinismo.** Todo ruído vem do índice **absoluto** da amostra (amostra = tempo × taxa desde o quadro 0) e da
+  semente: `hash_array`/`vnoise_array` são o `_hash`/`_vnoise` do `look.py` vetorizados (os mesmos valores). Nada de `random`
+  nem relógio.
+- **Contrato do contexto (pré-roll).** Toda etapa tem memória finita e só olha o passado: o wow lê com atraso ≥
+  `BASE_DELAY` (10 amostras; a sinc de 16 pontos olha 8 à frente), a curva é um FIR de **fase mínima** (cepstro real, 4096
+  pontos, 85 ms; causal, sem atraso de grupo de um FIR de fase linear), a sala é um FIR de 0,85 s, os cliques são núcleos
+  curtos. `before` traz o som imediatamente antes do trecho (até `preroll_samples` = `PREROLL_S` 1,1 s; o que falta é
+  silêncio, que é o que o som inteiro tem antes do 0). Assim **um trecho dá as mesmas amostras que o mesmo pedaço do som
+  inteiro** (≤ 1e-6, só o arredondamento da FFT) e nada precisa de amostras depois do trecho (a exportação de um trecho não
+  tem o futuro). `process_wav` usa o mesmo contrato em blocos de `CHUNK_S` (memória limitada em som longo), lendo com
+  `audiomix.WavReader` e gravando PCM de 24 bits.
+- **Trilhas** (`TRACKS`, curva em dB interpolada no log da frequência). Fontes: curva da Academia (1938) — plana de 100 Hz a
+  1,6 kHz, −7 dB em 40 Hz, −10 dB em 5 kHz, −18 dB em 8 kHz (B. Florian, "Learning from History: Cinema Sound and EQ
+  Curves", Secrets of Home Theater and High Fidelity, jun. 2002; Encyclopaedia Britannica, "Academy Curve"); 16 mm ótico ~90
+  Hz a 6,5 kHz, sinal/ruído de 35 a 40 dB (SFU, notas de aula de som para cinema, "Optical Soundtrack" e "16mm film is
+  projected"); Super 8 magnético 80 Hz a 10 kHz a 18 qps e 12 kHz a 24 qps, ótico 80 Hz a 6 kHz (ficha do projetor Bauer T 190
+  ML e "Super 8 format standards", super8data/filmkorn.org); 35 mm ótico de área variável dos anos 70–80 ~40 Hz a 12 kHz
+  (aproximação). Chiado e ronco são níveis escolhidos dentro dessas relações sinal/ruído, não medidas. "Igual à bitola"
+  (`GAUGE_TRACK`): 16 mm/Super 16 → `otica_16`; Super 8/8 mm → `magnetica_s8`; o resto (35, 65, IMAX, nenhuma e as de foto) →
+  `otica_35`. Tudo sintetizado, sem amostras gravadas.
+- **Wow e flutter** (`wow_delay`). Atraso variável lido por sinc com janela de Hann (tabela de 1024 frações). A parte lenta
+  é `wow_curve` = o tremor vertical do quadro (`look.weave`, a mesma conta, sementes 103/104 e `tremor_vel`) com a parte de
+  cada quadro alisada pela curva do ruído de valor entre um quadro e o próximo: no instante do quadro N ela vale exatamente o
+  sorteio da imagem no quadro N (correlação com `u_shift` medida > 0,9 pela fase de um tom). Profundidade `WOW_S` × `weave`
+  da bitola × `somf_wow` (100%: ~0,2% eficaz no 35 mm, ~0,5% no Super 8). Mais o flutter da roda dentada: um seno na
+  frequência furos × fps (`PERFS`), 0,08% de afinação. **Decisão**: o som segue `look.weave` mesmo com o Projetor
+  desligado (é a mesma película correndo; a imagem só não mostra o tremor) — assim ligar o projetor não muda o som.
+- **Estalos** (`_pops`): clique de ruído preso à amostra (a primeira amostra é ±1 × força) e baque de 45–75 Hz, na amostra
+  `round(quadro / fps × taxa)`. **Poeira** (`_crackle`): no máximo um clique por célula de 2,5 ms, com probabilidade
+  `CRACKLE_RATE` × `somf_poeira` × (a *Poeira* da imagem com os Defeitos ligados, senão `DUST_BASE`). **Projetor**: um
+  clique de mecanismo por quadro projetado (`projection_fps`: o fps do vídeo, ou 18/24 com os rolos de Super 8), zumbido de
+  60 Hz com harmônicas e ventoinha (ruído pela curva `FAN_CURVE`), mono, −22 dB × `somf_projetor`. **Sala**: `room_ir`, L e
+  R diferentes, reflexões iniciais e cauda de 0,8 s nos graves e 0,35 s nos agudos, energia 1; seco × (1 − 0,3·sala) +
+  molhado × 0,5·sala.
+- **Custo**: ~20× o tempo real num núcleo (8 s de estéreo em ~0,35 s com tudo ligado; o wow é a metade).
+
+### 45.3 Eventos compartilhados com a imagem
+
+Refatoração do `look.py` sem mudar um bit (as referências de ouro passam):
+
+- `look.weave(t, quadro, vel)` → (x, y, rotação) de −1 a 1: `build_plan` multiplica pelos ajustes e pela bitola.
+- `look.emenda_frame(v, época, fps)`: o quadro da emenda dos Defeitos na época de 2,5 s (ou None); `build_plan` usa nos dois
+  lugares (o pulo e o `u_splice`). `look.emenda_frames(v, fps, a, b)`: os quadros de [a, b) em que a imagem mostra a emenda
+  (confere a época do quadro como o `build_plan`, inclusive o arredondamento a 25 e 29,97 fps).
+- `montagem_filme.splice_visible(v, corte)` (a fita aparece? `apply` usa) e `montagem_filme.splice_frames(seq, v, fps, a, b)`:
+  o primeiro quadro de cada corte pela mesma conta de `edit_info`, com a fita visível.
+- `somfilme.events_for(v, fps, quadros, seq)` junta os dois. Os testes comparam com os `u_splice` de `build_plan` e da
+  `Recipe` quadro a quadro.
+
+Sincronia: os estalos ficam no quadro da imagem (decisão da frente). O avanço real do som no projetor (21 quadros no 35 mm
+ótico, 26 no 16 mm, 18 no Super 8 magnético) só é citado na dica e no EFEITOS.md.
+
+O fps dos eventos é o da sequência ou do arquivo (o da prévia). Exportar com outra taxa troca os quadros da imagem para a
+taxa nova, mas o som continua no tempo da fonte: o estalo pode ficar até um quadro da saída longe da emenda redesenhada.
+As chaves de animação do look não entram no som (o motor lê os valores fixos do look).
+
+### 45.4 Onde liga
+
+- **Exportação** (`export._film_sound`, chamado em `run_job` logo depois da mixagem): com `somfilme.film_values(job.values,
+  no_effects)` (nada com *Sem efeitos*; o modo Edição sem película já exporta o preset "original", desligado) e áudio na saída,
+  `somfilme.export_sound` devolve um WAV novo que vira o `mix_path` do trabalho (`audio_codec` "pcm_s24le"). Montagem: processa
+  a mixagem do trecho, com a mixagem de ~1,1 s antes (`audiomix.render_mix(seq, …, início − pré, início)`) como `before`.
+  Arquivo direto: decodifica o trecho com o contexto antes (`decode_range`, as mesmas conversões de `decode_wav`) e pula o
+  contexto (`skip`). Por isso **o som do arquivo nunca é copiado** com o som de película: é recodificado do WAV (no MOV/MKV o
+  PCM do WAV pode ser copiado). Volume alvo e tamanho alvo medem o WAV processado. Desligado, `_film_sound` devolve None e o
+  comando é o de sempre. O terminal (`pelicula-cli exportar`) passa pelo mesmo `run_job`.
+- **Prévia** (`ui/som_pelicula_ui.SomPeliculaUI`, `MainWindow.som_pelicula`): `MainWindow._set_audio` passa por `route`, que
+  troca o som pedido (a mixagem da montagem ou o arquivo) pelo WAV processado por `process_wav` a partir da amostra 0 (o
+  arquivo é decodificado uma vez por `audiomix.decode_wav` e guardado enquanto caminho + data são os mesmos). A chave inclui o
+  caminho do som cru, `sound_key` dos valores, o fps e os eventos; então mudar um `somf_*`, a bitola, as emendas ou um corte da
+  V1 refaz **só o processamento** (a mixagem e o `mix_key` da janela não mudam). `store.changed`, `model.changed` e
+  `_update_label_proc` (modo, *Com película*, *Sem efeitos*) agendam `refresh` (350 ms). Enquanto processa, toca o som cru;
+  pronto, chega por sinal e `_set_audio` troca sem parar a reprodução. O medidor lê o WAV processado direto (tipo "seq").
+- **Sequência aninhada**: o som de dentro entra cru (o WAV de `nested_mix_path` nunca passa por aqui); o som de película dela só
+  vale aberta ou exportada, como o look (§42.2).
+- **Fora**: plugin do DaVinci e OpenFX (nenhum controle `somf_*`; `resolve`/`ofx` listam controles à mão), LUT, "Salvar quadro"
+  e o plano da imagem (`build_plan` não lê a seção: `test_image_lut_and_plugin_ignore_the_section`).
+
+### 45.5 Para a onda B
+
+Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
+preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
+de 48 kHz com o contrato do contexto (`before`).

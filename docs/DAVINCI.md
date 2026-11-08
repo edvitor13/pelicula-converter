@@ -355,3 +355,4 @@ Os nomes de filmes são aproximações artísticas, sem relação com os fabrica
     nos atributos do clipe e o risco num efeito de brilho);
   - *Data impressa* (desenhada na luz da cena antes da película: use um texto no Fusion antes dos nós do
     Película Converter).
+- **Som de película** (1.8): é som, e o plugin só mexe na imagem; os ajustes `somf_*` não viram controles do plugin.

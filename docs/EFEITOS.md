@@ -890,3 +890,43 @@ película* fica desligado):
 
 No plugin do DaVinci os quatro vêm no *Preset* do OpenFX e como nós DCTL; os dois últimos dependem da película
 vencida e da pré-exposição, que só o nó **Laboratorio** tem (o nó *Cor* desses presets sai sem elas).
+
+---
+
+## Som de película (1.8, Beta)
+
+*Trilha ótica ou magnética, estalos, poeira e projetor.* Chave: liga. Recurso **Som de película** em *Configurações ›
+Recursos* (Beta: começa desligado e só esconde o cartão; um projeto que usa o som de película sai igual com o recurso
+desligado). É o único cartão do look que muda o **som**: a imagem, os LUTs, "Salvar quadro" e o plugin do DaVinci não
+mudam nada.
+
+Uma cópia de cinema levava o som ao lado das imagens. Na **trilha ótica** uma faixa de luz e sombra, lida por uma
+lâmpada e uma célula, vira o som: a película limitava os agudos, a faixa saturava perto do volume máximo e o próprio
+grão da película virava chiado. No **Super 8 sonoro** o som ficava numa **tarja magnética** colada na beira, como uma
+fita cassete. Tudo passava pelo projetor, com a película correndo (nunca com velocidade perfeita), as emendas batendo
+na leitura e a poeira crepitando.
+
+| Ajuste | Faixa | Padrão | O que imita |
+|---|---|---|---|
+| **Trilha sonora** | Igual à bitola, Ótica 35 mm, Ótica 16 mm, Magnética Super 8, Ótica antiga (anos 30) | Igual à bitola | O tipo de trilha. *Ótica 35 mm*: de cerca de 40 Hz a 12 kHz, fundo baixo, estéreo. *Ótica 16 mm*: de 90 Hz a ~6,5 kHz, mono, chiado alto (relação sinal/ruído de 35 a 40 dB). *Magnética Super 8*: de ~80 Hz a 10–12 kHz, mono, chiado de fita. *Ótica antiga*: a **curva da Academia** de 1938 (plana de 100 Hz a 1,6 kHz, −10 dB em 5 kHz, −18 dB em 8 kHz), feita para esconder o chiado das trilhas da época, mono. *Igual à bitola*: 35 mm, 65 mm, IMAX e as de foto usam a de 35 mm; 16 mm e Super 16, a de 16 mm; Super 8 e 8 mm, a magnética. |
+| **Força da trilha** | 0–100% | 100% | Quanto da trilha vale: a faixa de frequências (em dB, proporcional), a saturação perto do máximo, o som em mono e o chiado. 0% = o som original, só com os estalos, a poeira e o resto. |
+| **Estalos das emendas** | 0–100% | 60% | Um estalo seco com um baque grave em cada emenda, **no mesmo quadro** em que a imagem mostra a emenda: a *Emenda* dos Defeitos da película e a fita dos cortes de *A montagem na película*. |
+| **Poeira na trilha** | 0–100% | 40% | Cliques e crepitação da sujeira na faixa do som. Com a *Poeira* dos Defeitos ligada, a quantidade dela também conta. |
+| **Wow e flutter** | 0–100% | 50% | A afinação oscila devagar (wow) e depressa (flutter). A oscilação lenta segue o **mesmo tremor do quadro** do Projetor (com a *Velocidade do tremor*), então o som balança quando a imagem balança, e cresce com a bitola: a 100%, cerca de 0,2% no 35 mm e 0,5% no Super 8. O flutter rápido vem da roda dentada (um furo de cada vez). |
+| **Projetor na sala** | 0–100% | 0% | O barulho do projetor junto do filme: o mecanismo que puxa cada quadro (na taxa do vídeo, ou 18/24 qps com os *Rolos de Super 8*), o zumbido do motor e a ventoinha da lâmpada. |
+| **Sala de cinema** | 0–100% | 0% | A reverberação de uma sala pequena de cinema (cerca de 0,8 s). |
+| **Semente** | 0–9999 | 19 | Avançado. Troca os sorteios (poeira, estalos, sala) mantendo o resto. |
+
+**Sincronia.** No projetor de verdade a leitura do som fica **antes** da janela da imagem — 21 quadros no 35 mm
+ótico, 26 no 16 mm ótico, 18 no Super 8 magnético —, porque ali a película precisa correr lisa, e a janela anda aos
+saltos. Por isso uma emenda estalava um pouco antes de pular na tela. Aqui os estalos ficam **no quadro** da emenda:
+um atraso de quase um segundo pareceria defeito do app.
+
+**Onde vale.** O som de película processa o **som final**: a mixagem da montagem (modo Edição, ou a montagem como
+entrada do modo Película) ou o som do arquivo (modo Película com o arquivo direto). A prévia toca e mede o mesmo som
+que a exportação grava; enquanto o som é processado (alguns segundos num arquivo longo), a prévia toca o som de
+sempre. Com o som de película ligado o som do arquivo nunca é copiado na exportação: ele é recodificado no formato do
+recipiente. No modo Edição sem *Com película* e com *Desligar todos os efeitos*, o som sai como sempre, igual à
+imagem. Uma sequência dentro de outra entra com o som cru: o som de película dela só vale quando ela é aberta ou
+exportada (como o look). Tudo é sintetizado, sem amostras de som de terceiros. O som nunca passa de −0,2 dBFS
+(limite suave). Os ajustes do som de película não animam (um valor só para o som inteiro).
