@@ -1014,7 +1014,7 @@ class ExportDialog(QDialog):
         for k, label, s in self.presets:
             if k == key:
                 self._apply(s)
-                self.qdesc.setText(_describe(k))
+                self._quality_text(k)
                 return
         if not self.platform_id():  # "Nenhuma" no ajuste livre: tira o que a plataforma tinha posto
             s, neutral = self.settings(), export.ExportSettings()
@@ -1118,6 +1118,20 @@ class ExportDialog(QDialog):
         text = export.film_sound_note(s, self.info, self.values, self.sequence)
         self.audio_note.setText(text)
         self.form.setRowVisible(self.audio_note, bool(text))
+        if self.quality.currentData() == "original":   # a linha do áudio fica escondida: o aviso vai na descrição
+            self._quality_text("original", text)
+
+    def _quality_text(self, key: str, film_note: str | None = None) -> None:
+        """A descrição da qualidade escolhida. "Original" diz que o áudio é copiado; com o som de película ligado ele é
+        recodificado, e a descrição diz isso no lugar (`film_sound_note`)."""
+        if key == "original":
+            if film_note is None:
+                film_note = export.film_sound_note(self.settings(), self.info, self.values, self.sequence)
+            if film_note:
+                self.qdesc.setText(_("Mesmo codec, resolução, quadros por segundo e profundidade de cor do arquivo "
+                                     "original, com qualidade alta para não perder detalhe.") + " " + film_note)
+                return
+        self.qdesc.setText(_describe(key))
 
     def _warnings(self, s: export.ExportSettings, dur: float) -> None:
         """Avisos: limites da plataforma (duração, tamanho estimado), duas passadas e som recodificado."""

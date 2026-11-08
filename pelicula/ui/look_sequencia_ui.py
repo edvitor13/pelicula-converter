@@ -251,6 +251,9 @@ class SeqLookUI(QObject):
                                 "\"Próprio\" começa como cópia dele e muda só aqui (por exemplo, um corte com outra "
                                 "película). Dentro de outra sequência, ela entra sem look e recebe o daquela."))
         self.combo.activated.connect(self._combo_chosen)
+        # A caixa cabe o item mais longo no idioma em uso ("Próprio desta sequência" cortava em 14 letras); o rótulo
+        # ao lado é que se encurta (com o nome inteiro na dica).
+        self.combo.setMinimumContentsLength(max(len(self.combo.itemText(i)) for i in range(self.combo.count())))
         h.addWidget(self.combo)
         panel = w.preset_combo.parentWidget()
         lay = panel.layout() if panel is not None else None

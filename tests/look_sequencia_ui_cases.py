@@ -292,3 +292,15 @@ def test_a_clip_of_a_sequence_with_its_own_look_warns_that_it_enters_without_it(
     pump()
     assert "entra sem look" in win.inspector.info.text()
     assert win.seq_look.owner is None and win.preset_id == "vision3_500t"  # a de fora segue o projeto
+
+
+def test_the_look_choice_box_fits_its_longest_item(win, monkeypatch):
+    """"Próprio desta sequência" cabia em 14 letras e saía cortado ("Próprio desta sequênci"): a caixa agora tem a
+    largura mínima do item mais longo; quem se encurta é o rótulo "Look de …" (o nome inteiro fica na dica)."""
+    two_tabs(win, monkeypatch)
+    ui = win.seq_look
+    ui.refresh()
+    combo = ui.combo
+    longest = max(combo.fontMetrics().horizontalAdvance(combo.itemText(i)) for i in range(combo.count()))
+    assert combo.minimumContentsLength() >= len("Próprio desta sequência")
+    assert combo.minimumSizeHint().width() > longest

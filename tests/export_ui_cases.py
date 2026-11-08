@@ -313,6 +313,25 @@ def test_safe_area_is_drawn_only_on_screen():
 
 
 # ------------------------------------------------------------------ 1.8: som de película com "Copiar original"
+def test_original_quality_says_the_film_sound_reencodes_the_audio():
+    """Na qualidade "Original" a linha do áudio fica escondida e a descrição dizia "O áudio é copiado sem recodificar"
+    mesmo com o som de película ligado: agora a descrição diz em que formato o som sai. Sem o som de película, o texto
+    de sempre."""
+    from pelicula import params
+    on, off = params.sanitize({"somf_on": True}), params.sanitize({"somf_on": False})
+    dlg = dialog(quality="original", values=on)
+    assert dlg.settings().audio == "copy"
+    assert "copiado sem recodificar" not in dlg.qdesc.text()
+    assert dlg.qdesc.text().endswith("O som de película está ligado: o som será recodificado em AAC 320 kb/s.")
+    plain = dialog(quality="original", values=off)
+    assert plain.qdesc.text().endswith("O áudio é copiado sem recodificar.")
+    plain.values = on      # outro look (sequência com look próprio): a descrição acompanha
+    plain._summary()
+    assert "será recodificado" in plain.qdesc.text()
+    plain.quality.setCurrentIndex(plain.quality.findData("mp4"))
+    assert "recodificado" not in plain.qdesc.text()
+
+
 def test_film_sound_note_next_to_the_audio_choice():
     """Com "Copiar original" e o som de película do look ligado, a nota ao lado do áudio diz em que formato o som sai;
     some com outra escolha de áudio, sem som, com o som de película desligado e com "Desligar todos os efeitos"."""

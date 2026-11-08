@@ -1538,6 +1538,7 @@
   "Menos zoom (−). A roda do mouse também dá zoom.": "Zoom out (−). The mouse wheel zooms too.",
   "Mensagens": "Messaging",
   "Mesclagem": "Blend mode",
+  "Mesmo codec, resolução, quadros por segundo e profundidade de cor do arquivo original, com qualidade alta para não perder detalhe.": "Same codec, resolution, frame rate and color depth as the original file, at high quality so no detail is lost.",
   "Mesmo codec, resolução, quadros por segundo e profundidade de cor do arquivo original, com qualidade alta para não perder detalhe. O áudio é copiado sem recodificar.": "Same codec, resolution, frame rate and color depth as the original file, at high quality so no detail is lost. The audio is copied without re-encoding.",
   "Meu {nome}": "My {nome}",
   "Meus LUTs": "My LUTs",
