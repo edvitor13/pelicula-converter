@@ -39,7 +39,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media, timeline
+from . import media, somlimpo, timeline
 from .i18n import _
 
 RATE = 48000
@@ -174,6 +174,7 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             out[-1]["pieces"] = m.pieces(-pre, c.dur / fps + post)
             out[-1]["reverse"] = c.reverse
             out[-1]["length"] = src.length
+        somlimpo.clean_input(out[-1], src.length if src is not None else 0.0)  # 1.8: ruído aprendido (§44)
     return out
 
 
@@ -254,6 +255,7 @@ def _chain_tail(seg: dict) -> list[str]:
         f.append(volume_envelope(vk, seg["pre"], seg["fps"], seg["key_off"], seg["track_db"]))
     elif abs(seg["gain_db"]) > 1e-6:
         f.append(f"volume={_fmt(seg['gain_db'])}dB")
+    f += somlimpo.hum_filters(v)  # 1.8: zumbido da rede (§44)
     if v["voz"]:
         f += ["highpass=f=90", "acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2"]
     if abs(v["graves"]) > 1e-6:
@@ -264,6 +266,7 @@ def _chain_tail(seg: dict) -> list[str]:
         f.append(f"treble=g={_fmt(v['agudos'])}:f=5000")
     if v["reducao_ruido"] > 0:
         f.append(f"afftdn=nr={_fmt(6 + 30 * v['reducao_ruido'])}:nf=-40")
+    f += somlimpo.after_eq_filters(v)  # 1.8: cortar graves/agudos e nivelar a voz (§44)
     if v["normalizar"]:
         f += ["loudnorm=I=-16:TP=-1.5:LRA=11", f"aresample={RATE}"]
     bal = float(v["balanco"])
@@ -610,7 +613,7 @@ def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threadi
         if inner is not None:
             wanted[seg["path"]] = inner
     if not wanted:
-        return True
+        return somlimpo.render_inputs(segments(seq, start, end), cancel, perf)  # 1.8: entradas limpas (§44)
     nested_dir().mkdir(parents=True, exist_ok=True)
     keep = {nested_mix_path(s) for root in wanted.values() for s in root.closure()}
     _prune_nested(keep)
@@ -630,7 +633,7 @@ def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threadi
             os.replace(part, path)
         finally:
             _remove(part)
-    return True
+    return somlimpo.render_inputs(segments(seq, start, end), cancel, perf)  # 1.8: depois das aninhadas (§44)
 
 
 # ------------------------------------------------------------------ forma de onda

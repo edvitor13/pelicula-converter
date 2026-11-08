@@ -51,6 +51,7 @@ from . import filme_ui
 from . import geometria_ui, luz_fotometro_ui
 from . import filtro_ajustes
 from . import look_sequencia_ui, pastas_ui
+from . import somlimpo_ui
 from . import sequencias_ui
 from . import som_pelicula_ui
 from . import aninhar_ui
@@ -392,6 +393,7 @@ class MainWindow(QMainWindow):
         self.nest_ui = aninhar_ui.install(self)  # 1.7: aninhar, desaninhar e abrir a sequência de um clipe (`ui/aninhar_ui.py`)
         self.seq_look = look_sequencia_ui.install(self)  # 1.8: look próprio de cada sequência (`ui/look_sequencia_ui.py`)
         self.som_pelicula = som_pelicula_ui.install(self)  # 1.8: som de película na prévia (`ui/som_pelicula_ui.py`)
+        self.som_sync = somlimpo_ui.install(self)  # 1.8: sincronizar pelo som (`ui/somlimpo_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)

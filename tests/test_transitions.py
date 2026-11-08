@@ -50,7 +50,7 @@ def test_old_transition_choices_keep_their_order():
     assert [v for v, _l in p["saida_tipo"].choices][4:] == list(editparams.EXTRA_OUT)
     assert set(editparams.EXTRA_TWO_CLIP) <= set(editparams.EXTRA_IN)
     for key in editparams.SPARSE_KEYS:
-        assert key.isascii() and key in p
+        assert key.isascii() and (key in p or key in editparams.AUDIO.params)  # 1.8: ajustes de som também
 
 
 def test_clip_shader_text_is_the_one_of_the_base():

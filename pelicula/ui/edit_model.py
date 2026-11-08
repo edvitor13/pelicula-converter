@@ -295,6 +295,19 @@ class TimelineModel(QObject):
             self._done("structure")
         return delta
 
+    def move_groups(self, moves: list[tuple[str, int]]) -> list[int]:
+        """Move cada clipe (e os ligados) pelo próprio deslocamento, todos num passo só de desfazer (1.8: sincronizar
+        pelo som, `sincronia.py`). Devolve o deslocamento aplicado a cada um (menor se esbarrou no começo)."""
+        before = self.history._dump(self.seq)
+        done = []
+        with self.seq.keep_main():
+            for cid, delta in moves:
+                c = self.seq.find(cid)
+                done.append(self.seq.move_many([cid], int(delta), 0, c.kind) if c is not None and delta else 0)
+        if self.history._dump(self.seq) != before:
+            self._done("structure")
+        return done
+
     def trim_start(self, cid: str, frame: int, solo: bool = False) -> int:
         """Apara o começo; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
         seq = self.seq

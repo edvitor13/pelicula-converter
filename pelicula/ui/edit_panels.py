@@ -27,6 +27,7 @@ THUMB = QSize(72, 42)
 # 1.6: as seções de cor novas (acrescentadas no fim de `editparams.VIDEO_SECTIONS`) aparecem depois destas.
 DISPLAY_AFTER = {"pele": "cor", "alvo": "hsl", "degrade": "efeitos", "manivela": "tempo",
                  "luz_copiadora": "camera"}  # 1.6: manivela; luz da copiadora por plano (`luz_plano.py`)
+DISPLAY_AFTER["limpar"] = "eq"  # 1.8: limpeza do som (`somlimpo.py`)
 
 
 def display_order(sections):
@@ -383,6 +384,8 @@ class ClipInspector(QWidget):
         self.transitions = transitions_ui.InspectorTransitions(self.vstore, self.vcards, model)
         from . import geometria_ui  # 1.7: taxa manual e aviso do desespremer no cartão de enquadramento
         self.geometry = geometria_ui.InspectorGeometry(self.vstore, self.vcards)
+        from . import somlimpo_ui  # 1.8: aprender o ruído, zumbido e predefinições do som (`ui/somlimpo_ui.py`)
+        self.limpeza = somlimpo_ui.InspectorSound(self)
         self.playhead = 0
         target = ClipKeys(model, lambda: self.clip_id)
         self.vkeys = KeyRows(self.vstore, target, self.vcards, self)
