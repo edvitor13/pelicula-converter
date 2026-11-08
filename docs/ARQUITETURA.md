@@ -4757,7 +4757,7 @@ Qt) e `pelicula/ui/narracao_ui.py`.
 - **Formato do arquivo**: 48 kHz, 24 bits, estéreo (`somcache.WavWriter`, o mesmo WAV de todo o som da montagem).
 - **Atraso do microfone** (`narracao/atraso_ms`): o começo do arquivo é cortado por esse tempo, **à amostra** (em vez de
   adiantar o clipe em quadros): não depende do fps nem esbarra no quadro 0, e o clipe continua começando exatamente onde a
-  gravação começou. Para medir: grave uma palma junto com o bipe de **Novo ▸ Contagem** com a prévia tocando e veja na forma
+  gravação começou. Para medir: grave uma palma junto com o bipe de **Novo ▸ Ponta com contagem** com a prévia tocando e veja na forma
   de onda quantos milissegundos a palma ficou depois do bipe; digite esse valor.
 - **Sem módulo.** É parte da linha do tempo (como o mixer e o som ao arrastar o cursor), tem o próprio botão e não esconde
   nada que a renderização use.

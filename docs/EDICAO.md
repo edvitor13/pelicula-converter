@@ -787,7 +787,7 @@ O botão do **microfone** na barra da linha do tempo (ou **Ctrl+Shift+R**) abre 
 - **Tocar a montagem enquanto grava** (ligada): a prévia toca a partir de onde a gravação começa. **Use fones de ouvido**: o som
   dos alto-falantes entra no microfone.
 - **Compensar o atraso do microfone** (0 ms): o som do microfone chega um pouco depois de acontecer, e a prévia também demora
-  a começar. Para medir, ponha o cursor num bipe (**Novo ▸ Contagem** tem um na ponta), grave uma palma junto com ele e veja na
+  a começar. Para medir, ponha o cursor num bipe (**Novo ▸ Ponta com contagem** tem um), grave uma palma junto com ele e veja na
   forma de onda quantos milissegundos a palma ficou depois; digite esse valor. O começo da gravação é cortado por ele.
 - **Gravar / Parar**: a gravação começa no cursor, ou na **entrada** (I) se ela estiver marcada, e para sozinha na **saída**
   (O). Ao parar, o som entra na **Mídia** e na linha do tempo, numa faixa de áudio **livre** ali (uma faixa **Narração** nova se

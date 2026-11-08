@@ -245,7 +245,7 @@ class NarrationPanel(QDialog):
         self.latency.setSuffix(" ms")
         self.latency.setToolTip(_(
             "O som do microfone chega alguns milissegundos depois de acontecer, e a prévia também demora a começar: a fala "
-            "grava atrasada em relação às imagens. Para medir, ponha o cursor num bipe (Novo ▸ Contagem tem um) ou numa "
+            "grava atrasada em relação às imagens. Para medir, ponha o cursor num bipe (Novo ▸ Ponta com contagem tem um) ou numa "
             "batida, grave uma palma junto com ele, e veja na forma de onda quantos milissegundos a palma ficou depois. "
             "Digite esse valor aqui: o começo da gravação é cortado por ele, ao milésimo de segundo."))
         lat_row = QFormLayout()
