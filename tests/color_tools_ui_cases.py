@@ -127,8 +127,10 @@ def test_new_cards_sit_next_to_the_similar_ones():
     sec = [s.key for s in editparams.VIDEO_SECTIONS]
     i = sec.index("pele")  # 1.6, frente E: a manivela vem depois, também com lugar próprio no inspetor
     assert sec[i:i + 3] == ["pele", "alvo", "degrade"]
+    vfx_sections = {s.key for s in editparams.VIDEO_SECTIONS[editparams._N_BASE:]}  # 1.9: cartões postos pelo vfx_ui
     assert [s.key for s in edit_panels.display_order(editparams.VIDEO_SECTIONS)
-            if s.key not in edit_panels.DISPLAY_AFTER] == [s.key for s in editparams.VIDEO_SECTIONS[:i]]
+            if s.key not in edit_panels.DISPLAY_AFTER and s.key not in vfx_sections] == [
+        s.key for s in editparams.VIDEO_SECTIONS[:i]]
 
 
 # ------------------------------------------------------------------ janela

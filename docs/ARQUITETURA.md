@@ -5317,7 +5317,7 @@ Reservada para a frente F4 (efeitos com `order` 400 a 700; bloco `# 1.9 F4`).
 
 Três efeitos de clipe que leem o tempo do arquivo, em `pelicula/tempo_imagem.py` (sem Qt nem GPU), módulo Beta
 `tempo_imagem` (grupo "efeitos_visuais"), seção `tempo_imagem` do bloco `# 1.9 F5` de `editparams.py` e o cartão de
-`ui/tempo_imagem_ui.py` (ligado por `vfx_ui.FRONT_UIS`, depois do cartão *Velocidade*). Nada novo em `clip_uniforms`, no
+`ui/tempo_imagem_ui.py` (ligado por `vfx_ui.FRONT_UIS`, depois dos cartões *Velocidade* e *Manivela*). Nada novo em `clip_uniforms`, no
 `CLIP` nem nos FEATURES: os ajustes vão pelo retrato da 1.8 (`ajustes_clipe_1_9`) e a análise por `Source.analysis`
 (`analise_fonte`).
 

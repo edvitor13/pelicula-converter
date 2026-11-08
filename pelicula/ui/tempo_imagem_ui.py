@@ -26,7 +26,7 @@ class TempoImagemUI:
         self.vfxui = vfxui
         self.win = vfxui.win
         self.jobs: dict[str, jobs.Job] = {}       # caminho do arquivo → análise rodando
-        self.card = vfxui.add_section(ti.SECTION, ti.MODULE, after="tempo")
+        self.card = vfxui.add_section(ti.SECTION, ti.MODULE, after="manivela")  # depois de Velocidade e Manivela
         self.btn = QPushButton(_("Analisar"))
         self.btn.setObjectName("deflicker_analisar")
         self.btn.setToolTip(_("Mede o brilho de cada quadro do arquivo deste clipe (para o deflicker). Roda em segundo "

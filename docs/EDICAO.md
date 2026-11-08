@@ -517,7 +517,7 @@ duração e o Shift+F usa a última escolhida). O quadro parado leva a cor e o e
 
 ### Tempo da imagem: deflicker, ruído temporal e mistura de quadros (1.9, Beta)
 
-O cartão **Tempo da imagem** do clipe (logo depois de *Velocidade*) tem três efeitos que olham os quadros vizinhos do
+O cartão **Tempo da imagem** do clipe (depois de *Velocidade* e da *Manivela*) tem três efeitos que olham os quadros vizinhos do
 vídeo. Ele aparece com o recurso **Tempo da imagem** (Beta, grupo **Efeitos visuais** em Configurações › Recursos),
 desligado no começo; desligá-lo só esconde o cartão (um projeto que já usa os efeitos sai igual).
 

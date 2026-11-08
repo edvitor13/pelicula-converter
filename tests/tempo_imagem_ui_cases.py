@@ -1,5 +1,5 @@
 """Casos da interface do tempo da imagem da 1.9 (frente F5, ARQUITETURA §53): o cartão "Tempo da imagem" do inspetor
-segue o módulo Beta "tempo_imagem", fica depois do cartão Velocidade, e o botão Analisar do deflicker roda na fila,
+segue o módulo Beta "tempo_imagem", fica depois dos cartões Velocidade e Manivela, e o botão Analisar do deflicker roda na fila,
 guarda a análise na fonte (fora do desfazer) e a linha diz o estado (sem arquivo, sem análise, pronta, arquivo mudado).
 
 Rodados por test_tempo_imagem_ui.py num subprocesso offscreen (via `uicases.run_cases`). Este arquivo não é coletado
@@ -77,7 +77,7 @@ def ui(win):
     return win.vfx_ui.fronts["tempo_imagem_ui"]
 
 
-def test_the_card_follows_the_module_and_comes_after_speed(win):
+def test_the_card_follows_the_module_and_comes_after_speed_and_crank(win):
     assert not modules.is_enabled(win.settings, ti.MODULE)
     card = ui(win).card
     assert card.section.key == ti.SECTION and card.isHidden()
@@ -85,8 +85,8 @@ def test_the_card_follows_the_module_and_comes_after_speed(win):
     load(win, tl.Source.virtual("cor", 320, 180, "24/1", data={"cor": "#336699"}))
     assert card.isVisibleTo(win.inspector)
     lay = card.parentWidget().layout()
-    speed = win.vfx_ui.card("tempo")
-    assert lay.indexOf(card) == lay.indexOf(speed) + 1
+    crank = win.vfx_ui.card("manivela")  # Velocidade, Manivela (1.6, logo depois) e este
+    assert lay.indexOf(card) == lay.indexOf(crank) + 1 == lay.indexOf(win.vfx_ui.card("tempo")) + 2
     assert win.vfx_ui.module_tools()[ti.MODULE] == [card]
     keys = [r.param.key for r in card.rows]
     assert keys == ["deflicker", "deflicker_janela", "ruido_temporal", "ruido_temporal_quadros", "mistura_quadros"]
