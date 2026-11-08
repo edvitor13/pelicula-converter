@@ -511,6 +511,14 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawArc(QRectF(2.5, 9, 7, 8), 100 * 16, 160 * 16)
         p.drawArc(QRectF(14.5, 9, 7, 8), -80 * 16, 160 * 16)
+    elif name == "beats":
+        # 1.8, ímã nas batidas: as marcas das batidas (o começo do compasso mais alto) sob um ímã pequeno.
+        _pen(p, c)
+        for x, top in ((4, 13), (9, 17), (14, 17), (19, 17)):
+            p.drawLine(QPointF(x, top), QPointF(x, 21))
+        p.drawArc(QRectF(8, 2.5, 9, 9), 0, -180 * 16)
+        p.drawLine(QPointF(8, 7), QPointF(8, 3))
+        p.drawLine(QPointF(17, 7), QPointF(17, 3))
     else:
         _draw_components(name, p, c)
 

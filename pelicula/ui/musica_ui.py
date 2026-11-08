@@ -13,10 +13,11 @@ janela (testes da linha do tempo sozinha), `controller_for` prende um controlado
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QProgressBar, QToolButton, QWidget
 
-from .. import batidas, jobs
+from .. import batidas, jobs, musica
 from ..i18n import _, fmt_decimal
 from ..timeline import AUDIO
 from . import prefs
@@ -24,7 +25,10 @@ from .job_bridge import bridge
 
 DETECT_KEY = "detectar_batidas"
 PREF_AUTO = "musica/batidas_auto"        # "true"/"false"; sem valor = ligado
+PREF_SNAP = "musica/ima_batidas"         # "true"/"false"; sem valor = ligado (só vale com o ímã ligado)
 AUTO_MIN_S = 20.0                        # clipe de música mais longo que isto é analisado sozinho
+TICK_PX, TICK_DOWN_PX = 4, 8             # altura das marcas das batidas e dos começos de compasso
+TICK_MIN_PX = 4                          # marcas mais juntas que isto não são desenhadas
 
 
 def music_path(seq, clip) -> str | None:
@@ -49,9 +53,10 @@ class MusicUI(QObject):
     message = Signal(str)
     beatsChanged = Signal()
 
-    def __init__(self, model, canvas, parent=None):
+    def __init__(self, model, canvas, parent=None, auto: bool = True):
         super().__init__(parent)
         self.model = model
+        self.auto_allowed = auto          # sem a janela (testes da linha do tempo sozinha) nada é analisado sozinho
         self.canvas = canvas
         self.beats: dict[str, batidas.Beats] = {}
         self.jobs: dict[str, jobs.Job] = {}
@@ -80,7 +85,7 @@ class MusicUI(QObject):
     # ------------------------------------------------------------ batidas
     @property
     def auto(self) -> bool:
-        return str(prefs.settings().value(PREF_AUTO, "true")) != "false"
+        return self.auto_allowed and str(prefs.settings().value(PREF_AUTO, "true")) != "false"
 
     def beats_for(self, path: str | None) -> batidas.Beats | None:
         if not path:
@@ -168,13 +173,78 @@ class MusicUI(QObject):
         return text + " — " + _("compassos de 4 estimados")
 
 
+# ------------------------------------------------------------------ marcas das batidas e ímã
+def tick_marks(canvas, clip) -> list[tuple[float, bool]]:
+    """[(x, começo de compasso)] das marcas que o clipe mostra agora: todas as batidas, só os compassos se as batidas
+    ficariam a menos de `TICK_MIN_PX` uma da outra, nenhuma se nem os compassos cabem."""
+    ctl = controller_for(canvas)
+    b = ctl.beats_for(music_path(canvas.model.seq, clip))
+    if b is None or b.bpm <= 0:
+        return []
+    seq = canvas.model.seq
+    px_beat = 60.0 / b.bpm * seq.fps / max(clip.speed, 1e-9) * canvas.ppf
+    if px_beat * batidas.BAR < TICK_MIN_PX:
+        return []
+    only_downs = px_beat < TICK_MIN_PX
+    return [(canvas.frame_to_x(f), down) for f, down in musica.beat_frames(seq, clip, b) if down or not only_downs]
+
+
+def paint_beats(canvas, p: QPainter, clip, r: QRectF) -> None:
+    """Marcas das batidas no pé do clipe de som (o começo do compasso mais alto e mais claro). Gancho de
+    `TimelineCanvas._paint_clip`, já recortado no retângulo do clipe."""
+    marks = tick_marks(canvas, clip)
+    if not marks:
+        return
+    beat = QPen(QColor(255, 246, 232, 95), 1)
+    down = QPen(QColor(255, 246, 232, 210), 1.4)
+    bottom = r.bottom() - 2
+    for x, is_down in marks:
+        if x < r.left() or x > r.right():
+            continue
+        p.setPen(down if is_down else beat)
+        p.drawLine(QPointF(x, bottom - (TICK_DOWN_PX if is_down else TICK_PX)), QPointF(x, bottom))
+
+
+def beat_snap_on(canvas) -> bool:
+    return bool(getattr(canvas, "beat_snap", True))
+
+
+def snap_points(canvas, exclude) -> set[int]:
+    """Gancho de `TimelineCanvas.snap_points`: os quadros das batidas das músicas (menos as que estão sendo
+    arrastadas), com "Ímã nas batidas" ligado."""
+    if not beat_snap_on(canvas):
+        return set()
+    ctl = controller_for(canvas)
+    return musica.snap_frames(canvas.model.seq, ctl.beats_for, exclude)
+
+
+def snap_button(editor) -> QToolButton:
+    """O botão "Ímã nas batidas", ao lado do ímã da barra da linha do tempo (preferência `PREF_SNAP`; só vale com o
+    ímã ligado)."""
+    b = editor._btn("beats", _("Ímã nas batidas: com o ímã ligado, gruda também nas batidas das músicas "
+                               "(\"Detectar batidas\" no menu do clipe de som)"), checkable=True)
+    b.setObjectName("beat_snap")
+    canvas = editor.canvas
+    canvas.beat_snap = str(prefs.settings().value(PREF_SNAP, "true")) != "false"
+    b.setChecked(canvas.beat_snap)
+    b.setEnabled(canvas.snap)
+
+    def toggled(on: bool) -> None:
+        canvas.beat_snap = on
+        prefs.settings().setValue(PREF_SNAP, "true" if on else "false")
+
+    b.toggled.connect(toggled)
+    editor.btn_snap.toggled.connect(b.setEnabled)
+    return b
+
+
 def controller_for(canvas) -> MusicUI:
     """O controlador da janela (`install`) ou, sem ela (testes), um preso à linha do tempo."""
     ctl = getattr(canvas.window(), "musica", None)
     if ctl is None:
         ctl = getattr(canvas, "_musica", None)
         if ctl is None:
-            ctl = canvas._musica = MusicUI(canvas.model, canvas, canvas)
+            ctl = canvas._musica = MusicUI(canvas.model, canvas, canvas, auto=False)
     return ctl
 
 

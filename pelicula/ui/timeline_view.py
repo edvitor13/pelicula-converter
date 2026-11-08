@@ -283,6 +283,7 @@ class TimelineCanvas(QWidget):
             if c.id not in exclude:
                 pts.add(c.start)
                 pts.add(c.end)
+        pts.update(musica_ui.snap_points(self, exclude))  # 1.8: ímã nas batidas das músicas
         return sorted(pts)
 
     def snap_frame(self, frame: float, exclude: set[str], enabled: bool | None = None) -> tuple[int, int | None]:
@@ -404,6 +405,7 @@ class TimelineCanvas(QWidget):
         p.setClipRect(r.adjusted(1, 1, -1, -1))
         if c.kind == AUDIO:
             self._paint_wave(p, c, r)
+            musica_ui.paint_beats(self, p, c, r)  # 1.8: marcas das batidas no pé do clipe
         else:
             self._paint_transitions(p, c, r)
         # Rótulo: nome, velocidade, ligação.
@@ -1634,7 +1636,9 @@ class TimelineEditor(QWidget):
                                                      "em vez de cobrir. Ctrl inverte ao arrastar."), checkable=True)
         self.btn_insert.setChecked(c.insert_mode)
         self.btn_insert.toggled.connect(c.set_insert_mode)
-        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_insert):
+        self.btn_beat_snap = musica_ui.snap_button(self)  # 1.8: ímã nas batidas
+        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_beat_snap,
+                  self.btn_insert):
             hl.addWidget(b)
         hl.add_spacing(8)
         self.btn_marker = self._btn("marker", _("Adicionar marcador no cursor (M)"), _("Marcador"))
