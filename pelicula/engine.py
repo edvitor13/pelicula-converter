@@ -10,11 +10,12 @@ from __future__ import annotations
 import math
 import os
 import threading
+import zlib
 
 import moderngl
 import numpy as np
 
-from . import alphashaders, editshaders, look, luts, shaders
+from . import alphashaders, editshaders, look, luts, shaders, vfx
 
 _LUT_CACHE: dict[str, tuple[float, luts.Lut3D]] = {}
 _LUT_LOCK = threading.Lock()
@@ -41,6 +42,13 @@ def lut_info(path: str):
     except Exception:
         return None
     return (lut.size, lut.dmin, lut.dmax) if lut else None
+
+
+def _inert_adjustment(U: dict, layer) -> bool:
+    """1.9: uma camada de ajuste que não muda nada (sem cor nem detalhe, sem fade nem transição, mesclagem normal) não
+    desenha: a tela embaixo sai bit a bit."""
+    return (not U["u_cc_on"] and not U["u_det_on"] and "u_cs_on" not in U and U["u_blend"] == 0
+            and U["u_fade"][3] <= 0.0 and "u_tr_kind" not in U and not layer.transitions)
 
 
 class Engine:
@@ -578,20 +586,35 @@ class Engine:
         src, dst = a, b
         for slot, li in enumerate(frame_layers.layers):
             key = f"{path}:{slot}" if path else slot
-            if li.nested is not None:
+            adj = vfx.is_adjustment(seq, li.layer.clip)  # 1.9: camada de ajuste: a textura é a tela embaixo
+            values = li.layer.values if li.layer.values is not None else li.layer.clip.values
+            fx_alpha = not neutral and li.nested is None and not adj and vfx.makes_alpha(values)
+            if adj:
+                if neutral:  # "Desligar todos os efeitos" e o "Original" da comparação: a camada de ajuste não desenha
+                    continue
+                tex, tw, th, tex_alpha = src[0], size[0], size[1], False
+            elif li.nested is not None:
                 tex = self._nested_texture(li.nested, f"{path}/{slot}", neutral, light, camera)
                 tw, th, tex_alpha = li.nested.size[0], li.nested.size[1], bool(li.nested.seq.transparent)
             else:
                 tex = self._clip_texture(key, li.image)
                 tw, th, tex_alpha = li.image.shape[1], li.image.shape[0], tex.components == 4
-            U, mip = compositor.clip_uniforms(seq, li.layer, tw, th, size[0], size[1], neutral, tex_alpha=tex_alpha,
-                                              light=light)
-            if li.nested is not None and U["u_exact"] and "u_tr_kind" not in U:
+            U, mip = compositor.clip_uniforms(seq, li.layer, tw, th, size[0], size[1], neutral,
+                                              tex_alpha=tex_alpha or fx_alpha, light=light)
+            if (li.nested is not None or adj) and U["u_exact"] and "u_tr_kind" not in U:
                 # A tela inteira pixel a pixel não tem borda a suavizar. Na última coluna, o erro de 32 bits do uv vira
                 # cobertura de 0,99998: de fora vazaria 0,002% do que está embaixo, e a tela não sairia bit a bit.
                 U["u_px_per_uv"] = (compositor.EXACT_PX_PER_UV, compositor.EXACT_PX_PER_UV)
-            if camera is not None:  # 1.6: clipe com perfil de câmera próprio → espaço da entrada do look
+            if camera is not None and not adj:  # 1.6: clipe com perfil de câmera próprio → espaço da entrada do look
                 tex = self._camera_pass(key, tex, seq, li.layer, camera)
+            if li.nested is None:  # 1.9: pilha de efeitos do clipe (`vfx.py`); a saída é a textura que o CLIP amostra
+                ctx = vfx.Ctx(seq, li.layer, int(frame_layers.frame), tw, th, size[0], size[1], light, adj, neutral)
+                plan = vfx.plan(ctx)
+                if adj and not plan and _inert_adjustment(U, li.layer):
+                    continue  # sem cor, sem efeitos, mesclagem normal: a tela embaixo fica bit a bit
+                if adj or plan:
+                    tex = self._fx_stack(key, tex, plan, ctx, U, src[0], tex_alpha, tex_alpha or fx_alpha,
+                                         getattr(li, "neighbors", None), None if adj else camera)
             if mip:
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
                 tex.build_mipmaps()
@@ -604,6 +627,9 @@ class Engine:
             if "u_cs_on" in U:  # 1.6: cor simples do clipe (`colorsimple.py`)
                 program += "_cs"
                 self._lazy_program(program, editshaders.CLIP_TR_CS if "u_tr_kind" in U else editshaders.CLIP_CS)
+            if U["u_blend"] >= 7 or adj:  # 1.9: mesclagem nova (`mesclagem.py`) e camada de ajuste: variantes do CLIP
+                program += ("_bx" if U["u_blend"] >= 7 else "") + ("_adj" if adj else "")
+                self._lazy_program(program, editshaders.clip_source(program))
             self._run(program, dst, {"t_clip": tex, "t_dst": src[0]}, U)
             src, dst = dst, src
         if seq.window:  # 1.7, "Faixas pretas no quadro": camadas e fundo só dentro da janela útil
@@ -655,6 +681,129 @@ class Engine:
         out = self._target(f"clip_cam{slot}", tex.size, dtype="f4", mip=True)
         U["u_tex_alpha"] = 1 if tex.components == 4 else 0
         self._run("clip_cam", out, {"t_clip": tex}, U)
+        return out[0]
+
+    # ------------------------------------------------------------ 1.9: pilha de efeitos do clipe (vfx.py, §49)
+    def _fx_stack(self, key, tex, plan, ctx, U: dict, below, src_alpha: bool, out_alpha: bool, neighbors=None,
+                  camera=None):
+        """Roda os passos de `plan` (`vfx.plan`) na textura do clipe e devolve a textura f4 com mipmaps, do tamanho de
+        `tex`, que o `CLIP` amostra. Os alvos levam o nome do lugar da camada (`fx<key>_…`, como `clip_cam<key>`):
+        nenhum clipe escreve no de outro, e são reaproveitados entre quadros. `below`: a tela embaixo do clipe;
+        `src_alpha`: `tex` é RGBA pré-multiplicado; `out_alpha`: a saída tem cobertura (pré-multiplicada para o
+        `CLIP`); `neighbors`: `LayerImage.neighbors`; `camera`: o espaço do look para o perfil de câmera dos vizinhos."""
+        size = tex.size
+        base = f"fx{key}"
+        self._lazy_program("fx_load", editshaders.FX_LOAD)
+        orig = self._target(base + "_orig", size, dtype="f4")
+        self._run("fx_load", orig, {"t_src": tex}, {"u_src_alpha": int(bool(src_alpha))})
+        common = vfx.common_uniforms(ctx, U["u_xf"])
+        near: dict = {}
+        prev = orig[0]
+        for effect, passes in plan:
+            own: dict = {}
+            for i, p in enumerate(passes):
+                textures = {"t_prev": prev, "t_orig": orig[0], "t_below": below}
+                for sampler, ref in p.inputs.items():
+                    textures[sampler] = self._fx_input(ref, base, key, prev, orig[0], below, own, near, neighbors,
+                                                       src_alpha, camera, ctx)
+                out_size = vfx.pass_size(p.size, ctx)
+                name = f"{base}_{effect.id}_{i}"
+                if p.kind == "blur":
+                    out = self._fx_blur(name, textures.get("t_src", prev), out_size, float(p.sigma), p.dtype)
+                elif p.kind == "streak":
+                    out = self._fx_streak(name, textures.get("t_src", prev), out_size, float(p.sigma), float(p.angle),
+                                          p.dtype)
+                elif p.kind == "glsl":
+                    prog = "fx_" + format(zlib.crc32(p.glsl.encode("utf-8")), "08x") + f"_{len(p.glsl)}"
+                    self._lazy_program(prog, editshaders.FX_HEAD + p.glsl)
+                    t = self._target(name, out_size, dtype=p.dtype, mip=p.mip)
+                    self._run(prog, t, textures, {**common, "u_fx_size": (float(out_size[0]), float(out_size[1])),
+                                                  **p.uniforms})
+                    out = t[0]
+                else:
+                    raise ValueError(f"tipo de passo desconhecido: {p.kind!r}")
+                if p.mip:
+                    out.build_mipmaps()
+                own[p.name] = own[str(i)] = out
+                prev = out
+        self._lazy_program("fx_store", editshaders.FX_STORE)
+        res = self._target(base + "_out", size, dtype="f4", mip=True)
+        self._run("fx_store", res, {"t_src": prev}, {"u_premul": int(bool(out_alpha)), "u_same": int(prev.size == size)})
+        return res[0]
+
+    def _fx_input(self, ref: str, base: str, key, prev, orig, below, own: dict, near: dict, neighbors, src_alpha,
+                  camera, ctx):
+        """A textura de uma entrada de passo (`vfx.Pass.inputs`)."""
+        if ref == "prev":
+            return prev
+        if ref == "orig":
+            return orig
+        if ref == "below":
+            return below
+        if ref.startswith("pass:"):
+            hit = own.get(ref[5:])
+            if hit is None:
+                raise ValueError(f"passo {ref!r} não existe (ou vem depois) neste efeito")
+            return hit
+        k = vfx.NEIGHBOR_REFS.get(ref)
+        if k is None:
+            raise ValueError(f"entrada de passo desconhecida: {ref!r}")
+        if k in near:
+            return near[k]
+        img = dict(neighbors or ()).get(k)
+        if img is None:  # sem vizinhos (imagem parada, congelado, gerado, ponta do arquivo): o próprio quadro
+            near[k] = orig
+            return orig
+        tex = self._clip_texture(f"{key}:n{k}", img)
+        if camera is not None:
+            tex = self._camera_pass(f"{key}:n{k}", tex, ctx.seq, ctx.layer, camera)
+        t = self._target(f"{base}_n{k}", tex.size, dtype="f4")
+        self._run("fx_load", t, {"t_src": tex}, {"u_src_alpha": int(tex.components == 4 and bool(src_alpha))})
+        near[k] = t[0]
+        return t[0]
+
+    def _fx_blur(self, name: str, src, size: tuple[int, int], sigma: float, dtype: str):
+        """Desfoque gaussiano (`sigma` em texels de `src`) em RGBA pré-multiplicado: com raio grande, parte de um nível
+        de mipmap (como as cadeias do look) e volta ao tamanho do passo no fim."""
+        self._lazy_program("fx_premul", editshaders.FX_PREMUL)
+        self._lazy_program("fx_unpremul", editshaders.FX_UNPREMUL)
+        w, h = src.size
+        pm = self._target(name + "_pm", (w, h), dtype=dtype, mip=True)
+        self._run("fx_premul", pm, {"t_src": src}, {})
+        pm[0].build_mipmaps()  # o alvo amostra com mipmaps: sem eles a textura fica incompleta (preta)
+        cur = pm[0]
+        if sigma > 0:
+            lvl = 0
+            while sigma / (2 ** lvl) > 6.0 and lvl < 8 and (w >> (lvl + 1)) >= 4 and (h >> (lvl + 1)) >= 4:
+                lvl += 1
+            sw, sh = max(1, w >> lvl), max(1, h >> lvl)
+            sig = max(sigma / (2 ** lvl), 0.5)
+            a = self._target(name + "_a", (sw, sh), dtype=dtype)
+            b = self._target(name + "_b", (sw, sh), dtype=dtype)
+            self._blur(pm[0], a, (1.0 / sw, 0.0), sig, lvl)
+            self._blur(a[0], b, (0.0, 1.0 / sh), sig, 0)
+            cur = b[0]
+        out = self._target(name, size, dtype=dtype)
+        self._run("fx_unpremul", out, {"t_src": cur}, {})
+        return out[0]
+
+    def _fx_streak(self, name: str, src, size: tuple[int, int], sigma: float, angle: float, dtype: str):
+        """Desfoque numa direção (`angle` em graus, sentido horário da tela; `sigma` em texels de `src`), em passos que
+        crescem 3× (`vfx.streak_steps`), em RGBA pré-multiplicado."""
+        self._lazy_program("fx_premul", editshaders.FX_PREMUL)
+        self._lazy_program("fx_unpremul", editshaders.FX_UNPREMUL)
+        self._lazy_program("fx_streak", editshaders.FX_STREAK)
+        w, h = src.size
+        ping = (self._target(name + "_a", (w, h), dtype=dtype), self._target(name + "_b", (w, h), dtype=dtype))
+        self._run("fx_premul", ping[0], {"t_src": src}, {})
+        cur, n = ping[0], 0
+        dx, dy = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        for step in vfx.streak_steps(sigma):
+            dst = ping[(n + 1) % 2]
+            self._run("fx_streak", dst, {"t_src": cur[0]}, {"u_step": (dx * step / w, dy * step / h)})
+            cur, n = dst, n + 1
+        out = self._target(name, size, dtype=dtype)
+        self._run("fx_unpremul", out, {"t_src": cur[0]}, {})
         return out[0]
 
     def _canvas_alpha(self, canvas, size, osize, offset, depth: int) -> np.ndarray:

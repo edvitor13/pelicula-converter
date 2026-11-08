@@ -29,10 +29,12 @@ from typing import Any
 
 import numpy as np
 
-from . import editparams, timeline
+from . import editparams, mesclagem, timeline
 
 BLEND_IDS = {"normal": 0, "tela": 1, "multiplicar": 2, "sobrepor": 3, "adicionar": 4, "clarear": 5,
              "escurecer": 6}
+# 1.9: os modos novos (`mesclagem.py`), desenhados por uma variante do programa (`editshaders._with_blend`, u_blend >= 7)
+BLEND_IDS.update({key: i for i, key in mesclagem.MODES.items()})
 DETAIL_KEYS = ("nitidez", "clareza", "desfoque", "reducao_ruido")
 W709 = (0.2126, 0.7152, 0.0722)
 
@@ -155,14 +157,16 @@ def transform(seq: timeline.Sequence, clip: timeline.Clip, canvas_w: int, canvas
 
 
 def is_identity(seq: timeline.Sequence, clip: timeline.Clip, tex_w: int, tex_h: int, canvas_w: int,
-                canvas_h: int, values: dict[str, Any] | None = None) -> bool:
-    """O clipe cobre a tela pixel a pixel (sem reamostrar): a saída pode ser bit a bit."""
+                canvas_h: int, values: dict[str, Any] | None = None, m: np.ndarray | None = None) -> bool:
+    """O clipe cobre a tela pixel a pixel (sem reamostrar): a saída pode ser bit a bit. `m` (1.9): a matriz já
+    calculada (com a geometria dos efeitos, `vfx.geometry`); None = `transform`."""
     if (tex_w, tex_h) != (canvas_w, canvas_h):
         return False
     v = values if values is not None else clip.values
     if any(v[k] for k in ("corte_esq", "corte_dir", "corte_topo", "corte_base", "espelhar_h", "espelhar_v")):
         return False
-    m = transform(seq, clip, canvas_w, canvas_h, v)
+    if m is None:
+        m = transform(seq, clip, canvas_w, canvas_h, v)
     ref = np.array([[1.0 / canvas_w, 0, 0], [0, 1.0 / canvas_h, 0], [0, 0, 1]])
     return bool(np.allclose(m, ref, atol=1e-12, rtol=0))
 
@@ -182,12 +186,14 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
     v = layer.values if layer.values is not None else clip.values
     bw, bh = fit_box(seq, clip, canvas_w, canvas_h, v)
     sx, sy = axis_scale(v)
+    from . import vfx  # 1.9: geometria dos efeitos (estabilização, camada de ajuste); sem nada, a de sempre
+    m = vfx.geometry(seq, layer, transform(seq, clip, canvas_w, canvas_h, v), canvas_w, canvas_h, neutral)
     U: dict[str, Any] = {
         "u_canvas": (float(canvas_w), float(canvas_h)),
         "u_clip_px": (float(tex_w), float(tex_h)),
-        "u_xf": mat3_uniform(transform(seq, clip, canvas_w, canvas_h, v)),
+        "u_xf": mat3_uniform(m),
         "u_px_per_uv": (float(sx * bw), float(sy * bh)),
-        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v) else 0,
+        "u_exact": 1 if is_identity(seq, clip, tex_w, tex_h, canvas_w, canvas_h, v, m) else 0,
         "u_crop": (float(v["corte_esq"]), float(v["corte_topo"]), float(v["corte_dir"]), float(v["corte_base"])),
         "u_alpha": float(v["opacidade"]) * float(layer.alpha),
         "u_tex_alpha": 1 if tex_alpha else 0,
@@ -241,7 +247,7 @@ def clip_uniforms(seq: timeline.Sequence, layer: timeline.Layer, tex_w: int, tex
         U.update(colorsimple.uniforms(v))
     if layer.transitions:  # 1.5: transições de película (`transitions.py`, programa `editshaders.CLIP_TR`)
         from . import transitions
-        U = transitions.apply(U, seq, layer, transform(seq, clip, canvas_w, canvas_h, v), canvas_w, canvas_h, light)
+        U = transitions.apply(U, seq, layer, m, canvas_w, canvas_h, light)
     return U, mip
 
 

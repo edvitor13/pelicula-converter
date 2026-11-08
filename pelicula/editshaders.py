@@ -715,3 +715,177 @@ void main() {
     f_out = vec4(c.rgb * s, s);
 }
 """
+
+
+# ------------------------------------------------------------------ 1.9: mesclagens novas e camada de ajuste
+# Variantes do `CLIP` (e do `CLIP_TR`, `CLIP_CS`, `CLIP_TR_CS`) por substituição de texto, como `_with_simple`: o texto
+# fixo dos programas de sempre não muda e eles continuam sendo usados quando a camada não precisa da variante.
+def _with_blend(src: str) -> str:
+    """Os modos de mesclagem novos (`mesclagem.py`, `u_blend >= 7`): o `blend` de sempre vira `blendBase` e o novo
+    `blend` escolhe. Só para camadas com um modo novo (`Engine._canvas`)."""
+    from .mesclagem import GLSL
+    head, sep, main = src.partition("void main() {")
+    old = "vec3 blend(vec3 b, vec3 s) {"
+    assert sep and head.count(old) == 1
+    return head.replace(old, "vec3 blendBase(vec3 b, vec3 s) {") + GLSL + "\n" + sep + main
+
+
+def _with_adjust(src: str) -> str:
+    """Camada de ajuste (`vfx.is_adjustment`): numa tela transparente a cor muda e a cobertura fica a da tela (uma
+    camada de ajuste não pinta onde não há nada). Numa tela opaca, o caminho de sempre."""
+    head, sep, main = src.partition("void main() {")
+    old = "    vec3 res = blend(dst.rgb, c);\n    if (dst.a < 1.0) {\n"
+    assert sep and main.count(old) == 1
+    weight = "a * clamp(w, 0.0, 1.0)" if "float w = 1.0;" in main else "a"
+    new = ("    vec3 res = blend(dst.rgb, c);\n"
+           "    if (dst.a < 1.0) {  // 1.9: camada de ajuste\n"
+           f"        f_out = vec4(mix(dst.rgb, res, {weight}), dst.a);\n"
+           "        return;\n"
+           "    }\n"
+           "    if (dst.a < 1.0) {\n")
+    return head + sep + main.replace(old, new)
+
+
+_CLIP_SOURCES: dict[str, str] = {}
+
+
+def clip_source(name: str) -> str:
+    """O texto do programa `name` de `Engine._canvas`: "clip", com os sufixos na ordem "_tr" (transição da 1.5),
+    "_cs" (cor simples), "_bx" (mesclagem nova) e "_adj" (camada de ajuste)."""
+    hit = _CLIP_SOURCES.get(name)
+    if hit is not None:
+        return hit
+    tr, cs = "_tr" in name, "_cs" in name
+    src = (CLIP_TR_CS if cs else CLIP_TR) if tr else (CLIP_CS if cs else CLIP)
+    if "_bx" in name:
+        src = _with_blend(src)
+    if "_adj" in name:
+        src = _with_adjust(src)
+    _CLIP_SOURCES[name] = src
+    return src
+
+
+CLIP_BX = clip_source("clip_bx")
+CLIP_TR_BX = clip_source("clip_tr_bx")
+CLIP_CS_BX = clip_source("clip_cs_bx")
+CLIP_TR_CS_BX = clip_source("clip_tr_cs_bx")
+
+
+# ------------------------------------------------------------------ 1.9: pilha de efeitos do clipe (vfx.py, §49)
+# Cabeça de todo passo `kind="glsl"`: o `COMMON` do look até as curvas (hash `pcg`/`rnd`, `vnoise2`, `fbm2`, `toLinear`
+# e as inversas das curvas), as entradas padrão e os uniforms `u_fx_*` (`vfx.common_uniforms`). O passo acrescenta as
+# funções dele e o `void main()`; escreve `f_out` (RGBA de cor direta e cobertura) no pixel `gl_FragCoord.xy` da saída
+# (y para baixo, como em tudo). `v_uv` é o uv da saída.
+_TR_ENC = _TR_FUNCS[_TR_FUNCS.index("vec3 trEnc(vec3 n) {"):_TR_FUNCS.index("// O preto da curva")]
+assert _TR_ENC.count("u_tr_input") == 1 and _TR_ENC.count("u_tr_cv") == 1
+
+FX_HEAD = _COMMON[:_COMMON.index("// ---------------------------------------------------------------- cor")] + """
+// ---------------------------------------------------------------- pilha de efeitos do clipe (vfx.py, 1.9)
+uniform sampler2D t_prev;     // saída do passo anterior (no primeiro, a imagem do clipe)
+uniform sampler2D t_orig;     // a imagem do clipe antes dos efeitos (cor direta e cobertura)
+uniform sampler2D t_below;    // a tela embaixo do clipe (cor direta e cobertura; uv da tela: use fxBelow)
+uniform vec2 u_fx_size;       // tamanho da saída deste passo (px)
+uniform vec2 u_fx_clip_px;    // tamanho da textura do clipe (texels)
+uniform vec2 u_fx_canvas;     // tamanho da tela (px)
+uniform float u_fx_scale;     // texels do clipe por px@1080 (altura da textura / 1080)
+uniform mat3 u_fx_below;      // uv do clipe → uv da tela
+uniform int u_fx_input;       // curva da luz (look.INPUT_IDS; a mesma das transições)
+uniform int u_fx_cv;          // 1 = curva em código de 10 bits numa fonte de faixa legal
+uniform int u_fx_frame;       // quadro do clipe (tempo das chaves: não muda ao cortar ou aparar)
+uniform float u_fx_time;      // o mesmo em segundos
+
+vec3 cvToLegal(vec3 v) { return (v * 1023.0 - 64.0) / 876.0; }
+vec3 fxDec(vec3 c) { return toLinear(c, u_fx_input, u_fx_cv == 1); }
+""" + _TR_ENC.replace("trEnc", "fxEnc").replace("u_tr_input", "u_fx_input").replace("u_tr_cv", "u_fx_cv") + """
+// A tela embaixo do clipe num uv do clipe (fora da tela: a borda dela).
+vec4 fxBelow(vec2 uv) { return texture(t_below, (u_fx_below * vec3(uv, 1.0)).xy); }
+"""
+
+# Leitura da textura do clipe para a pilha: RGBA de cor direta e cobertura (f4). Arquivo com transparência: a textura
+# é pré-multiplicada e o alfa ganha as "pontas firmes" do `clipAlpha` (o que o `CLIP` faria). Opaca: cobertura 1.
+FX_LOAD = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_src;
+uniform int u_src_alpha;
+void main() {
+    vec4 s = texelFetch(t_src, ivec2(gl_FragCoord.xy), 0);
+    if (u_src_alpha == 0) {
+        f_out = vec4(s.rgb, 1.0);
+        return;
+    }
+    const float E = 1.0 / 256.0;
+    f_out = vec4(s.a > 0.0 ? s.rgb / s.a : vec3(0.0), clamp((s.a - E) / (1.0 - 2.0 * E), 0.0, 1.0));
+}
+"""
+
+# Saída da pilha, a textura que o `CLIP` amostra: com cobertura, pré-multiplicada e com a conta inversa do `clipAlpha`
+# (como o `NEST_PREMUL`: o `CLIP` volta exatamente à cobertura da pilha); sem, opaca. `u_same`: mesmo tamanho (texel a
+# texel); senão, reamostrada.
+FX_STORE = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_src;
+uniform int u_premul;
+uniform int u_same;
+void main() {
+    vec4 s = u_same == 1 ? texelFetch(t_src, ivec2(gl_FragCoord.xy), 0) : texture(t_src, v_uv);
+    if (u_premul == 0) {
+        f_out = vec4(s.rgb, 1.0);
+        return;
+    }
+    const float E = 1.0 / 256.0;
+    float a = clamp(s.a, 0.0, 1.0);
+    if (a <= 0.0) {
+        f_out = vec4(0.0);
+        return;
+    }
+    float k = E + a * (1.0 - 2.0 * E);
+    f_out = vec4(s.rgb * k, k);
+}
+"""
+
+# Desfoques da pilha (`Pass.kind` "blur" e "streak") em RGBA pré-multiplicado: a cor de um pixel transparente não
+# entra. `FX_PREMUL` antes, `FX_UNPREMUL` depois (reamostra do tamanho reduzido para o do passo).
+FX_PREMUL = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_src;
+void main() {
+    vec4 s = texture(t_src, v_uv);
+    f_out = vec4(s.rgb * s.a, s.a);
+}
+"""
+
+FX_UNPREMUL = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_src;
+void main() {
+    vec4 s = texture(t_src, v_uv);
+    f_out = vec4(s.a > 1e-6 ? s.rgb / s.a : vec3(0.0), s.a);
+}
+"""
+
+# Um passo do desfoque numa direção: 13 amostras com desvio de 2 passos (`vfx.streak_steps`).
+FX_STREAK = """
+#version 330
+in vec2 v_uv;
+out vec4 f_out;
+uniform sampler2D t_src;
+uniform vec2 u_step;  // uv por amostra
+void main() {
+    vec4 acc = vec4(0.0);
+    float ws = 0.0;
+    for (int i = -6; i <= 6; i++) {
+        float w = exp(-float(i * i) / 8.0);
+        acc += texture(t_src, v_uv + u_step * float(i)) * w;
+        ws += w;
+    }
+    f_out = acc / ws;
+}
+"""
