@@ -135,6 +135,9 @@ class Source:
     # 1.8: crédito de um som livre baixado pela busca de sons CC0 (`sons_cc0.py`): {"titulo", "autor", "licenca",
     # "url", "origem"} (texto). "credito" no JSON, só quando há; vira o `<saída>.creditos.txt` da exportação.
     credit: dict[str, str] = field(default_factory=dict)
+    # 1.8: correção à mão das batidas da música deste arquivo (`batidas.corrected`): {"fator": 2.0 | 0.5, "compasso":
+    # 3}; só as chaves que não são neutras. "batidas" no JSON, só quando há; vale em todo lugar que usa as batidas.
+    beats_fix: dict[str, float] = field(default_factory=dict)
 
     @property
     def is_file(self) -> bool:
@@ -262,6 +265,8 @@ class Source:
             out["sequencia"] = {"inicio": self.seq_start}
         if self.credit:
             out["credito"] = dict(self.credit)
+        if self.beats_fix:
+            out["batidas"] = dict(self.beats_fix)
         return out
 
     @classmethod
@@ -288,7 +293,8 @@ class Source:
                    container=str(d.get("recipiente") or ""), has_alpha=d.get("alfa") is True,
                    kind=d.get("tipo") if d.get("tipo") in SOURCE_KINDS else SOURCE_FILE,
                    data=copy.deepcopy(d["dados"]) if isinstance(d.get("dados"), dict) else {},
-                   seq_start=_seq_start(d.get("sequencia")), credit=clean_credit(d.get("credito")))
+                   seq_start=_seq_start(d.get("sequencia")), credit=clean_credit(d.get("credito")),
+                   beats_fix=clean_beats_fix(d.get("batidas")))
 
 
 CREDIT_KEYS = ("titulo", "autor", "licenca", "url", "origem")  # `Source.credit` (1.8, `sons_cc0.py`)
@@ -301,6 +307,19 @@ def clean_credit(value: Any) -> dict[str, str]:
         return {}
     out = {k: str(value[k])[:500] for k in CREDIT_KEYS if isinstance(value.get(k), (str, int, float))}
     return out if out.get("titulo") or out.get("url") else {}
+
+
+def clean_beats_fix(value: Any) -> dict[str, float]:
+    """A correção das batidas conferida (`Source.beats_fix`): "fator" 2 ou 0.5 e "compasso" 3; o neutro (1 e 4) e o que
+    não é isso saem."""
+    out: dict[str, float] = {}
+    if isinstance(value, dict):
+        f = value.get("fator")
+        if isinstance(f, (int, float)) and not isinstance(f, bool) and f in (0.5, 2):
+            out["fator"] = float(f)
+        if value.get("compasso") == 3:
+            out["compasso"] = 3
+    return out
 
 
 def _has_tones(seq: "Sequence") -> bool:
@@ -2623,6 +2642,8 @@ FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
     "efeito_sonoro": lambda seq: any(s.kind == "efeito" for s in seq.used_sources()),
     # crédito de um som CC0 baixado pela busca (`Source.credit`, "credito" na fonte): a 1.7 perderia o crédito ao salvar
     "credito_som": lambda seq: any(s.credit for s in seq.used_sources()),
+    # correção à mão das batidas de uma música (`Source.beats_fix`, "batidas" na fonte): a 1.7 perderia a correção ao salvar
+    "batidas_corrigidas": lambda seq: any(s.beats_fix for s in seq.used_sources()),
 }
 
 

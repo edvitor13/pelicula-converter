@@ -552,6 +552,12 @@ montagem é analisada sozinha, em segundo plano. O resultado fica guardado: reab
 As batidas aparecem como risquinhos no pé do clipe (o começo do compasso mais alto) e acompanham o aparar e a velocidade
 do clipe. Música com o andamento irregular mostra as batidas como ajuda visual, mas não serve para o encaixe.
 
+**Corrigir as batidas à mão.** O detector às vezes acha a metade ou o dobro do andamento (87 em vez de 174 BPM) e sempre
+supõe 4 batidas por compasso. No mesmo menu, **Andamento ×2** põe uma batida no meio de cada par, **Andamento ÷2** deixa uma
+batida sim, outra não, e **Compasso de 3** / **Compasso de 4** refazem os começos de compasso (pelo acento mais forte).
+**Voltar ao detectado** desfaz tudo. A correção vale para a música (o arquivo) em toda a sequência, fica salva no projeto, e
+as marcas, o ímã e o **Encaixar a música** passam a usá-la. Cada mudança volta com um Ctrl+Z.
+
 **Ímã nas batidas.** O botão ao lado do ímã, na barra da linha do tempo (ligado por padrão), faz os clipes, o cursor e as
 pontas grudarem também nas batidas das músicas, com o ímã ligado.
 

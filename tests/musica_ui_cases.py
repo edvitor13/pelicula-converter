@@ -7,6 +7,7 @@ QApplication própria. Este arquivo não é coletado sozinho pelo pytest. Os son
 
 from __future__ import annotations
 
+import json
 import os
 import time
 import wave
@@ -141,6 +142,98 @@ def test_long_music_is_analyzed_by_itself_with_the_preference(tmp_path):
     _wait(ctl.jobs.get(path))
     assert ctl.beats_for(path) is not None and ctl.beats_for(short) is None
     prefs.settings().remove(musica_ui.PREF_AUTO)
+
+
+# ------------------------------------------------------------------ correção à mão
+_MENUS: list[QMenu] = []      # os menus ficam vivos enquanto o caso olha as ações
+
+
+def _menu_of(ed, clip) -> dict[str, QAction]:
+    menu = QMenu()
+    _MENUS.append(menu)
+    musica_ui.add_clip_actions(menu, ed.canvas, clip)
+    return _actions(menu)
+
+
+def test_fix_actions_change_ticks_in_one_undo_step_and_survive_reopen():
+    seq = tl.Sequence(640, 360, f"{FPS}/1")
+    seq.add_source(_music("musica.wav", 60.0))
+    c = tl.Clip(tl.new_id(), tl.AUDIO, "musica.wav", 0, 0, 120, 0.0)     # 5 s: 10 batidas a 120 BPM
+    seq.clips.append(c)
+    m, ed = _editor(seq)
+    canvas = ed.canvas
+    ctl = musica_ui.controller_for(canvas)
+    said = []
+    ctl.message.connect(said.append)
+    assert "beats_x2" not in _menu_of(ed, c)                        # sem batidas, nada a corrigir
+    raw = _grid(120)
+    ctl.beats["musica.wav"] = raw
+    canvas.set_ppf(4.0)
+    ticks = lambda: musica_ui.tick_marks(canvas, m.seq.find(c.id))  # noqa: E731
+    assert len(ticks()) == 10
+    acts = _menu_of(ed, c)
+    assert acts["beats_x2"].isEnabled() and acts["beats_div2"].isEnabled()
+    assert acts["beats_bar4"].isChecked() and not acts["beats_bar3"].isChecked() and "beats_reset" not in acts
+    acts["beats_x2"].trigger()                                       # ×2: uma batida no meio de cada par
+    assert m.seq.sources["musica.wav"].beats_fix == {"fator": 2.0}
+    marks = ticks()
+    assert len(marks) == 20 and np.allclose(np.diff([x for x, _d in marks]), 6 * canvas.ppf)
+    assert "240" in said[-1] and "BPM" in said[-1]
+    acts = _menu_of(ed, c)
+    assert not acts["beats_x2"].isEnabled() and acts["beats_div2"].isEnabled() and "beats_reset" in acts
+    m.undo()                                                          # um passo só
+    assert len(ticks()) == 10 and m.seq.sources["musica.wav"].beats_fix == {} and not m.can_undo()
+    m.redo()
+    acts = _menu_of(ed, c)
+    acts["beats_bar3"].trigger()                                      # compasso de 3
+    assert m.seq.sources["musica.wav"].beats_fix == {"fator": 2.0, "compasso": 3}
+    assert [d for _x, d in ticks()[:7]] == [k % 3 == 0 for k in range(7)] and "compassos de 3" in said[-1]
+    acts = _menu_of(ed, c)
+    assert acts["beats_bar3"].isChecked() and not acts["beats_bar4"].isChecked()
+    # o projeto salvo e reaberto: a mesma correção (o resultado cru vem do cache pelo carimbo do arquivo)
+    reopened = tl.Sequence.from_json(json.loads(json.dumps(m.seq.to_json())))
+    m2, ed2 = _editor(reopened)
+    ctl2 = musica_ui.controller_for(ed2.canvas)
+    ctl2.beats["musica.wav"] = raw
+    got = ctl2.beats_for("musica.wav")
+    assert got.bar == 3 and got.bpm == 240.0 and len(got.times) == 2 * len(raw.times) - 1
+    _menu_of(ed2, reopened.clips[0])["beats_reset"].trigger()
+    assert reopened.sources["musica.wav"].beats_fix == {} and ctl2.beats_for("musica.wav") is raw
+    m2.undo()
+    assert m2.seq.sources["musica.wav"].beats_fix == {"fator": 2.0, "compasso": 3}
+    # ÷2 depois de ×2 volta ao detectado; outra vez vai à metade e não passa dela
+    ctl.set_fix("musica.wav", reset=True)
+    assert m.seq.sources["musica.wav"].beats_fix == {}
+    ctl.set_fix("musica.wav", factor=2.0)
+    ctl.set_fix("musica.wav", factor=2.0)
+    ctl.set_fix("musica.wav", factor=0.5)
+    assert m.seq.sources["musica.wav"].beats_fix == {} and ctl.beats_for("musica.wav") is raw
+    ctl.set_fix("musica.wav", factor=0.5)
+    assert m.seq.sources["musica.wav"].beats_fix == {"fator": 0.5} and ctl.beats_for("musica.wav").bpm == 60.0
+    assert not ctl.set_fix("musica.wav", factor=0.5)                  # já na metade: nada muda, nada no desfazer
+
+
+def test_snap_and_fit_use_the_corrected_beats():
+    seq, music = _with_video()
+    m, ed = _editor(seq)
+    canvas = ed.canvas
+    ctl = musica_ui.controller_for(canvas)
+    ctl.beats["musica.wav"] = _grid(120)
+    ctl.inform = lambda text: None
+    canvas.set_ppf(4.0)
+    prefs.settings().setValue(musica_ui.PREF_SNAP, "true")
+    assert canvas.snap_frame(5.0, set()) == (5, None) and canvas.snap_frame(11.0, set()) == (12, 12)
+    ctl.set_fix("musica.wav", factor=2.0)                              # batidas a cada 6 quadros
+    assert canvas.snap_frame(5.0, set()) == (6, 6) and canvas.snap_frame(11.0, set()) == (12, 12)
+    ctl.set_fix("musica.wav", reset=True)
+    ctl.set_fix("musica.wav", bar=3)                                   # compassos de 1,5 s
+    ctl.fit(music.id)
+    parts = sorted((c for c in m.seq.clips if c.kind == tl.AUDIO), key=lambda c: c.start)
+    assert len(parts) == 2 and parts[-1].end == 30 * FPS
+    assert (parts[1].src_in / 1.5) == pytest.approx(round(parts[1].src_in / 1.5), abs=1.0 / FPS / 1.5)
+    m.undo()                                                           # desfaz o encaixe, a correção fica
+    assert m.seq.sources["musica.wav"].beats_fix == {"compasso": 3}
+    prefs.settings().remove(musica_ui.PREF_SNAP)
 
 
 # ------------------------------------------------------------------ marcas e ímã

@@ -14,7 +14,10 @@ só com numpy (sem IA e sem dependência nova). Determinístico: o mesmo arquivo
   período); a melhor sequência é lida de trás para a frente. Batidas fracas nas pontas saem. Cada batida é refinada
   no som (`_refine`): o começo do ataque, no meio da subida da energia de 2 ms, até ±`REFINE_S`.
 - **Compasso** (`_downbeats`): compasso de `BAR` = 4 batidas; a fase com o maior acento médio (graves + todos) é a do
-  primeiro tempo. É uma **estimativa** (`bar_confidence`): a interface diz isso.
+  primeiro tempo. É uma **estimativa** (`bar_confidence`): a interface diz isso. O acento de cada batida fica no
+  resultado (`Beats.accents`) para a correção à mão refazer os compassos sem decodificar o som de novo.
+- **Correção à mão** (`corrected`, §46.5): andamento ×2 ou ÷2 e compasso de 3 ou de 4, aplicados em cima do resultado
+  cru (que o cache guarda como foi detectado). Pura e determinística.
 - **Confiança** (0–1): o tempo de cada janela de `WINDOW_S` concorda com o geral (a música não muda de andamento), as
   batidas estão em linha reta no tempo e caem em ataques. `CONFIDENT` é o mínimo para encaixar a música por compassos.
 - **BPM** final: a reta das batidas refinadas (mais exata que o atraso da autocorrelação).
@@ -63,7 +66,7 @@ BAR = 4
 CONFIDENT = 0.5
 MAX_SECONDS = 30 * 60.0
 BLOCK_FRAMES = 2048              # quadros da STFT por bloco (memória limitada em músicas longas)
-VERSION = 1                      # muda com o algoritmo: o cache de antes deixa de valer
+VERSION = 2                    # muda com o algoritmo: o cache de antes deixa de valer
 CACHE_DIR = "pelicula_batidas"
 CACHE_ENV = "PELICULA_SOM_CACHE"  # a mesma pasta-base do cache de som dos clipes (`somcache.CACHE_ENV`)
 MEM_ITEMS = 64
@@ -83,10 +86,12 @@ class Beats:
     candidates: tuple[float, ...] = ()  # outros andamentos possíveis (metade e dobro)
     bar_confidence: float = 0.0        # 0–1: o quanto o primeiro tempo se destaca dos outros
     duration: float = 0.0              # segundos analisados
+    accents: tuple[float, ...] = ()    # acento de cada batida (uma por `times`; vazio = não medido): refaz os compassos
+    bar: int = BAR                     # batidas por compasso (4 como detectado; 3 só pela correção à mão)
 
     @property
     def confident(self) -> bool:
-        return self.confidence >= CONFIDENT and len(self.times) >= 2 * BAR
+        return self.confidence >= CONFIDENT and len(self.times) >= 2 * self.bar
 
     @property
     def period(self) -> float:
@@ -98,13 +103,15 @@ class Beats:
         return {"versao": VERSION, "batidas": [r(t) for t in self.times], "bpm": r(self.bpm),
                 "compassos": [r(t) for t in self.downbeats], "confianca": r(self.confidence),
                 "candidatos": [r(b) for b in self.candidates], "confianca_compasso": r(self.bar_confidence),
-                "duracao": r(self.duration)}
+                "duracao": r(self.duration), **({"acentos": [r(a) for a in self.accents]} if self.accents else {}),
+                **({"batidas_por_compasso": self.bar} if self.bar != BAR else {})}
 
     @classmethod
     def from_json(cls, d: dict) -> "Beats":
         f = lambda k: tuple(float(v) for v in d.get(k, []))  # noqa: E731
         return cls(f("batidas"), float(d.get("bpm", 0.0)), f("compassos"), float(d.get("confianca", 0.0)),
-                   f("candidatos"), float(d.get("confianca_compasso", 0.0)), float(d.get("duracao", 0.0)))
+                   f("candidatos"), float(d.get("confianca_compasso", 0.0)), float(d.get("duracao", 0.0)),
+                   f("acentos"), int(d.get("batidas_por_compasso", BAR)))
 
 
 # ------------------------------------------------------------------ força dos ataques
@@ -307,20 +314,32 @@ def _refine(x: np.ndarray, t: float) -> float:
     return (a + j) / RATE
 
 
-def _downbeats(times: np.ndarray, frames: np.ndarray, env: np.ndarray, low: np.ndarray) -> tuple[np.ndarray, float]:
-    """(compassos, confiança): a fase de `BAR` batidas com o maior acento médio. Acento = quanto a energia dos graves
-    sobe na batida (o bumbo) mais a força do ataque, cada um dividido pela sua média nas batidas."""
-    if len(frames) < BAR:
-        return times[:0], 0.0
+def _accents(frames: np.ndarray, env: np.ndarray, low: np.ndarray) -> np.ndarray:
+    """Acento de cada batida: quanto a energia dos graves sobe nela (o bumbo) mais a força do ataque, cada um dividido
+    pela sua média nas batidas."""
     n = len(env)
     lows = np.array([max(0.0, float(low[f:min(n, f + 4)].max() - low[max(0, f - 4):f + 1].min())) for f in frames])
     hits = np.array([float(env[max(0, f - 2):f + 3].max()) for f in frames])
-    accent = lows / (lows.mean() or 1.0) + hits / (hits.mean() or 1.0)
-    score = np.array([accent[k::BAR].mean() for k in range(BAR)])
+    return lows / (lows.mean() or 1.0) + hits / (hits.mean() or 1.0)
+
+
+def _phase(accent: np.ndarray, bar: int) -> tuple[int, float]:
+    """(fase, confiança) do primeiro tempo de um compasso de `bar` batidas: a fase com o maior acento médio; a
+    confiança é o quanto ela se destaca da segunda melhor."""
+    score = np.array([accent[k::bar].mean() for k in range(bar)])
     k = int(np.argmax(score))
     rest = np.sort(score)[-2]
     conf = float(max(0.0, (score[k] - rest) / score[k])) if score[k] > 0 else 0.0
-    return times[k::BAR], min(1.0, conf * 4.0)
+    return k, min(1.0, conf * 4.0)
+
+
+def _downbeats(times: np.ndarray, frames: np.ndarray, env: np.ndarray, low: np.ndarray,
+               bar: int = BAR) -> tuple[np.ndarray, float]:
+    """(compassos, confiança): a fase de `bar` batidas com o maior acento médio (`_accents`, `_phase`)."""
+    if len(frames) < bar:
+        return times[:0], 0.0
+    k, conf = _phase(_accents(frames, env, low), bar)
+    return times[k::bar], conf
 
 
 def analyze(x: np.ndarray, rate: int = RATE, cancel: threading.Event | None = None) -> Beats:
@@ -354,9 +373,66 @@ def analyze(x: np.ndarray, rate: int = RATE, cancel: threading.Event | None = No
     stab = min(1.0, max(0.0, (_stability(env, bpm0) - 0.5) / 0.4))
     conf = stab * reg * strength
     downs, bar_conf = _downbeats(times, frames, env, low)
-    cands = tuple(round(b, 3) for b in (bpm / 2, bpm * 2) if 30.0 <= b <= 400.0)
-    return Beats(tuple(float(t) for t in times), float(bpm), tuple(float(t) for t in downs), float(conf), cands,
-                 float(bar_conf), dur)
+    accent = _accents(frames, env, low) if len(frames) else np.zeros(0)
+    return Beats(tuple(float(t) for t in times), float(bpm), tuple(float(t) for t in downs), float(conf),
+                 _candidates(bpm), float(bar_conf), dur, tuple(round(float(a), 6) for a in accent))
+
+
+def _candidates(bpm: float) -> tuple[float, ...]:
+    """Os outros andamentos possíveis: a metade e o dobro."""
+    return tuple(round(b, 3) for b in (bpm / 2, bpm * 2) if 30.0 <= b <= 400.0)
+
+
+# ------------------------------------------------------------------ correção à mão
+def corrected(beats: Beats, factor: float = 1.0, bar: int = BAR) -> Beats:
+    """As batidas com a correção feita à mão em cima do resultado cru do detector (§46.5). Pura e determinística.
+
+    - `factor` 2: uma batida nova no meio exato de cada par de batidas (o andamento dobra); 0.5: fica uma batida sim,
+      outra não, na paridade que guarda mais começos de compasso detectados (se empatar, a de maior acento somado; se
+      empatar, a das batidas de índice par). Outro valor vale 1.
+    - `bar` 3 ou 4: batidas por compasso. Os compassos são refeitos pela fase de maior acento médio (`_phase`, a mesma
+      conta do detector); a batida inserida pelo ×2 tem acento 0 (é contratempo). Sem os acentos (resultado montado à
+      mão), a fase é a que mantém o primeiro começo de compasso que já havia.
+    - A confiança é a do detector; `candidates` refaz a metade e o dobro do andamento novo.
+    Sem correção (1 e 4) devolve o próprio `beats`."""
+    factor = float(factor) if float(factor) in (0.5, 2.0) else 1.0
+    bar = 3 if int(bar) == 3 else BAR
+    if factor == 1.0 and bar == beats.bar:
+        return beats
+    times = list(beats.times)
+    acc = list(beats.accents) if len(beats.accents) == len(times) else []
+    downs = set(round(t, 6) for t in beats.downbeats)
+    bpm = beats.bpm
+    if factor == 2.0 and len(times) >= 2:
+        new, new_acc = [], []
+        for i, t in enumerate(times):
+            new.append(t)
+            new_acc.append(acc[i] if acc else 0.0)
+            if i + 1 < len(times):
+                new.append((t + times[i + 1]) / 2.0)
+                new_acc.append(0.0)
+        times, acc, bpm = new, (new_acc if acc else []), bpm * 2.0
+    elif factor == 0.5 and len(times) >= 2:
+        def kept(p: int) -> tuple[int, float]:
+            return sum(round(t, 6) in downs for t in times[p::2]), (sum(acc[p::2]) if acc else 0.0)
+        p = 1 if kept(1) > kept(0) else 0
+        times, acc, bpm = times[p::2], (acc[p::2] if acc else []), bpm / 2.0
+    if len(times) < bar:
+        return Beats(tuple(times), bpm, (), beats.confidence, _candidates(bpm), 0.0, beats.duration, tuple(acc), bar)
+    if acc:
+        k, conf = _phase(np.array(acc), bar)
+    else:
+        first = next((i for i, t in enumerate(times) if round(t, 6) in downs), 0)
+        k, conf = first % bar, beats.bar_confidence
+    return Beats(tuple(times), bpm, tuple(times[k::bar]), beats.confidence, _candidates(bpm), float(conf),
+                 beats.duration, tuple(acc), bar)
+
+
+def corrected_by(beats: Beats, fix: dict | None) -> Beats:
+    """`corrected` com a correção como a fonte a guarda (`timeline.Source.beats_fix`: "fator" e "compasso"; o que falta
+    é neutro)."""
+    fix = fix or {}
+    return corrected(beats, fix.get("fator", 1.0), fix.get("compasso", BAR))
 
 
 # ------------------------------------------------------------------ arquivo e cache
@@ -432,4 +508,5 @@ def analyze_file(path: str, cancel: threading.Event | None = None) -> Beats:
     return beats
 
 
-__all__ = ["Beats", "BeatError", "analyze", "analyze_file", "cached", "cache_dir", "onset_envelope", "CONFIDENT"]
+__all__ = ["Beats", "BeatError", "analyze", "analyze_file", "cached", "cache_dir", "onset_envelope", "CONFIDENT",
+           "corrected", "corrected_by"]
