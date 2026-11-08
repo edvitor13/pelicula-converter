@@ -990,6 +990,14 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                     mix_path = None
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
+        film = _film_sound(job, info, seq, start, end, mix_path, perf)  # 1.8: som de película (`somfilme.py`)
+        if film is False:
+            return
+        if film:
+            if mix_path:
+                system.remove_file(mix_path)
+            mix_path = film
+            info = media.MediaInfo(**{**info.__dict__, "has_audio": True, "audio_codec": "pcm_s24le"})
         run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
                    seq, mix_path, chapters_path, subs_embed)
         if job.burn:
@@ -1021,6 +1029,33 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             system.remove_file(chapters_path)
         if subs_embed is not None:
             system.remove_file(subs_embed.path)
+
+
+def _film_sound(job: ExportJob, info: media.MediaInfo, seq, start: int, end: int, mix_path: str | None,
+                perf: media.Perf) -> str | None | bool:
+    """1.8: com o "Som de película" no look da exportação, o som final passa por `somfilme` (ARQUITETURA §45): a
+    mixagem do trecho (montagem) ou o trecho do arquivo, nunca copiado. Devolve o WAV novo (vira o som do trabalho),
+    None quando nada muda e False quando cancelou ou deu erro (o trabalho já fica marcado)."""
+    from . import somfilme
+    values = somfilme.film_values(job.values, job.settings.no_effects)
+    if values is None or not info.has_audio:
+        return None
+    if _audio_args(job.settings, info, 0.0 if seq is not None else start / info.fps) == ["-an"]:
+        return None
+    if seq is not None and not mix_path:
+        return None
+    try:
+        path = somfilme.export_sound(values, info, seq, start, end + 1, mix_path, job.cancel, perf)
+    except (RuntimeError, OSError, ValueError) as exc:
+        job.status = "erro"
+        job.error = str(exc)[-1500:]
+        return False
+    if job.cancel.is_set():
+        if path:
+            system.remove_file(path)
+        job.status = "cancelado"
+        return False
+    return path
 
 
 @dataclass

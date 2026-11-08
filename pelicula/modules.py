@@ -125,6 +125,10 @@ MODULES: tuple[Module, ...] = (
               "revelação, a película vencida e a pré-exposição): sem detalhe, pé, trecho reto, ombro ou estourado, "
               "a latitude em stops e a leitura de um ponto. Só na tela: nunca vai para a exportação."),
            "pelicula", BETA),
+    Module("som_pelicula", N_("Som de película"),
+           N_("O som passa pela trilha da cópia: ótica de 35 ou 16 mm, magnética do Super 8 ou ótica dos anos 30, com "
+              "estalos nas emendas (nos mesmos quadros da imagem), poeira, wow e flutter que seguem o tremor do "
+              "quadro, o projetor e a sala de cinema. Não vai para o plugin do DaVinci."), "pelicula", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -260,6 +264,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         used.add("data_impressa")
     if v.get("mfilme_on"):  # 1.6: a montagem na película
         used.add("montagem_pelicula")
+    if v.get("somf_on"):  # 1.8: som de película
+        used.add("som_pelicula")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):

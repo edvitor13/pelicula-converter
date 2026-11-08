@@ -159,6 +159,10 @@ pelicula/
   maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
   montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
                              (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
+  somfilme.py                1.8, som de película (módulo Beta som_pelicula, seção "som_pelicula" do look; ARQUITETURA §45):
+                             motor numpy sobre o som final (trilha ótica/magnética, estalos nos quadros das emendas de
+                             look.emenda_frames/montagem_filme.splice_frames, poeira, wow por look.weave, projetor, sala),
+                             pelo índice absoluto da amostra, com contexto antes (process, process_wav, export_sound)
   luz_plano.py               1.6, marcação de luz por plano: pontos da copiadora por clipe (luz_r/g/b, luz_densidade)
                              somados a lab_luz_* no plano da V1 (shot_lights, via frame.Recipe.plan; transição de dois
                              clipes interpolada), mostrador TAPE 25-25-25 (classic); ARQUITETURA §35
@@ -209,6 +213,8 @@ pelicula/
                              seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
                              1.8, look próprio de cada sequência (§42): look_sequencia_ui (SeqLookUI: o look em edição
                              acompanha a aba, a escolha no painel/aba/Mídia, alvos da exportação, aviso no clipe);
+                             1.8, som_pelicula_ui (SomPeliculaUI: o som da prévia passa pelo somfilme em `_set_audio`,
+                             cartão do módulo som_pelicula);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -459,6 +465,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_alfa_titulos_ui.py` | casos de `alfa_titulos_ui_cases.py`: imagens numeradas, Fundo transparente, janela Exportar com alfa, xadrez, menu Novo, campos do gerador e editor de títulos com desfazer, aviso de caractere, Sobre, módulo desligado |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
+| `tests/test_somfilme.py` | som de película sem ffmpeg: seção e módulo, desligado = bit a bit, trecho com contexto = pedaço do som inteiro, determinismo, faixa medida de cada trilha, mono e chiado, limite suave, estalos na amostra exata dos quadros de `u_splice` (defeitos e montagem), wow correlacionado com o tremor do quadro, `process_wav` em blocos, imagem/LUT/plugin sem a seção |
+| `tests/test_somfilme_export.py` | som de película com o ffmpeg: trecho exportado = prévia (montagem e arquivo), estalo no corte, agudos cortados; na GPU, som do arquivo recodificado (desligado: copiado) e o estalo na exportação de uma montagem |
+| `tests/test_som_pelicula_ui.py` | casos de `som_pelicula_ui_cases.py`: cartão do módulo Beta, prévia do arquivo = motor da exportação, só o processamento refaz (a mixagem fica), sem efeitos/sem película/desligado voltam ao som de sempre |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |

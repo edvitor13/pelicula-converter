@@ -8,6 +8,8 @@ dá um pulo. Aqui a montagem (o modo Edição) diz onde estão os cortes, quadro
 - `edit_info(seq, index, fps)`: em que quadro da saída estamos desde o último corte seco da faixa principal de vídeo
   (V1; o corte com transição não é emenda). `frame.Recipe.plan` calcula e passa a `look.build_plan(edit=...)`; sem
   montagem (modo Película com o arquivo direto) não há cortes, e só os rolos valem.
+- `splice_visible`/`splice_frames` (1.8): em que cortes a fita aparece e em que quadros; o som de película
+  (`somfilme`) põe o estalo nesses mesmos quadros.
 - `apply(U, v, edit, frame, fps, scale)`: no plano do quadro. A emenda usa o desenho da "Emenda" dos defeitos
   (`u_splice`), o clarão soma exposição (`u_gain`), o pulo desloca o quadro (`u_shift`) e o velamento do fim do rolo
   usa o vazamento de luz (`u_leak*`) — nenhum programa novo na GPU.
@@ -78,6 +80,32 @@ def _hash(i: int, s: int) -> float:
     return h(i, s)
 
 
+def splice_visible(v: dict, cut: int) -> bool:
+    """Se a fita da emenda aparece no primeiro quadro depois do corte `cut` ("Emendas visíveis" e a semente)."""
+    return _hash(cut, int(v.get("mfilme_semente", 7)) + 601) < float(v["mfilme_emenda"])
+
+
+def splice_frames(seq, v: dict, fps: float, first: int, end: int) -> list[int]:
+    """1.8: os quadros de [first, end) em que a imagem mostra a fita da emenda de um corte (`apply` com
+    `edit_info(...).since == 0` e `splice_visible`), para o som de película pôr o estalo no mesmo quadro
+    (`somfilme`). Vazio com a seção desligada ou sem montagem."""
+    if seq is None or not v.get("mfilme_on") or end <= first:
+        return []
+    fps = fps or 24.0
+    out = []
+    for k, c in enumerate(cut_times(seq)):
+        if not splice_visible(v, k):
+            continue
+        guess = math.ceil(c * fps - 1e-6)
+        for f in (guess - 1, guess, guess + 1):  # o primeiro quadro do corte pela conta de `edit_info`
+            e = edit_info(seq, f, fps)
+            if f >= 0 and e.since == 0 and e.cut == k:
+                if first <= f < end:
+                    out.append(f)
+                break
+    return out
+
+
 def apply(U: dict[str, Any], v: dict, edit: EditInfo | None, frame: int, fps: float, scale: float) -> None:
     """Os defeitos da montagem no plano do quadro (nada com a seção desligada)."""
     if not v.get("mfilme_on"):
@@ -89,7 +117,7 @@ def apply(U: dict[str, Any], v: dict, edit: EditInfo | None, frame: int, fps: fl
     if edit is not None and edit.since is not None and edit.since <= 1:
         k = edit.cut
         first = edit.since == 0
-        if first and _hash(k, sd + 601) < float(v["mfilme_emenda"]):
+        if first and splice_visible(v, k):
             U["u_splice"] = (1.0, 0.1 + 0.8 * _hash(k, sd + 602))
         flash = float(v["mfilme_clarao"]) * FLASH_STOPS * (1.0 if first else 0.3)
         if flash > 0:
