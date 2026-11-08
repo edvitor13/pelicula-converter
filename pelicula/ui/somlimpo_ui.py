@@ -1,0 +1,154 @@
+"""Limpeza do som na interface (1.8, ARQUITETURA §44): o que os cartões de som do inspetor têm além das linhas do
+esquema.
+
+- Cartão "Limpar o som": botão "Aprender o ruído" (o trecho de `somlimpo.learn_range`, conferido numa thread de
+  trabalho pela fila de tarefas) e as linhas do trecho aprendido escondidas.
+
+Um gancho só: `ClipInspector` cria o `InspectorSound`. Tudo o que muda o clipe passa por
+`TimelineModel.set_clip_values` (um passo do desfazer); a mixagem lê os valores (`audiomix`, `somlimpo`).
+"""
+
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+
+from .. import jobs, somlimpo
+from ..i18n import _, fmt_decimal
+from ..timeline import AUDIO
+from .job_bridge import bridge
+
+LEARN_KEY = "aprender_ruido"
+LEARN_STRENGTH = 0.8   # força posta ao aprender, se estava em 0 (para o resultado se ouvir logo)
+
+
+def _seconds(t: float) -> str:
+    return fmt_decimal(t, 2) + " s"
+
+
+class InspectorSound:
+    """Liga os botões dos cartões de som do inspetor ao clipe escolhido."""
+
+    def __init__(self, inspector):
+        self.ins = inspector
+        self.model = inspector.model
+        self.store = inspector.astore
+        self.job: jobs.Job | None = None
+        cards = {c.section.key: c for c in inspector.acards}
+        self.clean_card = cards.get("limpar")
+        self.rows = {r.param.key: r for r in self.clean_card.rows} if self.clean_card is not None else {}
+        for key in ("ruido_ini", "ruido_fim"):  # o trecho aprendido não se edita à mão
+            if key in self.rows:
+                self.rows[key].setVisible(False)
+        self.btn_learn = QPushButton(_("Aprender o ruído"))
+        self.btn_learn.setObjectName("learn_noise")
+        self.btn_learn.setToolTip(_("Ouve um trecho só com o ruído deste clipe: a entrada e a saída marcadas na linha do "
+                                    "tempo, se estão dentro do clipe, ou 1 s a partir do cursor."))
+        self.btn_learn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_learn.clicked.connect(self.learn)
+        self.learned = QLabel()
+        self.learned.setObjectName("Faint")
+        self.learned.setWordWrap(True)
+        self.status = QLabel()
+        self.status.setObjectName("Muted")
+        self.status.setWordWrap(True)
+        self.status.hide()
+        if self.clean_card is not None:
+            body = self.clean_card.body.layout()
+            at = body.indexOf(self.rows["ruido_perfil"]) + 1 if "ruido_perfil" in self.rows else 0
+            line = QWidget()
+            hl = QHBoxLayout(line)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.addWidget(self.btn_learn)
+            hl.addWidget(self.learned, 1)
+            body.insertWidget(at, line)
+            body.insertWidget(at + 1, self.status)
+        self.store.changed.connect(self._changed)
+        self.model.selectionChanged.connect(lambda: self.say(""))
+        self.update()
+
+    # -------------------------------------------------------- estado
+    def _changed(self, key: str) -> None:
+        if key in ("*", "ruido_ini", "ruido_fim"):
+            self.update()
+
+    def update(self) -> None:
+        a, b = float(self.store.get("ruido_ini")), float(self.store.get("ruido_fim"))
+        self.learned.setText(_("Aprendido: {ini} a {fim} do arquivo.").format(ini=_seconds(a), fim=_seconds(b))
+                             if b - a > 1e-9 else _("Nenhum ruído aprendido."))
+
+    def say(self, text: str) -> None:
+        """Mensagem no cartão e, com a janela, na barra de status."""
+        self.status.setText(text)
+        self.status.setVisible(bool(text))
+        win = self.ins.window()
+        if text and hasattr(win, "statusBar") and win is not self.ins:
+            win.statusBar().showMessage(text, 7000)
+
+    def _marks(self) -> tuple[int | None, int | None]:
+        win = self.ins.window()
+        return getattr(win, "inp", None), getattr(win, "outp", None)
+
+    def _clip(self):
+        c = self.ins.current_clip()
+        return c if c is not None and c.kind == AUDIO else None
+
+    # -------------------------------------------------------- aprender o ruído
+    @property
+    def busy(self) -> bool:
+        return self.job is not None and self.job.active
+
+    def learn(self) -> jobs.Job | None:
+        """Confere o trecho (`somlimpo.learn_range`) e o som dele numa thread de trabalho; no fim grava o trecho no
+        clipe num passo do desfazer. None (com a explicação na mensagem) se o trecho não serve."""
+        c = self._clip()
+        if c is None or self.busy:
+            return None
+        seq = self.model.seq
+        path = somlimpo.source_path(seq, c)
+        if path is None:
+            self.say(_("Este clipe não tem som de arquivo para aprender o ruído."))
+            return None
+        try:
+            t0, t1 = somlimpo.learn_range(seq, c, self.ins.playhead, *self._marks())
+        except somlimpo.CleanError as exc:
+            self.say(str(exc))
+            return None
+        if not os.path.exists(path):
+            self.say(_("O som desta sequência ainda não foi mixado: toque a prévia e tente de novo."))
+            return None
+        cid = c.id
+
+        def run(job: jobs.Job):
+            job.report(_("Ouvindo o ruído…"))
+            somlimpo.profile_for(path, t0, t1, job.cancel_event)
+            return t0, t1
+
+        self.btn_learn.setEnabled(False)
+        self.say(_("Ouvindo o ruído…"))
+        self.job = bridge().submit(run, _("Aprender o ruído"), kind=jobs.CPU, key=LEARN_KEY,
+                                   on_finished=lambda job: self._learned(job, cid))
+        return self.job
+
+    def _learned(self, job: jobs.Job, cid: str) -> None:
+        if job is not self.job:
+            return
+        self.btn_learn.setEnabled(True)
+        if job.state == jobs.ERRO:
+            self.say(job.error)
+            return
+        c = self.model.seq.find(cid)
+        if job.state != jobs.CONCLUIDO or c is None:
+            self.say("")
+            return
+        t0, t1 = job.result
+        vals = {**c.values, "ruido_ini": float(t0), "ruido_fim": float(t1)}
+        if float(vals["ruido_perfil"]) <= 0:
+            vals["ruido_perfil"] = LEARN_STRENGTH
+        self.model.set_clip_values(cid, vals)
+        self.say(_("Ruído aprendido de {ini} a {fim} do arquivo.").format(ini=_seconds(t0), fim=_seconds(t1)))
+
+
+__all__ = ["InspectorSound"]
