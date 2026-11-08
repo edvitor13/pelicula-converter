@@ -919,7 +919,7 @@ class TimelineCanvas(QWidget):
         d = self._drag
         r = QRectF(10, 0, HEADER_W - 26, 1)
         t = (x - r.left()) / r.width()
-        self.model.set_track(d["kind"], d["idx"], volume=self.t_to_volume(t))
+        self.model.set_track(d["kind"], d["idx"], record=False, volume=self.t_to_volume(t))  # um passo ao soltar
 
     def mouseMoveEvent(self, e):
         pos = e.position()

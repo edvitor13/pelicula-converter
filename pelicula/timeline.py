@@ -407,10 +407,14 @@ class Track:
     locked: bool = False     # travada: nenhuma edição mexe nela
     solo: bool = False       # áudio: só as faixas em solo tocam
     volume: float = 0.0      # dB (áudio)
+    pan: float = 0.0         # 1.8, balanço da faixa de áudio (−1 esquerda … 1 direita), na soma (`somcache.track_gains`)
 
     def to_json(self) -> dict[str, Any]:
-        return {"tipo": self.kind, "nome": self.name, "mudo": self.muted, "travada": self.locked, "solo": self.solo,
-                "volume": self.volume}
+        d = {"tipo": self.kind, "nome": self.name, "mudo": self.muted, "travada": self.locked, "solo": self.solo,
+             "volume": self.volume}
+        if self.pan:  # só fora do centro: o JSON de antes fica igual (recurso "balanco_faixa" do formato 6)
+            d["balanco"] = self.pan
+        return d
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Track | None":
@@ -421,7 +425,17 @@ class Track:
         except (TypeError, ValueError):
             vol = 0.0
         return cls(kind=d["tipo"], name=str(d.get("nome") or ""), muted=bool(d.get("mudo", False)),
-                   locked=bool(d.get("travada", False)), solo=bool(d.get("solo", False)), volume=vol)
+                   locked=bool(d.get("travada", False)), solo=bool(d.get("solo", False)), volume=vol,
+                   pan=clean_pan(d.get("balanco", 0.0)))
+
+
+def clean_pan(v: Any) -> float:
+    """Balanço da faixa entre −1 e 1 (o que não é número vira o centro), em 2 casas como o controle mostra."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(min(max(x, -1.0), 1.0), 2) if math.isfinite(x) else 0.0
 
 
 @dataclass
@@ -2182,7 +2196,7 @@ class Sequence:
             if (a.src != v.src or a.start != 0 or a.dur != v.dur or a.src_in > EPS
                     or not editparams.is_neutral(AUDIO, a.values) or a.keys or not self.has_audio):
                 return None
-            if any(abs(t.volume) > 1e-9 for t in self.kind_tracks(AUDIO)):
+            if any(abs(t.volume) > 1e-9 or abs(t.pan) > 1e-9 for t in self.kind_tracks(AUDIO)):
                 return None
         elif src.has_audio:
             return None
@@ -2582,6 +2596,8 @@ FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_8": _clips_beyond_1_7,
     # look próprio da sequência (`Sequence.look`): a 1.7 abriria a sequência com o look do projeto, sem avisar
     "look_proprio": lambda seq: seq.look is not None,
+    # balanço da faixa de áudio (`Track.pan`, "balanco" na faixa): a 1.7 tocaria a faixa no centro
+    "balanco_faixa": lambda seq: any(t.pan for t in seq.tracks),
 }
 
 

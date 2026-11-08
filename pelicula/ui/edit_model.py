@@ -38,7 +38,7 @@ from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
 
-TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
+TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name", "pan"}  # 1.8: "pan" (balanço da faixa, o mixer)
 AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
 
 
@@ -552,21 +552,37 @@ class TimelineModel(QObject):
             self.seq.close_gaps(kind, idx)
         self._done("structure")
 
-    def set_track(self, kind: str, idx: int, **attrs) -> None:
+    def set_track(self, kind: str, idx: int, record: bool = True, **attrs) -> None:
+        """Muda propriedades da faixa (`TRACK_ATTRS`). `record=False` (arrastando o volume ou o balanço) agrupa o
+        histórico em 400 ms, como os sliders do clipe; quem arrasta chama `commit()` ao soltar: um passo por gesto."""
         tr = self.seq.track(kind, idx)
         if tr is None:
             return
+        trivial = self.seq.is_trivial()
         changed = False
         for k, v in attrs.items():
             if k not in TRACK_ATTRS:
                 raise KeyError(k)
             if k == "volume":
                 v = min(max(float(v), -60.0), 12.0)
+            if k == "pan":
+                v = timeline.clean_pan(v)
             if getattr(tr, k) != v:
                 setattr(tr, k, v)
                 changed = True
-        if changed:
-            self._done("structure")
+        if not changed:
+            return
+        # Volume e balanço de uma faixa de som só mudam o som: a prévia remonta o quadro e refaz a mixagem, sem
+        # recarregar a fonte (a não ser que a montagem deixe de ser, ou volte a ser, só o arquivo).
+        kind_changed = ("values" if kind == AUDIO and set(attrs) <= {"volume", "pan"}
+                        and self.seq.is_trivial() == trivial else "structure")
+        if record:
+            self._done(kind_changed)
+            return
+        self._filter_selection(emit=True)
+        self._timer.start()
+        self.changed.emit(kind_changed)
+        self.historyChanged.emit()
 
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,

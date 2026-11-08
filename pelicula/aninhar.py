@@ -224,18 +224,41 @@ def _plan_audio(seq: Sequence, sel: list[Clip], atracks: list[int]) -> tuple[int
         return None, 0.0, []
     for i in cands:
         t = tracks[i].volume
-        if tone and abs(t) > 1e-9:
-            continue  # o tom não passa pela faixa de dentro: só uma faixa a 0 dB deixa o volume dele como estava
+        if tone and (abs(t) > 1e-9 or tracks[i].pan):
+            continue  # o tom não passa pela faixa de dentro: só uma faixa a 0 dB e no centro o deixa como estava
+        if any(pan_inside(tracks[j].pan, tracks[i].pan) is None for j in cands):
+            continue  # 1.8: o balanço desta faixa não se desconta do das outras (`pan_inside`)
         if all(_in_range(tracks[j].volume - t) for j in cands):
             warn = []
             if abs(t) > 1e-9 and any(c.kind == AUDIO and any(c.values.get(k) for k in NONLINEAR) for c in sel):
                 warn.append(_("O volume da faixa de som agora vem depois dos efeitos de voz, ruído ou normalização do "
                               "clipe: o som pode mudar um pouco."))
             return i, t, warn
-    if tone:
-        return NEW, 0.0, []
+    if tone or not any(all(pan_inside(tracks[j].pan, tracks[i].pan) is not None for j in cands) for i in cands):
+        return NEW, 0.0, []  # numa faixa nova (0 dB, no centro) nada se desconta
     raise Refusal(_("Os volumes das faixas de som são tão diferentes que o de dentro sairia do limite (-60 a +12 dB). "
                     "Aproxime os volumes das faixas antes de aninhar."))
+
+
+def pan_inside(pan: float, land: float) -> float | None:
+    """1.8: o balanço de uma faixa de dentro para que, com o da faixa de fora onde o som cai (`land`) por cima, o som
+    saia como estava (`pan`). A lei do balanço (`somcache.track_gains`) só se desfaz quando uma das duas está no centro
+    ou quando são iguais (a de dentro fica no centro); senão None."""
+    if not land:
+        return pan
+    if abs(pan - land) < 1e-9:
+        return 0.0
+    return None
+
+
+def pan_outside(inner: float, land: float) -> float | None:
+    """1.8, desaninhar: o balanço que a faixa de fora precisa para soar como a de dentro com a de fora por cima (None
+    quando os dois estão fora do centro e não dá para juntar num só)."""
+    if not land:
+        return inner
+    if not inner:
+        return land
+    return None
 
 
 def nest(seq: Sequence, ids, name: str = "", look: dict | None = None) -> NestResult:
@@ -256,6 +279,7 @@ def nest(seq: Sequence, ids, name: str = "", look: dict | None = None) -> NestRe
     # Faixas: só as usadas, na mesma ordem relativa e com as mesmas propriedades. O som de dentro desconta o volume da
     # faixa onde o clipe de fora cai, e silencia o que o solo já silenciava.
     solo = any(t.solo for t in seq.kind_tracks(AUDIO))
+    land_pan = seq.track(AUDIO, p.a_land).pan if p.a_land not in (None, NEW) else 0.0
     vmap = {t: i for i, t in enumerate(p.vtracks)}
     amap = {t: i for i, t in enumerate(p.atracks)}
     tracks: list[Track] = []
@@ -269,7 +293,8 @@ def nest(seq: Sequence, ids, name: str = "", look: dict | None = None) -> NestRe
         t = seq.track(AUDIO, old)
         tracks.append(Track(AUDIO, t.name if not _is_default(t.name, AUDIO) else default_name(AUDIO, amap[old]),
                             muted=bool(t.muted or (solo and not t.solo)), solo=t.solo,
-                            volume=_clamp_db(t.volume - p.a_delta)))
+                            volume=_clamp_db(t.volume - p.a_delta),
+                            pan=_or(pan_inside(t.pan, land_pan), t.pan)))
     if not p.atracks:
         tracks.append(Track(AUDIO, default_name(AUDIO, 0)))
     inner.tracks = tracks
@@ -445,6 +470,9 @@ def unnest(seq: Sequence, cid: str) -> UnnestResult:
             if not _in_range(inner.kind_tracks(AUDIO)[old].volume + (land.volume if land is not None else 0.0)):
                 raise Refusal(_("O volume das faixas de som passaria do limite (-60 a +12 dB). Aproxime o volume da "
                                 "faixa onde o clipe está do das faixas de dentro."))
+            if pan_outside(inner.kind_tracks(AUDIO)[old].pan, land.pan if land is not None else 0.0) is None:
+                raise Refusal(_("A faixa onde o clipe está e uma faixa de dentro têm balanço fora do centro: o som não "
+                                "sairia igual. Centralize o balanço de uma delas antes de desaninhar."))
     # As faixas de dentro que têm parte, com o que elas valem na sequência de fora.
     inner_tracks = {k: inner.kind_tracks(k) for k in (VIDEO, AUDIO)}
     placed: dict[tuple[str, int, int], int] = {}   # (tipo, membro, faixa de dentro) → faixa de fora
@@ -474,13 +502,14 @@ def unnest(seq: Sequence, cid: str) -> UnnestResult:
                 it = inner_tracks[AUDIO][old]
                 audible = land_ok and not it.muted and (not in_solo or it.solo)
                 vol = it.volume + delta
-                want = (not audible, bool(solo and audible), _clamp_db(vol))
+                want = (not audible, bool(solo and audible), _clamp_db(vol),
+                        _or(pan_outside(it.pan, land.pan if land is not None else 0.0), it.pan))
                 idx = next((i for i in range(m.track, len(seq.kind_tracks(AUDIO)))
                             if _same_audio(seq.track(AUDIO, i), want) and _free(seq, AUDIO, i, a, b, ignore)), None)
                 if idx is None:
                     idx = seq.add_track(AUDIO)
                     t = seq.track(AUDIO, idx)
-                    t.muted, t.solo, t.volume = want
+                    t.muted, t.solo, t.volume, t.pan = want
                     if not _is_default(it.name, AUDIO):
                         t.name = it.name
                 placed[(AUDIO, id(m), old)] = idx
@@ -507,6 +536,10 @@ def unnest(seq: Sequence, cid: str) -> UnnestResult:
     return UnnestResult(inner, out)
 
 
-def _same_audio(track: Track | None, want: tuple[bool, bool, float]) -> bool:
+def _same_audio(track: Track | None, want: tuple[bool, bool, float, float]) -> bool:
     return (track is not None and not track.locked and track.muted == want[0] and track.solo == want[1]
-            and abs(track.volume - want[2]) < 1e-9)
+            and abs(track.volume - want[2]) < 1e-9 and abs(track.pan - want[3]) < 1e-9)
+
+
+def _or(value: float | None, fallback: float) -> float:
+    return fallback if value is None else value

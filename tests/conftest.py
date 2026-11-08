@@ -25,6 +25,11 @@ if not os.environ.get("PELICULA_SETTINGS_DIR"):
     import tempfile
     os.environ["PELICULA_SETTINGS_DIR"] = tempfile.mkdtemp(prefix="pelicula_test_settings_")
 
+# 1.8: o cache do som de cada clipe (`somcache.cache_dir`) numa pasta só da suíte, nunca a do app.
+if not os.environ.get("PELICULA_SOM_CACHE"):
+    import tempfile
+    os.environ["PELICULA_SOM_CACHE"] = tempfile.mkdtemp(prefix="pelicula_test_som_")
+
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 

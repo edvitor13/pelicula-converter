@@ -972,9 +972,10 @@ def test_the_frame_cache_depends_on_every_parameter(gl_engine, renderer, monkeyp
 # ------------------------------------------------------------------ som
 @pytest.fixture
 def mix_dir(tmp_path, monkeypatch):
-    """Os WAVs das sequências aninhadas numa pasta do teste."""
+    """Os WAVs das sequências aninhadas numa pasta do teste (e, desde a 1.8, o cache do som de cada clipe também)."""
     d = tmp_path / "som_aninhado"
     monkeypatch.setattr(audiomix, "nested_dir", lambda: d)
+    monkeypatch.setenv("PELICULA_SOM_CACHE", str(tmp_path / "som_clipes"))
     return d
 
 

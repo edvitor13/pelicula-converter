@@ -1,5 +1,9 @@
 """Mixagem do som da sequência do modo Edição com o ffmpeg (prévia e exportação usam a mesma função).
 
+1.8: `render_mix` renderiza cada clipe uma vez (a cadeia de filtros abaixo, sem o recorte do trecho nem o atraso) num
+cache e soma em numpy (`somcache.py`, ARQUITETURA §43). O grafo único descrito a seguir continua em `build_graph` e
+`render_mix_graph`, como referência.
+
 Cada clipe de som vira uma entrada do ffmpeg (`-ss`/`-t` no trecho usado do arquivo) e uma cadeia
 de filtros: velocidade (`atempo`), volume do clipe + da faixa, equalização (graves, médios,
 agudos), realce de voz, redução de ruído, normalização, balanço, fades, recorte para o trecho
@@ -162,6 +166,7 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "key_off": c.key_off,
             "fps": fps,
             "pre": pre,                                          # s antes do início do clipe (transição)
+            "post": post,                                        # s depois do fim do clipe (transição)
             "xf_in": sum(head) if head else 0.0,                 # transição de entrada (começa em 0)
             "xf_out": sum(tail) if tail else 0.0,                # transição de saída...
             "xf_out_st": pre + c.dur / fps - tail[0] if tail else 0.0,  # ...a partir daqui
@@ -474,9 +479,25 @@ def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: in
 
 
 def render_mix(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
-               cancel: threading.Event | None = None, perf: media.Perf | None = None) -> bool:
-    """Grava o som do trecho num WAV. False se o trecho não tem som ou foi cancelado; erro do ffmpeg vira RuntimeError
-    (também o de uma sequência aninhada, que é mixada antes com o mesmo `cancel`)."""
+               cancel: threading.Event | None = None, perf: media.Perf | None = None, *,
+               track_peaks: bool = False) -> bool:
+    """Grava o som do trecho num WAV (24 bits, 48 kHz estéreo). False se o trecho não tem som ou foi cancelado; erro do
+    ffmpeg vira RuntimeError (também o de uma sequência aninhada, que é mixada antes com o mesmo `cancel`).
+
+    1.8: o som de cada clipe sai do cache por clipe e a soma é feita em numpy (`somcache.mix`, ARQUITETURA §43); o
+    grafo único de antes ficou em `render_mix_graph`, a referência dos testes. `track_peaks`: grava ao lado do WAV os
+    picos de cada faixa a cada 10 ms (`somcache.save_peaks`; os medidores do mixer da prévia)."""
+    from . import somcache
+    res = somcache.mix(seq, out_path, start, end, cancel, perf, with_peaks=track_peaks)
+    if res is not None and track_peaks:
+        somcache.save_peaks(res)
+    return res is not None
+
+
+def render_mix_graph(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
+                     cancel: threading.Event | None = None, perf: media.Perf | None = None) -> bool:
+    """O caminho de antes da 1.8: o trecho inteiro num grafo só do ffmpeg (`build_graph`). Fica como referência dos
+    testes (a soma do cache tem de dar o mesmo som) e para depurar. False se o trecho não tem som ou foi cancelado."""
     g = build_graph(seq, start, end)
     if g is None or not _render_nested(seq, start, end, cancel, perf):
         return False
@@ -579,10 +600,16 @@ def nested_mix_path(inner: timeline.Sequence) -> str:
 
 def _prune_nested(keep: set[str]) -> None:
     """Tira os WAVs mais antigos até caber em `NEST_MAX_BYTES`, menos os de `keep` e os usados há pouco."""
+    _prune_dir(nested_dir(), keep, NEST_MAX_BYTES)
+
+
+def _prune_dir(folder: Path, keep: set[str], max_bytes: int) -> None:
+    """A limpeza das pastas de cache de som (sequências aninhadas e, na 1.8, os pedaços de `somcache`): tira os WAVs mais
+    antigos até caber em `max_bytes`, menos os de `keep` e os usados há menos de `NEST_KEEP_S`."""
     now = time.time()
     found = []
     try:
-        for e in os.scandir(nested_dir()):
+        for e in os.scandir(folder):
             if e.is_file() and e.name.endswith(".wav"):
                 st = e.stat()
                 found.append((st.st_mtime, st.st_size, e.path))
@@ -590,7 +617,7 @@ def _prune_nested(keep: set[str]) -> None:
         return
     total = sum(f[1] for f in found)
     for mtime, size, path in sorted(found):
-        if total <= NEST_MAX_BYTES:
+        if total <= max_bytes:
             break
         if path in keep or now - mtime < NEST_KEEP_S:
             continue
