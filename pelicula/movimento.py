@@ -337,19 +337,23 @@ def frame_motion(prev: np.ndarray, cur: np.ndarray, scale: float = 1.0,
 def estimate(frames: Iterator[tuple[int, np.ndarray]], total: int, scale: float,
              report: Callable[[int, int], None] | None = None) -> np.ndarray:
     """Movimento quadro a quadro de uma sequência de quadros em cinza (o caminho em numpy, sem o vid.stab): array
-    (total, 4) float32 com (tx, ty, ângulo, log da escala) do quadro anterior para cada quadro, em px@1080; o primeiro
-    (e os que faltarem) é a identidade."""
+    (lidos, 4) float32 com (tx, ty, ângulo, log da escala) do quadro anterior para cada quadro, em px@1080, até o último
+    quadro lido (no máximo `total`); o primeiro é a identidade."""
     out = np.zeros((int(total), 4), np.float32)
     prev = None
     done = 0
+    last = -1
     for k, g in frames:
-        if prev is not None and 0 <= k < total:
+        if not 0 <= k < total:
+            break
+        if prev is not None:
             out[k] = frame_motion(prev, g, scale)
         prev = g
+        last = k
         done += 1
         if report is not None:
             report(done, total)
-    return out
+    return out[:last + 1]
 
 
 # ------------------------------------------------------------------ trajetória e correção

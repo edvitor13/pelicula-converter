@@ -103,6 +103,7 @@ EFFECTS: dict[str, Effect] = {}
 # Módulos dos efeitos (`pelicula.<nome>`), um por frente: cada um chama `register` (e põe seus provedores em `GEOMETRY` e
 # `WINDOWS`) ao ser importado. `load_effects` os importa antes do primeiro uso. Frente nova: **uma linha** aqui.
 EFFECT_PACKAGES: tuple[str, ...] = (
+    "estabilizacao",  # 1.9 F3: estabilização (geometria; §51)
 )
 _LOADED = False
 _LOAD_LOCK = threading.Lock()

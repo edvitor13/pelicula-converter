@@ -291,6 +291,28 @@ VIDEO_SECTIONS += [
 
 # 1.9 F3: estabilização e rastreio (§51)
 VIDEO_SECTIONS += [
+    # `estabilizacao.py`: a correção sai da análise guardada na fonte (botão "Analisar" do cartão) e entra na geometria
+    # do clipe (`vfx.GEOMETRY`). Desligada (padrão) ou sem análise, o clipe de sempre.
+    Section("estabilizar", "Estabilizar", "estab_on", [
+        B("estab_on", "Estabilizar", False, "Tira o tremor da câmera na mão. Analise o arquivo antes (botão Analisar)."),
+        F("estab_suavizar", "Suavizar", 1.0, 0.1, 10.0, 0.1, 1, " s",
+          "Quanto do movimento fica: pouco segue a câmera de perto (só some o tremor); muito deixa o movimento lento e "
+          "liso, como num tripé com cabeça fluida."),
+        B("estab_rotacao", "Corrigir a rotação", True, "Desligado, a imagem só anda (o horizonte pode balançar)."),
+        C("estab_bordas", "Bordas", "ampliar", [
+            ("ampliar", N_("Ampliar (sem bordas)")), ("preto", N_("Mostrar as bordas"))],
+          "Ao corrigir, a imagem anda e as bordas aparecem. Ampliar escolhe o menor zoom que as esconde no arquivo "
+          "inteiro."),
+        _pct("estab_zoom_extra", "Zoom a mais", lo=0.0, hi=0.5, tip="Amplia mais um pouco, além do necessário."),
+    ], "Tira o tremor da câmera na mão"),
+    # `rastreio.py`: o tamanho do alvo e a busca do rastreio de ponto (botão "Rastrear ponto"); não mudam a imagem.
+    Section("rastreio", "Rastrear ponto", None, [
+        F("rastreio_caixa", "Tamanho do alvo", 64, 16, 256, 2, 0, " px",
+          "Lado do quadrado em volta do ponto que é procurado nos outros quadros (px num quadro de 1080 linhas). "
+          "Pegue algo com detalhe e que não mude muito."),
+        F("rastreio_busca", "Busca por quadro", 48, 8, 256, 2, 0, " px",
+          "Quanto o ponto pode andar de um quadro para o outro. Aumente para movimentos rápidos.", advanced=True),
+    ], "Um título (ou o próprio clipe) seguindo um ponto da imagem"),
 ]
 
 # 1.9 F4: luz e atmosfera (§52)
