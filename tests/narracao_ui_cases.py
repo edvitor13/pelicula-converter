@@ -478,3 +478,37 @@ def test_the_recording_is_a_normal_audio_clip_with_no_new_json_field(rig, ffmpeg
     js = rig.seq.to_json()
     assert not any(k for k in js if "narr" in k.lower())
     assert all("narr" not in str(f).lower() for f in rig.seq.features())
+
+
+def test_the_real_capture_watches_the_device_without_the_state_signal():
+    """O `QtCapture` de verdade não liga o `stateChanged` (o PySide6 6.12 não converte `QAudio::State` e cada mudança de
+    estado virava um relatório de erro ao começar a gravar): a falha do microfone é vista pela checagem de `error()`, e
+    avisa uma vez só. Sem dispositivo: a fonte é falsa."""
+    import inspect
+    assert ".stateChanged.connect" not in inspect.getsource(narracao_ui.QtCapture)
+    from PySide6.QtCore import QTimer
+    from PySide6.QtMultimedia import QAudio
+
+    class Source:
+        err = QAudio.Error.NoError
+
+        def error(self):
+            return self.err
+
+        def stop(self):
+            pass
+
+    cap = narracao_ui.QtCapture.__new__(narracao_ui.QtCapture)
+    QObject.__init__(cap)
+    cap.source, cap.io = Source(), object()
+    cap._watch = QTimer(cap)
+    got = []
+    cap.failed.connect(got.append)
+    cap._watch.start(250)
+    cap._check()
+    assert got == [] and cap._watch.isActive()        # tudo bem: nada
+    cap.source.err = QAudio.Error.OpenError
+    cap._check()
+    assert got == ["O microfone parou de responder."] and not cap._watch.isActive()
+    cap.stop()
+    assert cap.io is None

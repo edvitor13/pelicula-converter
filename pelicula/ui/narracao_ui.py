@@ -97,7 +97,11 @@ class QtCapture(QObject):
                 raise RuntimeError(_("Este microfone não entrega um formato de som que o app consiga ler."))
         self.rate, self.channels, self.fmt = fmt.sampleRate(), fmt.channelCount(), name
         self.source = QAudioSource(dev, fmt, self)
-        self.source.stateChanged.connect(self._state)
+        # Sem `stateChanged`: o PySide6 6.12 não converte `QAudio::State` para o Python ("Cannot call meta function ...
+        # cannot be converted"), e o sinal vira um relatório de erro. A falha do dispositivo é vista por uma checagem curta.
+        self._watch = QTimer(self)
+        self._watch.setInterval(250)
+        self._watch.timeout.connect(self._check)
         self.io = None
 
     def start(self) -> None:
@@ -106,23 +110,24 @@ class QtCapture(QObject):
             self.failed.emit(_("Não foi possível abrir o microfone."))
             return
         self.io.readyRead.connect(self._ready)
+        self._watch.start()
 
     def _ready(self) -> None:
         chunk = bytes(self.io.readAll())
         if chunk:
             self.data.emit(chunk)
 
-    def _state(self, _state) -> None:
-        """O dispositivo parou sozinho com erro (desconectado, tomado por outro programa)?"""
-        from PySide6.QtMultimedia import QAudio
-        if self.io is not None and self.source.error() != QAudio.Error.NoError:
+    def _check(self) -> None:
+        """O dispositivo parou sozinho com erro (desconectado, tomado por outro programa)? Avisa uma vez só."""
+        if self.io is None:
+            return
+        err = self.source.error()
+        if getattr(err, "name", str(err)).rsplit(".", 1)[-1] != "NoError":
+            self._watch.stop()
             self.failed.emit(_("O microfone parou de responder."))
 
     def stop(self) -> None:
-        try:
-            self.source.stateChanged.disconnect(self._state)
-        except (RuntimeError, TypeError):
-            pass
+        self._watch.stop()
         self.source.stop()
         self.io = None
 
