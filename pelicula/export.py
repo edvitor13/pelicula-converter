@@ -117,6 +117,7 @@ class ExportSettings:
     true_peak: float = -1.0   # pico real máximo (dBTP) quando há volume alvo
     net_grain: bool = False   # "Grão para redes": grão com tamanho mínimo na saída (look.build_plan(net_grain=))
     no_effects: bool = False  # 1.7: "Desligar todos os efeitos" valia ao criar o trabalho (`frame.Recipe.no_effects`)
+    sound_only: str = ""      # 1.8: "" vídeo e som | "som" só o som | "stems" uma faixa por arquivo (`somexport.py`)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -919,7 +920,8 @@ class ExportQueue:
                 job.status = "cancelado"
                 continue
             try:
-                if self._engine is None:
+                from . import somexport
+                if self._engine is None and not somexport.wants(job.settings):  # só o som não usa a GPU
                     self._engine = Engine()
                 run_job(job, self._engine)
             except Exception as exc:  # noqa: BLE001
@@ -932,6 +934,10 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     """Exporta um trabalho. O ffmpeg grava num parcial ao lado do destino e o resultado só vai para o
     lugar do destino quando tudo deu certo; cancelado ou com erro, o parcial é apagado e o arquivo
     antigo (se havia) fica como estava."""
+    from . import somexport
+    if somexport.wants(job.settings):  # 1.8: só o som (ou os stems), sem vídeo nem GPU
+        somexport.run(job)
+        return
     info, s = job.info, job.settings
     perf = s.perf()
     job.status = "exportando"

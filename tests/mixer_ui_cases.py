@@ -290,3 +290,67 @@ def test_scrub_toggle_is_saved_in_the_prefs(win, tmp_path):
 def test_the_real_sink_stays_silent_offscreen():
     assert scrub_ui._qt_sink(None) is None
 
+
+
+# ------------------------------------------------------------------ "O que exportar" na janela Exportar
+def _dialog(win, sequence, tmp_path):
+    from pelicula import export, sequence as seqmod
+    from pelicula.ui.export_dialog import ExportDialog
+    export_measure = export.measure_speed
+    export.measure_speed = lambda *a, **k: 0.0
+    try:
+        info = seqmod.media_info(sequence) if sequence is not None else media_info_of_file(tmp_path)
+        dlg = ExportDialog(None, info, {}, "Teste", None, last_dir=str(tmp_path), sequence=sequence)
+    finally:
+        export.measure_speed = export_measure
+    dlg._est_timer.stop()
+    dlg._preview_timer.stop()
+    return dlg
+
+
+def media_info_of_file(tmp_path):
+    from pelicula import media
+    return media.MediaInfo(path=str(tmp_path / "entrada.mp4"), width=320, height=180, fps=24.0, fps_str="24/1",
+                           frames=48, duration=2.0, pix_fmt="yuv420p", bit_depth=8, codec="h264", profile="",
+                           bitrate=0, color_space="bt709", color_range="tv", color_transfer="bt709",
+                           color_primaries="bt709", has_audio=True, audio_codec="aac", container="mov,mp4",
+                           is_image=False)
+
+
+def test_export_dialog_sound_only_and_stems(win, tmp_path):
+    seq = tl.Sequence(320, 180, "24/1", micro_fade=True)
+    wav = tmp_path / "tom.wav"
+    with somcache.WavWriter(str(wav), 48000) as w:
+        w.write(np.full((48000, 2), 0.25))
+    seq.add_source(tl.Source(str(wav), fps=24.0, frames=24, duration=1.0, has_video=False, has_audio=True))
+    seq.clips.append(tl.Clip(tl.new_id(), tl.AUDIO, str(wav), 0, 0, 24, 0.0))
+    seq.add_track(tl.AUDIO)
+    dlg = _dialog(win, seq, tmp_path)
+    s = dlg.sound
+    assert s.mode == "" and dlg.settings().sound_only == "" and not s.fmt.isEnabled()
+    video_parts = [dlg.platform_group, dlg.quality.parentWidget(), dlg.perf_box]
+    assert not any(w.isHidden() for w in video_parts)
+    loud_was = dlg.form.isRowVisible(dlg.loud)
+    s.what.setCurrentIndex(s.what.findData("som"))
+    s.fmt.setCurrentIndex(s.fmt.findData("flac"))
+    st = dlg.settings()
+    assert st.sound_only == "som" and st.audio == "flac" and dlg.path.text().endswith(".flac")
+    assert all(w.isHidden() for w in video_parts) and dlg.form.isRowVisible(dlg.loud)
+    assert not dlg.form.isRowVisible(dlg.codec) and "só o som" in dlg.summary.text()
+    dlg._set_loudness(-16.0)
+    assert dlg.settings().loudness == -16.0
+    s.what.setCurrentIndex(s.what.findData("stems"))
+    st = dlg.settings()
+    assert st.sound_only == "stems" and st.loudness == 0.0 and not dlg.form.isRowVisible(dlg.loud)
+    assert "volume alvo" in s.note.text()
+    s.what.setCurrentIndex(0)
+    assert not any(w.isHidden() for w in video_parts) and dlg.form.isRowVisible(dlg.codec)
+    assert dlg.form.isRowVisible(dlg.loud) == loud_was and dlg.path.text().endswith(".mp4")
+    job = dlg.job()
+    assert job.settings.sound_only == ""
+    dlg.close()
+    plain = _dialog(win, None, tmp_path)   # modo Película, o arquivo sem montagem: stems desligado, com o porquê
+    item = plain.sound.what.model().item(2)
+    assert not item.isEnabled() and "Edição" in item.toolTip()
+    assert plain.sound.what.model().item(1).isEnabled()
+    plain.close()
