@@ -143,6 +143,16 @@ def to_float(data: bytes, fmt: str, channels: int) -> np.ndarray:
     return ((x.astype(np.float64) - zero) / scale).astype(np.float32).reshape(-1, channels)
 
 
+def block_level(data: bytes, fmt: str, channels: int) -> Level:
+    """Pico e RMS de um bloco cru (o medidor do painel enquanto não grava; um resto menos que um quadro é ignorado)."""
+    width = np.dtype(FORMATS[fmt][0]).itemsize * channels
+    data = bytes(data)[:len(data) - len(data) % width]
+    if not data:
+        return Level()
+    x = to_stereo(to_float(data, fmt, channels))
+    return Level(float(np.abs(x).max()), float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))))
+
+
 def to_stereo(x: np.ndarray) -> np.ndarray:
     """1 canal → L = R; 2 ficam; mais de 2, os dois primeiros."""
     if x.shape[1] == 1:
