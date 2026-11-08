@@ -5,24 +5,29 @@ esquema.
   trabalho pela fila de tarefas) e as linhas do trecho aprendido escondidas; "Detectar" ao lado do zumbido
   (`somlimpo.detect_hum_file` no trecho usado do clipe).
 - Cartão "Equalizar e limpar": menu "Predefinições" (`editparams.AUDIO_PRESETS`, um passo do desfazer).
+- "Sincronizar pelo som" no menu do botão direito da linha do tempo (2 ou mais grupos com som escolhidos):
+  `SyncController` roda `sincronia.plan` na fila de tarefas, com progresso e Cancelar na barra de status, e move os
+  grupos com `TimelineModel.move_groups` (um passo do desfazer).
 
-Um gancho só: `ClipInspector` cria o `InspectorSound`. Tudo o que muda o clipe passa por
-`TimelineModel.set_clip_values` (um passo do desfazer); a mixagem lê os valores (`audiomix`, `somlimpo`).
+Ganchos: `ClipInspector` cria o `InspectorSound`; o menu da linha do tempo chama `add_clip_actions`; a janela chama
+`install` (o controlador e a barra de status). Tudo o que muda o clipe passa pelo `TimelineModel` (um passo do
+desfazer); a mixagem lê os valores (`audiomix`, `somlimpo`).
 """
 
 from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QWidget
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QProgressBar, QPushButton, QToolButton, QWidget)
 
-from .. import editparams, jobs, somlimpo
+from .. import editparams, jobs, sincronia, somlimpo
 from ..i18n import _, fmt_decimal
 from ..timeline import AUDIO
 from .job_bridge import bridge
 
 LEARN_KEY = "aprender_ruido"
+SYNC_KEY = "sincronizar_som"
 HUM_KEY = "detectar_zumbido"
 LEARN_STRENGTH = 0.8   # força posta ao aprender, se estava em 0 (para o resultado se ouvir logo)
 
@@ -232,4 +237,130 @@ class InspectorSound:
             self.say(_("Zumbido de {hz} Hz encontrado: os entalhes já estão no clipe.").format(hz=job.result))
 
 
-__all__ = ["InspectorSound"]
+# ------------------------------------------------------------------ sincronizar pelo som
+class SyncController(QObject):
+    """"Sincronizar pelo som": o plano numa thread de trabalho e, no fim, os grupos movidos num passo do desfazer.
+    `message` leva o resultado (a janela mostra na barra de status); `bar` é o progresso com Cancelar."""
+
+    message = Signal(str)
+
+    def __init__(self, model, parent=None):
+        super().__init__(parent)
+        self.model = model
+        self.job: jobs.Job | None = None
+        self.last: sincronia.Plan | None = None
+        self.bar = QWidget()
+        hl = QHBoxLayout(self.bar)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(6)
+        self.label = QLabel(_("Sincronizando pelo som…"))
+        self.progress = QProgressBar()
+        self.progress.setFixedWidth(120)
+        self.progress.setTextVisible(False)
+        self.btn_cancel = QToolButton()
+        self.btn_cancel.setObjectName("sync_cancel")
+        self.btn_cancel.setText(_("Cancelar"))
+        self.btn_cancel.clicked.connect(self.cancel)
+        for w in (self.label, self.progress, self.btn_cancel):
+            hl.addWidget(w)
+        self.bar.hide()
+        bridge().changed.connect(self._progress)
+
+    @property
+    def busy(self) -> bool:
+        return self.job is not None and self.job.active
+
+    def can_sync(self, ids) -> bool:
+        return len(sincronia.candidates(self.model.seq, ids)) >= 2
+
+    def start(self, ids) -> jobs.Job | None:
+        """Começa a sincronizar os clipes `ids` (com os ligados). None se já está rodando ou faltam clipes com som."""
+        ids = list(ids)
+        if self.busy:
+            return None
+        if not self.can_sync(ids):
+            self.message.emit(_("Escolha dois ou mais clipes com som para sincronizar."))
+            return None
+        seq = self.model.seq.copy()   # o trabalho lê uma cópia (outra thread)
+
+        def run(job: jobs.Job):
+            job.report(_("Comparando o som dos clipes…"))
+            return sincronia.plan(seq, ids, cancel=job.cancel_event,
+                                  progress=lambda done, total: job.report(None, done, total))
+
+        self.progress.setRange(0, 0)
+        self.bar.show()
+        self.job = bridge().submit(run, _("Sincronizar pelo som"), kind=jobs.CPU, key=SYNC_KEY,
+                                   on_finished=self._finished)
+        return self.job
+
+    def cancel(self) -> None:
+        if self.job is not None:
+            self.job.cancel()
+
+    def _progress(self, job: jobs.Job) -> None:
+        if job is self.job and job.total:
+            self.progress.setRange(0, job.total)
+            self.progress.setValue(job.done)
+
+    def _name(self, cid: str) -> str:
+        c = self.model.seq.find(cid)
+        src = self.model.seq.sources.get(c.src) if c is not None else None
+        return (c.name if c is not None and c.name else "") or (src.name if src is not None else "?")
+
+    def _finished(self, job: jobs.Job) -> None:
+        if job is not self.job:
+            return
+        self.bar.hide()
+        if job.state == jobs.ERRO:
+            self.message.emit(job.error)
+            return
+        if job.state != jobs.CONCLUIDO:
+            self.message.emit(_("Sincronização cancelada: nada mudou."))
+            return
+        p: sincronia.Plan = job.result
+        self.last = p
+        moves = [(m.clip, m.frames) for m in p.moves if m.frames]
+        self.model.move_groups(moves)
+        parts = []
+        if p.moves:
+            worst = max(abs(m.residue) for m in p.moves) * 1000
+            parts.append(_("{n} clipe(s) sincronizado(s) pelo som; sobra abaixo de um quadro: até {ms} ms.").format(
+                n=len(p.moves), ms=fmt_decimal(worst, 1)))
+        for cid, why in p.refused:
+            parts.append(_("{nome} ficou onde estava: {motivo}.").format(nome=self._name(cid), motivo=why))
+        self.message.emit(" ".join(parts) or _("Nada para sincronizar."))
+
+
+def controller_for(canvas) -> SyncController:
+    """O controlador da janela (`install`) ou, sem ela (testes), um preso à linha do tempo."""
+    ctl = getattr(canvas.window(), "som_sync", None)
+    if ctl is None:
+        ctl = getattr(canvas, "_som_sync", None)
+        if ctl is None:
+            ctl = canvas._som_sync = SyncController(canvas.model, canvas)
+    return ctl
+
+
+def add_clip_actions(menu: QMenu, canvas, clip) -> None:
+    """"Sincronizar pelo som" no menu do botão direito com 2 ou mais grupos com som escolhidos."""
+    ids = list(canvas.model.selection)
+    if len(sincronia.candidates(canvas.model.seq, ids)) < 2:
+        return
+    ctl = controller_for(canvas)
+    act = menu.addAction(_("Sincronizar pelo som"), lambda: ctl.start(ids))
+    act.setObjectName("sync_sound")
+    act.setToolTip(_("Alinha os clipes escolhidos pelo som com o da referência (o som ligado ao vídeo da faixa mais "
+                     "baixa); procura até {s} s para cada lado. Ctrl+Z desfaz.").format(s=int(sincronia.SEARCH_S)))
+    act.setEnabled(not ctl.busy)
+
+
+def install(win) -> SyncController:
+    """O controlador da janela, com o progresso na barra de status e o resultado na mensagem dela."""
+    ctl = SyncController(win.model, win)
+    win.statusBar().addPermanentWidget(ctl.bar)
+    ctl.message.connect(lambda text: win.statusBar().showMessage(text, 10000))
+    return ctl
+
+
+__all__ = ["InspectorSound", "SyncController", "add_clip_actions", "controller_for", "install"]

@@ -173,3 +173,71 @@ def test_eq_presets_menu():
     assert m.seq.find(c.id).values["passa_baixa"] == 3400.0
     m.undo()
     assert m.seq.find(c.id).values["passa_baixa"] == 0.0 and m.seq.find(c.id).values["volume"] == -4.0
+
+
+# ------------------------------------------------------------------ sincronizar pelo som
+def _bursts(secs, seed) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    x = np.zeros(int(secs * R))
+    for t in rng.uniform(0, secs - 0.15, int(secs * 6)):
+        n = int(rng.uniform(0.03, 0.12) * R)
+        x[int(t * R):int(t * R) + n] += rng.standard_normal(n) * 0.3
+    return x
+
+
+def test_sync_by_sound_menu_moves_and_undoes_in_one_step(tmp_path):
+    _ffmpeg()
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QMenu
+    from pelicula.ui import somlimpo_ui as sui
+    from pelicula.ui.timeline_view import TimelineEditor
+    full = _bursts(4.3, 5)
+    cam = _wav(tmp_path / "camera.wav", full[int(1.23 * R):int(4.23 * R)])
+    rec = _wav(tmp_path / "gravador.wav", full[:3 * R])
+    seq = tl.Sequence(640, 360, "24/1")
+    vcam = tl.Source(cam, 640, 360, 24.0, "24/1", 72, 3.0, has_video=True, has_audio=True)
+    ca = seq.insert_media(vcam, at=48, vtrack=0, atrack=0)
+    cb = seq.insert_media(_source(rec, 3.0), at=48, atrack=1)
+    m = TimelineModel(seq)
+    ed = TimelineEditor(m)
+    canvas = ed.canvas
+    a_audio = next(c for c in ca if c.kind == tl.AUDIO)
+    m.select([cb[0].id])
+    menu = QMenu()
+    sui.add_clip_actions(menu, canvas, cb[0])
+    assert not [a for a in menu.findChildren(QAction) if a.objectName() == "sync_sound"]   # um só: sem a ação
+    m.select([c.id for c in ca + cb])
+    menu = QMenu()
+    sui.add_clip_actions(menu, canvas, cb[0])
+    (act,) = [a for a in menu.findChildren(QAction) if a.objectName() == "sync_sound"]
+    ctl = sui.controller_for(canvas)
+    said = []
+    ctl.message.connect(said.append)
+    act.trigger()
+    assert ctl.job is not None and not ctl.bar.isHidden()
+    _wait(ctl.job)
+    assert ctl.bar.isHidden()
+    assert m.seq.find(cb[0].id).start == 48 - 30 and m.seq.find(a_audio.id).start == 48   # a câmera é a referência
+    assert said and "1 clipe" in said[-1] and "ms" in said[-1]
+    m.undo()
+    assert m.seq.find(cb[0].id).start == 48 and not m.can_undo()
+    # o gravador com outro som: fica onde está e a mensagem diz quem
+    other = _wav(tmp_path / "outro.wav", _bursts(3.0, 8))
+    seq2 = tl.Sequence(640, 360, "24/1")
+    c1 = seq2.insert_media(vcam, at=48, vtrack=0, atrack=0)
+    c2 = seq2.insert_media(_source(other, 3.0), at=48, atrack=1)
+    m.set_sequence(seq2)
+    m.select([c.id for c in c1 + c2])
+    _wait(ctl.start(m.selection))
+    assert m.seq.find(c2[0].id).start == 48 and not m.can_undo()
+    assert "outro.wav" in said[-1] and "não bate" in said[-1]
+    # cancelar logo depois de pedir: se pegou o trabalho antes do fim, nada muda
+    m.set_sequence(seq)
+    m.select([c.id for c in ca + cb])
+    job = ctl.start(m.selection)
+    ctl.cancel()
+    _wait(job)
+    if "cancelada" in said[-1]:
+        assert m.seq.find(cb[0].id).start == 48 and not m.can_undo() and ctl.bar.isHidden()
+    else:
+        assert m.seq.find(cb[0].id).start == 18
