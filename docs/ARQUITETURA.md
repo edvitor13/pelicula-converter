@@ -49,6 +49,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
 42. [Look próprio de cada sequência](#42-look-próprio-de-cada-sequência)
+43. [Mixer e cache de som por clipe](#43-mixer-e-cache-de-som-por-clipe)
 44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
 45. [Som de película](#45-som-de-película)
 
@@ -4390,6 +4391,120 @@ estado). A chave do look é o id da sequência ou `""` quando ela está sozinha.
   próprio mudou), `choose`. Lugares: a linha "Look de …" no topo do painel de ajustes (só com mais de uma sequência ou com a
   aberta tendo look próprio), o submenu *Look de película* da aba (`SequenceTabs.lookRequested`, `TabInfo.own_look`, o ponto
   na aba) e o da sequência na Mídia (`add_menu`). O aviso de `nested_note` aparece no painel do clipe e ao inserir.
+
+
+## 43. Mixer e cache de som por clipe
+
+Issue #39 (1.8, só o som). Testes em `tests/test_somcache.py` (a soma contra o grafo antigo, cache, balanço da faixa,
+aninhar), `tests/test_somexport.py` (só o som, stems, terminal), `tests/test_scrub.py` (o grão) e
+`tests/mixer_ui_cases.py` (mixer, scrub e a janela Exportar).
+
+### 43.1 Cache por clipe e a soma (`somcache.py`)
+
+- **Antes (até a 1.7)**: um `filter_complex` só para a montagem inteira (`audiomix.build_graph`: cada clipe com a cadeia de
+  sempre, `adelay` em milissegundos, `amix normalize=0` sobre `anullsrc` e `atrim` no trecho). Mudar qualquer coisa refazia
+  tudo. O grafo continua em `build_graph` e **`audiomix.render_mix_graph`**, a referência dos testes.
+- **Agora**: `audiomix.render_mix` (mesma assinatura e mesmo WAV) chama `somcache.mix`. Cada pedaço de som da montagem é um
+  **`Part`**: os de `clip_parts` (um por entrada de `audiomix.segments`: o clipe com a extensão da transição, os
+  micro-fades, velocidade, rampa e reverso) e os de `tone_parts` (os tons de `audiomix.tones`). Cada um é renderizado **uma
+  vez** pela mesma cadeia do grafo (`_chain`/`_retimed_chain`, com `trim_start=0`, `trim_len = pre + duração + post`,
+  `delay=0`) num WAV float32 48 kHz estéreo em `cache_dir()` (`$PELICULA_SOM_CACHE` ou o temporário, pasta
+  `pelicula_som_clipes`; limite de 2 GiB pela mesma limpeza das aninhadas, `audiomix._prune_dir`).
+- **Chave** (`_key`, sha1 de JSON): o carimbo dos arquivos lidos (caminho, tamanho e mtime; o WAV de uma aninhada já tem o
+  conteúdo no nome, então sem carimbo), o grafo inteiro (tempo, velocidade, rampa, reverso, fades, ganho), todos os
+  `stored_values` do clipe, as chaves, `c.speed`/`c.ramp`/`c.reverse`, o fps e `somcache.VERSION`. **Posição, trecho, ganho
+  e balanço da faixa não entram**: mover um clipe, exportar outro trecho ou mexer no fader não renderiza nada.
+- **Renderizar**: os pedaços que faltam vão em lotes (`BATCH` = 24, balanceados pela duração) para até `WORKERS` processos
+  do ffmpeg ao mesmo tempo, cada processo com várias saídas (`_relabel` prefixa os rótulos e desloca as entradas
+  `[n:a…]`). Cancelar é visto antes de cada processo e durante; o parcial tem nome próprio (`<chave>.<pid>_<thread>.wav`) e
+  só vira `<chave>.wav` com `os.replace`.
+- **A soma** (`mix`): float64, em blocos de 10 s. Cada pedaço entra na amostra `offset = _at(start/fps − pre)` (amostra
+  exata; o grafo antigo arredondava o `adelay` para o milissegundo: **um projeto antigo pode ter um clipe até 0,5 ms em
+  outra posição**, nada audível; os testes usam 25 quadros/s, onde os dois coincidem). Por faixa: soma dos pedaços × ganho
+  da faixa (se a cadeia é linear, ver abaixo) × (esquerda, direita) do balanço; depois a soma das faixas. O trecho é
+  `range_samples`: começa em `_at(a/fps)` e tem o número de amostras do `atrim` antigo, então **exportar um trecho dá
+  exatamente o recorte da mixagem inteira**. A gravação em 24 bits (`to_s24`) repete o ffmpeg: float32 → s32 com `llrintf`
+  e corte, depois `>> 8`. Igualdade com o grafo antigo: no máximo 2 passos de 24 bits.
+- **Ganho da faixa na soma só com cadeia linear** (`LINEAR_KEYS`, `chain_is_linear`): volume, mudo, balanço, fades,
+  transição, graves/médios/agudos e velocidade são lineares; `voz`, `reducao_ruido`, `normalizar` e qualquer chave
+  desconhecida fora do padrão não são, e aí o ganho da faixa fica dentro da cadeia (como antes) e o pedaço muda com ele.
+  **Filtro novo de clipe**: se for linear, entra em `LINEAR_KEYS`; se não, nada a fazer (o padrão é "não linear").
+- **Aninhadas**: `audiomix._render_nested` mixa antes cada sequência de dentro pelo mesmo `render_mix` (cache e soma), e o
+  WAV dela entra como um clipe comum. `mix_key` não mudou (muda exatamente quando o som muda; igual no `copy()`).
+- **Velocidade** (montagem de 10 clipes de 3 s, esta máquina): grafo antigo 0,31 s; cache vazio 0,42 s; um clipe mudado
+  0,16 s; mexer no fader ou mover um clipe 0,03 s.
+
+### 43.2 Fontes de som (`PROVIDERS`) e pontos de entrada
+
+- **`somcache.PROVIDERS`**: lista de funções `fn(seq) → [Part]`. Hoje `clip_parts` e `tone_parts`. Uma fonte nova (voz
+  sintetizada, música gerada…) acrescenta uma função: cada `Part` tem `key` (com tudo que muda o som), `offset`, `kind` e
+  `track` (a faixa onde soa: ganho, balanço, stem e medidor), `length` (amostras) e **ou** `graph = (entradas, grafo)` (o
+  grafo lê `[0:a]`, `[1:a]`… e termina num rótulo `[out]`; rótulos internos com nomes `[a-z_]\w*`) **ou** `synth()` →
+  `(n, 2)` float32. `source` diferente de `"clipe"` toca no trecho pela sobreposição de `offset`/`length`.
+- **Filtros do clipe** (a cadeia, `audiomix._chain_tail` e abaixo): mudam o grafo e os `stored_values`, então a chave muda
+  sozinha; só a linearidade precisa de registro.
+- **Entradas derivadas** (o WAV de uma aninhada, o WAV limpo de um clipe da limpeza do som): `segments` troca
+  `seg["path"]` por um WAV com o conteúdo no nome, numa pasta de `CONTENT_NAMED_DIRS` (a chave usa o caminho, sem a data;
+  o arquivo pode ainda não existir). Quem grava esses WAVs entra em **`somcache.PRERENDER`**: `fn(segmentos, cancel, perf)
+  → bool`, chamado em `mix` depois de `audiomix._render_nested` e antes de `ensure`, com as entradas de `segments(seq)` da
+  sequência **inteira** (as que `clip_parts` lê) só dos clipes que tocam no trecho. As do trecho (`segments(seq, a, b)`)
+  têm outros tempos e não servem para o cache.
+- **A mixagem final**: o WAV existe inteiro, sem nada depois, em `MainWindow._mix_done` (prévia), em `run_job` logo depois
+  de `audiomix.render_mix` (exportação de vídeo) e em `somexport._mix_to` (só o som). Um processamento da mixagem inteira
+  entra nesses três pontos (ou dentro de `render_mix`, depois de `somcache.mix`), e antes do volume alvo.
+
+### 43.3 Balanço da faixa (`Track.pan`)
+
+`Track.pan` (−1 esquerda … 1 direita, padrão 0, em 2 casas por `timeline.clean_pan`). JSON `"balanco"` na faixa só fora do
+centro (o JSON de antes fica igual); `timeline.FEATURES_V6["balanco_faixa"]`; `is_trivial` exige centro. Lei do `balanco`
+do clipe: o lado para onde se puxa fica em 1 e o outro cai até 0 (`track_gains`). `TimelineModel.set_track(..., pan=)`
+(`TRACK_ATTRS`), com `record=False` para arrastar (um passo do desfazer quando quem arrasta chama `commit()` ao soltar; a
+barrinha de volume do cabeçalho também passou a ser assim). **Aninhar** (`aninhar._plan_audio`): a faixa de destino precisa
+ter balanço 0 ou igual ao de dentro (`pan_inside`); senão o som cai numa faixa nova, no centro. **Desaninhar** recusa quando
+os dois balanços (o de fora e o de uma faixa de dentro) estão fora do centro e são diferentes (`pan_outside`); a mensagem
+pede para centralizar um deles.
+
+### 43.4 Mixer (`ui/mixer_ui.py`)
+
+`MainWindow.mixer`: o painel fica no lugar do inspetor, no painel direito do modo Edição; o botão *Mixer* da barra da linha
+do tempo (`TimelineEditor.btn_mixer`) ou **Ctrl+Alt+M** troca um pelo outro. Uma tira por faixa de áudio (`Strip`: nome,
+balanço, fader de −60 a +12 dB linear em dB como a barrinha do cabeçalho, medidor de pico, mudo e solo; dois cliques voltam
+o fader a 0 dB e o balanço ao centro; faixa travada desliga os controles) e a tira da mixagem (pico e o M/S/I do medidor da
+prévia, quando ele está ligado). Tudo por `TimelineModel.set_track`; `model.changed` refaz as tiras, então o cabeçalho e o
+mixer andam juntos. **Medidores**: a mixagem da prévia chama `render_mix(..., track_peaks=True)`, que grava ao lado do WAV
+`<wav>.faixas.npz` (`somcache.save_peaks`: o pico de cada faixa de áudio e o da mistura a cada 10 ms, das mesmas somas); o
+`QTimer` de 40 ms indexa esse arquivo pelo relógio da prévia (`_play_f0`, `_play_t0`, o mesmo do medidor de som) e fica
+parado fora do 1× para a frente. `_clean_mixes` apaga o `.faixas.npz` com o WAV.
+
+### 43.5 Som ao arrastar o cursor (`ui/scrub_ui.py`)
+
+`MainWindow.scrub`. Ganchos em `MainWindow.seek` (só enquanto `TimelineEditor.scrubbing` está ligado, isto é, arrastando o
+cursor na régua) e `step` (quadro a quadro). O grão (`grain_span`, `make_grain`): um quadro, no mínimo 40 ms, com fades de
+5 ms, lido do WAV que a prévia toca (`_audio_src` do tipo "seq": a mixagem, ou o resultado de um processamento
+dela; `audiomix.WavReader`, só 48 kHz); sem mixagem pronta, nada toca. `Throttle`: um grão novo só
+depois que o anterior acabou. Saída: um `QAudioSink` próprio (48 kHz, estéreo, 16 bits, buffer de 200 ms), criado na
+primeira vez por uma fábrica que os testes trocam; com `QT_QPA_PLATFORM=offscreen` a fábrica real devolve None (testes e
+automações nunca tocam som). Respeita o mudo e o volume da prévia. Botão *Som ao arrastar o cursor* na barra da linha do
+tempo, preferência `som_ao_arrastar` (ligado por padrão). **Sem módulo**: é parte da linha do tempo, como o cursor, e tem o
+botão para desligar.
+
+### 43.6 Exportar só o som e stems (`somexport.py`, `ui/som_export_ui.py`)
+
+- `ExportSettings.sound_only`: `""` (vídeo e som), `"som"` ou `"stems"`; o formato em `ExportSettings.audio` entre
+  `somexport.FORMATS` (pcm24 → .wav, flac, aac320 → .m4a, mp3; os argumentos de `export.AUDIO_ARGS`). `run_job` passa para
+  `somexport.run` logo no começo; a fila não abre o contexto OpenGL para esses trabalhos.
+- **Só o som**: a mixagem do trecho (`somcache.mix`) ou, no modo Película com o arquivo sem montagem, o som do próprio arquivo
+  (`-ss`/`-t`); o volume alvo mede e aplica o `loudnorm` como na exportação de vídeo. **Stems**: `mix(..., stems=fn)` grava
+  junto um WAV por faixa que toca no trecho (com o ganho e o balanço dela, do mesmo tamanho; somados dão a mixagem com no
+  máximo alguns passos de 24 bits); nomes `somexport.stem_path` (`<nome>_A1_<faixa>.<ext>`, o nome padrão "A1" não se
+  repete; tons das barras na faixa de vídeo: `_V1`); sem volume alvo. Aninhadas vão na faixa onde está o clipe delas. Cada
+  arquivo vai para o parcial e só troca de nome quando todos terminaram.
+- **Janela**: `som_export_ui.SoundChoice` (`ExportDialog.sound`), grupo *O que exportar* logo abaixo do destino. No modo de som
+  some o que é de vídeo (plataforma e prévia, qualidade, desempenho, capítulos, legendas, linhas de vídeo dos ajustes) e volta
+  como estava; o resumo não mede velocidade. Stems desligados (com o porquê) sem montagem; sem som, os dois desligados.
+  Ganchos no diálogo: `settings`, `_fix_ext`/`_browse`, `_summary`, `_start_estimate`/`_start_preview` e `_accept`.
+- **Terminal**: `exportar --so-som` e `--stems` (`cli._export_sound`; formato por `--audio` ou pela extensão da saída; vale
+  `--inicio`/`--fim`/`--trecho` e `--volume`/`--pico`; sem GPU).
 
 ## 44. Limpeza do som e sincronia
 

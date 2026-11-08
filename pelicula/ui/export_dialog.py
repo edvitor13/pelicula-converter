@@ -287,7 +287,8 @@ class ExportDialog(QDialog):
                 form.setRowVisible(w, False)
 
         # desempenho
-        lay.addWidget(self._perf_group(perf or {}))
+        self.perf_box = self._perf_group(perf or {})
+        lay.addWidget(self.perf_box)
 
         # trecho
         self.r_all = QRadioButton(_("Vídeo inteiro"))
@@ -394,6 +395,14 @@ class ExportDialog(QDialog):
         self._update_mem()
         self._sync_chapters()
         self._init_subtitles()
+        # 1.8: "O que exportar" (vídeo e som, só o som, stems), logo abaixo do destino (`ui/som_export_ui.py`)
+        from . import som_export_ui
+        self.sound = som_export_ui.install(self, lay, g0)
+
+    def _sound_on(self) -> bool:
+        """1.8: a exportação é só de som (`som_export_ui`)?"""
+        sound = getattr(self, "sound", None)
+        return sound is not None and sound.active
 
     # ------------------------------------------------------------ várias sequências
     def _title_of(self, sequence, info) -> str:
@@ -991,6 +1000,8 @@ class ExportDialog(QDialog):
             s.threads, s.priority, s.hwaccel, s.gpu, s.buffer = (p["threads"], p["priority"], p["hwaccel"],
                                                                  p["gpu"], p["buffer"])
         s.no_effects = self.no_effects
+        if self._sound_on():
+            self.sound.apply(s)  # 1.8: só o som / stems e o formato do som
         return s
 
     def _quality_changed(self) -> None:
@@ -1044,7 +1055,7 @@ class ExportDialog(QDialog):
         self._summary()
 
     def _fix_ext(self, *_args):
-        ext = self.container.currentData() or "mp4"
+        ext = self.sound.ext() if self._sound_on() else self.container.currentData() or "mp4"
         cur = self.path.text().strip()
         if not cur:
             stem = self._stem()
@@ -1055,13 +1066,16 @@ class ExportDialog(QDialog):
         self.path.setText(cur)
 
     def _browse(self) -> None:
-        ext = self.container.currentData() or "mp4"
+        ext = self.sound.ext() if self._sound_on() else self.container.currentData() or "mp4"
         path, _filter = QFileDialog.getSaveFileName(self, _("Salvar como"), self.path.text(),
                                                     _("Arquivo (*.{ext})").format(ext=ext))
         if path:
             self.path.setText(str(Path(path).with_suffix("." + ext)))
 
     def _summary(self, *_args):
+        if self._sound_on():
+            self.sound.summary()
+            return
         s = self.settings()
         if not s.codec:
             return
@@ -1145,6 +1159,8 @@ class ExportDialog(QDialog):
         self._est_timer.start()
 
     def _start_estimate(self) -> None:
+        if self._sound_on():
+            return
         s = self.settings()
         if not s.codec:
             return
@@ -1204,6 +1220,8 @@ class ExportDialog(QDialog):
         return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys), self.burn()
 
     def _start_preview(self) -> None:
+        if self._sound_on():
+            return
         args = self._preview_args()
         s = args[2]
         key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3],
@@ -1262,7 +1280,10 @@ class ExportDialog(QDialog):
         if clash:
             QMessageBox.warning(self, _("Exportar"), export.partial_clash_message(clash))
             return
-        if export.output_exists(path, s):
+        if self._sound_on():
+            if not self.sound.confirm_overwrite(path, s):
+                return
+        elif export.output_exists(path, s):
             if export.is_sequence(s):
                 text = _("A pasta já tem uma sequência de quadros com este nome:\n{caminho}\n\nSubstituir? Os "
                          "quadros antigos só são trocados quando a exportação terminar.")

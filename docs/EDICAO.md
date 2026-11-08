@@ -145,7 +145,10 @@ Cada faixa tem botões no cabeçalho:
 - **alto-falante** (áudio): silencia a faixa;
 - **fones** (áudio): *solo* — só as faixas em solo tocam;
 - **cadeado**: trava a faixa (nada muda nela);
-- **barrinha de volume** (áudio): arraste para mudar o volume da faixa; dois cliques voltam a 0 dB.
+- **barrinha de volume** (áudio): arraste para mudar o volume da faixa; dois cliques voltam a 0 dB. Cada
+  arraste é um passo só do Ctrl+Z.
+
+O **balanço** da faixa (esquerda/direita) fica no **Mixer** (abaixo).
 
 **+ Vídeo** e **+ Áudio** criam faixas novas. Arrastar um clipe de vídeo para cima da última faixa de
 vídeo também cria uma faixa nova. Para apagar uma faixa: botão direito nela → **Remover esta faixa**.
@@ -747,6 +750,33 @@ medidor). No modo Película, o som do arquivo é preparado uma vez em segundo pl
 de o medidor andar. O medidor só mede a prévia: nada dele vai para a exportação. Para escondê-lo,
 desligue **Medidor de som** em Configurações › Recursos.
 
+### Mixer (1.8)
+
+O botão **Mixer** na barra da linha do tempo (ou **Ctrl+Alt+M**) põe o mixer no lugar do painel do clipe,
+à direita; clique de novo para voltar. Cada faixa de som tem uma tira:
+
+- **balanço**: arraste para a esquerda ou para a direita (o centro gruda; dois cliques voltam ao centro).
+  Funciona como o balanço do clipe: o lado para onde você puxa fica igual e o outro vai diminuindo;
+- **fader**: o volume da faixa em dB, de −60 a +12 (o mesmo da barrinha do cabeçalho; dois cliques voltam
+  a 0 dB; a roda do mouse anda 0,5 dB);
+- **medidor**: o pico da faixa enquanto a prévia toca (a luz no topo acende se chegou a 0 dBFS);
+- **mudo** e **solo**, os mesmos botões do cabeçalho da faixa.
+
+A última tira, **Mixagem**, mostra o pico de tudo junto e o loudness (M, S, I) do medidor de som. Cada
+arraste no fader ou no balanço é um passo só do Ctrl+Z, e o cabeçalho e o mixer mostram sempre o mesmo.
+Faixa travada não muda.
+
+O som ficou mais rápido de preparar: cada clipe é processado uma vez e guardado; mover clipes, mudar o
+trecho exportado ou mexer no volume e no balanço das faixas só soma de novo o que já estava pronto.
+
+### Som ao arrastar o cursor (1.8)
+
+Arrastando o cursor na régua da linha do tempo, ou andando quadro a quadro (← → e K + J/L), o app toca um
+pedacinho do som naquele quadro (um quadro, no mínimo 40 ms), como nos editores profissionais. Ele segue o
+mudo e o volume da prévia. Para desligar, use o botão **Som ao arrastar o cursor** (o cursor com ondas) na
+barra da linha do tempo; a escolha fica guardada. Enquanto o som da montagem ainda está sendo preparado,
+nada toca.
+
 ## 6. Depois da edição
 
 - Vá para o modo **Película** (Ctrl+1) para escolher o look; a prévia já mostra a montagem.
@@ -767,6 +797,13 @@ desligue **Medidor de som** em Configurações › Recursos.
   edição mudar de lugar, o app pergunta onde ele está ao abrir o projeto.
 - Com marcadores de capítulo, a exportação em MP4, MOV ou MKV grava os capítulos no arquivo
   (**Incluir capítulos**); para o YouTube, use **Copiar capítulos para o YouTube…**.
+- **Só o som** (1.8): em **O que exportar**, na janela de exportação, escolha **Só o som** para gravar só a
+  mixagem (WAV 24 bits, FLAC, AAC 320 kb/s ou MP3 320 kb/s), do vídeo inteiro ou do trecho, com o volume
+  alvo se você quiser. **Só o som, uma faixa por arquivo (stems)** grava um arquivo para cada faixa de som
+  (`nome_A1_Diálogo.wav`, `nome_A2_Música.wav`…), todos do mesmo tamanho e começando no mesmo ponto, para
+  levar a outro programa de som; somados, dão a mixagem. Nos stems não há volume alvo (cada faixa sai no
+  nível que tem na mixagem). No modo Película, com um arquivo sem montagem, **Só o som** grava o som do
+  próprio arquivo. No terminal: `pelicula-cli exportar projeto.plc -o som.wav --so-som` (ou `--stems`).
 
 ## 7. Atalhos do modo Edição
 
@@ -778,6 +815,7 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
 | Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
 | Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
+| Ctrl+Alt+M | Mostrar / esconder o mixer |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

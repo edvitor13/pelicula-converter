@@ -410,6 +410,68 @@ def _export_notes(plat, s, info, duration: float) -> list[str]:
 
 
 # ------------------------------------------------------------------ comandos
+def _export_sound(a, src: str, info, seq, start: int, end: int) -> int:
+    """`exportar --so-som` / `--stems` (1.8): o som do trecho (a mixagem da montagem ou o som do arquivo) num arquivo de
+    som, ou uma faixa por arquivo. Sem GPU: não abre o contexto OpenGL."""
+    from . import export, somexport
+    if a.so_som and a.stems:
+        raise CliError(_("Use --so-som ou --stems, não os dois."))
+    if a.stems and seq is None:
+        raise CliError(_("--stems precisa de um projeto com montagem no modo Edição (uma faixa por arquivo); para o "
+                         "som de um arquivo, use --so-som."))
+    if a.plataforma or a.qualidade:
+        raise CliError(_("--so-som e --stems não usam --plataforma nem --qualidade; escolha o formato com --audio "
+                         "(pcm24, flac, aac320, mp3) ou pela extensão da saída."))
+    s = export.ExportSettings(sound_only="stems" if a.stems else "som")
+    suffix = Path(a.saida).suffix.lower().lstrip(".") if a.saida else ""
+    s.audio = a.audio or somexport.FROM_EXT.get(suffix, "pcm24")
+    if s.audio not in somexport.EXT:
+        raise CliError(_("Formato de som inválido para --so-som/--stems: {valor}. Use pcm24, flac, aac320 ou mp3.")
+                       .format(valor=s.audio))
+    if a.volume is not None or a.pico is not None:
+        _platform_overrides(a, s)
+    if a.stems and export.wants_loudness(s):
+        print(_("Aviso: o volume alvo não vale nos stems (cada faixa sai no nível que tem na mixagem)."),
+              file=sys.stderr)
+    for k, v in (("threads", a.threads), ("priority", a.prioridade)):
+        if v is not None:
+            setattr(s, k, v)
+    out = a.saida or str(Path(src).with_name(Path(src).stem + "_pelicula"))
+    out = str(Path(out).with_suffix("." + somexport.ext(s)))
+    if os.path.abspath(out) == os.path.abspath(src):
+        raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))
+    dests = somexport.stem_paths(seq, out, s.audio) if a.stems else [out]
+    for d in dests:
+        if os.path.exists(d) and not a.sobrescrever:
+            raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=d))
+    job = export.ExportJob(info=info, values={}, settings=s, out_path=out, start_frame=start, end_frame=end,
+                           name=Path(out).name, sequence=seq)
+    if not a.json and not a.silencioso:
+        print(_("Exportando o som de {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
+
+    def on_sigint(*_args):
+        job.cancel.set()
+
+    old = signal.signal(signal.SIGINT, on_sigint)
+    th = threading.Thread(target=lambda: export.run_job(job, None), daemon=True)
+    th.start()
+    while th.is_alive():
+        th.join(0.25)
+    signal.signal(signal.SIGINT, old)
+    made = [d for d in dests if os.path.exists(d)] if job.status == "concluido" else []
+    if a.json:
+        print(json.dumps({"status": job.status, "saida": out, "arquivos": made, "erro": job.error}))
+    if job.status == "concluido":
+        if not a.json:
+            for d in made:
+                print(_("Pronto: {caminho}").format(caminho=d))
+        return 0
+    if job.status == "cancelado":
+        print(_("Exportação cancelada."), file=sys.stderr)
+        return 130
+    raise CliError(_("A exportação falhou:\n{erro}").format(erro=job.error))
+
+
 def cmd_export(a) -> int:
     from . import export, media, platforms, subtitles
     from .engine import Engine
@@ -429,6 +491,8 @@ def cmd_export(a) -> int:
     start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
     end = parse_time(a.fim, info.fps) if a.fim else (proj.out_point if proj and a.trecho and proj.out_point else -1)
     duration = ((info.frames - 1 if end < 0 else min(end, info.frames - 1)) - start + 1) / info.fps
+    if a.so_som or a.stems:  # 1.8: só o som, ou uma faixa por arquivo (`somexport.py`)
+        return _export_sound(a, src, info, seq, start, end)
     plat = _platform_arg(a, info)
     if plat is not None:
         qkey = plat.id
@@ -978,6 +1042,12 @@ def build_parser() -> argparse.ArgumentParser:
                                          "sai 1080×1920)"))
     p.add_argument("--fps", help=_("original, 24, 24000/1001, 30…"))
     p.add_argument("--audio", help=_("copy, aac320, aac192, mp3, opus, pcm24, none"))
+    p.add_argument("--so-som", action="store_true",
+                   help=_("exporta só o som (a mixagem da montagem ou o som do arquivo): pcm24 (WAV, padrão), flac, "
+                          "aac320 ou mp3 com --audio ou pela extensão da saída; vale o trecho e o --volume"))
+    p.add_argument("--stems", action="store_true",
+                   help=_("exporta só o som, uma faixa de som por arquivo (saida_A1_nome.wav…), todas do mesmo "
+                          "tamanho; sem o volume alvo"))
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--fim", help=_("fim: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--trecho", action="store_true", help=_("usa a entrada e a saída marcadas no projeto"))
