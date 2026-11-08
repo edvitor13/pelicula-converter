@@ -212,6 +212,12 @@ pelicula/
                              (matriz tela → uv do clipe), WINDOWS (quadros misturados), EFFECT_MODULES, camada de ajuste
                              (is_adjustment, new_adjustment), modules_used, pack/unpack/stamp/stale das análises
   mesclagem.py               1.9, modos de mesclagem novos (ids 7 a 16, §49.6): GLSL da variante do CLIP e referência numpy
+  atmosfera.py               1.9, atmosfera do clipe (módulo Beta atmosfera, sem Qt, §52): névoa por degradê com nuvens
+                             periódicas que andam e partículas (chuva, neve, poeira, brasas) por célula em três camadas,
+                             hash de inteiros e tempo do clipe; efeitos "nevoa" (600) e "particulas" (700) da pilha
+  luzes_clipe.py             1.9, luzes e lente do clipe (módulo Beta luzes_lente, sem Qt, §52): desfoque de lente (400,
+                             máscara pelo degradê; gancho MASK_SOURCES da máscara de forma), listra anamórfica, flare e
+                             raios de luz (500–520) somados na luz só onde mudam; entry() (a entrada depois de outro efeito)
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -263,6 +269,8 @@ pelicula/
                              botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
                              1.9, efeitos visuais (§49.10): vfx_ui (VfxUI: Novo ▸ Camada de ajuste, inspetor da camada
                              de ajuste, add_section/add_overlay/pick_point/clip_point para as frentes);
+                             1.9, atmosfera_ui (F4, §52.7: cartões Desfoque de lente, Luz, Névoa e Partículas; ponto do
+                             flare e origem dos raios escolhidos na prévia);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -535,6 +543,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_camada_ajuste.py` | mesclagens novas (ids, variantes do CLIP, pontos conhecidos, cada modo na GPU == `mesclagem.apply`) e camada de ajuste: fonte e formato 7, módulo, desfazer, aninhar recusado; neutra bit a bit, exposição nela == no clipe de tela cheia, só no tempo dela, opacidade, tela transparente |
 | `tests/test_vfx_dados.py` | `Clip.fx` ("efeitos") e `Source.analysis` ("analise", fora do desfazer) no JSON e no formato 7, dividir/aninhar/desaninhar, `frame_window` e `neighbor_frames`, vizinhos de `grab` == leitor, passo que lê "n-1" |
 | `tests/test_vfx_ui.py` | casos de `vfx_ui_cases.py`: módulo Beta e Novo ▸ Camada de ajuste (um passo do desfazer), inspetor sem o enquadramento, cartão e camada de prévia de uma frente seguindo o módulo |
+| `tests/test_atmosfera.py` | partículas e névoa (1.9, §52): padrões neutros e esparsos, formato 7, ordem e módulo, deslocamentos no período em horas de clipe, só o que não mexe na grade anima; na GPU: desligado = nenhum passo e bit a bit, determinismo pelo tempo do clipe (dividir no meio não muda nada), px@1080 em duas resoluções, limites de energia (neve cobre, brasas somam), cor e degradê da névoa e as nuvens que andam, camada de ajuste == clipe de tela cheia, gêmea aninhada, prévia == exportação |
+| `tests/test_luzes_clipe.py` | desfoque de lente, listra, flare e raios (1.9, §52): padrões e ordem, a entrada do efeito ("orig" ou a cópia); na GPU: desligado e abaixo do limiar bit a bit, direção e energia da listra (luz linear), raios para longe da origem, fantasmas na reta luz–centro, flare de um ponto sem ler a imagem, desfoque que conserva a luz e mantém a cor chapada, máscara pelo degradê e pelo gancho da F2, entrada depois de outro efeito, camada de ajuste, gêmea, prévia == exportação |
+| `tests/test_atmosfera_ui.py` | casos de `atmosfera_ui_cases.py`: cartões seguem os módulos atmosfera e luzes_lente e vêm depois de "Efeitos", escolher o ponto do flare e a origem dos raios na prévia (um passo do desfazer), camada de prévia dos pontos, ajuste num passo |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |
