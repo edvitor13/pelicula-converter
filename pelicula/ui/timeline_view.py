@@ -37,6 +37,7 @@ from .keyframes_ui import merged_marks, paint_diamond, param_names
 from .widgets import FilmSlider, timecode
 from . import transitions_ui  # 1.5: transições de película (módulo "transicoes")
 from . import somlimpo_ui  # 1.8: "Sincronizar pelo som" no menu do clipe
+from . import musica_ui  # 1.8: batidas, ímã nas batidas, encaixar a música e abaixá-la sob a voz
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
 HEADER_W = 156               # coluna dos nomes e botões das faixas
@@ -1317,6 +1318,7 @@ class TimelineCanvas(QWidget):
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())
             somlimpo_ui.add_clip_actions(menu, self, clip)  # 1.8: "Sincronizar pelo som" (2+ grupos com som)
+            musica_ui.add_clip_actions(menu, self, clip)  # 1.8: batidas, encaixar a música, abaixar sob a voz
             transitions_ui.add_menu(self, menu, clip, pos.x())  # 1.5: "Transição ▸" (módulo "transicoes")
             self.split_edit_actions(menu, clip, pos.x())
             menu.addSeparator()
