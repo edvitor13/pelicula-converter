@@ -3566,7 +3566,10 @@ class MainWindow(QMainWindow):
             "configura ou apaga)") + "\n\n" + _(
             "Edição: Ctrl+Shift+G aninha a seleção numa sequência nova (Ctrl+Z desfaz) • dois cliques num clipe de "
             "sequência abrem a dela • botão direito nele: Desaninhar") + "\n\n" + _(
-            "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)"))
+            "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)")
+            + "\n\n" + _(
+            "Edição: Ctrl+Alt+E — pôr efeitos sonoros (whoosh nas transições, swish e teclas nos títulos, obturador, "
+            "riser nos marcadores com \"!\"; módulo Efeitos sonoros)"))
 
     def about(self) -> None:
         try:

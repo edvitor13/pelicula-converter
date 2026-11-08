@@ -359,13 +359,18 @@ def synth_typewriter(v: dict, n: int, seed: int) -> np.ndarray:
     line_start = 0.0
     nxt = iter(rets)
     ret = next(nxt, None)
+    clicks = v["tecla"] == "clique"
+    click = synth_click(v, int(0.03 * RATE), seed) if clicks else None
     for k, t in enumerate(hits):
         while ret is not None and ret <= t:
             line_start = ret
             ret = next(nxt, None)
+        if clicks:  # um clique por letra (o mesmo de "Clique", um pouco variado no volume)
+            _place(out, click * (0.8 + 0.4 * _unit(seed, 3 * k + 2)), int(round(t * RATE)))
+            continue
         pos = min(1.0, (t - line_start) * 0.12)  # o carro anda: a tecla soa mais à direita ao longo da linha
         _place(out, _key_hit(seed, k, b, w, w * (2.0 * pos - 1.0) * 0.6), int(round(t * RATE)))
-    if v["sino"]:
+    if v["sino"] and not clicks:
         for t in rets:
             _place(out, _bell(seed, b) * 0.6, int(round(t * RATE)))
             _place(out, _carriage(seed, w) * 0.8, int(round((t + 0.12) * RATE)))
@@ -406,7 +411,10 @@ EFFECTS: dict[str, Effect] = {
                           Field("ritmo", N_("Teclas por segundo"), "numero", 9.0, 2.0, 20.0, 0.5, 1,
                                 tip=N_("A velocidade de quem datilografa (sem as batidas de um título).")),
                           Field("sino", N_("Sino e retorno do carro"), "bool", True,
-                                tip=N_("O sino e o retorno do carro no fim de cada linha."))),
+                                tip=N_("O sino e o retorno do carro no fim de cada linha.")),
+                          Field("tecla", N_("Som das teclas"), "escolha", "maquina",
+                                choices=(("maquina", N_("Máquina de escrever")), ("clique", N_("Clique"))),
+                                tip=N_("Teclas de máquina de escrever ou um clique curto por letra (sem sino)."))),
                       synth_typewriter, N_("Teclas de uma máquina de escrever durante o clipe, com o sino no fim da "
                                            "linha.")),
     "obturador": Effect("obturador", N_("Obturador"), 0.5,

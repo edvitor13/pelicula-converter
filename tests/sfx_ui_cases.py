@@ -143,3 +143,70 @@ def test_new_button_is_shared_with_titles_and_generators(win):
         set_module(win, "efeitos_sonoros", True)
     assert win.bin.btn_new.isVisibleTo(win.bin)
     assert all(a.isVisible() for a in win.sfx.gen_actions if not a.isSeparator())
+
+
+# ------------------------------------------------------------------ "Pôr efeitos sonoros…"
+def auto_seq(win) -> tl.Sequence:
+    """Cor em V1 (0–96), cor com "Surgir do preto" de 0,5 s (96–192) e um marcador "Agora!" no quadro 150."""
+    seq = fresh(win).copy()
+    b = seq.insert_media(tl.Source.virtual("cor", 320, 180, "24/1", data={"cor": "#993311"}), at=96)[0]
+    b.dur = 96
+    seq.set_values(b.id, {**b.values, "entrada_tipo": "preto", "entrada_dur": 0.5})
+    seq.markers.append(tl.Marker("m1", 150, "laranja", "Agora!"))
+    win.model.set_sequence(seq)
+    pump()
+    return win.model.seq
+
+
+def test_place_is_one_undo_step_on_an_effects_track_and_does_not_repeat(win):
+    set_module(win, "efeitos_sonoros", True)
+    auto_seq(win)
+    win.model.history.reset(win.model.seq)
+    steps = win.model.history._pos
+    n_audio = len(win.model.seq.kind_tracks(tl.AUDIO))
+    made = win.sfx.place()
+    pump()
+    assert len(made) == 2   # whoosh na transição e riser antes do marcador
+    seq = win.model.seq
+    assert win.model.history._pos == steps + 1
+    assert {seq.kind_tracks(tl.AUDIO)[c.track].name for c in made} == {"Efeitos"}
+    assert win.sfx.place() == []   # de novo: nada repete
+    assert win.model.history._pos == steps + 1
+    win.model.undo()
+    pump()
+    seq = win.model.seq
+    assert not [c for c in seq.clips if c.kind == tl.AUDIO]
+    assert len(seq.kind_tracks(tl.AUDIO)) == n_audio
+
+
+def test_the_dialog_counts_what_it_will_place_and_follows_the_boxes(win):
+    from pelicula.ui.sfx_ui import AutoDialog
+    set_module(win, "efeitos_sonoros", True)
+    seq = auto_seq(win)
+    dlg = AutoDialog(seq, win)
+    try:
+        assert not dlg.boxes["impactos"].isChecked() and dlg.boxes["transicoes"].isChecked()
+        assert dlg.ok.isEnabled() and "Whoosh" in dlg.summary.text() and "Riser" in dlg.summary.text()
+        dlg.boxes["transicoes"].setChecked(False)
+        dlg.boxes["marcadores"].setChecked(False)
+        assert not dlg.ok.isEnabled()
+        dlg.boxes["marcadores"].setChecked(True)
+        o = dlg.options()
+        assert o.marcadores and not o.transicoes and o.tecla == "maquina" and o.cor_marcador == ""
+    finally:
+        dlg.deleteLater()
+
+
+def test_the_button_sits_after_silences_and_the_shortcut_is_unique(win):
+    from PySide6.QtGui import QShortcut
+    set_module(win, "efeitos_sonoros", True)
+    ed = win.tl_editor
+    lay = ed.btn_silences.parentWidget().layout()
+    assert lay.indexOf(win.sfx.button) == lay.indexOf(ed.btn_silences) + 1
+    assert lay.indexOf(ed.btn_mixer) == lay.indexOf(win.sfx.button) + 1
+    assert win.sfx.button.isVisibleTo(ed)
+    keys = [s.key().toString() for s in win.findChildren(QShortcut)]
+    assert keys.count("Ctrl+Alt+E") == 1
+    set_module(win, "efeitos_sonoros", False)
+    assert not win.sfx.button.isVisibleTo(ed) and not win.sfx.shortcut.isEnabled()
+    set_module(win, "efeitos_sonoros", True)
