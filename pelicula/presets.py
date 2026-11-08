@@ -272,6 +272,48 @@ BUILTIN += [
                       lab_revelacao=-0.5, lab_saturacao=0.9, iso="250")),
 ]
 
+# 1.8: looks com o som de película (`somf_*`, `somfilme.py`). A imagem copia o preset mais parecido (Super 8 •
+# Kodachrome 40, 16 mm documentário, Noir anos 40, Cópia desbotada); o som combina com ela. Níveis moderados, escolhidos
+# sem escuta: confira de ouvido antes de mexer. No fim da lista, como os da 1.6 (o índice no plugin não muda).
+BUILTIN += [
+    dict(id="super8_caseiro_som", nome="Super 8 caseiro com som", grupo="Bitolas e formatos",
+         desc="O filme da família projetado na sala de casa: Kodachrome tremido, tarja magnética, o projetor "
+              "rodando ao lado e estalos nas emendas.",
+         valores=dict(bitola="super8", iso="50", copia="nenhuma", contraste=1.18, meio_tom=0.43, preto=0.025,
+                      saturacao=1.25, densidade=0.55, luzes_matiz=45, luzes_forca=0.25, sombras_matiz=220,
+                      sombras_forca=0.08, hal_forca=0.8, vinheta=0.15,
+                      proj_on=True, tremor_x=1.4, tremor_y=1.1, cintilacao=0.06,
+                      desg_on=True, poeira=0.35, riscos=0.1,
+                      mold_on=True, proporcao="bitola", cantos=0.06, borda_irregular=0.25,
+                      somf_on=True, somf_trilha="magnetica_s8", somf_estalos=0.5, somf_poeira=0.35, somf_wow=0.6,
+                      somf_projetor=0.4, somf_sala=0.1)),
+    dict(id="16mm_arquivo_som", nome="16 mm de arquivo com som ótico", grupo="Bitolas e formatos",
+         desc="Cópia de 16 mm tirada do arquivo: grão evidente, poeira e a trilha ótica gasta, com chiado e poucos "
+              "agudos.",
+         valores=dict(bitola="16mm", iso="500", contraste=0.9, sombras_matiz=205, sombras_forca=0.2,
+                      luzes_forca=0.12, hal_forca=0.8, proj_on=True, tremor_x=0.6, tremor_y=0.5,
+                      tremor_rot=0.02, cintilacao=0.025, desg_on=True, poeira=0.2, riscos=0.08,
+                      somf_on=True, somf_trilha="otica_16", somf_estalos=0.5, somf_poeira=0.55, somf_wow=0.4,
+                      somf_projetor=0.15, somf_sala=0.2)),
+    dict(id="cinema_anos_30", nome="Cinema anos 30 (som ótico antigo)", grupo="Preto e branco",
+         desc="Preto e branco dramático com a trilha ótica da época: som abafado pela curva da Academia, chiado, "
+              "estalos e a sala de cinema.",
+         valores=dict(pb=True, pb_filtro="vermelho", copia="nenhuma", contraste=1.4, preto=0.01, branco=0.96,
+                      grao_forca=1.2, grao_cor=0.0, hal_cor=[1.0, 1.0, 1.0], hal_forca=0.5,
+                      nevoa_forca=0.3, vinheta=0.35, sombras_forca=0.0, luzes_forca=0.0,
+                      proj_on=True, tremor_x=0.5, tremor_y=0.4, cintilacao=0.04,
+                      desg_on=True, poeira=0.3, riscos=0.12, emenda_on=True, emenda=0.2,
+                      somf_on=True, somf_trilha="otica_antiga", somf_estalos=0.6, somf_poeira=0.5, somf_wow=0.5,
+                      somf_projetor=0.15, somf_sala=0.3)),
+    dict(id="cine_de_bairro", nome="Cine de bairro (cópia gasta e sala)", grupo="Processos e estilos",
+         desc="A cópia que rodou meses no cinema do bairro: cor desbotada, poeira e riscos, a trilha ótica de 35 mm, "
+              "o projetor lá atrás e o eco da sala.",
+         valores=dict(envelhecimento=0.65, contraste=0.92, grao_forca=1.2, proj_on=True, tremor_x=0.6,
+                      tremor_y=0.5, cintilacao=0.05, desg_on=True, poeira=0.3, riscos=0.15,
+                      somf_on=True, somf_trilha="otica_35", somf_estalos=0.45, somf_poeira=0.4, somf_wow=0.35,
+                      somf_projetor=0.25, somf_sala=0.55)),
+]
+
 BY_ID = {p["id"]: p for p in BUILTIN}
 DEFAULT_ID = "vision3_250d"
 

@@ -203,7 +203,7 @@ quadros vizinhos:
   (furos escuros).
 
 ### Presets e LUTs
-- **48 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
+- **52 presets prontos** em sete grupos (Cinema 35 mm, Laboratório, Bitolas e formatos, Preto e
   branco, Fotografia, Processos e estilos, Básicos), com **miniaturas ao vivo** do seu próprio quadro
   e busca.
 - **Presets do usuário**: salvar como, atualizar, excluir, voltar ao preset, importar e exportar
@@ -560,10 +560,10 @@ mesmo preset aparece na lista do painel **Ajustes**.
 |---|---|
 | Cinema 35 mm | Kodak Vision3 250D · Kodak Vision3 50D · Kodak Vision3 200T · Kodak Vision3 500T · Fujifilm Eterna 250D · Fujifilm Eterna Vivid 500 · Blockbuster (teal & orange) |
 | Laboratório | Vision3 250D → 2383 · Vision3 500T → 2383 (noite) · Eterna 250D → Fuji 3513 · 5247 ECN-II (anos 70) · Technicolor 3 tiras · Technicolor 2 cores (anos 20) · Retenção de prata · Double-X → 2302 (P&B) · Negativo escaneado (sem cópia) · Technicolor (5297 → 5386, Hue Split) · Teal & orange (5201 → 2393, Hue Split) · Slide reversível · Revelação cruzada: slide no C-41 · Película vencida (18 anos) · Pré-exposição (baixo contraste) |
-| Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm |
-| Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo |
+| Bitolas e formatos | Super 8 • Kodachrome 40 · Super 8 • Ektachrome 100D · 8 mm caseiro (anos 60) · Scan de 35 mm (com furos) · Scan de Super 8 (com furos) · 16 mm • Vision3 500T (documentário) · Super 16 • Vision3 250D · 35 mm Scope (2,39) · 65 mm • Vision3 50D (épico) · IMAX 70 mm · Super 8 caseiro com som · 16 mm de arquivo com som ótico |
+| Preto e branco | Kodak Double-X 5222 · Kodak Tri-X 400 · Ilford HP5 Plus · Noir anos 40 · Sépia antigo · Cinema anos 30 (som ótico antigo) |
 | Fotografia | Kodak Portra 400 · Kodak Ektar 100 · Fujifilm Velvia 50 · Fujifilm Superia 400 · CineStill 800T |
-| Processos e estilos | Bleach bypass · Technicolor 3 cores · Revelação cruzada · Cópia desbotada (anos 70) |
+| Processos e estilos | Bleach bypass · Technicolor 3 cores · Revelação cruzada · Cópia desbotada (anos 70) · Cine de bairro (cópia gasta e sala) |
 | Básicos | Só textura (cor original) · Original (sem efeito) |
 
 Todos os presets de película partem da mesma base (35 mm, ISO 250, cópia Kodak 2383, grão, halação,
@@ -966,7 +966,7 @@ gratuito** e no Studio, nas páginas *Color* e *Edit*.
   pede permissão de administrador, porque a pasta do OpenFX é do sistema) ou com
   `pelicula-cli resolve --ofx-instalar`, e reabra o Resolve.
 - Na página **Color**, arraste **OpenFX → PeliculaConverter** para um nó; na **Edit**, *Effects → OpenFX →
-  PeliculaConverter*. Escolha um dos **48 presets** ou **carregue um look `.json`** exportado pelo app.
+  PeliculaConverter*. Escolha um dos **52 presets** ou **carregue um look `.json`** exportado pelo app.
 - Calcula na CPU (1080p: ~0,25–0,3 s por quadro com o look completo; 4K: ~1 s); use o *Render Cache* do
   Resolve para tocar em tempo real.
 
