@@ -33,7 +33,11 @@ from . import generators_ui, icons, theme
 ADJUSTMENT_ITEM = "camada_ajuste"  # id do item no "Novo" da Mídia (`generators_ui.MODULE_MAKERS`)
 # No enquadramento de uma camada de ajuste ficam só estes (ela cobre a tela inteira, pixel a pixel).
 ADJUSTMENT_KEEP = ("opacidade", "mesclagem")
-ADJUSTMENT_HIDE_CARDS = ("camera",)  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
+ADJUSTMENT_HIDE_CARDS = ("camera",)
+# A interface de cada frente (`pelicula.ui.<nome>`, com `install(vfx_ui)`), chamada no fim de `VfxUI.__init__`. Frente
+# nova: **uma linha** aqui.
+FRONT_UIS: tuple[str, ...] = (
+)  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 
 class VfxUI:
@@ -61,6 +65,8 @@ class VfxUI:
         self._adj_shown = False
         win.model.selectionChanged.connect(self._sync_inspector)
         win.model.changed.connect(self._sync_inspector)
+        import importlib
+        self.fronts = {name: importlib.import_module(f"{__package__}.{name}").install(self) for name in FRONT_UIS}
 
     # -------------------------------------------------------- para as frentes
     def card(self, section_key: str):

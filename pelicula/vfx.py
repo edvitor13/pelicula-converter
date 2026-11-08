@@ -100,6 +100,12 @@ class Effect:
 
 
 EFFECTS: dict[str, Effect] = {}
+# Módulos dos efeitos (`pelicula.<nome>`), um por frente: cada um chama `register` (e põe seus provedores em `GEOMETRY` e
+# `WINDOWS`) ao ser importado. `load_effects` os importa antes do primeiro uso. Frente nova: **uma linha** aqui.
+EFFECT_PACKAGES: tuple[str, ...] = (
+)
+_LOADED = False
+_LOAD_LOCK = threading.Lock()
 # módulo → ids dos efeitos dele (preenchido por `register`)
 EFFECT_MODULES: dict[str, list[str]] = {}
 # Provedores de geometria: id → fn(seq, layer, M) -> M, com M a matriz 3×3 (numpy) tela → uv do clipe. Aplicados na
@@ -108,6 +114,20 @@ GEOMETRY: dict[str, Callable[[Any, Any, np.ndarray], np.ndarray]] = {}
 # Janelas de tempo: id → fn(seq, clip, t) -> [(quadro do arquivo, peso)] | None. A primeira que devolve uma janela vale
 # (`Sequence.frame_window`); a mistura é a do obturador (`frame.Recipe._blend_layer`, na luz da curva do clipe).
 WINDOWS: dict[str, Callable[[Any, Any, int], list[tuple[int, float]] | None]] = {}
+
+
+def load_effects() -> None:
+    """Importa os módulos de `EFFECT_PACKAGES` (uma vez; seguro entre threads)."""
+    global _LOADED
+    if _LOADED:
+        return
+    with _LOAD_LOCK:
+        if _LOADED:
+            return
+        import importlib
+        for name in EFFECT_PACKAGES:
+            importlib.import_module(f"{__package__}.{name}")
+        _LOADED = True
 
 
 def register(effect: Effect) -> Effect:
@@ -128,6 +148,7 @@ def unregister(effect_id: str) -> None:
 
 
 def _ordered() -> list[Effect]:
+    load_effects()
     return sorted(EFFECTS.values(), key=lambda e: (e.order, e.id))
 
 
@@ -168,6 +189,7 @@ def new_adjustment(seq):
 def modules_used(seq) -> set[str]:
     """Módulos dos efeitos visuais que esta montagem usa (`modules.used_by` passa por cada sequência do projeto): a
     camada de ajuste e os efeitos ligados (ou com chaves de animação) em algum clipe. Só para o aviso."""
+    load_effects()
     used: set[str] = set()
     for c in getattr(seq, "clips", []) if seq is not None else []:
         if c.kind != "video":
@@ -311,6 +333,7 @@ def geometry(seq, layer, m: np.ndarray, canvas_w: int, canvas_h: int, neutral: b
     """A matriz tela → uv do clipe com a geometria dos efeitos: a camada de ajuste lê a tela pixel a pixel (o cartão
     de enquadramento some na interface) e os provedores de `GEOMETRY` (estabilização) mexem no resto. Com `neutral`
     ("Desligar todos os efeitos"), só a camada de ajuste."""
+    load_effects()
     if is_adjustment(seq, layer.clip):
         return np.array([[1.0 / canvas_w, 0.0, 0.0], [0.0, 1.0 / canvas_h, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
     if neutral or not GEOMETRY:
@@ -322,6 +345,7 @@ def geometry(seq, layer, m: np.ndarray, canvas_w: int, canvas_h: int, neutral: b
 
 def window(seq, clip, t: int) -> list[tuple[int, float]] | None:
     """A primeira janela de `WINDOWS` para o clipe no quadro t, ou None."""
+    load_effects()
     for fn in list(WINDOWS.values()):
         got = fn(seq, clip, t)
         if got:

@@ -321,3 +321,22 @@ def test_preview_equals_export(gl_engine, renderer, test_effect):
         r = Recipe.for_source(None, 24.0, 8, legal=sequence.legal_range(seq), seq=seq, size=(W, H))
         prev = r.render(gl_engine, sequence.grab(seq, t, W, H, 8, shutter=r.shutter), t)
         assert np.array_equal(prev, exported[t]), f"quadro {t}"
+
+
+def test_effect_packages_are_imported_once_before_use(monkeypatch, tmp_path):
+    """Uma frente se registra com uma linha em `vfx.EFFECT_PACKAGES`: o módulo é importado antes do primeiro `plan`."""
+    import sys
+    import types
+    calls = []
+    fake = types.ModuleType("pelicula._teste_frente")
+    sys.modules["pelicula._teste_frente"] = fake
+    monkeypatch.setattr(vfx, "EFFECT_PACKAGES", ("_teste_frente",))
+    monkeypatch.setattr(vfx, "_LOADED", False)
+    monkeypatch.setattr("importlib.import_module", lambda name: calls.append(name) or fake)
+    try:
+        vfx.active_effects({})
+        vfx.active_effects({})
+    finally:
+        sys.modules.pop("pelicula._teste_frente", None)
+    assert calls == ["pelicula._teste_frente"]
+    assert vfx.EFFECT_PACKAGES == ("_teste_frente",)

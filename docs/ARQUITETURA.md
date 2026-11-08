@@ -5183,7 +5183,12 @@ makes_alpha(values) -> bool;  neighbor_radius(values) -> int;  is_adjustment(seq
 modules_used(seq) -> set[str];  new_adjustment(seq) -> Source;  pass_size(size, ctx);  streak_steps(sigma)
 GEOMETRY: dict[str, fn(seq, layer, M) -> M];  WINDOWS: dict[str, fn(seq, clip, t) -> [(quadro, peso)] | None]
 EFFECT_MODULES: dict[módulo, [ids]];  pack(arr) / unpack(d);  stamp(path) / stale(src, tipo)
+EFFECT_PACKAGES: tuple[str, ...];  load_effects()   # os módulos das frentes, importados antes do primeiro uso
 ```
+
+**Registrar uma frente**: o módulo `pelicula/<frente>.py` chama `vfx.register(...)` (e põe seus provedores em `GEOMETRY` /
+`WINDOWS`) ao ser importado, e o nome dele entra em `vfx.EFFECT_PACKAGES` (uma linha). `load_effects` os importa uma vez,
+antes do primeiro `plan`, `geometry`, `window` ou `modules_used`, em qualquer thread.
 
 `Ctx(seq, layer, t, tex_w, tex_h, canvas_w, canvas_h, light, adjustment, neutral)`: `clip`, `values` (com as chaves de
 animação já avaliadas), `src`, `scale` (= `tex_h / 1080`), `px(v)`, `frame` e `seconds` (tempo do clipe das chaves,
@@ -5288,7 +5293,9 @@ Recurso do formato 7: `"camada_ajuste"`.
 
 ### 49.10 Interface (`ui/vfx_ui.py`)
 
-`VfxUI` é o único ponto na `MainWindow` (`install`, `module_tools`, `apply_modules`). Para as frentes:
+`VfxUI` é o único ponto na `MainWindow` (`install`, `module_tools`, `apply_modules`). A interface de cada frente é um
+módulo `pelicula/ui/<frente>_ui.py` com `install(vfx_ui)`, listado em `vfx_ui.FRONT_UIS` (uma linha; chamado no fim do
+`VfxUI.__init__`). Para as frentes:
 `add_section(seção, módulo, after=None) -> SectionCard`, `card(seção)`, `add_overlay(nome, módulo, provedor)` (camada de
 prévia de `preview_tools`, só com o módulo ligado), `points_overlay(size, pontos)`, `pick_point(fn)` e
 `clip_point(clipe, fx, fy)`. Grupo de módulos `"efeitos_visuais"` em Configurações › Recursos. Os efeitos de clipe não vão
