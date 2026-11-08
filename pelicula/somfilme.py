@@ -11,8 +11,9 @@ gravadas, sobre o som que já saiu da montagem (`audiomix.render_mix`) ou do arq
   finita (filtros FIR de fase mínima, atraso do wow, reverberação), e `before` traz o som logo antes do trecho (até
   `preroll_samples`): processar um trecho dá as mesmas amostras que o mesmo pedaço do som inteiro processado.
 - Eventos que a imagem também usa: o wow lento é `look.weave` (o tremor do quadro); os estalos caem nos quadros de
-  `look.emenda_frames` (Defeitos → Emendas) e `montagem_filme.splice_frames` (A montagem na película), a mesma conta
-  que desenha a emenda (`events_for`).
+  `look.emenda_frames` (Defeitos → Emendas), `montagem_filme.splice_frames` (A montagem na película) e
+  `montagem_filme.reel_frames` (a troca de rolo de Super 8), a mesma conta que desenha a emenda e o pulo
+  (`events_for`).
 - `process_wav`: o motor em blocos, de um WAV para um WAV PCM de 24 bits (memória limitada em som longo).
 - `export_sound`: o gancho da exportação (`export.run_job`); a prévia usa `process_wav` pela `ui/som_pelicula_ui.py`.
 
@@ -135,11 +136,13 @@ def projection_fps(values: dict, fps: float) -> float:
 
 
 def events_for(values: dict, fps: float, frames: int, seq=None) -> list[int]:
-    """Os quadros dos estalos: onde a imagem mostra a emenda dos defeitos e a fita dos cortes da montagem."""
+    """Os quadros dos estalos: onde a imagem mostra a emenda dos defeitos, a fita dos cortes da montagem e o pulo da
+    troca de rolo de Super 8 (1.8, também no arquivo direto: os rolos contam o tempo da saída)."""
     from . import look, montagem_filme
     frames = max(0, int(frames))
     out = set(look.emenda_frames(values, fps, 0, frames))
     out.update(montagem_filme.splice_frames(seq, values, fps, 0, frames))
+    out.update(montagem_filme.reel_frames(values, fps, 0, frames))
     return sorted(out)
 
 
