@@ -328,8 +328,9 @@ class Strip(QFrame):
         vl.addLayout(btns)
 
     def sync(self, tr: timeline.Track) -> None:
-        self.name.setText(tr.name)
-        self.name.setToolTip(tr.name)
+        name = tr.name or f"A{self.idx + 1}"
+        self.name.setText(name)
+        self.name.setToolTip(name)
         self.fader.set_value(tr.volume)
         self.pan.set_value(tr.pan)
         self.db_label.setText(fmt_db(tr.volume))

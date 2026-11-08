@@ -446,3 +446,23 @@ def test_unnest_refuses_two_pans_that_do_not_combine(tmp_path):
     seq.track(tl.AUDIO, out.track).pan = -0.2   # a faixa de fora ganhou balanço; a de dentro tem 0,5
     with pytest.raises(aninhar.Refusal, match="balanço"):
         aninhar.unnest(seq, out.id)
+
+
+@pytest.mark.ffmpeg
+def test_prerender_hook_runs_before_the_parts_with_whole_sequence_segments(wavs, tmp_path, monkeypatch):
+    """O ponto da frente L (entradas limpas): `PRERENDER` recebe as entradas de `segments(seq)` inteira dos clipes que
+    tocam, antes de qualquer pedaço; um WAV derivado com o conteúdo no nome entra na chave sem a data."""
+    seq = seq_of(wavs)
+    a = place(seq, wavs[0], 0, 40, 0.0)
+    place(seq, wavs[1], 60, 20, 0.0, track=1)
+    order = []
+    monkeypatch.setattr(somcache, "PRERENDER", [lambda segs, cancel, perf: order.append(
+        [(s["clip"].id, s["src_len"]) for s in segs]) or True])
+    real = somcache.ensure
+    monkeypatch.setattr(somcache, "ensure", lambda *x, **k: order.append("ensure") or real(*x, **k))
+    assert audiomix.render_mix(seq, str(tmp_path / "m.wav"), 10, 30)
+    assert order == [[(a.id, pytest.approx(40 / 25))], "ensure"]   # o clipe inteiro, não só o trecho
+    derived = tmp_path / "derivados"
+    monkeypatch.setattr(somcache, "CONTENT_NAMED_DIRS", [audiomix.nested_dir, lambda: derived])
+    assert somcache._is_nested_wav(str(derived / "abc.wav"))
+    assert somcache._inputs_stamp(seq, ["-i", str(derived / "abc.wav")]) == ["-i", str(derived / "abc.wav")]

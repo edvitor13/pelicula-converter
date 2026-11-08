@@ -54,7 +54,20 @@ PEAK_BLOCK = RATE // 100            # 10 ms: um pico por faixa a cada bloco (med
 # Ajustes de som do clipe que só geram filtros lineares depois do volume (ou nada depois dele): com todos os outros no
 # padrão, o ganho da faixa pode ir para a soma sem mudar o som. Frentes novas acrescentam aqui o que for linear.
 LINEAR_KEYS: set[str] = {"volume", "mudo", "balanco", "fade_in", "fade_out", "transicao", "graves", "medios",
-                         "agudos", "velocidade"}
+                         "agudos", "velocidade",
+                         # 1.8, limpeza do som (frente L, ARQUITETURA §44): filtros fixos (passa-altas/baixas e os
+                         # entalhes do zumbido). O ruído aprendido e "nivelar a voz" não são lineares.
+                         "passa_alta", "passa_baixa", "zumbido", "zumbido_harmonicos"}
+
+# Pastas de WAVs derivados com o conteúdo no nome (a mixagem de uma aninhada, a entrada limpa de um clipe): a chave do
+# pedaço usa o caminho, sem a data (que muda a cada uso, e o arquivo pode ainda não existir quando a chave é calculada).
+CONTENT_NAMED_DIRS: list[Callable[[], Path]] = [audiomix.nested_dir]
+
+# Etapas que preparam entradas derivadas antes de renderizar os pedaços: fn(segmentos, cancel, perf) -> bool (False =
+# cancelado). Recebem as entradas de `audiomix.segments(seq)` da sequência INTEIRA (são elas que `clip_parts` lê) só dos
+# clipes que tocam no trecho. Ex.: `somlimpo.render_inputs` (frente L) grava o WAV limpo que `segments` já pôs em
+# `seg["path"]`.
+PRERENDER: list[Callable] = []
 
 
 def cache_dir() -> Path:
@@ -112,7 +125,9 @@ def _inputs_stamp(seq: timeline.Sequence, inputs: list[str]) -> list:
 
 
 def _is_nested_wav(path: str) -> bool:
-    return Path(path).parent == audiomix.nested_dir()
+    """WAV derivado com o conteúdo no nome (`CONTENT_NAMED_DIRS`)."""
+    parent = Path(path).parent
+    return any(parent == d() for d in CONTENT_NAMED_DIRS)
 
 
 def clip_parts(seq: timeline.Sequence) -> list[Part]:
@@ -400,6 +415,8 @@ def mix(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
         return None
     if not audiomix._render_nested(seq, start, end, cancel, perf):
         return None
+    if not _prerender(seq, playing, cancel, perf):
+        return None
     try:
         if not ensure(items, cancel, perf):
             return None
@@ -465,6 +482,14 @@ def mix(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
             for path in [out_path, *result.stems.values()]:
                 audiomix._remove(path)
     return result if done else None
+
+
+def _prerender(seq: timeline.Sequence, playing: set[str], cancel, perf) -> bool:
+    """O ponto das entradas derivadas (`PRERENDER`), depois das aninhadas e antes dos pedaços (`ensure`)."""
+    if not PRERENDER:
+        return True
+    segs = [s for s in audiomix.segments(seq) if s["clip"].id in playing]
+    return all(fn(segs, cancel, perf) for fn in PRERENDER)
 
 
 def _block_peaks(buf: np.ndarray) -> np.ndarray:

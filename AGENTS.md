@@ -185,7 +185,13 @@ pelicula/
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
                              (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe);
                              sequência aninhada (1.7): WAV da mixagem de dentro como entrada do clipe
-                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5)
+                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5);
+                             1.8: render_mix chama somcache.mix; o grafo único ficou em render_mix_graph (referência)
+  somcache.py                1.8 (§43): cache do som de cada clipe (Part, PROVIDERS = clip_parts + tone_parts, chave com
+                             arquivo/tempo/valores/chaves) e a soma em numpy (mix: ganho e balanço da faixa, trecho exato,
+                             24 bits como o ffmpeg, picos por faixa a cada 10 ms, stems); LINEAR_KEYS; WavWriter
+  somexport.py               1.8 (§43.6): exportar só o som e stems (ExportSettings.sound_only, FORMATS, stem_path),
+                             chamado por export.run_job; o som do arquivo no modo Película
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -209,6 +215,10 @@ pelicula/
                              seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
                              1.8, look próprio de cada sequência (§42): look_sequencia_ui (SeqLookUI: o look em edição
                              acompanha a aba, a escolha no painel/aba/Mídia, alvos da exportação, aviso no clipe);
+                             1.8, som (§43): mixer_ui (MixerUI: tiras das faixas no lugar do inspetor, Ctrl+Alt+M,
+                             medidores dos picos gravados ao lado da mixagem), scrub_ui (ScrubUI: som ao arrastar o
+                             cursor, grão de um quadro por um QAudioSink próprio, preferência som_ao_arrastar),
+                             som_export_ui (SoundChoice: "O que exportar" na janela Exportar);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -276,8 +286,8 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    Todo efeito vive em `look.build_plan()` + `shaders.py`/`Engine.render()`. Nunca implemente um efeito só
    na interface, só na exportação ou só no "Salvar quadro". No modo Edição vale o mesmo: ajuste de clipe só
    em `compositor.py` + `editshaders.py` / `Engine.compose()`; qual quadro de qual arquivo aparece só em
-   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
-   que a exportação grava). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
+   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` + `somcache.py` (a prévia toca a
+   mesma mixagem que a exportação grava; ARQUITETURA §43). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
    `Layer.values` (imagem e volume do som) e `keyframes.look_values_at()` pela receita (look); nunca leia
    `clip.values` para desenhar um quadro. Imagem de camada com 4 canais é sempre RGBA **pré-multiplicado**
    (transparência: `media.FrameReader(alpha=)` e geradores de `sequence.RENDERERS`); com 3 canais, opaca.
@@ -458,6 +468,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_titles.py` | títulos: dados conferidos, estilos prontos, pré-multiplicação, posição, animações em quadros fixos, tempo do clipe (aparar, velocidade, congelar), **hashes fixos** (iguais no Windows e no Linux), módulo e `used_by` |
 | `tests/test_alfa_titulos_ui.py` | casos de `alfa_titulos_ui_cases.py`: imagens numeradas, Fundo transparente, janela Exportar com alfa, xadrez, menu Novo, campos do gerador e editor de títulos com desfazer, aviso de caractere, Sobre, módulo desligado |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
+| `tests/test_somcache.py` | cache por clipe e soma (1.8, §43): igual ao grafo antigo (`render_mix_graph`, ≤ 2 passos de 24 bits) em cortes, transição, velocidade, rampa, reverso, chaves, mudo/solo, volume da faixa, tons, aninhada e trechos do meio; posição na amostra exata; mover/aparar/fader sem renderizar; chave do pedaço; 24 bits como o ffmpeg; cancelar e erro; picos e stems; balanço da faixa (lei do clipe, JSON, formato 6, `mix_key`, aninhar e desaninhar); velocidade |
+| `tests/test_somexport.py` | só o som = `render_mix` (e o trecho), stems somam a mixagem, FLAC/AAC/MP3, volume alvo, o som do arquivo no modo Película, cancelar, `--so-som`/`--stems` |
+| `tests/test_scrub.py` | som ao arrastar o cursor: tamanho do grão, fades de 5 ms, 16 bits com o volume, um grão por vez (nada toca) |
+| `tests/test_mixer_ui.py` | casos de `mixer_ui_cases.py`: mixer no lugar do inspetor (botão, atalho), uma tira por faixa, fader e balanço num passo do desfazer, dois cliques, mudo/solo/trava, medidores pelos picos gravados, a prévia grava os picos e a limpeza apaga, scrub com sink falso (passo, régua, mudo, preferência) e "O que exportar" na janela Exportar |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
@@ -567,7 +581,9 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    chave em `editparams.SPARSE_KEYS`: no padrão ela não vai para o JSON e um projeto antigo grava igual.
 2. **Imagem**: `compositor.py` transforma o valor em uniform(s) e `editshaders.CLIP` usa; mantenha
    o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
-   cadeia do clipe.
+   cadeia do clipe. Se o filtro é linear (só multiplica e soma amostras, como volume e equalizador), ponha a
+   chave em `somcache.LINEAR_KEYS` (o ganho da faixa vai para a soma e o fader não renderiza o clipe de novo);
+   senão, nada a fazer. O cache por clipe já leva todos os valores na chave.
 3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
 4. Se ele deve aceitar chaves de animação, veja *Tornar um ajuste animável*.
 
