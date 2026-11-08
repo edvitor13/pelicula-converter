@@ -541,19 +541,23 @@ def detect_hum_file(path: str, t0: float, t1: float, cancel: threading.Event | N
 
 
 # ------------------------------------------------------------------ cortes e voz
-SPEECH_MAX_EXPANSION = 10.0   # 100%: o trecho baixo sobe até 20 dB
+SPEECH_MAX_DB = 30.0          # 100%: a fala baixa sobe até 30 dB
 SPEECH_MAX_COMPRESSION = 2.0  # 100%: o pico alto desce até 6 dB
+SPEECH_MAX_RATE = 0.2         # 100%: subida/descida do ganho por meio ciclo (alcança o alvo em poucas sílabas)
+SPEECH_THRESHOLD = 0.01       # meio ciclo abaixo disto (−40 dBFS) não é fala: as pausas não sobem
 
 
 def speechnorm_filter(amount: float) -> str:
-    """`speechnorm` do ffmpeg pela força 0–1: expansão 1 + 9·a (até +20 dB), compressão 1 + a (até −6 dB), pico
-    alvo 0,9 e subida/descida 0,0005 + 0,0045·a por meio ciclo (mais força, alcança o alvo mais depressa); canais
-    ligados (a imagem estéreo não muda)."""
+    """`speechnorm` do ffmpeg pela força a (0–1): pico alvo 0,9, expansão máxima 10^(1,5·a) (até +30 dB, em dB
+    proporcional à força), compressão 1 + a (até −6 dB), subida e descida 0,001 + 0,199·a por meio ciclo (o padrão
+    do ffmpeg em 0%; mais força, alcança o alvo mais depressa), limiar −40 dBFS e canais ligados (a imagem estéreo não
+    muda). Com 100%, metades de fala a 20 dB de distância terminam a menos de 1 dB."""
     a = max(0.0, min(1.0, float(amount)))
-    e = 1.0 + (SPEECH_MAX_EXPANSION - 1.0) * a
+    e = 10.0 ** (SPEECH_MAX_DB * a / 20.0)
     c = 1.0 + (SPEECH_MAX_COMPRESSION - 1.0) * a
-    r = 0.0005 + 0.0045 * a
-    return f"speechnorm=p=0.9:e={_fmt(e)}:c={_fmt(c)}:r={_fmt(r)}:f={_fmt(r)}:l=1"
+    r = 0.001 + (SPEECH_MAX_RATE - 0.001) * a
+    return (f"speechnorm=p=0.9:e={_fmt(round(e, 4))}:c={_fmt(c)}:r={_fmt(r)}:f={_fmt(r)}:"
+            f"t={_fmt(SPEECH_THRESHOLD)}:l=1")
 
 
 def after_eq_filters(v: dict) -> list[str]:

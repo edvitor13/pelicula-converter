@@ -334,7 +334,9 @@ def test_filter_and_leveling_text():
     got = somlimpo.after_eq_filters({**base, "passa_alta": 120.0, "passa_baixa": 3400.0})
     assert got == ["highpass=f=120:poles=2", "lowpass=f=3400:poles=2"]
     assert somlimpo.after_eq_filters({**base, "nivelar_voz": 1.0}) == [
-        "speechnorm=p=0.9:e=10:c=2:r=0.005:f=0.005:l=1"]
+        "speechnorm=p=0.9:e=31.6228:c=2:r=0.2:f=0.2:t=0.01:l=1"]
+    half = somlimpo.speechnorm_filter(0.5)
+    assert "e=5.6234:" in half and "c=1.5:" in half   # a expansão é em dB proporcional à força (15 dB)
 
 
 @pytest.mark.ffmpeg
@@ -356,3 +358,35 @@ def test_cut_filters_response(ffmpeg_ok, tmp_path):
     assert hp[200.0] == pytest.approx(-3.0, abs=0.5) and hp[50.0] < -20.0 and abs(hp[2000.0]) < 0.3
     lp = gains({"passa_baixa": 2000.0})
     assert lp[2000.0] == pytest.approx(-3.0, abs=0.5) and lp[8000.0] < -20.0 and abs(lp[200.0]) < 0.3
+
+
+# ------------------------------------------------------------------ nivelar a voz
+def speech_like(secs=3.0, split=1.5, loud=0.5, quiet=0.05) -> np.ndarray:
+    """Vogais com harmônicas (fundamental de 120 a 160 Hz) em sílabas de 4 por segundo; a primeira metade alta, a
+    segunda 20 dB mais baixa."""
+    t = np.arange(int(secs * R)) / R
+    f0 = 140 + 20 * np.sin(2 * np.pi * 0.7 * t)
+    ph = 2 * np.pi * np.cumsum(f0) / R
+    x = sum(np.sin(k * ph) / k for k in range(1, 12)) * np.clip(np.sin(2 * np.pi * 4 * t), 0, None) ** 0.5
+    x /= np.abs(x).max()
+    return np.where(t < split, loud * x, quiet * x)
+
+
+@pytest.mark.ffmpeg
+def test_voice_leveling_brings_the_halves_together(ffmpeg_ok, tmp_path):
+    src = write_wav16(tmp_path / "fala.wav", np.repeat(speech_like()[:, None], 2, axis=1))
+    seq = audio_seq([src], secs=3.0)
+    c = place(seq, src, 0, 72, 0.0)
+
+    def halves(amount):
+        seq.set_values(c.id, {**editparams.AUDIO.defaults(), "nivelar_voz": amount})
+        y = mixed(seq, tmp_path / f"n{amount}.wav")[:, 0]
+        return rms_db(y[int(0.5 * R):int(1.4 * R)]) - rms_db(y[int(2.0 * R):int(2.9 * R)])
+
+    assert halves(0.0) == pytest.approx(20.0, abs=0.5)
+    assert abs(halves(1.0)) < 3.0
+    assert 3.0 < halves(0.5) < 20.0
+    # depois da equalização, antes do loudnorm
+    seq.set_values(c.id, {**editparams.AUDIO.defaults(), "nivelar_voz": 0.5, "agudos": 2.0, "normalizar": True})
+    graph = audiomix.build_graph(seq)[1]
+    assert graph.index("treble=") < graph.index("speechnorm=") < graph.index("loudnorm=")
