@@ -184,6 +184,13 @@ def test_compose_neutral_is_bit_exact(gl_engine, test_rgb, depth):
     assert np.array_equal(gl_engine.compose(frame_of(seq, img), seq, W, H, depth, neutral=True), img)
 
 
+# 1.9 F4: luz e atmosfera; ficam as chaves que ligam cada efeito (raio, intensidades, densidade, tipo)
+F4_ONLY_WITH_EFFECT = {k for k in editparams.VIDEO.params
+                       if k.startswith(("desfoque_lente_", "listra_", "flare_", "raios_", "nevoa_", "part_"))} - {
+    "desfoque_lente_raio", "listra_intensidade", "flare_intensidade", "raios_intensidade", "nevoa_densidade",
+    "part_tipo"}
+
+
 @pytest_gpu
 def test_compose_every_param_runs(gl_engine, test_rgb):
     transition_keys = {p.key for s in editparams.VIDEO_SECTIONS if s.key == "transicao" for p in s.params}
@@ -200,6 +207,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
             continue                                # tests/test_mascaras_clipe.py: cada ajuste só vale com o tipo
         if key in {p.key for s in editparams.VIDEO_SECTIONS if s.key == "tempo_imagem" for p in s.params}:
             continue  # 1.9: tempo da imagem (análise do arquivo, vizinhos, câmera lenta), tests/test_tempo_imagem.py
+        if key in F4_ONLY_WITH_EFFECT:  # 1.9 F4: só valem com o efeito ligado (tests/test_atmosfera.py, test_luzes_clipe.py)
+            continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)

@@ -469,6 +469,45 @@ escurece onde é mais escuro), **Subtrair** (tira o clipe do que está embaixo),
 clipe), **Matiz**, **Saturação** e **Cor** (pegam só a cor, a saturação ou as duas do clipe, mantendo a luz de baixo) e
 **Luminosidade** (a luz do clipe com a cor de baixo). Escolher um deles grava o projeto no formato da 1.9.
 
+### Luz e atmosfera (1.9, Beta)
+
+Quatro cartões novos no inspetor do clipe, logo depois de **Efeitos**: **Desfoque de lente** e **Luz (listra, flares,
+raios)** (recurso **Luzes e lente**) e **Névoa** e **Partículas** (recurso **Atmosfera**). Os dois recursos são Beta,
+do grupo **Efeitos visuais** em Configurações › Recursos, e começam desligados; desligar só esconde os cartões (um
+projeto que já usa sai igual, e a janela avisa ao abrir). Tudo vale no tempo e no quadro do clipe: as medidas em **px**
+são de um quadro de 1080 linhas do clipe (o mesmo efeito em 720p, 1080p ou 4K), e numa **camada de ajuste** o efeito
+vale para tudo o que está embaixo dela. Todos começam desligados; usar qualquer um grava o projeto no formato da 1.9.
+O plugin do DaVinci não tem estes efeitos.
+
+- **Desfoque de lente**: **Raio** do círculo de desfoque (0 = desligado). As partes claras viram discos de luz, como
+  numa lente aberta; **Forma do bokeh**: disco ou hexágono. **Onde desfocar**: a imagem inteira ou **pelo degradê**
+  (foco perto ou longe): o lado marcado desfoca e o outro continua nítido. *Linear*: **Direção** 0° desfoca em cima (o
+  fundo), 180° embaixo (a frente); *Radial*: fica nítido dentro do círculo (**Raio do círculo**, **Centro**). **Suavidade**
+  é a passagem entre o nítido e o desfocado e **Inverter** troca os lados.
+- **Listra anamórfica**: uma linha de luz longa, azulada por padrão, nas luzes mais fortes. **Limiar** em stops acima do
+  cinza médio (só o que passa dele espalha), **Comprimento**, **Cor** e, nos avançados, o **Ângulo**.
+- **Flare**: reflexos da lente (fantasmas coloridos) na linha que vai da luz ao centro do quadro. Com a origem **As
+  luzes mais fortes da imagem**, cada luz acima do **Limiar** faz os seus; com **Um ponto escolhido**, o flare sai do
+  ponto (horizontal e vertical em px a partir do centro), mesmo sem luz ali. **Escolher o ponto do flare na prévia**:
+  clique no botão e depois na prévia, onde está a luz. **Fantasmas** (1 a 8), **Tamanho dos fantasmas** e **Cor**.
+- **Raios de luz**: raios que saem de uma origem atravessando as partes claras (sol entre as folhas, janela, poeira no
+  ar). **Origem** (pode ficar fora do quadro; o botão **Escolher a origem dos raios na prévia** acerta com um clique),
+  **Comprimento**, **Decaimento**, **Limiar** e **Cor**. Abaixo do limiar nada muda.
+- **Névoa**: **Densidade** (0% = sem névoa) e **Cor** (como num vídeo comum). **Forma**: *Degradê* (chão ou céu) ou *Por
+  igual*. No degradê, **Direção** 180° põe a névoa embaixo (chão) e 0° em cima (céu); **Altura** sobe ou desce a linha e
+  **Suavidade** alarga a passagem. **Textura** desenha nuvens (0% = lisa), que andam na horizontal pelo **Movimento**
+  (px por segundo; 0 = paradas); nos avançados, **Tamanho das nuvens** e **Semente**.
+- **Partículas**: **Tipo** chuva, neve, poeira no ar ou brasas (Nenhuma = desligado). **Quantidade**, **Tamanho**,
+  **Velocidade** (1× = a natural do tipo), **Vento** (empurra para os lados), **Profundidade** (camadas ao fundo menores,
+  mais lentas e mais apagadas), **Opacidade**, **Cor** (tinge; brasas e poeira já têm cor), **Desfoque de movimento** (o
+  rastro durante a exposição: 50% = obturador de 180°) e, nos avançados, **Semente** (outro desenho). Chuva e neve
+  cobrem a imagem; poeira e brasas somam luz, e as brasas cintilam. As partículas seguem o tempo do clipe: dividir o
+  clipe ou exportar um trecho não muda nenhum quadro.
+
+Os números e cores aceitam chaves de animação (um flare que acompanha a luz, um foco que passa da frente para o fundo, a
+névoa que chega), menos os que mexem na grade e no movimento das partículas e das nuvens (tamanho, velocidade, vento,
+profundidade, desfoque de movimento, movimento e tamanho das nuvens).
+
 ### Escala por eixo
 
 No cartão **Enquadrar e posicionar**, **Escala horizontal** e **Escala vertical** esticam o clipe só em um eixo, de

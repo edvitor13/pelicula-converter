@@ -220,6 +220,12 @@ pelicula/
   tempo_imagem.py            1.9 F5, tempo da imagem (módulo Beta tempo_imagem, sem Qt, §53): deflicker (análise do arquivo em
                              Source.analysis["deflicker"], média móvel, ganho na luz pela curva do clipe), ruído temporal
                              (vizinhos n±1/n±2 pesados pela semelhança) e mistura de quadros na câmera lenta (vfx.WINDOWS)
+  atmosfera.py               1.9, atmosfera do clipe (módulo Beta atmosfera, sem Qt, §52): névoa por degradê com nuvens
+                             periódicas que andam e partículas (chuva, neve, poeira, brasas) por célula em três camadas,
+                             hash de inteiros e tempo do clipe; efeitos "nevoa" (600) e "particulas" (700) da pilha
+  luzes_clipe.py             1.9, luzes e lente do clipe (módulo Beta luzes_lente, sem Qt, §52): desfoque de lente (400,
+                             máscara pelo degradê; gancho MASK_SOURCES da máscara de forma), listra anamórfica, flare e
+                             raios de luz (500–520) somados na luz só onde mudam; entry() (a entrada depois de outro efeito)
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -275,6 +281,8 @@ pelicula/
                              Recorte e conta-gotas do fundo), mascaras_ui (cartão Máscara, MaskHandles, polígono por cliques);
                              1.9 F5, tempo_imagem_ui (cartão "Tempo da imagem" depois da Manivela; Analisar do deflicker
                              na fila, estado da análise);
+                             1.9, atmosfera_ui (F4, §52.7: cartões Desfoque de lente, Luz, Névoa e Partículas; ponto do
+                             flare e origem dos raios escolhidos na prévia);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -552,6 +560,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_recorte_ui.py` | casos de `recorte_ui_cases.py`: cartões Recorte e Máscara seguindo o módulo, conta-gotas num passo do desfazer (cinza recusado, Esc), alças da máscara (centro num passo, cantos, girar com Shift, chave no cursor com o centro animado), polígono por cliques e dois cliques, Esc cancela, alças fora do quadro renderizado |
 | `tests/test_tempo_imagem.py` | tempo da imagem (1.9, §53): ajustes neutros e esparsos, módulo, ordem, média móvel, análise (FFV1 sem perdas, carimbo), janela da mistura (0,5×, 1×, rápido com o obturador, fps menor, rampa, reverso = espelho, congelado, imagem), vizinhos só com o ruído; na GPU: cintilação some e a rampa de luz fica, cena parada e sem análise bit a bit, dividir/aparar, prévia == exportação, ruído cai, borda sem fantasma, `grab` == leitor, 0,5× == numpy e 1× bit a bit, reverso, gêmea aninhada |
 | `tests/test_tempo_imagem_ui.py` | casos de `tempo_imagem_ui_cases.py`: cartão seguindo o módulo e depois de Velocidade e Manivela, botão sem arquivo, Analisar na fila e fora do desfazer, aviso do arquivo mudado |
+| `tests/test_atmosfera.py` | partículas e névoa (1.9, §52): padrões neutros e esparsos, formato 7, ordem e módulo, deslocamentos no período em horas de clipe, só o que não mexe na grade anima; na GPU: desligado = nenhum passo e bit a bit, determinismo pelo tempo do clipe (dividir no meio não muda nada), px@1080 em duas resoluções, limites de energia (neve cobre, brasas somam), cor e degradê da névoa e as nuvens que andam, camada de ajuste == clipe de tela cheia, gêmea aninhada, prévia == exportação |
+| `tests/test_luzes_clipe.py` | desfoque de lente, listra, flare e raios (1.9, §52): padrões e ordem, a entrada do efeito ("orig" ou a cópia); na GPU: desligado e abaixo do limiar bit a bit, direção e energia da listra (luz linear), raios para longe da origem, fantasmas na reta luz–centro, flare de um ponto sem ler a imagem, desfoque que conserva a luz e mantém a cor chapada, máscara pelo degradê e pelo gancho da F2, entrada depois de outro efeito, camada de ajuste, gêmea, prévia == exportação |
+| `tests/test_atmosfera_ui.py` | casos de `atmosfera_ui_cases.py`: cartões seguem os módulos atmosfera e luzes_lente e vêm depois de "Efeitos", escolher o ponto do flare e a origem dos raios na prévia (um passo do desfazer), camada de prévia dos pontos, ajuste num passo |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

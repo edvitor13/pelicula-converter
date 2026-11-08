@@ -5408,7 +5408,104 @@ Reservada para a frente F3 (`vfx.GEOMETRY`, análises em `Source.analysis`; bloc
 
 ## 52. Luz e atmosfera (1.9, F4)
 
-Reservada para a frente F4 (efeitos com `order` 400 a 700; bloco `# 1.9 F4`).
+Seis efeitos de clipe na pilha da §49, em dois módulos Beta do grupo `efeitos_visuais`: **`luzes_lente`**
+(`pelicula/luzes_clipe.py`: desfoque de lente, listra anamórfica, flare, raios de luz) e **`atmosfera`**
+(`pelicula/atmosfera.py`: névoa, partículas). Interface em `pelicula/ui/atmosfera_ui.py`. Nada usa IA, nada lê quadros
+vizinhos, nada guarda análise: cada quadro sai só dos ajustes do clipe, do tempo do clipe e de hashes de inteiros.
+
+### 52.1 Ordem, ids e ajustes
+
+| Efeito (`Effect.id`) | Ordem | Módulo | Liga com | Ajustes |
+|---|---|---|---|---|
+| `desfoque_lente` | 400 (`ORDER["desfoque_lente"]`) | `luzes_lente` | `desfoque_lente_raio > 0` | `desfoque_lente_*` |
+| `listra` | 500 (`ORDER["luz"]`) | `luzes_lente` | `listra_intensidade > 0` | `listra_*` |
+| `flare` | 510 | `luzes_lente` | `flare_intensidade > 0` | `flare_*` |
+| `raios` | 520 | `luzes_lente` | `raios_intensidade > 0` | `raios_*` |
+| `nevoa` | 600 (`ORDER["nevoa"]`) | `atmosfera` | `nevoa_densidade > 0` | `nevoa_*` |
+| `particulas` | 700 (`ORDER["particulas"]`) | `atmosfera` | `part_tipo ≠ "nenhuma"`, quantidade e opacidade > 0 | `part_*` |
+
+Os ajustes estão no bloco `# 1.9 F4` de `editparams.py`, em quatro seções (`desfoque_lente`, `luzes`, `nevoa`,
+`particulas`); todo padrão deixa o efeito desligado (nenhum passo). Cores (`*_cor`) são `Param` do tipo `"color"`. Os
+números e cores animam (`Param.animatable`, marcados no próprio bloco), **menos** os que desenham a grade ou o movimento
+pelo tempo: `part_tamanho`, `part_velocidade`, `part_vento`, `part_profundidade`, `part_desfoque`, `nevoa_movimento`,
+`nevoa_escala` (a posição é velocidade × tempo e a célula depende do tamanho; animá-los faria tudo pular). Nada novo no
+JSON além dos ajustes (formato 7 por `ajustes_clipe_1_9`); nenhum `FEATURES_V7` novo.
+
+### 52.2 Somar luz só onde muda
+
+Os efeitos trabalham na luz da curva do look (`fxDec`/`fxEnc`, §49.3) e gravam `c + fxEnc(luz nova) − fxEnc(luz)`: onde
+nada muda (sem partícula, sem névoa, brilho abaixo do limiar, raio de desfoque < 0,5 texel) o pixel sai **bit a bit**
+(`fxEnc(fxDec(c))` não volta exato nas pontas da curva de vídeo, então a ida e volta não pode entrar). A cobertura do
+clipe passa como está (o desfoque de lente a desfoca junto, pré-multiplicada).
+
+**Entrada do efeito**: o passo final dos efeitos de vários passos precisa da imagem que entrou no efeito, e a pilha só dá
+`"orig"` (antes de todos) e `"prev"` (o passo anterior). `luzes_clipe.entry(ctx, id)` devolve `"orig"` quando nenhum
+efeito ativo vem antes; senão acrescenta um passo `entrada` (cópia f4 do `t_prev`) e os passos seguintes leem
+`"pass:entrada"`. Os de um passo só (flare de um ponto, névoa, partículas) leem o `t_prev`.
+
+### 52.3 Luzes: listra, flare e raios
+
+- **Extração** (`luzes_clipe.EXTRACT`, meia resolução, f2): `lin·max(l − T, 0)/l` com `T = 0,18·2^limiar` (stops acima
+  do cinza de 18%) — zero exato abaixo do limiar —, limitado com suavidade em `T·2^LIGHT_CLAMP_STOPS` (um branco
+  estourado de vídeo vira ~737 na curva por paradas: sem o limite, ele incendiaria tudo) e × cobertura.
+- **Listra**: duas passadas `streak` da base (§49.4) sobre a extração (só luminância), uma longa (σ = comprimento/2) e
+  uma curta (`STREAK_SHORT`), somadas com a cor × intensidade × `STREAK_GAIN`. A energia somada é a extraída ×
+  intensidade (teste em luz linear).
+- **Flare automático**: a extração (cor) levemente desfocada é espelhada pelo centro do quadro em até 8 escalas
+  (`GS`, negativas = do outro lado do centro), cada uma com a cor e o peso da tabela e uma pequena aberração cromática
+  (r e b em escalas ±2,5%), apagando perto da borda; o resultado é desfocado pelo tamanho e somado × `FLARE_GAIN`. Os
+  fantasmas ficam na reta luz–centro, como numa lente.
+- **Flare de um ponto** (`flare_fonte = "ponto"`): um passo só, sem ler a imagem: brilho gaussiano no ponto e discos
+  com borda nos pontos `P − P·GT[i]` (px@1080 do centro do clipe), raio `flare_tamanho·GR[i]`.
+- **Raios**: dois passos de desfoque radial para a origem (`RADIAL`, 24 amostras): o primeiro percorre a fração
+  `raios_comprimento` do caminho com peso `k^i` (`k = 1 − 0,15·decaimento`), o segundo preenche os vãos (1/24 do
+  comprimento, pesos iguais). A luz sai da parte clara para longe da origem. Amostras fora do quadro não contam.
+
+### 52.4 Desfoque de lente
+
+Passo `luz` (f2, mipmaps): luz pré-multiplicada, cortada em `0,18·2^BOKEH_CLAMP_STOPS` (um céu estourado não espalha
+luz infinita). Passo `desfoque`: raio do pixel = `ctx.px(desfoque_lente_raio)` × máscara; abaixo de 0,5 texel, a entrada
+exata; senão `BOKEH_SAMPLES` amostras numa espiral de ângulo áureo no disco (no hexágono: raio × `cos(30°)/cos(θ mod
+60° − 30°)`), lidas no nível de mipmap do espaçamento entre elas (`log2(r·√(π/N))`). A soma volta pela diferença com a
+luz cortada da entrada (uma área chapada, mesmo estourada, fica igual). Máscara: `"tudo"`, `"degrade"`
+(`masks.gradMask` com os `desfoque_lente_*` do degradê; o lado marcado desfoca) ou uma de `MASK_SOURCES` (abaixo).
+
+### 52.5 Gancho da máscara de forma (F2)
+
+`luzes_clipe.MASK_SOURCES: dict[escolha, fn(ctx) -> [Pass] | None]`. Quando `desfoque_lente_mascara` é uma escolha
+registrada aqui, os passos de `fn` entram antes do desfoque e o último deles é lido como máscara (canal r, 0 a 1, no uv
+do clipe; `u_mask = 2`). Tem prioridade sobre `"degrade"`/`"tudo"` (o teste usa isso). Para ligar a máscara de forma da
+F2 depois da integração: (1) acrescentar no **fim** das opções de `desfoque_lente_mascara` `("dentro_mascara",
+N_("Dentro da máscara do clipe"))` e `("fora_mascara", N_("Fora da máscara do clipe"))`; (2) no módulo da máscara,
+registrar `MASK_SOURCES["dentro_mascara"]` e `["fora_mascara"]` com passos que desenham a máscara do clipe (a segunda
+invertida). Sem isso, nada muda.
+
+### 52.6 Atmosfera: névoa e partículas
+
+- **Névoa**: `f = densidade × degradê × (1 + textura·n)`, cortado em 0–1, e `lin·(1 − f) + névoa·f` com a cor da névoa
+  levada à luz como um vídeo Rec.709 (`stopsToLin(dispToStops(cor))`, a curva 0): a mesma névoa em qualquer perfil. O
+  degradê é o `masks.gradMask` linear (direção e altura); "por igual" usa 1. As nuvens `n` (−1 a 1) são a média de
+  dois `pfbm`: ruído de valor de 4 oitavas que se repete a cada `NOISE_PERIOD` células (a rede de inteiros é reduzida
+  ao período de cada oitava), deslocados por `movimento × tempo / escala` calculado em float64 e reduzido ao período
+  (`fog_offsets`): sem perda de precisão em horas de clipe.
+- **Partículas** (`atmosfera.PARTICLES`): para cada uma de `LAYERS` camadas (escala `1 − DEPTH_SCALE·prof·z`, mais
+  apagadas e mais macias ao fundo), o ponto vai a um quadriculado alinhado à direção do movimento (`particle_layers`:
+  largura × comprimento de célula com folga para o raio, o rastro e o balanço, independentes da resolução) e anda
+  `velocidade·escala·tempo` (float64, reduzido a `GRID_PERIOD` células). Cada célula vizinha (3 × 3) tem `CANDIDATES`
+  partículas possíveis; presença, posição, tamanho, brilho e fase saem de `pcg` da célula reduzida ao período, da
+  camada, da candidata e de `part_semente`. A forma é uma cápsula (o rastro `desfoque × velocidade / fps` ao longo da
+  direção) com borda em px@1080; menor que um texel, a luz é espalhada (× r/texel). Chuva e neve cobrem (mistura "por
+  cima" na luz), poeira e brasas somam; as brasas cintilam por um ruído de valor no tempo (~6 Hz). O tempo é
+  `Ctx.seconds` (tempo do clipe das chaves): o mesmo quadro sempre dá os mesmos bits e dividir não muda nada.
+- Tipos em `atmosfera.TYPES` (velocidade natural, direção, vento, luz, célula, partículas por célula, maciez, balanço).
+
+### 52.7 Interface e testes
+
+`ui/atmosfera_ui.py` (`install(vfx_ui)`, em `vfx_ui.FRONT_UIS`): `add_section` dos quatro cartões depois de
+`"efeitos"`; botões "Escolher … na prévia" (`pick_point` + `clip_point` → px@1080 do centro do clipe, um passo do
+desfazer; o do flare liga `flare_fonte = "ponto"`); camada de prévia `luzes_pontos` com os pontos em uso. Testes:
+`tests/test_atmosfera.py`, `tests/test_luzes_clipe.py` e `tests/test_atmosfera_ui.py` (casos em
+`atmosfera_ui_cases.py`).
 
 ## 53. Tempo da imagem (1.9, F5)
 
