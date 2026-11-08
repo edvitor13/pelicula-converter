@@ -43,6 +43,7 @@ FRONT_UIS: tuple[str, ...] = (
     "mascaras_ui",  # 1.9 F2: máscara de forma e as alças dela na prévia (§50)
     "tempo_imagem_ui",  # 1.9 F5: cartão "Tempo da imagem" (deflicker: Analisar)
     "atmosfera_ui",  # 1.9 F4: luz e atmosfera (§52)
+    "movimento_ui",  # 1.9 F3: estabilizar e rastrear ponto
 )  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 

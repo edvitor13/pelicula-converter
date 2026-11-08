@@ -151,6 +151,9 @@ MODULES: tuple[Module, ...] = (
     Module("luzes_lente", N_("Luzes e lente"),
            N_("Listra anamórfica, flares, raios de luz e desfoque de lente nos clipes do modo Edição."),
            "efeitos_visuais", BETA),
+    Module("movimento", N_("Estabilização e rastreio"),
+           N_("Estabilizar o clipe (análise do movimento guardada no projeto) e rastrear um ponto da imagem para um "
+              "título ou o próprio clipe segui-lo, no modo Edição."), "efeitos_visuais", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}

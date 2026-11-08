@@ -209,6 +209,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
             continue  # 1.9: tempo da imagem (análise do arquivo, vizinhos, câmera lenta), tests/test_tempo_imagem.py
         if key in F4_ONLY_WITH_EFFECT:  # 1.9 F4: só valem com o efeito ligado (tests/test_atmosfera.py, test_luzes_clipe.py)
             continue
+        if key.startswith(("estab_", "rastreio_")):  # 1.9 F3: só com a análise do arquivo (tests/test_estabilizacao.py)
+            continue
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)

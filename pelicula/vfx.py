@@ -107,6 +107,7 @@ EFFECT_PACKAGES: tuple[str, ...] = (
     "mascaras_clipe",  # 1.9 F2: máscara de forma do clipe (§50)
     "tempo_imagem",  # 1.9 F5: deflicker, ruído temporal, mistura de quadros (§53)
     "atmosfera", "luzes_clipe",  # 1.9 F4: luz e atmosfera (§52)
+    "estabilizacao",  # 1.9 F3: estabilização (geometria; §51)
 )
 _LOADED = False
 _LOAD_LOCK = threading.Lock()

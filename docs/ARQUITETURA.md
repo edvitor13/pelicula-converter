@@ -5404,7 +5404,82 @@ Testes: `tests/test_recorte.py`, `tests/test_mascaras_clipe.py`, `tests/test_rec
 
 ## 51. Estabilização e rastreio (1.9, F3)
 
-Reservada para a frente F3 (`vfx.GEOMETRY`, análises em `Source.analysis`; bloco `# 1.9 F3`).
+Módulo Beta `"movimento"` (grupo `efeitos_visuais`, começa desligado). Três peças sem Qt nem GPU — `movimento.py` (o
+núcleo em numpy), `estabilizacao.py` (análise + geometria) e `rastreio.py` (rastreio + chaves) — e a interface em
+`ui/movimento_ui.py`. Nada de passo na GPU: a estabilização é só uma matriz de `vfx.GEOMETRY`, e o rastreio só grava
+chaves comuns. Ajustes no bloco `# 1.9 F3` de `editparams.py` (esparsos, formato 7 quando usados).
+
+### 51.1 Núcleo do movimento (`movimento.py`)
+
+Tudo em px@1080 de um quadro de `1080·w/h × 1080`, y para baixo; o centro do quadro (`frame_center`) é o pivô.
+
+- **Leitura**: `read_gray(info, primeiro, quantos, tamanho)` decodifica em cinza numa altura de análise (`ANALYSIS_H`
+  540, tamanhos pares) pelo `media.FrameReader`; `analysis_size`.
+- **Correlação de fase** (`phase_correlate`): janela de Hann, espectro cruzado normalizado com um peso gaussiano de
+  baixa frequência (o ruído das altas não puxa o pico), pico subpixel por DFT ampliada (Guizar-Sicairos, `UPSAMPLE` 20)
+  e normalizado para um deslocamento puro dar 1. `ncc_map` = correlação cruzada normalizada (FFT + imagens integrais),
+  usada pelo rastreio.
+- **Movimento de um quadro** (`frame_motion`): deslocamento global numa versão reduzida, depois um bloco de 64 px por
+  célula de uma grade 8 × 5 → pares de pontos com peso (o pico) → semelhança (escala, rotação, translação) por IRLS de
+  Tukey a partir da mediana (`fit_similarity`). Uma segunda passada no quadro atual desfeito pela primeira estimativa
+  tira o viés da rotação (≈ 2%): resíduo < 0,2 px@1080 com 0,5° e 30 px de tremor.
+- **Trajetória** (`trajectory`): `T_k = D_k · T_{k−1}` (ângulo desenrolado); `smooth` = gaussiana com espelhamento
+  ponto a ponto nas pontas (`2·p0 − p[i]`: uma panorâmica reta não entorta no começo nem no fim); `corrections` =
+  `C_k = T_k · S_k⁻¹`; `auto_zoom` = forma fechada sobre os cantos, até `MAX_ZOOM` 1,6.
+
+### 51.2 Estabilização (`estabilizacao.py`)
+
+- **Análise** (`analyze`, trabalho de CPU da fila): com o `vidstabdetect` no ffmpeg (`available()`, via
+  `media.filters()`), uma decodificação reduzida (`scale=…:flags=bicubic,vidstabdetect=…`, `fileformat=ascii` quando o
+  filtro tem a opção) gera o `.trf` numa pasta temporária; `parse_trf` lê o texto (`Frame N (List M [(LM vx vy fx fy
+  tamanho contraste casamento),…])`; o quadro N é o movimento de N−2 para N−1 e `v` é o da câmera, o contrário do
+  conteúdo) e `motions_from_trf` ajusta a semelhança pelos campos (peso = contraste). Sem a vid.stab, o caminho em numpy
+  (`movimento.estimate`) e a interface avisa. **Nunca** o `vidstabtransform`: a correção é nossa.
+- **Guardado** em `Source.analysis["estabilizacao"]` (`"analise"` no JSON, recurso `analise_fonte`, fora do desfazer):
+  `{"versao", "metodo": "vidstab"|"numpy", "carimbo": vfx.stamp, "altura", "quadros", "parametros", "movimento":
+  vfx.pack(float32 n × 4: dx, dy, ângulo, log da escala)}`. Quadros lidos ≠ `Source.frames` por mais de 1 →
+  `AnalysisError` (taxa variável); ±1 completa com a identidade ou corta. Arquivo mudado (`vfx.stale`): a correção
+  continua valendo e o cartão avisa.
+- **Na imagem** (`geometry`, `vfx.GEOMETRY["estabilizar"]`): com `estab_on` e análise, `M' = C_uv[src_frame] · M`, com
+  `C_uv = diag(1/W1, 1/1080) · C · diag(W1, 1080)`; `C` = correção do quadro (`estab_suavizar` × fps de sigma,
+  `estab_rotacao`) × zoom (`estab_bordas` "ampliar" = `auto_zoom` do arquivo inteiro × (1 + `estab_zoom_extra`);
+  "preto" = 1). Uma reamostragem só (a do `CLIP`); a correção depende só do quadro do arquivo, então dividir, aparar e
+  a velocidade não a mudam. `corrections_for` guarda o resultado por análise e ajustes. Sob `neutral` (Shift+D) e na
+  camada de ajuste, nada. O recorte do clipe vale no uv da fonte (antes da correção).
+- **Ajustes**: `estab_on` (False), `estab_suavizar` (1 s), `estab_rotacao` (True), `estab_bordas` ("ampliar"),
+  `estab_zoom_extra` (0). O efeito registrado (`vfx.Effect("estabilizar", "movimento", passes=[])`) serve só ao aviso
+  do módulo (`vfx.modules_used`).
+
+### 51.3 Rastreio de ponto (`rastreio.py`)
+
+- **Seguir** (`track`/`run`, trabalho de CPU): decodificação em cinza a até `TRACK_H` 720 linhas; o quadrado
+  `rastreio_caixa` px@1080 do quadro anterior procurado por `ncc_map` numa janela de `rastreio_busca` px@1080 em volta
+  da posição prevista (velocidade constante), pico com parábola. Um **modelo-chave** (o do quadro escolhido, trocado pelo
+  quadrado atual quando deixa de casar quase tão bem quanto o anterior, `KEY_MARGIN`) tira a deriva. Para a frente e
+  para trás (blocos de `CHUNK` quadros); NCC < `MIN_SCORE` 0,5 → para ali com a mensagem do quadro (`Track.lost`).
+  Precisão nos testes: < 1 px@1080 com o alvo andando e girando 1,2°/quadro.
+- **Guardado** no clipe, no tempo do arquivo: `Clip.fx["rastros"] = [{"id", "ref", "inicio", "uv": vfx.pack(n × 2),
+  "nota": vfx.pack(n), "caixa", "perdido"?, "alvo"?: {"tipo", "clipe"}}]` (recurso `efeitos_clipe_dados`). A interface
+  usa um rastro por clipe (o último).
+- **Aplicar** (`apply`, num `TimelineModel.apply_edit` = um passo do desfazer): para cada quadro em que o rastreado e o
+  destino aparecem, `Target.value` dá o par de valores; relativo ao quadro de referência (o destino fica onde está nele);
+  simplificado por RDP (`TOLERANCE_PX` 0,5 px@1080, o quadro de referência sempre fica) e gravado como chaves lineares
+  no tempo do clipe de destino, trocando só as chaves dentro do trecho. O ponto na tela (`canvas_point`) usa o
+  enquadramento **e** `vfx.geometry` (com a estabilização). `reapply` repete o último alvo.
+- **Alvos** (`TARGETS`, registro): `"proprio"` (`pos_x/pos_y` do próprio clipe, ao contrário do ponto medido com a
+  posição parada: o ponto fica parado na tela) e `"acima"` (`pos_x/pos_y` dos clipes de vídeo de faixas acima que
+  passam junto). O centro da máscara da F2 é o alvo `"mascara"` (integração): `with_mask` (só clipe com forma),
+  `mask_value` (uv → px@1080 do clipe por `mascaras_clipe.clip_px` na proporção de `sequence.decode_size`) e
+  `units="px_clipe"` (tolerância: 1080 px do clipe = a altura dele na tela). Nada disso é uma ligação viva: o render só vê as chaves.
+
+### 51.4 Interface (`ui/movimento_ui.py`)
+
+Por `vfx_ui.FRONT_UIS`: `add_section("estabilizar", "movimento", after="transformar")` com **Analisar** e a linha de
+estado (`estabilizacao.describe` + o zoom), `add_section("rastreio", "movimento", after="estabilizar")` com **Rastrear
+ponto** (`VfxUI.pick_point` → `rastreio.clip_uv` com a geometria → trabalho), **Aplicar a…** (menu de
+`rastreio.targets_for`), **Reaplicar** e **Apagar o rastro**; progresso e Cancelar na barra de status (como a música);
+a análise vai direto para a fonte (fora do desfazer) e liga `estab_on` num passo; a camada de prévia `"rastreio"` marca
+o ponto no quadro. Sem atalhos novos.
 
 ## 52. Luz e atmosfera (1.9, F4)
 

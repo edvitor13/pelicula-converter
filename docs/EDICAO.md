@@ -300,6 +300,47 @@ que se move. Cada arrasto é um passo do Ctrl+Z.
 
 O recorte vem antes da máscara: dá para tirar o fundo verde e, com a máscara, cortar um tripé que aparece no canto.
 **Desligar todos os efeitos** (Shift+D) desliga os dois. Um projeto com recorte ou máscara é gravado no formato da 1.9.
+### Estabilizar e rastrear ponto (1.9, Beta)
+
+Do recurso **Estabilização e rastreio** (Beta, grupo **Efeitos visuais** em Configurações › Recursos), desligado no
+começo. Ligado, o inspetor de um clipe de vídeo ganha dois cartões, logo depois de **Enquadrar e posicionar**.
+
+**Estabilizar** tira o tremor da câmera na mão:
+
+1. Clique em **Analisar**. O app mede o movimento do arquivo inteiro (uma vez por arquivo; o progresso e o
+   **Cancelar** ficam na barra de status). Com a vid.stab no ffmpeg a análise é rápida; sem ela, o app usa um método
+   próprio, mais lento, e avisa. A análise fica guardada no projeto e a estabilização do clipe é ligada.
+2. Ajuste no cartão:
+   - **Suavizar** (segundos): quanto do movimento sai. Pouco tira só o tremor; muito deixa a câmera quase parada.
+     Uma panorâmica de verdade continua.
+   - **Corrigir a rotação**: desligado, só o deslocamento é corrigido.
+   - **Bordas**: **Ampliar (sem bordas)** aumenta a imagem o suficiente para nenhuma borda aparecer em todo o arquivo
+     (até 60%; o cartão diz quanto); **Mostrar as bordas** não amplia.
+   - **Zoom a mais**: um pouco mais de ampliação, se quiser.
+
+A correção é do arquivo: dividir, aparar e mudar a velocidade do clipe não mudam a imagem de cada quadro. Um arquivo de
+taxa de quadros variável é recusado (converta para uma taxa fixa antes). Se o arquivo mudar depois da análise, o cartão
+avisa: analise de novo. **Desligar todos os efeitos** (Shift+D) mostra o clipe sem a estabilização.
+
+**Rastrear ponto** faz um título (ou o próprio clipe) seguir um ponto da imagem:
+
+1. Ponha o cursor sobre o clipe, clique em **Rastrear ponto** e clique na prévia num ponto com detalhe (um canto, uma
+   letra, uma marca). O ponto é seguido no arquivo para a frente e para trás; se ele sumir ou mudar demais, o rastro
+   para ali e o cartão diz em que quadro. **Tamanho do alvo** e **Busca por quadro** (avançado) ajudam em pontos grandes
+   ou que andam rápido.
+2. **Aplicar a…** transforma o rastro em chaves de animação:
+   - **O próprio clipe**: a posição do clipe anda ao contrário, e o ponto fica parado na tela.
+   - **Um clipe acima** (título, imagem, outro vídeo que passa junto): a posição dele segue o ponto, a partir do lugar
+     em que você o pôs.
+   - **O centro da máscara do clipe** (só com uma forma no cartão **Máscara**): a máscara acompanha o ponto, a partir
+     do lugar em que você a pôs — para desfocar ou pixelar um rosto ou uma placa que se mexe.
+   As chaves são poucas (só onde o caminho muda) e são chaves comuns: dá para editá-las, e elas andam com o clipe ao
+   aparar e mudar a velocidade. Aplicar é um passo do desfazer.
+3. **Reaplicar** refaz as chaves no último alvo (depois de mover o título ou rastrear de novo). **Apagar o rastro** tira
+   o rastro do clipe; as chaves já aplicadas ficam.
+
+O ponto rastreado aparece marcado na prévia (só na tela). Um projeto com estabilização ou rastro é gravado no formato da
+1.9.
 
 ### Títulos
 

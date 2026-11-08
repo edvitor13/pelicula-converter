@@ -226,6 +226,13 @@ pelicula/
   luzes_clipe.py             1.9, luzes e lente do clipe (módulo Beta luzes_lente, sem Qt, §52): desfoque de lente (400,
                              máscara pelo degradê; gancho MASK_SOURCES da máscara de forma), listra anamórfica, flare e
                              raios de luz (500–520) somados na luz só onde mudam; entry() (a entrada depois de outro efeito)
+  movimento.py               1.9 F3, núcleo do movimento em numpy (§51.1): read_gray, phase_correlate, ncc_map,
+                             frame_motion/estimate (semelhança robusta), trajectory/smooth/corrections, auto_zoom
+  estabilizacao.py           1.9 F3, estabilização (§51.2): analyze (vidstabdetect em texto ou numpy; parse_trf), análise
+                             em Source.analysis["estabilizacao"], vfx.GEOMETRY["estabilizar"] (corrections_for, zoom_of)
+  rastreio.py                1.9 F3, rastreio de ponto (§51.3): track/run (NCC + modelo-chave), Track em
+                             Clip.fx["rastros"], TARGETS (proprio, acima; máscara da F2 com uma linha), apply/reapply
+                             (chaves simplificadas por RDP), canvas_point/clip_uv com a geometria dos efeitos
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -283,6 +290,8 @@ pelicula/
                              na fila, estado da análise);
                              1.9, atmosfera_ui (F4, §52.7: cartões Desfoque de lente, Luz, Névoa e Partículas; ponto do
                              flare e origem dos raios escolhidos na prévia);
+                             1.9 F3 (§51.4): movimento_ui (MotionUI: cartões Estabilizar com Analisar e Rastrear ponto
+                             com Aplicar a…/Reaplicar/Apagar, progresso e Cancelar na barra de status, marca na prévia);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -563,6 +572,10 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_atmosfera.py` | partículas e névoa (1.9, §52): padrões neutros e esparsos, formato 7, ordem e módulo, deslocamentos no período em horas de clipe, só o que não mexe na grade anima; na GPU: desligado = nenhum passo e bit a bit, determinismo pelo tempo do clipe (dividir no meio não muda nada), px@1080 em duas resoluções, limites de energia (neve cobre, brasas somam), cor e degradê da névoa e as nuvens que andam, camada de ajuste == clipe de tela cheia, gêmea aninhada, prévia == exportação |
 | `tests/test_luzes_clipe.py` | desfoque de lente, listra, flare e raios (1.9, §52): padrões e ordem, a entrada do efeito ("orig" ou a cópia); na GPU: desligado e abaixo do limiar bit a bit, direção e energia da listra (luz linear), raios para longe da origem, fantasmas na reta luz–centro, flare de um ponto sem ler a imagem, desfoque que conserva a luz e mantém a cor chapada, máscara pelo degradê e pelo gancho da F2, entrada depois de outro efeito, camada de ajuste, gêmea, prévia == exportação |
 | `tests/test_atmosfera_ui.py` | casos de `atmosfera_ui_cases.py`: cartões seguem os módulos atmosfera e luzes_lente e vêm depois de "Efeitos", escolher o ponto do flare e a origem dos raios na prévia (um passo do desfazer), camada de prévia dos pontos, ajuste num passo |
+| `tests/test_movimento.py` | núcleo do movimento (1.9 F3): correlação de fase subpixel (deslocamento de Fourier exato), `ncc_map`, matriz ida e volta, semelhança robusta com 30% de pontos errados, `frame_motion` < 0,5 px@1080 com tremor de 0,5° e 30 px, `estimate`, trajetória, suavização (panorâmica mantida), correções, `auto_zoom` (usa `movimento_sinteticos.py`) |
+| `tests/test_estabilizacao.py` | estabilização: `.trf` em texto (`data/estabilizacao/`) sem ffmpeg e o tremor conhecido, recusas (formato, taxa variável, imagem/gerado), estado do cartão, desligado/neutro = uniforms de sempre, ponto da cena liso na tela, zoom sem bordas, igual ao dividir/aparar/velocidade, sem rotação; com ffmpeg: análise numpy e vid.stab (pulada sem o filtro), cancelar; na GPU: tremor corrigido e prévia == exportação |
+| `tests/test_rastreio.py` | rastreio de ponto: alvo andando e girando a < 1 px@1080, perdido com aviso, recusas, cancelar, RDP, JSON no clipe e formato 7, aplicar no próprio clipe (ponto parado) e num título acima (segue o ponto), chaves depois de aparar e de mudar a velocidade, um passo do desfazer e Reaplicar, chaves fora do trecho ficam, gancho de alvo em uv (máscara), ponto da tela com a estabilização; com ffmpeg, `run` num arquivo |
+| `tests/test_movimento_ui.py` | casos de `movimento_ui_cases.py`: cartões seguem o módulo "movimento" (depois de Transformar), clipe gerado sem Analisar, Analisar grava a análise e liga (desfazer só o ligar), rastrear + Aplicar a… em passos do desfazer, marca do ponto na prévia |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

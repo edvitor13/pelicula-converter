@@ -83,7 +83,10 @@ def test_the_key_card_follows_the_module(win):
     assert rec.isVisibleTo(win.inspector)
     cards = win.inspector.vcards
     lay = rec.parentWidget().layout()
-    assert lay.indexOf(rec) == lay.indexOf(card(win, "transformar")) + 1
+    # logo depois de Transformar; no meio, só cartões de outras frentes da 1.9 (estabilizar e rastrear, F3)
+    i_t, i_r = lay.indexOf(card(win, "transformar")), lay.indexOf(rec)
+    vfx_cards = {w for ws in win.vfx_ui.module_tools().values() for w in ws}
+    assert i_r > i_t and all(lay.itemAt(i).widget() in vfx_cards for i in range(i_t + 1, i_r))
     assert rec in win.vfx_ui.module_tools()[MODULE]
     set_module(win, MODULE, False)
     assert not rec.isVisibleTo(win.inspector) and cards
