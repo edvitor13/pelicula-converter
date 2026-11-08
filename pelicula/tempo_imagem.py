@@ -61,8 +61,9 @@ def analyze(src, cancel: threading.Event | None = None,
     com `ANALYSIS_W` px de largura em 16 bits. Devolve o dicionário de `Source.analysis["deflicker"]`:
     {"carimbo": `vfx.stamp`, "fps", "quadros", "media": `vfx.pack` (float32)}. `cancel` interrompe (RuntimeError)."""
     from . import media
+    from .i18n import _
     if src is None or not src.is_file or src.is_image or not src.has_video:
-        raise ValueError("o deflicker precisa de um vídeo de arquivo")
+        raise ValueError(_("O deflicker precisa de um clipe de vídeo de um arquivo."))
     w = ANALYSIS_W
     h = max(2, int(round(w * src.height / max(1, src.width) / 2.0)) * 2)
     reader = media.FrameReader(src.to_info(), w, h, 16)
@@ -72,7 +73,7 @@ def analyze(src, cancel: threading.Event | None = None,
     try:
         while True:
             if cancel is not None and cancel.is_set():
-                raise RuntimeError("cancelado")
+                raise RuntimeError(_("Cancelado."))
             img = reader.read()
             if img is None:
                 break
@@ -87,7 +88,7 @@ def analyze(src, cancel: threading.Event | None = None,
     finally:
         reader.close()
     if not means:
-        raise RuntimeError(reader.error or "nenhum quadro lido")
+        raise RuntimeError(reader.error or _("Nenhum quadro lido do arquivo."))
     arr = np.asarray(means, dtype=np.float32)
     return {"carimbo": vfx.stamp(src.path), "fps": float(src.fps), "quadros": int(arr.size), "media": vfx.pack(arr)}
 
