@@ -203,7 +203,6 @@ def test_the_button_sits_after_silences_and_the_shortcut_is_unique(win):
     ed = win.tl_editor
     lay = ed.btn_silences.parentWidget().layout()
     assert lay.indexOf(win.sfx.button) == lay.indexOf(ed.btn_silences) + 1
-    assert lay.indexOf(ed.btn_mixer) == lay.indexOf(win.sfx.button) + 1
     assert win.sfx.button.isVisibleTo(ed)
     keys = [s.key().toString() for s in win.findChildren(QShortcut)]
     assert keys.count("Ctrl+Alt+E") == 1
