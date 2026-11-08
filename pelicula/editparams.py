@@ -279,6 +279,28 @@ VIDEO_SECTIONS += [
     ], "Marcação de luz deste plano (pontos da copiadora do Laboratório)"),
 ]
 
+# 1.9 (#68, efeitos visuais; ARQUITETURA §49–§53): as seções dos efeitos de clipe vêm depois destas, em blocos
+# reservados, um por frente, nesta ordem (acrescente só dentro do seu bloco; nunca mude a ordem dos blocos). Toda chave
+# das seções depois de `_N_BASE` vai para o JSON só fora do padrão (`SPARSE_KEYS`) e todo padrão é neutro (efeito
+# desligado: nenhum passo na GPU, `vfx.Effect.active`). Não ponha estas seções em `COLOR_SECTIONS`.
+_N_BASE = len(VIDEO_SECTIONS)
+
+# 1.9 F2: recorte e máscaras (§50)
+VIDEO_SECTIONS += [
+]
+
+# 1.9 F3: estabilização e rastreio (§51)
+VIDEO_SECTIONS += [
+]
+
+# 1.9 F4: luz e atmosfera (§52)
+VIDEO_SECTIONS += [
+]
+
+# 1.9 F5: tempo da imagem (§53)
+VIDEO_SECTIONS += [
+]
+
 AUDIO_SECTIONS: list[Section] = [
     Section("som", "Som", None, [
         F("volume", "Volume", 0.0, -60, 12, 0.5, 1, " dB"),
@@ -437,6 +459,7 @@ SPARSE_KEYS |= {"escala_x", "escala_y"}  # 1.7: escala por eixo (`compositor.axi
 SPARSE_KEYS |= {"desespremer", "desespremer_taxa"}  # 1.7: desespremer do clipe (`compositor.desqueeze`)
 SPARSE_KEYS |= {"passa_alta", "passa_baixa", "nivelar_voz", "ruido_perfil", "ruido_ini", "ruido_fim", "zumbido",
                 "zumbido_harmonicos"}  # 1.8: limpeza do som (`somlimpo.py`)
+SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS[_N_BASE:] for p in s.params}  # 1.9: efeitos visuais (todas as frentes)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

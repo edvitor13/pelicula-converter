@@ -60,6 +60,7 @@ from . import sem_efeitos_ui
 from . import mixer_ui, narracao_ui, scrub_ui
 from . import musica_ui
 from . import sfx_ui  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`, ARQUITETURA §47)
+from . import vfx_ui  # 1.9: efeitos visuais e camada de ajuste (`ui/vfx_ui.py`, ARQUITETURA §49)
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -402,6 +403,7 @@ class MainWindow(QMainWindow):
         self.narracao = narracao_ui.install(self)  # 1.8: gravar narração (`ui/narracao_ui.py`)
         self.musica = musica_ui.install(self)  # 1.8: batidas, encaixar a música, abaixar sob a voz (`ui/musica_ui.py`)
         self.sfx = sfx_ui.install(self)  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`)
+        self.vfx_ui = vfx_ui.install(self)  # 1.9: efeitos visuais e camada de ajuste (`ui/vfx_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -3459,6 +3461,7 @@ class MainWindow(QMainWindow):
             **filme_ui.module_tools(self),  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
             **luz_fotometro_ui.module_tools(self),  # 1.6: fotômetro da película (`ui/luz_fotometro_ui.py`)
             **som_pelicula_ui.module_tools(self),  # 1.8: som de película (`ui/som_pelicula_ui.py`)
+            **(self.vfx_ui.module_tools() if getattr(self, "vfx_ui", None) is not None else {}),  # 1.9 (`ui/vfx_ui.py`)
         }
 
     def apply_modules(self) -> None:
@@ -3493,6 +3496,7 @@ class MainWindow(QMainWindow):
         for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
             editor.set_allowed("titulos_geradores" in on)
         self.sfx.apply_modules(on)  # 1.8: depois de "titulos_geradores" (o botão "Novo" é dos dois)
+        self.vfx_ui.apply_modules(on)  # 1.9: depois do `sfx` (camada de ajuste no "Novo" e os cartões dos efeitos)
         self._check_modules()
         for filtro in (getattr(self, "look_filter", None), getattr(self.inspector, "filtro", None)):
             if filtro is not None:
