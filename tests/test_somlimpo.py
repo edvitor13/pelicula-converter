@@ -304,3 +304,55 @@ def test_hum_detection_reads_the_file(ffmpeg_ok, tmp_path):
     assert somlimpo.detect_hum_file(src, 0.0, 3.0) == "50"
     silent = write_wav16(tmp_path / "s.wav", np.zeros((R, 2)))
     assert somlimpo.detect_hum_file(silent, 0.0, 1.0) is None
+
+
+# ------------------------------------------------------------------ predefinições e cortes
+def test_presets_set_exactly_their_keys():
+    ids = [k for k, _label, _v in editparams.AUDIO_PRESETS]
+    assert ids == ["voz_clara", "voz_grave", "telefone", "radio_antigo", "menos_vento", "musica_cheia", "podcast",
+                   "sem_ajustes"]
+    base = editparams.AUDIO.defaults()
+    clip = {**base, "volume": -3.0, "fade_in": 0.5, "zumbido": "60", "ruido_perfil": 0.4, "reducao_ruido": 0.3,
+            "normalizar": True, "graves": 6.0, "passa_baixa": 9000.0}
+    for key, _label, preset in editparams.AUDIO_PRESETS:
+        assert set(preset) <= set(editparams.AUDIO_PRESET_KEYS), key
+        out = editparams.apply_audio_preset(clip, key)
+        changed = {k for k in out if out[k] != clip[k]}
+        assert changed <= set(editparams.AUDIO_PRESET_KEYS), (key, changed)
+        for k in editparams.AUDIO_PRESET_KEYS:
+            assert out[k] == preset.get(k, base[k]), (key, k)
+        assert editparams.AUDIO.sanitize(out) == out
+    neutral = editparams.apply_audio_preset(clip, "sem_ajustes")
+    assert all(neutral[k] == base[k] for k in editparams.AUDIO_PRESET_KEYS)
+    assert neutral["volume"] == -3.0 and neutral["zumbido"] == "60"
+    assert editparams.is_neutral("audio", editparams.apply_audio_preset(base, "sem_ajustes"))
+
+
+def test_filter_and_leveling_text():
+    base = editparams.AUDIO.defaults()
+    assert somlimpo.after_eq_filters(base) == []
+    got = somlimpo.after_eq_filters({**base, "passa_alta": 120.0, "passa_baixa": 3400.0})
+    assert got == ["highpass=f=120:poles=2", "lowpass=f=3400:poles=2"]
+    assert somlimpo.after_eq_filters({**base, "nivelar_voz": 1.0}) == [
+        "speechnorm=p=0.9:e=10:c=2:r=0.005:f=0.005:l=1"]
+
+
+@pytest.mark.ffmpeg
+def test_cut_filters_response(ffmpeg_ok, tmp_path):
+    t = np.arange(3 * R) / R
+    freqs = (50.0, 200.0, 2000.0, 8000.0)
+    x = sum(0.1 * np.sin(2 * np.pi * f * t) for f in freqs)
+    src = write_wav16(tmp_path / "tons.wav", np.repeat(x[:, None], 2, axis=1))
+    seq = audio_seq([src], secs=3.0)
+    c = place(seq, src, 0, 72, 0.0)
+    before = mixed(seq, tmp_path / "antes.wav")[:, 0]
+
+    def gains(vals):
+        seq.set_values(c.id, {**editparams.AUDIO.defaults(), **vals})
+        y = mixed(seq, tmp_path / "depois.wav")[:, 0]
+        return {f: 20 * math.log10(abs(tone_at(y, 1.0, 2.5, f)) / abs(tone_at(before, 1.0, 2.5, f))) for f in freqs}
+
+    hp = gains({"passa_alta": 200.0})
+    assert hp[200.0] == pytest.approx(-3.0, abs=0.5) and hp[50.0] < -20.0 and abs(hp[2000.0]) < 0.3
+    lp = gains({"passa_baixa": 2000.0})
+    assert lp[2000.0] == pytest.approx(-3.0, abs=0.5) and lp[8000.0] < -20.0 and abs(lp[200.0]) < 0.3

@@ -4,6 +4,7 @@ esquema.
 - Cartão "Limpar o som": botão "Aprender o ruído" (o trecho de `somlimpo.learn_range`, conferido numa thread de
   trabalho pela fila de tarefas) e as linhas do trecho aprendido escondidas; "Detectar" ao lado do zumbido
   (`somlimpo.detect_hum_file` no trecho usado do clipe).
+- Cartão "Equalizar e limpar": menu "Predefinições" (`editparams.AUDIO_PRESETS`, um passo do desfazer).
 
 Um gancho só: `ClipInspector` cria o `InspectorSound`. Tudo o que muda o clipe passa por
 `TimelineModel.set_clip_values` (um passo do desfazer); a mixagem lê os valores (`audiomix`, `somlimpo`).
@@ -14,9 +15,9 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QWidget
 
-from .. import jobs, somlimpo
+from .. import editparams, jobs, somlimpo
 from ..i18n import _, fmt_decimal
 from ..timeline import AUDIO
 from .job_bridge import bridge
@@ -83,6 +84,20 @@ class InspectorSound:
             line.addWidget(hum.combo, 1)
             line.addWidget(self.btn_hum)
             lay.insertLayout(at, line)
+        self.btn_presets = QToolButton()
+        self.btn_presets.setObjectName("eq_presets")
+        self.btn_presets.setText(_("Predefinições"))
+        self.btn_presets.setToolTip(_("Ajustes prontos de graves, médios, agudos, voz e cortes (Ctrl+Z desfaz)"))
+        self.btn_presets.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_presets.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.presets_menu = QMenu(self.btn_presets)
+        for key, label, _values in editparams.AUDIO_PRESETS:
+            act = self.presets_menu.addAction(_(label), lambda k=key: self.apply_preset(k))
+            act.setObjectName(f"preset_{key}")
+        self.btn_presets.setMenu(self.presets_menu)
+        eq = cards.get("eq")
+        if eq is not None:
+            eq.body.layout().insertWidget(0, self.btn_presets)
         self.store.changed.connect(self._changed)
         self.model.selectionChanged.connect(lambda: self.say(""))
         self.update()
@@ -167,6 +182,13 @@ class InspectorSound:
             vals["ruido_perfil"] = LEARN_STRENGTH
         self.model.set_clip_values(cid, vals)
         self.say(_("Ruído aprendido de {ini} a {fim} do arquivo.").format(ini=_seconds(t0), fim=_seconds(t1)))
+
+    # -------------------------------------------------------- predefinições do "eq"
+    def apply_preset(self, key: str) -> None:
+        """Uma predefinição de `editparams.AUDIO_PRESETS` no clipe, num passo do desfazer."""
+        c = self._clip()
+        if c is not None:
+            self.model.set_clip_values(c.id, editparams.apply_audio_preset(c.values, key))
 
     # -------------------------------------------------------- zumbido
     def detect_hum(self) -> jobs.Job | None:

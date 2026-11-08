@@ -148,3 +148,28 @@ def test_detect_hum_button(tmp_path):
     _wait(ins2.limpeza.detect_hum())
     assert m2.seq.find(c2.id).values["zumbido"] == "nao" and not m2.can_undo()
     assert "nada mudou" in ins2.limpeza.status.text()
+
+
+# ------------------------------------------------------------------ predefinições do "eq"
+def test_eq_presets_menu():
+    from PySide6.QtGui import QAction
+    m, c = _model("C:/v/som.wav")
+    m.set_clip_values(c.id, {**m.seq.find(c.id).values, "volume": -4.0})
+    ins = _inspector(m)
+    snd = ins.limpeza
+    eq = next(card for card in ins.acards if card.section.key == "eq")
+    assert eq.body.layout().itemAt(0).widget() is snd.btn_presets
+    acts = {a.objectName(): a for a in snd.presets_menu.findChildren(QAction) if a.objectName()}
+    assert list(acts) == [f"preset_{k}" for k, _l, _v in editparams.AUDIO_PRESETS]
+    acts["preset_telefone"].trigger()
+    v = m.seq.find(c.id).values
+    assert (v["passa_alta"], v["passa_baixa"], v["medios"], v["volume"]) == (300.0, 3400.0, 4.0, -4.0)
+    row = next(r for r in eq.rows if r.param.key == "passa_alta")
+    assert ins.astore.get("passa_alta") == 300.0 and row.isVisibleTo(eq.body)
+    acts["preset_sem_ajustes"].trigger()
+    v = m.seq.find(c.id).values
+    assert all(v[k] == editparams.AUDIO.defaults()[k] for k in editparams.AUDIO_PRESET_KEYS) and v["volume"] == -4.0
+    m.undo()   # cada predefinição é um passo
+    assert m.seq.find(c.id).values["passa_baixa"] == 3400.0
+    m.undo()
+    assert m.seq.find(c.id).values["passa_baixa"] == 0.0 and m.seq.find(c.id).values["volume"] == -4.0
