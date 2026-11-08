@@ -35,8 +35,9 @@ def scene() -> np.ndarray:
 def test_section_is_appended_with_neutral_defaults():
     keys = [s.key for s in params.SECTIONS]
     i = keys.index("planos")
-    # 1.6, frente E (câmera e formato): seções acrescentadas depois da Cor por planos
-    assert all(k in ("obturador", "anamorfico", "data", "montagem_filme") for k in keys[i + 1:]), keys[i + 1:]
+    # 1.6, frente E (câmera e formato): seções acrescentadas depois da Cor por planos; 1.8: o som de película
+    assert all(k in ("obturador", "anamorfico", "data", "montagem_filme", "som_pelicula")
+               for k in keys[i + 1:]), keys[i + 1:]
     sec = params.SECTIONS[i]
     assert sec.toggle == "planos_on" and params.PARAMS["planos_on"].default is False
     for k in planes.EFFECT_KEYS:
