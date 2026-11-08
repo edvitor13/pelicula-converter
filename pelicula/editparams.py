@@ -295,7 +295,115 @@ VIDEO_SECTIONS += [
 
 # 1.9 F4: luz e atmosfera (§52)
 VIDEO_SECTIONS += [
+    # `luzes_clipe.py` (módulo Beta "luzes_lente"): desfoque de lente (ordem 400) e listra, flares e raios (500).
+    Section("desfoque_lente", "Desfoque de lente", None, [
+        F("desfoque_lente_raio", "Raio", 0.0, 0, 200, 0.5, 1, " px",
+          "Tamanho do círculo de desfoque (bokeh), em px de um quadro de 1080 linhas do clipe. 0 = desligado."),
+        C("desfoque_lente_forma", "Forma do bokeh", "disco", [
+            ("disco", N_("Disco (redondo)")), ("hexagono", N_("Hexágono (seis lâminas)"))],
+          "A forma das luzes desfocadas."),
+        C("desfoque_lente_mascara", "Onde desfocar", "tudo", [
+            ("tudo", N_("A imagem inteira")), ("degrade", N_("Pelo degradê (foco perto ou longe)"))],
+          "Com o degradê, o lado marcado fica desfocado e o outro continua nítido."),
+        C("desfoque_lente_degrade", "Forma do degradê", "linear", [
+            ("linear", N_("Linear (fundo ou frente)")), ("radial", N_("Radial (fora do círculo)"))]),
+        F("desfoque_lente_angulo", "Direção", 0.0, -180, 180, 1, 0, "°",
+          "Que lado fica desfocado no degradê linear: 0° = em cima (o fundo), 180° = embaixo (a frente)."),
+        F("desfoque_lente_x", "Centro horizontal", 0.0, -1920, 1920, 10, 0, " px",
+          "Desloca a linha ou o círculo (px de um quadro de 1080 linhas do clipe; 0 = centro)."),
+        F("desfoque_lente_y", "Centro vertical", 0.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        F("desfoque_lente_circulo", "Raio do círculo", 400.0, 10, 2000, 10, 0, " px",
+          "No degradê radial, o que fica dentro do círculo continua nítido."),
+        F("desfoque_lente_suavidade", "Suavidade", 400.0, 0, 2000, 10, 0, " px",
+          "Largura da passagem entre o nítido e o desfocado."),
+        B("desfoque_lente_inverter", "Inverter", False, "Troca o lado desfocado."),
+    ], "Desfoque como o de uma lente aberta, com foco perto ou longe"),
+
+    Section("luzes", "Luz (listra, flares, raios)", None, [
+        _pct("listra_intensidade", "Listra anamórfica", lo=0.0, hi=2.0,
+             tip="Uma linha de luz longa nas luzes fortes, como a de uma lente anamórfica. 0% = desligada."),
+        F("listra_limiar", "Limiar da listra", 2.5, 0, 8, 0.1, 1, " EV",
+          "Só as partes mais claras que o cinza médio mais estes stops espalham a listra."),
+        F("listra_comprimento", "Comprimento da listra", 400.0, 20, 2000, 10, 0, " px",
+          "Até onde a listra vai de cada lado (px de um quadro de 1080 linhas do clipe)."),
+        Param("listra_cor", "Cor da listra", "color", (0.35, 0.6, 1.0)),
+        F("listra_angulo", "Ângulo da listra", 0.0, -90, 90, 1, 0, "°", "0° = horizontal.", advanced=True),
+        _pct("flare_intensidade", "Flare", lo=0.0, hi=2.0,
+             tip="Reflexos da lente (fantasmas) na linha que vai da luz ao centro do quadro. 0% = desligado."),
+        C("flare_fonte", "Origem do flare", "auto", [
+            ("auto", N_("As luzes mais fortes da imagem")), ("ponto", N_("Um ponto escolhido"))],
+          "Automático: cada luz forte da imagem faz os seus fantasmas. Ponto: os fantasmas saem do ponto escolhido "
+          "na prévia, mesmo sem uma luz ali."),
+        F("flare_x", "Ponto do flare (horizontal)", 0.0, -1920, 1920, 10, 0, " px",
+          "De onde sai o flare com a origem \"Um ponto escolhido\" (px de um quadro de 1080 linhas; 0 = centro)."),
+        F("flare_y", "Ponto do flare (vertical)", -300.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        I("flare_fantasmas", "Fantasmas", 4, 1, 8, "Quantos reflexos aparecem."),
+        F("flare_limiar", "Limiar do flare", 3.0, 0, 8, 0.1, 1, " EV",
+          "Na origem automática, só as partes mais claras que o cinza médio mais estes stops fazem fantasmas."),
+        F("flare_tamanho", "Tamanho dos fantasmas", 80.0, 10, 600, 5, 0, " px",
+          "Raio dos fantasmas de um ponto escolhido; na origem automática, o quanto eles ficam macios."),
+        Param("flare_cor", "Cor do flare", "color", (1.0, 0.85, 0.7)),
+        _pct("raios_intensidade", "Raios de luz", lo=0.0, hi=2.0,
+             tip="Raios que saem de um ponto atravessando as partes claras (luz por entre folhas, janela, "
+                 "poeira). 0% = desligados."),
+        F("raios_x", "Origem dos raios (horizontal)", 0.0, -1920, 1920, 10, 0, " px",
+          "De onde saem os raios (px de um quadro de 1080 linhas; 0 = centro). Pode ficar fora do quadro."),
+        F("raios_y", "Origem dos raios (vertical)", -400.0, -2160, 2160, 10, 0, " px", "Negativo sobe; positivo desce."),
+        _pct("raios_comprimento", "Comprimento dos raios", 0.5, 0.05, 1.0,
+             tip="Fração da distância até a origem que cada raio percorre."),
+        _pct("raios_decaimento", "Decaimento dos raios", 0.5, 0.0, 1.0,
+             tip="Quanto os raios enfraquecem ao se afastar da luz."),
+        F("raios_limiar", "Limiar dos raios", 1.5, 0, 8, 0.1, 1, " EV",
+          "Só as partes mais claras que o cinza médio mais estes stops viram raios."),
+        Param("raios_cor", "Cor dos raios", "color", (1.0, 0.95, 0.85)),
+    ], "Listra anamórfica, reflexos da lente e raios de luz"),
+
+    # `atmosfera.py` (módulo Beta "atmosfera"): névoa (ordem 600) e partículas (700).
+    Section("nevoa", "Névoa", None, [
+        _pct("nevoa_densidade", "Densidade", lo=0.0, tip="Quanto a névoa cobre a imagem. 0% = sem névoa."),
+        Param("nevoa_cor", "Cor da névoa", "color", (0.82, 0.85, 0.9),
+              tip="A cor da névoa onde ela é total, como num vídeo comum (Rec.709)."),
+        C("nevoa_forma", "Forma", "degrade", [
+            ("degrade", N_("Degradê (chão ou céu)")), ("uniforme", N_("Por igual (o quadro todo)"))]),
+        F("nevoa_angulo", "Direção", 180.0, -180, 180, 1, 0, "°",
+          "Que lado tem névoa: 180° = embaixo (chão), 0° = em cima (céu)."),
+        F("nevoa_posicao", "Altura", 0.0, -1080, 1080, 10, 0, " px",
+          "Desloca a linha do degradê (px de um quadro de 1080 linhas; negativo sobe)."),
+        F("nevoa_suavidade", "Suavidade", 600.0, 0, 3000, 10, 0, " px", "Largura da passagem do degradê."),
+        _pct("nevoa_textura", "Textura", 0.5, 0.0, 1.0, tip="0% = névoa lisa; mais = nuvens mais marcadas."),
+        F("nevoa_escala", "Tamanho das nuvens", 300.0, 20, 2000, 10, 0, " px", advanced=True),
+        F("nevoa_movimento", "Movimento", 20.0, -400, 400, 1, 0, " px/s",
+          "Velocidade com que a névoa anda na horizontal (negativo = para a esquerda)."),
+        I("nevoa_semente", "Semente", 1, 0, 9999, "Muda o desenho das nuvens.", advanced=True),
+    ], "Névoa por degradê, com nuvens que andam"),
+
+    Section("particulas", "Partículas", None, [
+        C("part_tipo", "Tipo", "nenhuma", [
+            ("nenhuma", N_("Nenhuma")), ("chuva", N_("Chuva")), ("neve", N_("Neve")), ("poeira", N_("Poeira no ar")),
+            ("brasas", N_("Brasas"))]),
+        _pct("part_quantidade", "Quantidade", 0.5, 0.0, 1.0),
+        F("part_tamanho", "Tamanho", 6.0, 1, 60, 0.5, 1, " px",
+          "Diâmetro das partículas da frente (px de um quadro de 1080 linhas do clipe)."),
+        F("part_velocidade", "Velocidade", 1.0, 0.0, 4.0, 0.05, 2, "×", "1× = a velocidade natural do tipo."),
+        _pct("part_vento", "Vento", tip="Empurra as partículas para a esquerda (negativo) ou para a direita."),
+        _pct("part_profundidade", "Profundidade", 0.5, 0.0, 1.0,
+             tip="Camadas ao fundo menores, mais lentas e mais apagadas (paralaxe)."),
+        _pct("part_opacidade", "Opacidade", 0.8, 0.0, 1.0),
+        Param("part_cor", "Cor", "color", (1.0, 1.0, 1.0), tip="Tinge as partículas (as brasas e a poeira já têm cor)."),
+        _pct("part_desfoque", "Desfoque de movimento", 0.5, 0.0, 1.0,
+             tip="Rastro de cada partícula durante a exposição (50% = obturador de 180°)."),
+        I("part_semente", "Semente", 1, 0, 9999, "Muda onde cada partícula aparece.", advanced=True),
+    ], "Chuva, neve, poeira ou brasas"),
 ]
+# Os números e as cores destas seções aceitam chaves de animação, menos os que desenham a grade das partículas (tamanho,
+# rastro, profundidade) e a posição delas e das nuvens pelo tempo (velocidade × tempo): animá-los faria tudo pular.
+for _s in VIDEO_SECTIONS[_N_BASE:]:
+    for _p in _s.params if _s.key in ("desfoque_lente", "luzes", "nevoa", "particulas") else ():
+        if _p.kind in ("float", "color") and _p.key not in ("part_tamanho", "part_velocidade", "part_vento",
+                                                              "part_profundidade", "part_desfoque", "nevoa_movimento",
+                                                              "nevoa_escala"):
+            _p.animatable = True
+del _s, _p
 
 # 1.9 F5: tempo da imagem (§53)
 VIDEO_SECTIONS += [
