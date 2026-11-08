@@ -52,13 +52,14 @@ AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
 # Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
 # 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes), uma com algo da 1.5 e nada da 1.6 com FORMAT_15,
-# uma com algo da 1.6 e nada da 1.7 com FORMAT_16, uma com algo da 1.7 e nada da 1.8 com FORMAT_17. Veja `features()` e
-# `migrate()`.
-FORMAT = 5
+# uma com algo da 1.6 e nada da 1.7 com FORMAT_16, uma com algo da 1.7 e nada da 1.8 com FORMAT_17, uma com algo da 1.8
+# e nada da 1.9 com FORMAT_18. Veja `features()` e `migrate()`.
+FORMAT = 6
 FORMAT_BASE = 1
 FORMAT_15 = 2
 FORMAT_16 = 3
 FORMAT_17 = 4
+FORMAT_18 = 5
 # Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
 # ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
 # "sequencia" (1.7): outra sequência do projeto usada como clipe; não é gerada: `Source.is_nested`.
@@ -2257,18 +2258,20 @@ class Sequence:
 
     def features(self) -> set[str]:
         """Recursos que esta montagem usa: os da 1.5 (`FEATURES`, o projeto vai para o formato 3), os da 1.6
-        (`FEATURES_V4`, formato 4), os da 1.7 (`FEATURES_V5`, formato 5) e os da 1.8 (`FEATURES_V6`, formato 6). Vale
-        para o projeto: conta as irmãs."""
+        (`FEATURES_V4`, formato 4), os da 1.7 (`FEATURES_V5`, formato 5), os da 1.8 (`FEATURES_V6`, formato 6) e os da
+        1.9 (`FEATURES_V7`, formato 7). Vale para o projeto: conta as irmãs."""
         seqs = self.family()
-        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5, FEATURES_V6) for fid, check in reg.items()
-                if any(check(s) for s in seqs)}
+        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5, FEATURES_V6, FEATURES_V7)
+                for fid, check in reg.items() if any(check(s) for s in seqs)}
 
     def block_format(self) -> int:
-        """O formato do bloco "edicao": FORMAT com algo da 1.8, FORMAT_17 com algo da 1.7, FORMAT_16 com algo da 1.6,
-        FORMAT_15 com algo da 1.5, FORMAT_BASE sem nada."""
+        """O formato do bloco "edicao": FORMAT com algo da 1.9, FORMAT_18 com algo da 1.8, FORMAT_17 com algo da 1.7,
+        FORMAT_16 com algo da 1.6, FORMAT_15 com algo da 1.5, FORMAT_BASE sem nada."""
         feats = self.features()
-        if feats & set(FEATURES_V6):
+        if feats & set(FEATURES_V7):
             return FORMAT
+        if feats & set(FEATURES_V6):
+            return FORMAT_18
         if feats & set(FEATURES_V5):
             return FORMAT_17
         if feats & set(FEATURES_V4):
@@ -2647,6 +2650,28 @@ FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
 }
 
 
+def _clips_beyond_1_8(seq: Sequence) -> bool:
+    """Algum clipe usa um ajuste (ou opção, ou chave de animação) que a 1.8 não lê (`params.beyond_1_8`)."""
+    from .params import beyond_1_8, known_1_8
+    known = known_1_8()
+    return any(beyond_1_8(editparams.SCHEMAS[c.kind], known[c.kind], c.values, c.keys) for c in seq.clips)
+
+
+def _own_look_beyond_1_8(seq: Sequence) -> bool:
+    """O look próprio da sequência usa um ajuste (ou opção, ou chave) do look que a 1.8 não lê (ARQUITETURA §42.1)."""
+    from .params import FILM, beyond_1_8, known_1_8
+    return seq.look is not None and beyond_1_8(FILM, known_1_8()["look"], seq.look.values, seq.look.keys)
+
+
+# Recursos da 1.9 numa montagem (mesma regra de `FEATURES`): o bloco vai para o formato 6 e o projeto para o 7, que a
+# 1.8 recusa. Ajuste novo de clipe (ou do look próprio) não precisa de linha: "ajustes_clipe_1_9" e "look_proprio_1_9"
+# pegam tudo o que a 1.8 não lê. Estrutura nova no JSON: uma linha aqui, com o campo só quando usado (ARQUITETURA §49).
+FEATURES_V7: dict[str, Callable[[Sequence], bool]] = {
+    "ajustes_clipe_1_9": _clips_beyond_1_8,
+    "look_proprio_1_9": _own_look_beyond_1_8,
+}
+
+
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
     do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
@@ -2685,9 +2710,16 @@ def _seq_v4_to_v5(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _seq_v5_to_v6(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.8 (formato 5) → formato 6: nada muda nos campos (a 1.9 só acrescenta)."""
+    out = dict(d)
+    out["formato"] = 6
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2, 2: _seq_v2_to_v3,
-                                                                     3: _seq_v3_to_v4, 4: _seq_v4_to_v5}
+                                                                     3: _seq_v3_to_v4, 4: _seq_v4_to_v5, 5: _seq_v5_to_v6}
 
 
 def migrate(d: dict[str, Any]) -> dict[str, Any]:

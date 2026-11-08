@@ -7,14 +7,15 @@ miniatura em JPEG (base64) para a lista de projetos recentes.
 Com o modo Edição, o projeto também guarda a sequência (`"edicao"`, ver `timeline.Sequence`) e o
 modo aberto (`"modo"`).
 
-Formato (`"formato"`): esta versão lê até `FORMAT` (6) e grava o **menor** formato que o projeto precisa, para
+Formato (`"formato"`): esta versão lê até `FORMAT` (7) e grava o **menor** formato que o projeto precisa, para
 abrir nas versões antigas sempre que der: 1 = só o arquivo (sem sequência); 2 = com sequência; 3 = usa algum
 recurso da 1.5 (`features()`: os testes de `FEATURES_V3` e de `timeline.FEATURES`); 4 = usa algo da 1.6 (os de
 `FEATURES_V4` e de `timeline.FEATURES_V4`: um ajuste ou uma opção que a 1.5 não lê entra sozinho, pelo retrato
 `params.known_1_5`); 5 = usa algo da 1.7 (os de `FEATURES_V5` e de `timeline.FEATURES_V5`, pelo retrato
 `params.known_1_6`); 6 = usa algo da 1.8 (os de `FEATURES_V6` e de `timeline.FEATURES_V6`, como o look próprio de
-uma sequência). Os recursos ficam listados em `"recursos"`. Versões antigas recusam formato maior que o delas com aviso.
-Abrir um formato antigo passa pelos passos de `MIGRATIONS` (1 → 2 → 3 → 4 → 5 → 6), puros e testados
+uma sequência); 7 = usa algo da 1.9 (os de `FEATURES_V7` e de `timeline.FEATURES_V7`, como a camada de ajuste e os
+efeitos de clipe, pelo retrato `params.known_1_8`). Os recursos ficam listados em `"recursos"`. Versões antigas recusam
+formato maior que o delas com aviso. Abrir um formato antigo passa pelos passos de `MIGRATIONS` (1 → … → 7), puros e testados
 (`tests/test_project_migration.py`).
 
 Look (1.8, #67): `values`, `preset_id` e `look_keys` são o look **do projeto**; uma sequência pode ter o dela
@@ -36,12 +37,13 @@ from . import APP_NAME, __version__, keyframes, params
 from .i18n import _
 
 EXT = ".plc"
-FORMAT = 6          # maior formato que esta versão lê
+FORMAT = 7          # maior formato que esta versão lê
 FORMAT_SIMPLE = 1   # projeto sem sequência do modo Edição
 FORMAT_EDIT = 2     # projeto com sequência, sem nada da 1.5
 FORMAT_15 = 3       # usa algum recurso da 1.5, nada da 1.6
 FORMAT_16 = 4       # usa algo da 1.6, nada da 1.7
 FORMAT_17 = 5       # usa algo da 1.7, nada da 1.8
+FORMAT_18 = 6       # usa algo da 1.8, nada da 1.9
 MODES = ("pelicula", "edicao")
 
 
@@ -115,10 +117,10 @@ class Project:
         return copy.deepcopy(self.values), self.preset_id, copy.deepcopy(self.look_keys)
 
     def features(self) -> set[str]:
-        """Recursos da 1.5 à 1.8 que o projeto usa: os de `FEATURES_V3` a `FEATURES_V6` e os da montagem
-        (`timeline.FEATURES` a `timeline.FEATURES_V6`)."""
-        found = {fid for reg in (FEATURES_V3, FEATURES_V4, FEATURES_V5, FEATURES_V6) for fid, check in reg.items()
-                 if check(self)}
+        """Recursos da 1.5 à 1.9 que o projeto usa: os de `FEATURES_V3` a `FEATURES_V7` e os da montagem
+        (`timeline.FEATURES` a `timeline.FEATURES_V7`)."""
+        found = {fid for reg in (FEATURES_V3, FEATURES_V4, FEATURES_V5, FEATURES_V6, FEATURES_V7)
+                 for fid, check in reg.items() if check(self)}
         if self.sequence:
             from . import timeline
             found |= timeline.Sequence.from_json(self.sequence).features()
@@ -155,12 +157,22 @@ FEATURES_V6: dict[str, Callable[[Project], bool]] = {
 }
 
 
+# Recursos da 1.9 fora da montagem (mesma regra; os da montagem ficam em `timeline.FEATURES_V7`, como a camada de ajuste
+# e os efeitos de clipe). Um ajuste ou uma opção nova do look não precisa de linha: "ajustes_1_9" pega tudo o que a 1.8
+# não lê (`params.beyond_1_8`).
+FEATURES_V7: dict[str, Callable[[Project], bool]] = {
+    "ajustes_1_9": lambda p: params.beyond_1_8(params.FILM, params.known_1_8()["look"], p.values, p.look_keys),
+}
+
+
 def needed_format(features: set[str] | frozenset[str], has_sequence: bool) -> int:
-    """O menor formato que guarda o projeto: 6 com algo da 1.8, 5 com algo da 1.7, 4 com algo da 1.6, 3 com recursos
-    da 1.5, 2 com sequência, 1 só com o arquivo."""
+    """O menor formato que guarda o projeto: 7 com algo da 1.9, 6 com algo da 1.8, 5 com algo da 1.7, 4 com algo da
+    1.6, 3 com recursos da 1.5, 2 com sequência, 1 só com o arquivo."""
     from . import timeline
-    if features & (set(FEATURES_V6) | set(timeline.FEATURES_V6)):
+    if features & (set(FEATURES_V7) | set(timeline.FEATURES_V7)):
         return FORMAT
+    if features & (set(FEATURES_V6) | set(timeline.FEATURES_V6)):
+        return FORMAT_18
     if features & (set(FEATURES_V5) | set(timeline.FEATURES_V5)):
         return FORMAT_17
     if features & (set(FEATURES_V4) | set(timeline.FEATURES_V4)):
@@ -220,9 +232,18 @@ def _v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _v6_to_v7(data: dict[str, Any]) -> dict[str, Any]:
+    """Formato 6 → 7: nada muda (a 1.9 só acrescenta campos, como os efeitos de clipe e as análises das fontes); o bloco
+    "edicao" é migrado ao ser lido (`timeline.Sequence.from_json`)."""
+    out = dict(data)
+    out.setdefault("recursos", [])
+    out["formato"] = 7
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4,
-                                                                     4: _v4_to_v5, 5: _v5_to_v6}
+                                                                     4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7}
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:

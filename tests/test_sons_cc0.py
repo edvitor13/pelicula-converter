@@ -190,9 +190,9 @@ def test_credit_json_round_trip_and_format_6():
     back = tl.Sequence.from_json(json.loads(json.dumps(seq.to_json())))
     assert back.sources[music.path].credit == music.credit
     assert "credito" not in back.sources["C:/sons/outro.wav"].to_json()
-    assert "credito_som" in seq.features() and seq.block_format() == tl.FORMAT
+    assert "credito_som" in seq.features() and seq.block_format() == tl.FORMAT_18
     data = project.Project(media_path="", sequence=seq.to_json(), mode="edicao").to_json()
-    assert data["formato"] == project.FORMAT == 6 and "credito_som" in data["recursos"]
+    assert data["formato"] == project.FORMAT_18 == 6 and "credito_som" in data["recursos"]
     music.credit = {}
     assert "credito_som" not in seq.features()
     # crédito estranho no JSON: só as chaves conhecidas, como texto; sem título nem URL, nada

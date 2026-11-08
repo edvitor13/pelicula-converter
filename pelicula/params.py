@@ -898,3 +898,23 @@ def beyond_1_7(schema: Schema, known: dict[str, list[str] | None], values: dict[
     """Se os valores usam algo que a 1.7 não lê (a regra é a de `beyond_1_5`, com o retrato `known_1_7`)."""
     return beyond_1_5(schema, known, values, keys)
 
+
+# ------------------------------------------------------------------ 1.9: o que a 1.8 lê (formato 7)
+# O mesmo retrato, mais um degrau: um projeto que usa um ajuste da 1.9 vai para o formato 7, que a 1.8 recusa com aviso
+# (`project.FEATURES_V7`, `timeline.FEATURES_V7`). Ajuste novo não precisa de registro. O retrato foi gerado rodando o
+# código do main com a 1.8 inteira (6de08de: a 1.8 foi direto para o main, junto da 1.9).
+KNOWN_1_8_FILE = Path(__file__).with_name("data") / "conhecidos_1_8.json"
+
+
+@lru_cache(maxsize=1)
+def known_1_8() -> dict[str, dict[str, list[str] | None]]:
+    """{"look"|"video"|"audio": {chave: opções da escolha, ou None}} como a 1.8 conhecia."""
+    data = json.loads(KNOWN_1_8_FILE.read_text(encoding="utf-8"))
+    return {k: data[k] for k in ("look", "video", "audio")}
+
+
+def beyond_1_8(schema: Schema, known: dict[str, list[str] | None], values: dict[str, Any] | None,
+               keys: dict[str, Any] | None = None) -> bool:
+    """Se os valores usam algo que a 1.8 não lê (a regra é a de `beyond_1_5`, com o retrato `known_1_8`)."""
+    return beyond_1_5(schema, known, values, keys)
+
