@@ -210,3 +210,119 @@ def test_the_button_sits_after_silences_and_the_shortcut_is_unique(win):
     set_module(win, "efeitos_sonoros", False)
     assert not win.sfx.button.isVisibleTo(ed) and not win.sfx.shortcut.isEnabled()
     set_module(win, "efeitos_sonoros", True)
+
+
+# ------------------------------------------------------------------ "Buscar sons (CC0)…" e a chave do Freesound
+def wav_bytes(seconds: float = 0.5) -> bytes:
+    import io
+    import wave
+
+    import numpy as np
+    x = (np.sin(np.arange(int(48000 * seconds)) * 0.05) * 8000).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(x.tobytes())
+    return buf.getvalue()
+
+
+OPENVERSE = {"results": [
+    {"id": "a1", "title": "Whoosh de teste", "creator": "Ana", "license": "cc0", "url": "https://cdn.example.org/w.wav",
+     "foreign_landing_url": "https://example.org/w", "duration": 500, "filetype": "wav"},
+    {"id": "b2", "title": "Com atribuição", "creator": "Bia", "license": "by", "url": "https://cdn.example.org/b.wav"}]}
+
+
+class FakeNet:
+    def __init__(self):
+        self.urls: list[str] = []
+
+    def __call__(self, req, timeout=None):
+        import io
+        import json
+        self.urls.append(req.full_url)
+
+        class R(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+
+        if req.full_url.startswith("https://api.openverse.org/"):
+            return R(json.dumps(OPENVERSE).encode("utf-8"))
+        return R(wav_bytes())
+
+
+def wait_idle(dlg, timeout: float = 10.0) -> None:
+    t0 = time.time()
+    pump(0.05)
+    while dlg.busy and time.time() - t0 < timeout:
+        pump(0.05)
+    assert not dlg.busy
+
+
+def test_the_settings_page_keeps_the_freesound_key_masked_in_the_preferences(win):
+    from PySide6.QtWidgets import QLineEdit
+    from pelicula import sons_cc0
+    from pelicula.ui.settings_dialog import PAGES, SettingsDialog
+    assert "sons" in [p[0] for p in PAGES]
+    dlg = SettingsDialog(None, win.settings, "sons", main=None)
+    try:
+        page = dlg.page("sons")
+        assert page.key.echoMode() == QLineEdit.EchoMode.Password
+        page.key.setText("  abc123  ")
+        assert win.settings.value(sons_cc0.KEY_FREESOUND) == "abc123"
+        page.show_key.setChecked(True)
+        assert page.key.echoMode() == QLineEdit.EchoMode.Normal
+        page.key.setText("")
+        assert win.settings.value(sons_cc0.KEY_FREESOUND) == ""
+    finally:
+        dlg.deleteLater()
+
+
+def test_search_listen_and_add_to_media_with_the_credit(win, tmp_path):
+    from pelicula import sons_cc0
+    from pelicula.ui import sons_cc0_ui
+    set_module(win, "efeitos_sonoros", True)
+    fresh(win)
+    win.project_path = str(tmp_path / "filme.plc")
+    net = FakeNet()
+    dlg = sons_cc0_ui.SearchDialog(win, opener=net)
+    played = []
+    dlg.play = played.append   # nada toca nos alto-falantes
+    try:
+        assert net.urls == []   # nada vai para a rede antes de "Buscar"
+        assert "Configurações › Sons livres" in dlg.where.text() and "filme_sons" in dlg.note.text()
+        dlg.query.setText("whoosh")
+        dlg.do_search()
+        wait_idle(dlg)
+        assert len(net.urls) == 1 and "license=cc0" in net.urls[0]
+        assert dlg.list.topLevelItemCount() == 1   # só o CC0
+        assert dlg.list.topLevelItem(0).text(0) == "Whoosh de teste" and dlg.list.topLevelItem(0).text(3) == "Openverse"
+        dlg.do_listen()
+        wait_idle(dlg)
+        assert played and played[0].endswith(".wav") and "previa" in played[0]
+        dlg.do_add()
+        wait_idle(dlg)
+        folder = tmp_path / "filme_sons"
+        files = list(folder.glob("*.wav"))
+        assert len(files) == 1
+        src = win._sources.get(str(files[0]))
+        assert src is not None and src.has_audio
+        assert src.credit == {"titulo": "Whoosh de teste", "autor": "Ana", "licenca": sons_cc0.LICENSE,
+                              "url": "https://example.org/w", "origem": "Openverse"}
+        assert "Mídia" in dlg.status.text()
+    finally:
+        dlg.done(0)
+        dlg.deleteLater()
+        win.project_path = None
+
+
+def test_the_search_action_lives_in_the_new_menu(win):
+    set_module(win, "efeitos_sonoros", True)
+    assert win.sfx.search_action.isVisible() and win.sfx.search_action.objectName() == "novo_buscar_sons"
+    set_module(win, "efeitos_sonoros", False)
+    assert not win.sfx.search_action.isVisible()
+    set_module(win, "efeitos_sonoros", True)

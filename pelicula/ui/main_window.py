@@ -2898,7 +2898,8 @@ class MainWindow(QMainWindow):
                 self._seen_done.add(j.id)
                 target = export.output_target(j.out_path, j.settings)
                 if j.status == "concluido":
-                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=target), 10000)
+                    self.statusBar().showMessage(_("Exportação concluída: {caminho}").format(caminho=target)
+                                                 + (f"  •  {j.note}" if j.note else ""), 10000)  # 1.8: créditos
                 else:
                     self.statusBar().showMessage(_("Uma exportação falhou. Veja os detalhes na fila."), 10000)
                     self.show_queue()

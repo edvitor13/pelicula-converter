@@ -85,7 +85,8 @@ class JobRow(QFrame):
                               .format(feitos=j.done, total=j.total, pct=f"{j.progress * 100:.1f}",
                                       fps=f"{j.fps_rate:.1f}", tempo=_dur(j.eta)))
         elif j.status == "concluido":
-            self.info.setText(_("{total} quadros em {tempo}").format(total=j.total, tempo=_dur(j.finished - j.started)))
+            self.info.setText(_("{total} quadros em {tempo}").format(total=j.total, tempo=_dur(j.finished - j.started))
+                              + (f"  •  {j.note}" if getattr(j, "note", "") else ""))  # 1.8: créditos dos sons
         elif j.status == "erro":
             self.info.setText(j.error[-600:])
         elif j.status == "cancelado":

@@ -251,7 +251,12 @@ class SfxUI:
             act.setToolTip(_(eff.tip))
             act.setObjectName(f"novo_efeito_{eid}")
         self.sub_action = menu.addMenu(self.submenu)
-        self.extra_actions = [self.sep, self.sub_action]  # o "Buscar sons (CC0)…" entra aqui (`ui/sons_cc0_ui.py`)
+        self.search_action = menu.addAction(icons.icon("music", theme.TEXT, 16), _("Buscar sons (CC0)…"),
+                                            self.search_sounds)
+        self.search_action.setObjectName("novo_buscar_sons")
+        self.search_action.setToolTip(_("Sons livres (domínio público) do Openverse e do Freesound, com o crédito "
+                                        "guardado no projeto"))
+        self.extra_actions = [self.sep, self.sub_action, self.search_action]
         # "Pôr efeitos sonoros…": botão na barra da linha do tempo, logo depois de "Silêncios" (só pela API do QLayout)
         ed = win.tl_editor
         self.button = QToolButton()
@@ -295,6 +300,11 @@ class SfxUI:
         win.model.insert_media(src, at=at, atrack=track)
         win.statusBar().showMessage(_("{nome} na faixa A{faixa}: ajuste no inspetor, à direita.").format(
             nome=src.name, faixa=track + 1), 6000)
+
+    def search_sounds(self) -> None:
+        """"Buscar sons (CC0)…": a janela da busca (`ui/sons_cc0_ui.py`); nada vai para a rede até "Buscar"."""
+        from . import sons_cc0_ui
+        sons_cc0_ui.open_dialog(self.win)
 
     # -------------------------------------------------------- pôr sozinho
     def auto_dialog(self) -> None:
