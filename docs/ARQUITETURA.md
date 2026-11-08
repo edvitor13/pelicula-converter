@@ -52,6 +52,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 43. [Mixer e cache de som por clipe](#43-mixer-e-cache-de-som-por-clipe)
 44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
 45. [Som de película](#45-som-de-película)
+46. [Música: batidas, encaixe e ducking](#46-música-batidas-encaixe-e-ducking)
 
 ---
 
@@ -4738,3 +4739,88 @@ As chaves de animação do look não entram no som (o motor lê os valores fixos
 Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
 preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
 de 48 kHz com o contrato do contexto (`before`).
+
+## 46. Música: batidas, encaixe e ducking
+
+Três ferramentas para a trilha musical do modo Edição (1.8, #39), todas em numpy e sem tipo de clipe novo: o que elas
+fazem na montagem são operações comuns (aparar, clipes novos do mesmo arquivo, `transicao`, chaves de volume), então a
+mixagem (§43), a exportação e o som de película (§45) não mudam. A interface fica em `ui/musica_ui.py` (`MusicUI`,
+`MainWindow.musica`); nada consulta `modules` (não é módulo: são ações do menu do clipe e um botão da barra). Nenhuma chave
+de projeto nova, nenhum id em `FEATURES_V6`.
+
+### 46.1 Batidas (`batidas.py`)
+
+- **Decodificação**: `somlimpo.read_range` do arquivo inteiro, mono, 22,05 kHz (`RATE`), até `MAX_SECONDS`.
+- **Ataques**: espectrograma (Hann de 1024, passo de 256 ≈ 86 quadros de análise por segundo, zeros nas pontas), 40 bandas
+  mel de 30 Hz a 8 kHz, em dB (faixa de 80 dB). O fluxo é a subida em dB (retificada) média das bandas, menos a média móvel
+  de 1 s, retificado de novo (`onset_envelope`). O começo do arquivo (a janela com os zeros) não conta como ataque.
+- **Andamento** (`_tempo`): autocorrelação da raiz do fluxo (um ataque forte não apaga o mais fraco: bumbo e caixa
+  alternados não viram a metade), com desfoque de 1 quadro, pesada por uma gaussiana em oitavas em torno de 120 BPM
+  (`BPM_PRIOR`), de 60 a 200 BPM, com refinamento parabólico. A metade e o dobro vão em `candidates`.
+- **Batidas** (`_track`): programação dinâmica de Ellis (2007) — cada quadro soma a força do ataque e o melhor antecessor
+  a cerca de um período, com penalidade `TIGHTNESS`·log²(distância/período). As pontas sem ataque são aparadas. Cada batida
+  é afinada no ataque de verdade (`_refine`: energia em 2 ms, o primeiro ponto que chega a 75% da maior subida perto da
+  batida, a até 30 ms), então o tempo tocado à mão fica no clique, não na grade. O BPM final é a regressão das batidas.
+- **Compassos** (`_downbeats`): 4 batidas por compasso; a fase é a de maior acento médio (subida da energia dos graves +
+  força do ataque, cada um dividido pela média nas batidas). É uma estimativa (`bar_confidence`).
+- **Confiança**: produto da estabilidade do andamento em janelas de 12 s (passo de 6 s), do resíduo da regressão das
+  batidas e da força do pico da autocorrelação. `confident` = ≥ 0,5 e ≥ 8 batidas. Mudança de andamento, ruído e silêncio
+  ficam abaixo. Sem `random` nem relógio: o mesmo som dá as mesmas batidas.
+- **Cache**: `Beats.to_json` em `<PELICULA_SOM_CACHE ou temp>/pelicula_batidas/<sha1(caminho, tamanho, data, VERSION)>.json`
+  (arquivo parcial + `os.replace`) e um LRU de 64 na memória. `cached(path)` só lê; `analyze_file` analisa. Arquivo
+  mudado (tamanho ou data) = outra chave. Mudar o algoritmo = subir `VERSION`.
+- **Interface**: "Detectar batidas" no menu do clipe de som, e sozinho para clipes de arquivos **só de som** com mais de
+  20 s (`AUTO_MIN_S`) quando a estrutura da montagem muda (preferência `musica/batidas_auto`, ligada por padrão; a análise
+  que falhou ou foi cancelada não volta sozinha). Fila `jobs.CPU`, chave `detectar_batidas`, barra de status com Cancelar.
+  Reabrir o projeto lê o cache (`beats_for`). Sem a janela (testes da linha do tempo), o controlador preso à linha do tempo
+  não analisa sozinho.
+
+### 46.2 Marcas e ímã
+
+`musica.beat_frames(seq, clip, beats)` leva cada batida (segundo do arquivo) ao quadro da sequência: sem rampa,
+`start + (t − src_in) / velocidade × fps`; com rampa ou reverso, o inverso exato do mapa do clipe (`TimeMap.out_at`). Só as
+batidas dentro do clipe. `paint_beats` (gancho em `TimelineCanvas._paint_clip`, depois da forma de onda) desenha as marcas no
+pé do clipe — o começo de compasso mais alto e mais claro; batidas a menos de 4 px viram só os compassos, e nem eles se
+também não cabem. `snap_points` (gancho em `TimelineCanvas.snap_points`) junta as batidas de todos os clipes de som com
+batidas, menos os arrastados; vale com o ímã ligado e o botão **Ímã nas batidas** (`btn_beat_snap`, ao lado do ímã;
+preferência `musica/ima_batidas`, ligada por padrão; desabilitado com o ímã desligado). Sem atalho novo.
+
+### 46.3 Encaixar a música na duração do vídeo
+
+- **Alvo** (`fit_target`): o trecho In/Out (In sem Out = até o fim da imagem; Out sem In = do começo do clipe), senão do
+  começo do clipe ao fim do último clipe de imagem.
+- **Plano** (`fit_plan`): a música do clipe (o trecho aparado, na velocidade dele) e os começos de compasso dentro dela.
+  `KEEP_BARS` = 2 compassos ficam em cada ponta (a introdução e o final natural). Encurtar tira o **maior bloco contíguo de
+  compassos inteiros** que não deixa a música curta demais; alongar repete o **menor bloco** que basta (pedaços `[a, d_j)` +
+  `[d_i, b)`); se nem o meio inteiro basta, o meio inteiro n vezes e mais os r compassos antes do final. Entre os blocos
+  possíveis, o de centro mais perto do meio. O resto (menos de um compasso) sai do fim; mais que 0,25 s cortado pede
+  "Diminuir no fim" de até 2 s (`FADE_S`, no máximo metade do último pedaço).
+- **Tempo**: cada emenda cai num quadro inteiro e o pedaço seguinte começa um pouquinho antes ou depois do começo do
+  compasso, para os compassos continuarem na mesma grade (o teste confere a 128 BPM e 25 qps). Cada emenda leva a transição
+  de som que já existe (`transicao`, potência constante, centrada no corte, §16) de uma batida (no máximo 5 s).
+- **Recusas** (com a mensagem): batidas sem confiança, rampa/reverso, música curta demais (introdução + final + 1 compasso),
+  alvo menor que introdução + final, faixa travada, clipe ligado a outro, outro clipe na faixa dentro do alvo
+  (`fit_blockers`). Quando a música é mais longa que o alvo, a recusa oferece a saída simples (`fade_plan`: acabar no alvo
+  com "Diminuir no fim").
+- **Aplicar** (`apply_fit`): o primeiro pedaço é o próprio clipe; os outros, clipes novos do mesmo arquivo com os mesmos
+  ajustes (`fade_in` 0, `transicao` da emenda) e as chaves presas à música (`key_off` acompanha `src_in`); "Diminuir no fim"
+  só no último. Tudo por `TimelineModel.apply_edit(fn, kind)` (gancho novo: roda `fn(seq)` dentro de `keep_main` e grava
+  **um** passo do desfazer se a sequência mudou).
+
+### 46.4 Abaixar a música sob a voz
+
+- **Clipes**: os clipes de som selecionados (se o clicado está entre eles) ou só o clicado. **Faixas com voz**: diálogo com
+  as outras faixas de som, marcadas por padrão as que têm clipes tocando junto (`voice_tracks_for`), mais a profundidade
+  (−12 dB), a descida (0,3 s) e a volta (0,6 s), lembradas em `musica/ducking_db`, `musica/ducking_ataque` e
+  `musica/ducking_liberacao`.
+- **Voz**: `voice_mix` (cópia só com o som das faixas de voz, sem solo; o mudo vale) mixada por `audiomix.render_mix` no
+  trecho das músicas (o mesmo som da exportação), numa thread de trabalho (chave `abaixar_musica`).
+- **Fala** (`speech_regions`): mono a 16 kHz, janelas de 20 ms a cada 10 ms; fala = energia acima de (percentil 95 − 30 dB),
+  nunca abaixo de −55 dBFS, **e** planura espectral de 100 Hz a 4 kHz abaixo de 0,35 (ruído branco dá ~0,56: chiado e
+  vento não contam); cada janela vale mais 0,2 s; falas a menos de 1 s viram uma; trechos de menos de 0,1 s caem.
+- **Chaves** (`duck_spans` + `apply_duck`): por fala, chaves em `início − descida` (o volume de antes), `início` e `fim`
+  (o volume dali menos a profundidade, no mínimo −60 dB) e `fim + volta` (o volume de antes); descidas que se tocariam viram
+  uma; ponta fora do clipe = o clipe começa/acaba embaixo. São chaves de volume comuns (`ANIMATABLE_AUDIO`, interpoladas em
+  dB pela mixagem), editáveis depois. Chaves que já estavam dentro de uma descida (`duck_conflicts`): a interface pergunta
+  **Substituir** ou cancelar; substituir apaga essas e o volume de fora volta a valer nas pontas. Um passo do desfazer
+  (`apply_edit(…, "values")`).
