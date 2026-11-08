@@ -910,7 +910,7 @@ na leitura e a poeira crepitando.
 |---|---|---|---|
 | **Trilha sonora** | Igual à bitola, Ótica 35 mm, Ótica 16 mm, Magnética Super 8, Ótica antiga (anos 30) | Igual à bitola | O tipo de trilha. *Ótica 35 mm*: de cerca de 40 Hz a 12 kHz, fundo baixo, estéreo. *Ótica 16 mm*: de 90 Hz a ~6,5 kHz, mono, chiado alto (relação sinal/ruído de 35 a 40 dB). *Magnética Super 8*: de ~80 Hz a 10–12 kHz, mono, chiado de fita. *Ótica antiga*: a **curva da Academia** de 1938 (plana de 100 Hz a 1,6 kHz, −10 dB em 5 kHz, −18 dB em 8 kHz), feita para esconder o chiado das trilhas da época, mono. *Igual à bitola*: 35 mm, 65 mm, IMAX e as de foto usam a de 35 mm; 16 mm e Super 16, a de 16 mm; Super 8 e 8 mm, a magnética. |
 | **Força da trilha** | 0–100% | 100% | Quanto da trilha vale: a faixa de frequências (em dB, proporcional), a saturação perto do máximo, o som em mono e o chiado. 0% = o som original, só com os estalos, a poeira e o resto. |
-| **Estalos das emendas** | 0–100% | 60% | Um estalo seco com um baque grave em cada emenda, **no mesmo quadro** em que a imagem mostra a emenda: a *Emenda* dos Defeitos da película e a fita dos cortes de *A montagem na película*. |
+| **Estalos das emendas** | 0–100% | 60% | Um estalo seco com um baque grave em cada emenda, **no mesmo quadro** em que a imagem mostra a emenda: a *Emenda* dos Defeitos da película, a fita dos cortes de *A montagem na película* e o pulo da **troca de rolo** dos *Rolos de Super 8*. |
 | **Poeira na trilha** | 0–100% | 40% | Cliques e crepitação da sujeira na faixa do som. Com a *Poeira* dos Defeitos ligada, a quantidade dela também conta. |
 | **Wow e flutter** | 0–100% | 50% | A afinação oscila devagar (wow) e depressa (flutter). A oscilação lenta segue o **mesmo tremor do quadro** do Projetor (com a *Velocidade do tremor*), então o som balança quando a imagem balança, e cresce com a bitola: a 100%, cerca de 0,2% no 35 mm e 0,5% no Super 8. O flutter rápido vem da roda dentada (um furo de cada vez). |
 | **Projetor na sala** | 0–100% | 0% | O barulho do projetor junto do filme: o mecanismo que puxa cada quadro (na taxa do vídeo, ou 18/24 qps com os *Rolos de Super 8*), o zumbido do motor e a ventoinha da lâmpada. |
@@ -926,7 +926,25 @@ um atraso de quase um segundo pareceria defeito do app.
 entrada do modo Película) ou o som do arquivo (modo Película com o arquivo direto). A prévia toca e mede o mesmo som
 que a exportação grava; enquanto o som é processado (alguns segundos num arquivo longo), a prévia toca o som de
 sempre. Com o som de película ligado o som do arquivo nunca é copiado na exportação: ele é recodificado no formato do
-recipiente. No modo Edição sem *Com película* e com *Desligar todos os efeitos*, o som sai como sempre, igual à
+recipiente (AAC 320 no MP4, PCM 24 bits no MOV e no MKV, Opus no WebM, MP3 no AVI). Com *Copiar original* escolhido, a
+janela de exportação avisa embaixo do *Áudio* em que formato o som sai, o terminal avisa no começo e a fila diz no fim.
+No modo Edição sem *Com película* e com *Desligar todos os efeitos*, o som sai como sempre, igual à
 imagem. Uma sequência dentro de outra entra com o som cru: o som de película dela só vale quando ela é aberta ou
 exportada (como o look). Tudo é sintetizado, sem amostras de som de terceiros. O som nunca passa de −0,2 dBFS
 (limite suave). Os ajustes do som de película não animam (um valor só para o som inteiro).
+
+**Troca de rolo.** Com os *Rolos de Super 8* de *A montagem na película* ligados, a imagem pula no primeiro quadro de
+cada rolo novo (a cada 3 min 20 s a 18 qps, ou 2 min 30 s a 24). O som estala nesse mesmo quadro, com a força de
+*Estalos das emendas*, também no modo Película com o arquivo direto (os rolos contam o tempo do vídeo).
+
+**Presets com som.** Quatro presets já vêm com o som de película ligado (o recurso Beta precisa estar ligado para ver o
+cartão; se não estiver, a janela avisa e oferece ligar). A imagem é a do preset mais parecido:
+
+| Preset | Imagem | Som |
+|---|---|---|
+| **Super 8 caseiro com som** (Bitolas e formatos) | a do *Super 8 • Kodachrome 40* | Tarja magnética, o projetor rodando ao lado (40%), um pouco de sala, wow mais forte. |
+| **16 mm de arquivo com som ótico** (Bitolas e formatos) | a do *16 mm • Vision3 500T*, com poeira e riscos | Ótica de 16 mm (agudos curtos, chiado), mais poeira na trilha. |
+| **Cinema anos 30 (som ótico antigo)** (Preto e branco) | a do *Noir anos 40*, com riscos e emendas | Ótica antiga (curva da Academia), estalos nas emendas, sala de cinema. |
+| **Cine de bairro (cópia gasta e sala)** (Processos e estilos) | a da *Cópia desbotada (anos 70)* | Ótica de 35 mm, o projetor lá atrás e bastante sala. |
+
+Os níveis são moderados; ajuste a gosto. No plugin do DaVinci eles aparecem como presets de imagem (o plugin não tem som).

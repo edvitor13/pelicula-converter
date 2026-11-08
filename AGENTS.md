@@ -65,7 +65,7 @@ pelicula/
                              (tudo desligado, ARQUITETURA §40)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
-  presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (52 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
                              transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
@@ -158,10 +158,12 @@ pelicula/
                              BASE com a tira deitada (rotated, por substituição de texto; Engine._base_program)
   maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
   montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
-                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
+                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8 (roll_at,
+                             reel_frames: o pulo da troca de rolo, que o som de película também estala)
   somfilme.py                1.8, som de película (módulo Beta som_pelicula, seção "som_pelicula" do look; ARQUITETURA §45):
                              motor numpy sobre o som final (trilha ótica/magnética, estalos nos quadros das emendas de
-                             look.emenda_frames/montagem_filme.splice_frames, poeira, wow por look.weave, projetor, sala),
+                             look.emenda_frames/montagem_filme.splice_frames/reel_frames, poeira, wow por look.weave,
+                             projetor, sala),
                              pelo índice absoluto da amostra, com contexto antes (process, process_wav, export_sound)
   luz_plano.py               1.6, marcação de luz por plano: pontos da copiadora por clipe (luz_r/g/b, luz_densidade)
                              somados a lab_luz_* no plano da V1 (shot_lights, via frame.Recipe.plan; transição de dois
@@ -516,6 +518,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_somfilme.py` | som de película sem ffmpeg: seção e módulo, desligado = bit a bit, trecho com contexto = pedaço do som inteiro, determinismo, faixa medida de cada trilha, mono e chiado, limite suave, estalos na amostra exata dos quadros de `u_splice` (defeitos e montagem), wow correlacionado com o tremor do quadro, `process_wav` em blocos, imagem/LUT/plugin sem a seção |
 | `tests/test_somfilme_export.py` | som de película com o ffmpeg: trecho exportado = prévia (montagem e arquivo), estalo no corte, agudos cortados; na GPU, som do arquivo recodificado (desligado: copiado) e o estalo na exportação de uma montagem |
 | `tests/test_som_pelicula_ui.py` | casos de `som_pelicula_ui_cases.py`: cartão do módulo Beta, prévia do arquivo = motor da exportação, só o processamento refaz (a mixagem fica), sem efeitos/sem película/desligado voltam ao som de sempre |
+| `tests/test_somfilme_rolo.py` | estalo na troca de rolo de Super 8: `reel_frames` = os quadros em que a imagem pula (cadências e fps), estalo na amostra exata, trecho com contexto = som inteiro, nada sem os rolos, prévia = exportação (rolos de 1 s num arquivo de 2 s) |
+| `tests/test_export_film_note.py` | aviso de "Copiar original" com o som de película: formato que sai por recipiente, quando não se aplica, nota no começo do terminal e, na GPU, `job.note` no fim (o caso da janela está em `export_ui_cases.py`) |
 | `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
 | `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
 | `tests/test_sfx.py` | efeitos sonoros (1.8, §47): determinismo e semente de cada tipo, pico (−1 dBFS × intensidade, nunca satura) e RMS, largura/brilho, clique e obturador curtos, teclas nos tempos dados, a fonte "efeito" (só som, duração do tipo), JSON e formato 6, `mix_key`, o segmento aponta para o WAV do efeito e a mixagem toca o efeito igual à síntese (e no grafo antigo) |
@@ -539,7 +543,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
 | `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
-| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): no fim da lista, processo certo, efeito no eixo do cinza |
+| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): logo depois de "original", processo certo, efeito no eixo do cinza |
+| `tests/test_presets_som.py` | presets da 1.8 com som de película (Super 8 caseiro, 16 mm de arquivo, Cinema anos 30, Cine de bairro): no fim da lista, imagem copiada do preset mais parecido, som ligado com a trilha certa e níveis moderados, aviso do módulo, sem saturar |
 | `tests/test_fotometro.py` | fotômetro: latitude por negativo (Vision3 × Double-X), revelação, vencida e pré-exposição movem os limites como documentado, zonas da camada em stops conhecidos, leitura de um ponto, nada no caminho de render |
 | `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |

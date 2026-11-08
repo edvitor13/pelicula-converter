@@ -276,6 +276,11 @@ class ExportDialog(QDialog):
         form.addRow(_("Resolução"), self.res)
         form.addRow(_("Quadros/s"), self.fps)
         form.addRow(_("Áudio"), self.audio)
+        self.audio_note = QLabel()  # 1.8: "Copiar original" com o som de película ligado (`_film_note`)
+        self.audio_note.setObjectName("Faint")
+        self.audio_note.setWordWrap(True)
+        form.addRow("", self.audio_note)
+        form.setRowVisible(self.audio_note, False)
         form.addRow("", self.grain)
         form.addRow("", self.dither)
         self.form = form
@@ -1086,6 +1091,7 @@ class ExportDialog(QDialog):
                 w=w, h=h, bits=16 if export.high_depth(s) else 8))
             return
         self._sync_rows(s)
+        self._film_note(s)
         self._platform_info()
         dur = self._duration()
         frames = round(dur * fps)
@@ -1105,6 +1111,13 @@ class ExportDialog(QDialog):
         self._schedule_estimate()
         self._warnings(s, dur)
         self._schedule_preview()
+
+    def _film_note(self, s: export.ExportSettings) -> None:
+        """1.8: com "Copiar original" e o som de película do look ligado, diz ao lado do áudio em que formato o som sai
+        (`export.film_sound_note`). Só informa: a exportação é a mesma."""
+        text = export.film_sound_note(s, self.info, self.values, self.sequence)
+        self.audio_note.setText(text)
+        self.form.setRowVisible(self.audio_note, bool(text))
 
     def _warnings(self, s: export.ExportSettings, dur: float) -> None:
         """Avisos: limites da plataforma (duração, tamanho estimado), duas passadas e som recodificado."""

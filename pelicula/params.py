@@ -711,7 +711,8 @@ SECTIONS: list[Section] = [
         F("somf_estalos", "Estalos das emendas", 0.6, 0, 1, percent=True,
           tip="Cada emenda (a fita ou o cimento que junta dois pedaços de película) passa pela leitura do som e dá "
               "um estalo seco com um baque grave. Os estalos caem nos mesmos quadros em que a imagem mostra a "
-              "emenda: a emenda dos Defeitos da película e os cortes de \"A montagem na película\". No projetor de "
+              "emenda: a emenda dos Defeitos da película, os cortes de \"A montagem na película\" e o pulo da troca "
+              "de rolo de Super 8 (\"Rolos de Super 8\"). No projetor de "
               "verdade a leitura do som fica antes da janela (21 quadros no 35 mm ótico, 26 no 16 mm, 18 no Super 8 "
               "magnético) e o estalo vinha antes do pulo da imagem; aqui eles ficam juntos."),
         F("somf_poeira", "Poeira na trilha", 0.4, 0, 1, percent=True,

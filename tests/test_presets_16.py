@@ -15,8 +15,9 @@ BASE = "lab_v3_250d_2383"
 
 def test_new_presets_are_appended_after_the_old_ones():
     ids = [p["id"] for p in presets.BUILTIN]
-    assert ids[-len(NEW):] == NEW
-    assert ids.index("original") == len(ids) - len(NEW) - 1, "os antigos não mudam de posição"
+    at = ids.index("original") + 1  # 1.8: os presets com som de película vêm depois destes
+    assert ids[at:at + len(NEW)] == NEW
+    assert at - 1 == 43, "os antigos não mudam de posição"
     for pid in NEW:
         p = presets.BY_ID[pid]
         assert p["grupo"] == "Laboratório" and p["nome"] and p["desc"]

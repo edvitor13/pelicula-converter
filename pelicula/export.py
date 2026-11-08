@@ -360,6 +360,34 @@ def audio_reencoded_for_volume(s: ExportSettings, info: media.MediaInfo) -> bool
     return s.audio == "copy" and _audio_mode(s, info) not in ("", "copy") and (wants_loudness(s) or uses_target(s))
 
 
+def audio_reencoded_for_film(s: ExportSettings, info: media.MediaInfo, values: dict | None, sequence=None) -> str:
+    """1.8: a escolha era "Copiar original", mas o som de película do look está ligado: o som do arquivo passa pelo
+    `somfilme` e sai do WAV processado (`_film_sound`), nunca copiado. Devolve o modo que sai de fato (o de `_audio_mode`
+    para um WAV de 24 bits; "copy" = o PCM do WAV no MOV/MKV), ou "" quando não se aplica: outra escolha, sem som, som
+    de película desligado (ou "Desligar todos os efeitos") e a montagem do modo Edição, cujo som já é a mixagem."""
+    from . import somfilme
+    if s.audio != "copy" or sequence is not None or somfilme.film_values(values, s.no_effects) is None:
+        return ""
+    if not _audio_mode(s, info):
+        return ""
+    pcm = media.MediaInfo(**{**info.__dict__, "has_audio": True, "audio_codec": "pcm_s24le"})
+    return _audio_mode(s, pcm, 0.0)
+
+
+def film_sound_note(s: ExportSettings, info: media.MediaInfo, values: dict | None, sequence=None,
+                    done: bool = False) -> str:
+    """O aviso do som de película no lugar de "Copiar original" (`audio_reencoded_for_film`): a janela mostra ao lado
+    do áudio, o terminal no começo e a fila/barra de status no fim (`done`). "" quando não se aplica."""
+    mode = audio_reencoded_for_film(s, info, values, sequence)
+    if not mode:
+        return ""
+    labels = dict(AUDIO)
+    fmt = "FLAC" if mode == "flac" else _(labels["pcm24" if mode == "copy" else mode])
+    if done:
+        return _("O som de película estava ligado: o som foi recodificado em {formato}.").format(formato=fmt)
+    return _("O som de película está ligado: o som será recodificado em {formato}.").format(formato=fmt)
+
+
 def audio_kbps(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> float:
     """Taxa do som que sai (kb/s), para o tamanho alvo e a estimativa; copiar usa a taxa do vídeo de origem
     não conhecida (0) e sem som é 0."""
@@ -1000,6 +1028,7 @@ def run_job(job: ExportJob, engine: Engine) -> None:
         film = _film_sound(job, info, seq, start, end, mix_path, perf)  # 1.8: som de película (`somfilme.py`)
         if film is False:
             return
+        film_note = film_sound_note(s, info, job.values, seq, done=True) if film else ""
         if film:
             if mix_path:
                 system.remove_file(mix_path)
@@ -1030,6 +1059,8 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                 if job.status == "concluido":  # 1.8: créditos dos sons CC0 do trecho (`sons_cc0.py`, §47)
                     from . import sons_cc0
                     sons_cc0.export_credits(job, start, end + 1)
+                if job.status == "concluido" and film_note:  # 1.8: som de película no lugar de "Copiar original"
+                    job.note = "  •  ".join(t for t in (film_note, job.note) if t)
     finally:
         if job.status != "concluido" and not keep_partial:
             _discard_output(job.out_path, s)
