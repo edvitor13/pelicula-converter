@@ -52,6 +52,7 @@ from . import geometria_ui, luz_fotometro_ui
 from . import filtro_ajustes
 from . import look_sequencia_ui, pastas_ui
 from . import sequencias_ui
+from . import som_pelicula_ui
 from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
@@ -390,6 +391,7 @@ class MainWindow(QMainWindow):
         self.seqs_ui = sequencias_ui.install(self)  # 1.7: abas das sequências do projeto (`ui/sequencias_ui.py`)
         self.nest_ui = aninhar_ui.install(self)  # 1.7: aninhar, desaninhar e abrir a sequência de um clipe (`ui/aninhar_ui.py`)
         self.seq_look = look_sequencia_ui.install(self)  # 1.8: look próprio de cada sequência (`ui/look_sequencia_ui.py`)
+        self.som_pelicula = som_pelicula_ui.install(self)  # 1.8: som de película na prévia (`ui/som_pelicula_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -1381,6 +1383,8 @@ class MainWindow(QMainWindow):
         if self.no_effects:
             self.viewer.label_proc = _("SEM EFEITOS")
         self.viewer.update()
+        if getattr(self, "som_pelicula", None) is not None:
+            self.som_pelicula.schedule()  # 1.8: com ou sem película, o som de película acompanha a imagem
 
     def _set_edit_film(self, on: bool) -> None:
         self.edit_film = bool(on)
@@ -1550,6 +1554,8 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- som da montagem
     def _set_audio(self, kind: str, path: str) -> None:
         """Troca o som da prévia (arquivo original ou mixagem da montagem) sem perder a reprodução."""
+        if getattr(self, "som_pelicula", None) is not None:  # 1.8: o mesmo som processado pelo som de película
+            kind, path = self.som_pelicula.route(kind, path)
         if (kind, path) == self._audio_src:
             return
         self._audio_src = (kind, path)
@@ -1626,6 +1632,8 @@ class MainWindow(QMainWindow):
         self._mix_running.clear()
         self._clean_mixes()
         self._meter_close()
+        if getattr(self, "som_pelicula", None) is not None:
+            self.som_pelicula.cleanup()  # 1.8
 
     def _peaks_for(self, path: str):
         """Forma de onda de um arquivo para a linha do tempo (calculada em segundo plano na 1ª vez)."""
@@ -3435,6 +3443,7 @@ class MainWindow(QMainWindow):
             **grao_fisico_ui.module_tools(self),  # 1.6: "grao_fisico" (`ui/grao_fisico_ui.py`)
             **filme_ui.module_tools(self),  # 1.6: câmera, formato e montagem (`ui/filme_ui.py`)
             **luz_fotometro_ui.module_tools(self),  # 1.6: fotômetro da película (`ui/luz_fotometro_ui.py`)
+            **som_pelicula_ui.module_tools(self),  # 1.8: som de película (`ui/som_pelicula_ui.py`)
         }
 
     def apply_modules(self) -> None:

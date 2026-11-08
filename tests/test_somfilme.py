@@ -295,3 +295,17 @@ def test_process_wav_in_chunks_equals_process(tmp_path, monkeypatch):
     assert S.process_wav(str(src), str(dst2), v, 24.0, 3000, ev, skip=20000)
     got2 = WavReader(str(dst2)).read(0, len(x)).astype(np.float64)
     assert np.abs(got2 - ref[20000:]).max() < 2e-7
+
+
+# ------------------------------------------------------------------ fora da imagem e do plugin
+def test_image_lut_and_plugin_ignore_the_section():
+    from pelicula import ofx, resolve
+    on = _vals(**ALL_ON, somf_trilha="otica_antiga")
+    off = {**on, **{k: params.PARAMS[k].default for k in on if k.startswith("somf_")}}
+    for f in (0, 7, 61):
+        assert look.build_plan(on, 64, 36, f, 24.0).uniforms == look.build_plan(off, 64, 36, f, 24.0).uniforms
+    names = [c.key for c in resolve.cor_controls() + resolve.textura_controls() + resolve.projetor_controls()]
+    names += [c.key for c in ofx.controls()]
+    assert not any((k or "").startswith("somf_") for k in names)
+    for kind in ("cor", "textura", "projetor"):
+        assert "somf" not in resolve.source(kind, values=on)
