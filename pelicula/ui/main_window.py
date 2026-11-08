@@ -57,7 +57,7 @@ from . import som_pelicula_ui
 from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
-from . import mixer_ui, scrub_ui
+from . import mixer_ui, narracao_ui, scrub_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -397,6 +397,7 @@ class MainWindow(QMainWindow):
         self.som_sync = somlimpo_ui.install(self)  # 1.8: sincronizar pelo som (`ui/somlimpo_ui.py`)
         self.mixer = mixer_ui.install(self)  # 1.8: mixer das faixas de som (`ui/mixer_ui.py`)
         self.scrub = scrub_ui.install(self)  # 1.8: som ao arrastar o cursor (`ui/scrub_ui.py`)
+        self.narracao = narracao_ui.install(self)  # 1.8: gravar narração (`ui/narracao_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -3563,7 +3564,9 @@ class MainWindow(QMainWindow):
             "configura ou apaga)") + "\n\n" + _(
             "Edição: Ctrl+Shift+G aninha a seleção numa sequência nova (Ctrl+Z desfaz) • dois cliques num clipe de "
             "sequência abrem a dela • botão direito nele: Desaninhar") + "\n\n" + _(
-            "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)"))
+            "Edição: Ctrl+Alt+M mostra / esconde o mixer (no fader e no balanço, dois cliques voltam ao padrão)") + "\n\n" + _(
+            "Edição: Ctrl+Shift+R abre o painel de gravar narração (com ele aberto, grava / para; começa no cursor ou na "
+            "entrada e para na saída)"))
 
     def about(self) -> None:
         try:

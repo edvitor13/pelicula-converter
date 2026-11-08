@@ -1669,6 +1669,10 @@ class TimelineEditor(QWidget):
         self.btn_scrub = self._btn("scrub", _("Som ao arrastar o cursor: um pedacinho do som no quadro, ao arrastar o "
                                               "cursor na régua ou andar quadro a quadro"), checkable=True)
         hl.addWidget(self.btn_scrub)
+        # 1.8: gravar narração (`ui/narracao_ui.py` liga e abre o painel)
+        self.btn_narrar = self._btn("mic", _("Gravar narração: grava o microfone no cursor e põe numa faixa de som "
+                                             "(Ctrl+Shift+R)"))
+        hl.addWidget(self.btn_narrar)
         hl.add_stretch()
         zo = self.btn_zoom_out = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
         zo.clicked.connect(lambda: c.zoom_to(c.ppf * 0.8))

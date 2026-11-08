@@ -199,6 +199,9 @@ pelicula/
   somlimpo.py                1.8, limpeza do som do clipe (sem Qt, §44): ruído aprendido (perfil do trecho, STFT em blocos
                              sem emenda, entrada limpa em cache: clean_input/render_inputs), zumbido (entalhes, detect_hum),
                              cortes e nivelar a voz (after_eq_filters), learn_range do botão
+  narracao.py                1.8, gravar narração (sem Qt, §48): Recorder/BackgroundRecorder (PCM de qualquer taxa, canais e
+                             formato → WAV de 48 kHz em 24 bits, Resampler sinc em fluxo, parcial seguro), take_folder,
+                             next_take_path, plan_span, free_track/place_take (a faixa "Narração")
   sincronia.py               1.8, sincronizar pelo som (sem Qt, §44.5): find_lag (correlação normalizada por FFT, confiança),
                              candidates/reference_of, plan → Move/Plan
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
@@ -228,6 +231,8 @@ pelicula/
                              cartão do módulo som_pelicula);
                              1.8, limpeza do som (§44): somlimpo_ui (InspectorSound: Aprender o ruído, Detectar o zumbido,
                              Predefinições do "eq"; SyncController: Sincronizar pelo som no menu do clipe, barra de status);
+                             1.8, narração (§48): narracao_ui (NarrationUI: botão do microfone, Ctrl+Shift+R, painel com
+                             microfone, nível, contagem, tocar junto e atraso; grava pelo QAudioSource e insere o WAV);
                              1.8, som (§43): mixer_ui (MixerUI: tiras das faixas no lugar do inspetor, Ctrl+Alt+M,
                              medidores dos picos gravados ao lado da mixagem), scrub_ui (ScrubUI: som ao arrastar o
                              cursor, grão de um quadro por um QAudioSink próprio, preferência som_ao_arrastar),
@@ -485,6 +490,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_somexport.py` | só o som = `render_mix` (e o trecho), stems somam a mixagem, FLAC/AAC/MP3, volume alvo, o som do arquivo no modo Película, cancelar, `--so-som`/`--stems` |
 | `tests/test_scrub.py` | som ao arrastar o cursor: tamanho do grão, fades de 5 ms, 16 bits com o volume, um grão por vez (nada toca) |
 | `tests/test_mixer_ui.py` | casos de `mixer_ui_cases.py`: mixer no lugar do inspetor (botão, atalho), uma tira por faixa, fader e balanço num passo do desfazer, dois cliques, mudo/solo/trava, medidores pelos picos gravados, a prévia grava os picos e a limpeza apaga, scrub com sink falso (passo, régua, mudo, preferência) e "O que exportar" na janela Exportar |
+| `tests/test_narracao.py` | gravador sem Qt nem microfone (1.8, §48): WAV de 24 bits exato, mono centrado/estéreo, 8/16/32 bits e float, 44,1 → 48 kHz (erro, ganho, duração, blocos de qualquer tamanho), outras taxas e o que passa do Nyquist, níveis, atraso à amostra, duração máxima, cancelar sem deixar nada, fila em segundo plano, pasta/numeração, intervalo (entrada/saída), escolha da faixa "Narração" |
+| `tests/test_narracao_ui.py` | casos de `narracao_ui_cases.py`: botão e painel, microfone lembrado, atalho, gravar do cursor ou da entrada à saída (um passo do desfazer, faixa nova), pastas, contagem, tocar junto, atraso, medidor e erros (sem microfone, negado, desconectado, vazio) com microfone falso |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
 | `tests/test_somfilme.py` | som de película sem ffmpeg: seção e módulo, desligado = bit a bit, trecho com contexto = pedaço do som inteiro, determinismo, faixa medida de cada trilha, mono e chiado, limite suave, estalos na amostra exata dos quadros de `u_splice` (defeitos e montagem), wow correlacionado com o tremor do quadro, `process_wav` em blocos, imagem/LUT/plugin sem a seção |
 | `tests/test_somfilme_export.py` | som de película com o ffmpeg: trecho exportado = prévia (montagem e arquivo), estalo no corte, agudos cortados; na GPU, som do arquivo recodificado (desligado: copiado) e o estalo na exportação de uma montagem |

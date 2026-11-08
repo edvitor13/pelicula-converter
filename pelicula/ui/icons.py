@@ -511,6 +511,13 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawArc(QRectF(2.5, 9, 7, 8), 100 * 16, 160 * 16)
         p.drawArc(QRectF(14.5, 9, 7, 8), -80 * 16, 160 * 16)
+    elif name == "mic":
+        # 1.8, gravar narração: microfone de mesa (cápsula, arco do suporte e pé).
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(8.5, 3, 7, 11.5), 3.5, 3.5)
+        p.drawArc(QRectF(5, 8, 14, 11), 190 * 16, 160 * 16)
+        p.drawLine(QPointF(12, 19), QPointF(12, 21.5))
+        p.drawLine(QPointF(8.5, 21.5), QPointF(15.5, 21.5))
     else:
         _draw_components(name, p, c)
 

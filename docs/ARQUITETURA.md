@@ -52,6 +52,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 43. [Mixer e cache de som por clipe](#43-mixer-e-cache-de-som-por-clipe)
 44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
 45. [Som de película](#45-som-de-película)
+48. [Gravar narração](#48-gravar-narração)
 
 ---
 
@@ -4738,3 +4739,80 @@ As chaves de animação do look não entram no som (o motor lê os valores fixos
 Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
 preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
 de 48 kHz com o contrato do contexto (`before`).
+
+## 48. Gravar narração
+
+Issue #39 (1.8, só o som; frente "narração" da onda B). Testes em `tests/test_narracao.py` (gravador, resample, pasta,
+intervalo, faixa) e `tests/narracao_ui_cases.py` (painel e janela, com microfone falso). Arquivos: `pelicula/narracao.py` (sem
+Qt) e `pelicula/ui/narracao_ui.py`.
+
+### 48.1 Decisões
+
+- **A gravação é um arquivo comum.** Nenhum tipo de clipe novo e nenhum campo novo no JSON do projeto (nada em
+  `FEATURES_V6`): o WAV entra na Mídia (`MainWindow.adopt_source`) e na linha do tempo como qualquer áudio
+  (`TimelineModel.insert_media`), então a mixagem (§43), o som de película (§45), os stems e o aninhar o tratam como os outros.
+  QtMultimedia (`QAudioSource`) e nada mais: sem dependência nova.
+- **Canais**: 1 canal vira estéreo centrado (L = R); 2 ficam como estão; mais de 2, só os dois primeiros. Média dos canais
+  foi descartada: uma interface com o microfone só na entrada 1 perderia 6 dB.
+- **Formato do arquivo**: 48 kHz, 24 bits, estéreo (`somcache.WavWriter`, o mesmo WAV de todo o som da montagem).
+- **Atraso do microfone** (`narracao/atraso_ms`): o começo do arquivo é cortado por esse tempo, **à amostra** (em vez de
+  adiantar o clipe em quadros): não depende do fps nem esbarra no quadro 0, e o clipe continua começando exatamente onde a
+  gravação começou. Para medir: grave uma palma junto com o bipe de **Novo ▸ Contagem** com a prévia tocando e veja na forma
+  de onda quantos milissegundos a palma ficou depois do bipe; digite esse valor.
+- **Sem módulo.** É parte da linha do tempo (como o mixer e o som ao arrastar o cursor), tem o próprio botão e não esconde
+  nada que a renderização use.
+
+### 48.2 O gravador (`pelicula/narracao.py`)
+
+- `Recorder(path, rate, channels, fmt, skip_s=, max_s=)`: `feed(bytes)` aceita blocos de qualquer tamanho (um quadro cortado
+  no meio fica para o próximo), nos formatos `uint8`, `int16`, `int32` e `float32`. Devolve o `Level` (pico e RMS lineares do
+  bloco). 48 kHz passa direto, sem conta nenhuma; as outras taxas vão pelo `Resampler`. Grava num parcial
+  (`system.partial_path`) e `finish()` troca de nome de uma vez, devolvendo a `Take` (caminho, amostras, pico); `cancel()`, uma
+  gravação vazia e um erro de escrita não deixam nem o parcial nem o arquivo. `full` fica verdadeiro quando chegou em
+  `max_s` (o arquivo é cortado na amostra e o resto é ignorado); `silent_run` conta os quadros seguidos de zeros exatos
+  (microfone mudo no sistema).
+- `Resampler(src, dst)`: sinc com janela de Kaiser (β 8,6; 24 pontos de cada lado; corte em 96% do Nyquist menor; ganho 1 em
+  DC), em fluxo. A posição da saída `n` é `n × src / dst` em aritmética inteira (parte inteira e fração exatas): a saída
+  não depende de como os blocos chegaram e não acumula erro. Total de saída = `round(entrada × dst / src)` (44,1 → 48 kHz:
+  1 s → 48000 amostras). Uns 0,2× do tempo real num núcleo.
+- `BackgroundRecorder`: o mesmo gravador numa thread (`narracao`) com uma fila; `feed` só põe os bytes. `level`, `frames`,
+  `full`, `silent_run` e `error` podem ser lidos de qualquer thread; `finish()` espera a fila esvaziar.
+- Contas: `take_folder(projeto)`, `next_take_path(pasta)`, `plan_span(quadro, entrada, saída, fps)`, `free_track(seq, início,
+  duração)` e `place_take(seq, fonte, início)`.
+
+### 48.3 O painel (`ui/narracao_ui.py`)
+
+- **Botão** do microfone (`TimelineEditor.btn_narrar`) e **Ctrl+Shift+R**: fechado, abre o painel; aberto, grava / para
+  (o atalho é da aplicação, então vale também com o foco no painel). O painel é uma janela de ferramenta sem modal: a prévia
+  e a linha do tempo continuam à mão.
+- **Microfone**: `QMediaDevices.audioInputs()`, o padrão do sistema pré-escolhido; a escolha fica em `narracao/dispositivo`
+  (id em hexadecimal). O `QAudioSource` abre no formato que o próprio microfone prefere (`preferredFormat`) e só é pedido
+  um formato simples (48 kHz, 1 canal, 16 bits) se esse não for legível. O medidor de nível anda assim que o painel abre
+  (a captura fica aberta enquanto o painel está; fechar o painel solta o microfone).
+- **Fluxo**: Gravar → `plan_span` (começa na **entrada** se marcada, senão no cursor; para sozinho na **saída** se ela vem
+  depois do começo) → pasta e nome do arquivo → contagem 3, 2, 1 com bipes (`Beeper`, o `QAudioSink` do scrub: sem tela nada
+  toca) → abre o `BackgroundRecorder` e, com **Tocar a montagem enquanto grava**, `MainWindow.start_play(início)` no mesmo
+  instante (o *Repetir* é desligado enquanto grava e volta depois) → Parar (ou a saída) → `finish()` → `_insert`.
+- **Inserção**: `media.probe_source` → `adopt_source` → `model.commit()` → `place_take` (a faixa de áudio **"Narração"** livre
+  em [início, início + duração) tem a preferência, senão a primeira destravada e livre; se nenhuma serve, cria uma "Narração"
+  nova) → `TimelineModel.insert_media(src, at=início, atrack=faixa)`. A faixa nova, o nome e o clipe entram **num passo só do
+  desfazer**; o clipe fica selecionado e o cursor volta ao começo dele. A faixa só é criada depois de parar (a duração real
+  decide se cabe).
+- **Arquivos**: `<projeto>_narracao/narracao_001.wav` ao lado do `.plc` salvo (o número é o maior da pasta + 1: nunca
+  sobrescreve); sem projeto salvo, `narracao/` na pasta do app (`deps.app_data_dir()`), com um aviso na barra de status.
+  Salvar o projeto depois não move nada: ele passa a apontar para os arquivos onde estão. Se a pasta do projeto não deixa
+  gravar, cai na do app com um aviso.
+- **Erros**, sempre com mensagem e sem nada inserido: sem microfone (botão desligado), acesso negado
+  (`QMicrophonePermission`; no Windows e no Linux costuma ser "pode"), dispositivo que não abre, microfone que falha ou
+  é desconectado durante a gravação (a gravação é descartada, inclusive o parcial), disco que falha, gravação vazia, e o
+  projeto trocado no meio (o WAV fica só na Mídia). Avisos sem descartar: só zeros por 1,5 s ("o microfone só está mandando
+  silêncio"), pico a 0 dBFS (estourou) e pico abaixo de −40 dBFS (muito baixa).
+- **Preferências** (`prefs.settings()`): `narracao/dispositivo`, `narracao/contagem` e `narracao/tocar` (`"true"`/`"false"`;
+  ligadas se não há valor) e `narracao/atraso_ms` (0 a 500).
+- **Testes**: `NarrationUI(win, device_factory=, devices=, beep=)`; os casos trocam os três e nunca abrem um dispositivo.
+
+### 48.4 Limites
+
+O som da prévia começa um pouco depois do microfone (o `QMediaPlayer` demora a tocar); por isso o atraso é um número que o
+usuário mede, e não uma constante. A gravação não passa pelo som de película nem por nada da cadeia do clipe antes de entrar:
+ela é o arquivo cru, e é a mixagem (§43) quem a trata. Dois microfones ao mesmo tempo e gravar em várias faixas ficaram de fora.
