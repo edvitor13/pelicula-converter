@@ -1,8 +1,8 @@
 """Som ao arrastar o cursor (1.8, ARQUITETURA §43.5): arrastando o cursor na régua da linha do tempo ou andando quadro a
 quadro (← →, K + J/L), toca um grão curto da mixagem no quadro novo.
 
-O grão sai do WAV da mixagem da prévia que já existe (`MainWindow._mix_path`, lido com `audiomix.WavReader`): nada é
-mixado na interface. Sem mixagem pronta (ainda mixando, ou o arquivo aberto no modo Película), nada toca. Ele vai por um
+O grão sai do WAV que a prévia toca (`MainWindow._audio_src` do tipo "seq": a mixagem da montagem, lido com
+`audiomix.WavReader`): nada é mixado na interface. Sem mixagem pronta (ainda mixando, ou o arquivo aberto no modo Película), nada toca. Ele vai por um
 `QAudioSink` próprio, de latência baixa, separado do player da prévia, e respeita o mudo e o volume da prévia. Um grão
 novo só sai depois que o anterior acabou de tocar (`Throttle`): arrastar rápido não enfileira som.
 
@@ -121,8 +121,10 @@ class ScrubUI(QObject):
 
     # ------------------------------------------------------------ o grão
     def _path(self) -> str:
-        w = self.win
-        return w._mix_path if w._audio_src[0] == "seq" else ""
+        """O WAV que a prévia toca (a mixagem da montagem ou, com outro processamento do som da prévia, o resultado dele);
+        o arquivo original aberto no modo Película (`"arquivo"`) não é lido aqui."""
+        kind, path = self.win._audio_src
+        return path if kind == "seq" else ""
 
     def _wav(self, path: str) -> audiomix.WavReader | None:
         if self._reader[0] != path:
@@ -139,7 +141,7 @@ class ScrubUI(QObject):
         if not path or w.info is None:
             return None
         reader = self._wav(path)
-        if reader is None:
+        if reader is None or reader.rate != RATE:   # o sink é de 48 kHz
             return None
         start, count = grain_span(frame, w.info.fps, reader.rate)
         try:

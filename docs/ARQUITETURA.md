@@ -4478,7 +4478,8 @@ parado fora do 1× para a frente. `_clean_mixes` apaga o `.faixas.npz` com o WAV
 
 `MainWindow.scrub`. Ganchos em `MainWindow.seek` (só enquanto `TimelineEditor.scrubbing` está ligado, isto é, arrastando o
 cursor na régua) e `step` (quadro a quadro). O grão (`grain_span`, `make_grain`): um quadro, no mínimo 40 ms, com fades de
-5 ms, lido do WAV da mixagem da prévia (`audiomix.WavReader`); sem mixagem pronta, nada toca. `Throttle`: um grão novo só
+5 ms, lido do WAV que a prévia toca (`_audio_src` do tipo "seq": a mixagem, ou o resultado de um processamento
+dela; `audiomix.WavReader`, só 48 kHz); sem mixagem pronta, nada toca. `Throttle`: um grão novo só
 depois que o anterior acabou. Saída: um `QAudioSink` próprio (48 kHz, estéreo, 16 bits, buffer de 200 ms), criado na
 primeira vez por uma fábrica que os testes trocam; com `QT_QPA_PLATFORM=offscreen` a fábrica real devolve None (testes e
 automações nunca tocam som). Respeita o mudo e o volume da prévia. Botão *Som ao arrastar o cursor* na barra da linha do
