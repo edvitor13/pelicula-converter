@@ -299,6 +299,25 @@ VIDEO_SECTIONS += [
 
 # 1.9 F5: tempo da imagem (§53)
 VIDEO_SECTIONS += [
+    # `tempo_imagem.py` (módulo Beta "tempo_imagem"): deflicker pela análise do arquivo, ruído temporal pelos quadros
+    # vizinhos e câmera lenta por mistura de quadros. Padrão: tudo desligado (nenhum passo, nenhuma janela).
+    Section("tempo_imagem", "Tempo da imagem", None, [
+        _pct("deflicker", "Deflicker", lo=0.0,
+             tip="Tira a cintilação (o brilho que pisca de um quadro para o outro, de luz fluorescente, LED ou "
+                 "timelapse) igualando o brilho de cada quadro à média dos vizinhos. Precisa da análise do arquivo "
+                 "(botão Analisar)."),
+        F("deflicker_janela", "Janela do deflicker", 0.5, 0.1, 5.0, 0.05, 2, " s",
+          "O tempo em que o brilho é igualado: mais curto segue mudanças de luz de verdade; mais longo tira "
+          "cintilações lentas.", advanced=True),
+        _pct("ruido_temporal", "Ruído temporal", lo=0.0,
+             tip="Tira o ruído do sensor misturando cada pixel com o mesmo pixel nos quadros vizinhos, só onde a "
+                 "imagem não mudou (o que se mexe não deixa rastro). Melhor em cenas paradas ou de tripé."),
+        I("ruido_temporal_quadros", "Quadros de cada lado", 2, 1, 2,
+          "Quantos quadros antes e depois entram na média (mais quadros: menos ruído, mais lento).", advanced=True),
+        B("mistura_quadros", "Mistura de quadros", False,
+          "Na câmera lenta (menos de um quadro do vídeo por quadro da sequência), mistura os dois quadros mais "
+          "próximos em vez de repetir o mesmo: o movimento fica mais contínuo, sem saltos. Não muda o som."),
+    ], "Deflicker, ruído temporal e câmera lenta por mistura"),
 ]
 
 AUDIO_SECTIONS: list[Section] = [

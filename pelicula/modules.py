@@ -137,6 +137,10 @@ MODULES: tuple[Module, ...] = (
     Module("efeitos_clipe", N_("Efeitos de clipe"),
            N_("Camada de ajuste no modo Edição (cor e efeitos de clipe valendo para tudo o que está embaixo dela) e a "
               "base dos efeitos visuais da 1.9. Não vai para o plugin do DaVinci."), "efeitos_visuais", BETA),
+    Module("tempo_imagem", N_("Tempo da imagem"),
+           N_("Deflicker (tira a cintilação da luz), ruído temporal (pelos quadros vizinhos) e câmera lenta por "
+              "mistura de quadros, por clipe no modo Edição. Não vai para o plugin do DaVinci."), "efeitos_visuais",
+           BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
