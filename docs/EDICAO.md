@@ -285,6 +285,8 @@ enquadramento dele (escala, posição, rotação, espelhar). Escolha a forma e *
 - **Mostrar só o que está dentro**: fora da forma aparecem as faixas de baixo (um recorte à mão, uma janela).
 - **Desfocar** ou **Pixelar**: esconde o que está dentro (um rosto, uma placa); **Força** é o raio do desfoque ou o
   tamanho dos quadradinhos.
+- **Nada (só a forma, para o desfoque de lente)**: a máscara não muda o clipe; a forma serve ao **Desfoque de lente**
+  em *Dentro da máscara do clipe* ou *Fora da máscara do clipe* (fundo desfocado atrás de alguém, por exemplo).
 - **Suavidade da borda**, **Expandir** (aumenta ou encolhe a forma em todos os lados) e **Inverter** (troca dentro e
   fora) valem para todos.
 
@@ -483,7 +485,8 @@ O plugin do DaVinci não tem estes efeitos.
   numa lente aberta; **Forma do bokeh**: disco ou hexágono. **Onde desfocar**: a imagem inteira ou **pelo degradê**
   (foco perto ou longe): o lado marcado desfoca e o outro continua nítido. *Linear*: **Direção** 0° desfoca em cima (o
   fundo), 180° embaixo (a frente); *Radial*: fica nítido dentro do círculo (**Raio do círculo**, **Centro**). **Suavidade**
-  é a passagem entre o nítido e o desfocado e **Inverter** troca os lados.
+  é a passagem entre o nítido e o desfocado e **Inverter** troca os lados. **Dentro** ou **fora da máscara do clipe**
+  usa a forma do cartão **Máscara** (com o uso *Nada (só a forma…)* ela não recorta o clipe); sem forma, desfoca tudo.
 - **Listra anamórfica**: uma linha de luz longa, azulada por padrão, nas luzes mais fortes. **Limiar** em stops acima do
   cinza médio (só o que passa dele espalha), **Comprimento**, **Cor** e, nos avançados, o **Ângulo**.
 - **Flare**: reflexos da lente (fantasmas coloridos) na linha que vai da luz ao centro do quadro. Com a origem **As
