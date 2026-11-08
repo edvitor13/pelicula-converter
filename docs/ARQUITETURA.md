@@ -4747,8 +4747,8 @@ de 48 kHz com o contrato do contexto (`before`).
 Três ferramentas para a trilha musical do modo Edição (1.8, #39), todas em numpy e sem tipo de clipe novo: o que elas
 fazem na montagem são operações comuns (aparar, clipes novos do mesmo arquivo, `transicao`, chaves de volume), então a
 mixagem (§43), a exportação e o som de película (§45) não mudam. A interface fica em `ui/musica_ui.py` (`MusicUI`,
-`MainWindow.musica`); nada consulta `modules` (não é módulo: são ações do menu do clipe e um botão da barra). Nenhuma chave
-de projeto nova, nenhum id em `FEATURES_V6`.
+`MainWindow.musica`); nada consulta `modules` (não é módulo: são ações do menu do clipe e um botão da barra). Única chave
+de projeto: a correção à mão das batidas na fonte (§46.5, `"batidas"`, id `batidas_corrigidas` em `timeline.FEATURES_V6`).
 
 ### 46.1 Batidas (`batidas.py`)
 
@@ -4826,6 +4826,34 @@ preferência `musica/ima_batidas`, ligada por padrão; desabilitado com o ímã 
   dB pela mixagem), editáveis depois. Chaves que já estavam dentro de uma descida (`duck_conflicts`): a interface pergunta
   **Substituir** ou cancelar; substituir apaga essas e o volume de fora volta a valer nas pontas. Um passo do desfazer
   (`apply_edit(…, "values")`).
+
+### 46.5 Correção à mão das batidas
+
+O detector às vezes acha a metade ou o dobro do andamento (87 em vez de 174 BPM) e só conhece compasso de 4. No menu do
+clipe de som com batidas: **Andamento ×2**, **Andamento ÷2**, **Compasso de 3** / **Compasso de 4** (marcado o de agora) e
+**Voltar ao detectado** (só com correção).
+
+- **Onde fica**: na **fonte** (o arquivo da música), não no clipe: `timeline.Source.beats_fix`, `"batidas"` no JSON da fonte,
+  `{"fator": 2 | 0.5, "compasso": 3}` com **só as chaves que não são neutras** (fator 1 e compasso 4 não se gravam; sem
+  correção o campo nem existe). `timeline.clean_beats_fix` confere na leitura. Uma linha em `timeline.FEATURES_V6`
+  (`batidas_corrigidas`): só com correção o projeto vai para o formato 6; sem ela a 1.7 ainda o abre. Vale para todos os clipes
+  do arquivo na sequência; cada sequência tem a sua fonte (uma música usada em duas sequências corrige-se em cada uma).
+- **O cache não muda**: `analyze_file`/`cached` guardam o resultado cru, pelo carimbo do arquivo. A correção é a função
+  pura `batidas.corrected(beats, factor, bar)` (`corrected_by(beats, fix)` com o dicionário da fonte): mesmo resultado em
+  qualquer máquina, sem decodificar nada. Sem correção devolve o próprio objeto.
+- **×2**: uma batida nova no meio exato `(t_i + t_{i+1}) / 2` de cada par (as de antes ficam); BPM × 2. **÷2**: uma batida
+  sim, outra não; a paridade que guarda **mais começos de compasso detectados** (desempate: maior acento somado; depois, a de
+  índice par); BPM ÷ 2. Os atalhos andam entre metade, detectado e dobro: ×2 sobre ÷2 volta ao detectado.
+- **Compasso**: o resultado cru guarda o **acento** de cada batida (`Beats.accents`, as mesmas contas do detector,
+  `_accents`; por isso `VERSION` do cache subiu para 2). Os compassos de `bar` batidas (3 ou 4) são refeitos pela fase de
+  maior acento médio (`_phase`, a conta do detector parametrizada) e `bar_confidence` é a dessa fase. Batida inserida pelo
+  ×2 tem acento 0 (contratempo). Sem acentos (resultado montado à mão) fica a fase que mantém o primeiro começo de compasso
+  que já havia. A confiança do andamento é a do detector (`confidence` não muda); `Beats.bar` diz 3 ou 4 e o texto da
+  interface passa a "compassos de 3 estimados".
+- **Quem usa**: `MusicUI.beats_for(path)` devolve as batidas **já corrigidas** (memória por arquivo, refeita se o cru ou a
+  correção mudam) e é o que usam as marcas do clipe, o ímã nas batidas, o encaixe (`fit_plan` corta nos compassos corrigidos)
+  e a descrição. `MusicUI.raw_beats(path)` é o cru. `MusicUI.set_fix(path, factor, bar, reset)` grava a correção num único
+  passo do desfazer (`apply_edit(…, "values")`); desfazer e refazer trazem as marcas de volta.
 
 
 ## 47. Efeitos sonoros e sons CC0

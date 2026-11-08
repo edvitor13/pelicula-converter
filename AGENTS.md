@@ -213,7 +213,9 @@ pelicula/
                              candidates/reference_of, plan → Move/Plan
   batidas.py                 1.8, batidas da música (sem Qt, §46.1): fluxo espectral, andamento por autocorrelação (60–200
                              BPM), batidas por programação dinâmica, compassos estimados, confiança → Beats; analyze_file
-                             com cache em disco/memória pelo carimbo do arquivo (pelicula_batidas/)
+                             com cache em disco/memória pelo carimbo do arquivo (pelicula_batidas/); corrected(beats, fator,
+                             compasso) = correção à mão (×2, ÷2, compasso de 3; guardada em Source.beats_fix, §46.5):
+                             quem usa batidas lê MusicUI.beats_for (corrigidas), nunca o cache cru
   musica.py                  1.8, música na montagem (sem Qt, §46): beat_frames/snap_frames (batidas no tempo do clipe),
                              fit_plan/fade_plan/apply_fit (encaixar por compassos inteiros), speech_regions/duck_spans/
                              apply_duck/voice_mix (abaixar sob a voz com chaves de volume)
@@ -522,6 +524,7 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |
 | `tests/test_somlimpo_ui.py` | casos de `somlimpo_ui_cases.py`: Aprender o ruído (regras do trecho, recusas, um passo do desfazer), Detectar, Predefinições, Sincronizar pelo som pelo menu (move e desfaz num passo, recusa, cancelar) |
 | `tests/test_batidas.py` | batidas (1.8): cliques a 90/120/150 BPM limpos, com ruído e tocados à mão (BPM a 1%, batidas a 15 ms, compasso), mudança de andamento e ruído sem confiança, determinismo e JSON, cache pelo carimbo (memória, disco, arquivo mudado), cancelar |
+| `tests/test_batidas_mao.py` | correção à mão das batidas (1.8): `corrected` (×2 no meio exato, ÷2 pela paridade dos compassos, compasso de 3 por acento, sem acentos), JSON da fonte e formato 6 só com correção, encaixe nos compassos corrigidos |
 | `tests/test_musica.py` | música na montagem: batidas no tempo do clipe (aparar, 2×, reverso, rampa), ímã sem o clipe arrastado, encaixe (compassos inteiros no meio, emendas nos compassos com transição de uma batida, fim exato, grade mantida a 25 qps, velocidade), recusas e saída simples, alvo e impedimentos, um passo do desfazer; fala sintética (ruído não conta), chaves da descida, chaves de antes substituídas, mixagem mais baixa sob a voz |
 | `tests/test_musica_ui.py` | casos de `musica_ui_cases.py`: Detectar batidas pelo menu e cache, análise sozinha (preferência, > 20 s), marcas com o zoom e a velocidade, Ímã nas batidas, Encaixar pelo menu (In/Out, desfazer num passo, recusas e saída suave, faixa travada), Abaixar sob a voz (chaves, pergunta das chaves de antes, sem voz) e o diálogo que lembra os números |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |

@@ -8,6 +8,9 @@ abaixar a música sob a voz.
   sem analisar de novo.
 - **Marcas e ímã**: as batidas aparecem no pé do clipe (`paint_beats`); o botão "Ímã nas batidas" (`snap_button`,
   preferência `PREF_SNAP`) junta as batidas das outras músicas aos pontos do ímã (`snap_points`).
+- **Correção à mão** (`MusicUI.set_fix`): "Andamento ×2", "Andamento ÷2", "Compasso de 3/4" e "Voltar ao detectado" no
+  menu do clipe. A correção fica na fonte (`timeline.Source.beats_fix`, salva no projeto) e `beats_for` devolve as
+  batidas já corrigidas (`batidas.corrected_by`): marcas, ímã, encaixe e a descrição usam a mesma. Um passo do desfazer.
 - **Encaixar** (`MusicUI.fit`): `musica.fit_plan` + `musica.apply_fit` num passo do desfazer.
 - **Abaixar sob a voz** (`MusicUI.duck`): diálogo (profundidade, descida, volta, faixas com voz; preferências
   `PREF_DUCK_*`), mixagem só das faixas de voz e detecção de fala numa thread de trabalho (chave `DUCK_KEY`), e as
@@ -24,7 +27,7 @@ import shutil
 import tempfile
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QActionGroup, QColor, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel,
                                QMenu, QMessageBox, QProgressBar, QToolButton, QVBoxLayout, QWidget)
 
@@ -73,7 +76,8 @@ class MusicUI(QObject):
         self.model = model
         self.auto_allowed = auto          # sem a janela (testes da linha do tempo sozinha) nada é analisado sozinho
         self.canvas = canvas
-        self.beats: dict[str, batidas.Beats] = {}
+        self.beats: dict[str, batidas.Beats] = {}      # o resultado cru do detector, por arquivo
+        self._fixed: dict[str, tuple] = {}             # arquivo -> (cru, correção, batidas corrigidas)
         self.jobs: dict[str, jobs.Job] = {}
         self.duck_job: jobs.Job | None = None
         self._looked: set[str] = set()      # arquivos já procurados no cache (para não ler o disco a cada mudança)
@@ -103,7 +107,8 @@ class MusicUI(QObject):
     def auto(self) -> bool:
         return self.auto_allowed and str(prefs.settings().value(PREF_AUTO, "true")) != "false"
 
-    def beats_for(self, path: str | None) -> batidas.Beats | None:
+    def raw_beats(self, path: str | None) -> batidas.Beats | None:
+        """As batidas como o detector achou (do cache), sem a correção à mão."""
         if not path:
             return None
         hit = self.beats.get(path)
@@ -113,6 +118,47 @@ class MusicUI(QObject):
             if hit is not None:
                 self.beats[path] = hit
         return hit
+
+    def fix_of(self, path: str | None) -> dict:
+        """A correção à mão das batidas do arquivo na montagem aberta (`Source.beats_fix`; vazio = como detectado)."""
+        src = self.model.seq.sources.get(path) if path else None
+        return dict(src.beats_fix) if src is not None else {}
+
+    def beats_for(self, path: str | None) -> batidas.Beats | None:
+        """As batidas do arquivo já com a correção à mão: é o que marcas, ímã, encaixe e descrição usam."""
+        raw = self.raw_beats(path)
+        if raw is None:
+            return None
+        fix = self.fix_of(path)
+        hit = self._fixed.get(path)
+        if hit is None or hit[0] is not raw or hit[1] != fix:
+            hit = self._fixed[path] = (raw, fix, batidas.corrected_by(raw, fix))
+        return hit[2]
+
+    def set_fix(self, path: str, factor: float | None = None, bar: int | None = None, reset: bool = False) -> bool:
+        """Muda a correção das batidas do arquivo num passo do desfazer. `factor`: multiplica o andamento (2 ou 0.5; de
+        volta ao detectado ao passar por 1); `bar`: batidas por compasso (3 ou 4); `reset`: volta ao detectado."""
+        raw = self.raw_beats(path)
+        if raw is None or path not in self.model.seq.sources:
+            return False
+        fix = self.fix_of(path)
+        cur = float(fix.get("fator", 1.0))
+        if reset:
+            fix = {}
+        else:
+            if factor is not None:
+                cur = min(2.0, max(0.5, cur * float(factor)))
+            meter = int(bar) if bar is not None else int(fix.get("compasso", batidas.BAR))
+            fix = {}
+            if cur != 1.0:
+                fix["fator"] = cur
+            if meter != batidas.BAR:
+                fix["compasso"] = meter
+        if not self.model.apply_edit(lambda s: setattr(s.sources[path], "beats_fix", dict(fix)), "values"):
+            return False
+        self.beatsChanged.emit()
+        self.message.emit(self.describe(self.beats_for(path)))
+        return True
 
     def busy(self, path: str | None = None) -> bool:
         if path is None:
@@ -172,8 +218,8 @@ class MusicUI(QObject):
             if auto:
                 self._refused.add(path)   # cancelada: não volta sozinha a cada mudança
             return
-        b: batidas.Beats = job.result
-        self.beats[path] = b
+        self.beats[path] = job.result
+        b = self.beats_for(path)
         self.beatsChanged.emit()
         self.message.emit(self.describe(b))
         if then is not None:
@@ -394,6 +440,8 @@ class MusicUI(QObject):
         text = _("{bpm} BPM, {n} batidas").format(bpm=fmt_decimal(b.bpm, 1), n=len(b.times))
         if not b.confident:
             return text + " — " + _("ritmo irregular: as batidas são só uma ajuda visual")
+        if b.bar == 3:
+            return text + " — " + _("compassos de 3 estimados")
         return text + " — " + _("compassos de 4 estimados")
 
 
@@ -407,7 +455,7 @@ def tick_marks(canvas, clip) -> list[tuple[float, bool]]:
         return []
     seq = canvas.model.seq
     px_beat = 60.0 / b.bpm * seq.fps / max(clip.speed, 1e-9) * canvas.ppf
-    if px_beat * batidas.BAR < TICK_MIN_PX:
+    if px_beat * b.bar < TICK_MIN_PX:
         return []
     only_downs = px_beat < TICK_MIN_PX
     return [(canvas.frame_to_x(f), down) for f, down in musica.beat_frames(seq, clip, b) if down or not only_downs]
@@ -487,6 +535,7 @@ def add_clip_actions(menu: QMenu, canvas, clip) -> None:
         act = menu.addAction(ctl.describe(b))
         act.setObjectName("beats_info")
         act.setEnabled(False)
+        add_fix_actions(menu, ctl, path)
     act = menu.addAction(_("Encaixar a música na duração do vídeo"), lambda: ctl.fit(clip.id))
     act.setObjectName("fit_music")
     act.setToolTip(_("Tira ou repete compassos inteiros no meio da música para ela acabar junto com a imagem (ou no "
@@ -497,6 +546,33 @@ def add_clip_actions(menu: QMenu, canvas, clip) -> None:
     act.setToolTip(_("Acha as falas nas outras faixas de som e abaixa o volume da música enquanto alguém fala, com "
                      "chaves de volume comuns (dá para ajustar depois)."))
     act.setEnabled(not ctl.busy_duck() and not canvas.model.seq.locked(clip))
+
+
+def add_fix_actions(menu: QMenu, ctl: MusicUI, path: str) -> None:
+    """A correção à mão das batidas (§46.5): o detector às vezes acha a metade ou o dobro do andamento e só conhece o
+    compasso de 4. "Andamento ×2" e "÷2" andam entre metade, detectado e dobro; o compasso é de 3 ou de 4 (marcado);
+    "Voltar ao detectado" só aparece com correção."""
+    fix = ctl.fix_of(path)
+    factor, meter = float(fix.get("fator", 1.0)), int(fix.get("compasso", batidas.BAR))
+    act = menu.addAction(_("Andamento ×2"), lambda: ctl.set_fix(path, factor=2.0))
+    act.setObjectName("beats_x2")
+    act.setToolTip(_("O detector achou a metade do andamento: põe uma batida no meio de cada par."))
+    act.setEnabled(factor < 2.0)
+    act = menu.addAction(_("Andamento ÷2"), lambda: ctl.set_fix(path, factor=0.5))
+    act.setObjectName("beats_div2")
+    act.setToolTip(_("O detector achou o dobro do andamento: fica uma batida sim, outra não."))
+    act.setEnabled(factor > 0.5)
+    group = QActionGroup(menu)
+    for n in (3, batidas.BAR):
+        act = menu.addAction(_("Compasso de {n}").format(n=n), lambda _checked=False, n=n: ctl.set_fix(path, bar=n))
+        act.setObjectName(f"beats_bar{n}")
+        act.setCheckable(True)
+        act.setChecked(meter == n)
+        group.addAction(act)
+        act.setToolTip(_("Quantas batidas tem cada compasso: os compassos são refeitos pelo acento."))
+    if fix:
+        act = menu.addAction(_("Voltar ao detectado"), lambda: ctl.set_fix(path, reset=True))
+        act.setObjectName("beats_reset")
 
 
 def install(win) -> MusicUI:
