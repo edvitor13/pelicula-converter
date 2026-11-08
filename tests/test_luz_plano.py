@@ -54,7 +54,7 @@ def _off(values, seq, index, fps=24.0):
 def test_clip_params_are_appended_neutral_and_sparse():
     keys = [p.key for s in editparams.VIDEO_SECTIONS if s.key == "luz_copiadora" for p in s.params]
     assert keys == list(luz_plano.KEYS)
-    assert editparams.VIDEO_SECTIONS[-1].key == "luz_copiadora", "seção nova no fim"
+    assert editparams.VIDEO_SECTIONS[editparams._N_BASE - 1].key == "luz_copiadora", "seção nova no fim (antes da 1.9)"
     d = editparams.VIDEO.defaults()
     assert all(d[k] == 0.0 for k in keys)
     assert set(keys) <= editparams.SPARSE_KEYS
