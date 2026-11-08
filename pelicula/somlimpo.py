@@ -480,7 +480,7 @@ def source_path(seq, clip) -> str | None:
 
 
 # ------------------------------------------------------------------ zumbido da rede elétrica
-HUM_Q = 15.0                # entalhe: ≥ 30 dB no centro e ±0,5 dB a ±10% da frequência
+HUM_Q = 20.0                # entalhe: ≥ 30 dB no centro, −0,3 dB a ±10% (−0,7 entre duas harmônicas)
 HUM_SEARCH = (50, 60)
 HUM_MIN_DB = 10.0           # o zumbido precisa sobressair isto da vizinhança do espectro
 HUM_MARGIN_DB = 6.0         # e isto da outra rede

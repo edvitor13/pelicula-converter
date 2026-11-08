@@ -124,3 +124,27 @@ def test_learn_noise_button_rules(tmp_path):
 def somlimpo_ui():
     from pelicula.ui import somlimpo_ui as mod
     return mod
+
+
+# ------------------------------------------------------------------ zumbido
+def test_detect_hum_button(tmp_path):
+    _ffmpeg()
+    t = np.arange(3 * R) / R
+    music = sum(0.05 * np.sin(2 * np.pi * f * t) for f in (220.0, 330.0, 440.0))
+    hum = sum(0.03 / k * np.sin(2 * np.pi * 60 * k * t) for k in (1, 2, 3))
+    m, c = _model(_wav(tmp_path / "zumbido.wav", music + hum))
+    ins = _inspector(m)
+    snd = ins.limpeza
+    row = snd.rows["zumbido"]
+    assert snd.btn_hum.parent() is row   # ao lado da caixa de escolha
+    job = snd.detect_hum()
+    _wait(job)
+    assert m.seq.find(c.id).values["zumbido"] == "60" and "60 Hz" in snd.status.text()
+    assert row.combo.currentData() == "60"
+    m.undo()
+    assert m.seq.find(c.id).values["zumbido"] == "nao" and not m.can_undo()
+    m2, c2 = _model(_wav(tmp_path / "musica.wav", music))
+    ins2 = _inspector(m2)
+    _wait(ins2.limpeza.detect_hum())
+    assert m2.seq.find(c2.id).values["zumbido"] == "nao" and not m2.can_undo()
+    assert "nada mudou" in ins2.limpeza.status.text()

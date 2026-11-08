@@ -242,3 +242,65 @@ def test_learn_range_rules(tmp_path):
     short = place(seq, a, 300, 4, 0.0)            # o clipe inteiro tem menos de 0,25 s
     with pytest.raises(somlimpo.CleanError, match="curto"):
         somlimpo.learn_range(seq, short, 301, None, None)
+
+
+# ------------------------------------------------------------------ zumbido da rede
+def hum(base, secs=3.0, harmonics=6, amp=0.05) -> np.ndarray:
+    t = np.arange(int(secs * R)) / R
+    return sum(amp / k * np.sin(2 * np.pi * base * k * t + k) for k in range(1, harmonics + 1))
+
+
+def music(secs=3.0) -> np.ndarray:
+    """Notas que não são harmônicas da rede (e duas a ±10% de 60 Hz, onde o entalhe já não pode mexer)."""
+    t = np.arange(int(secs * R)) / R
+    return sum(0.05 * np.sin(2 * np.pi * f * t) for f in (54.0, 66.0, 220.0, 330.0, 440.0, 587.3, 880.0))
+
+
+def test_hum_filters_text():
+    assert somlimpo.hum_filters({"zumbido": "nao", "zumbido_harmonicos": 6}) == []
+    got = somlimpo.hum_filters({"zumbido": "50", "zumbido_harmonicos": 3})
+    assert got == ["bandreject=f=50:width_type=q:width=20", "bandreject=f=100:width_type=q:width=20",
+                   "bandreject=f=150:width_type=q:width=20"]
+
+
+@pytest.mark.ffmpeg
+def test_hum_notches_remove_the_hum_and_keep_the_rest(ffmpeg_ok, tmp_path):
+    x = hum(60.0) + music()
+    src = write_wav16(tmp_path / "zumbido.wav", np.repeat(x[:, None], 2, axis=1))
+    seq = audio_seq([src], secs=3.0)
+    c = place(seq, src, 0, 72, 0.0)
+    before = mixed(seq, tmp_path / "antes.wav")[:, 0]
+    seq.set_values(c.id, {**c.values, "zumbido": "60", "zumbido_harmonicos": 6})
+    graph = audiomix.build_graph(seq)[1]
+    assert graph.index("bandreject=f=60:") < graph.index("atrim")
+    after = mixed(seq, tmp_path / "depois.wav")[:, 0]
+    for k in range(1, 7):
+        drop = 20 * math.log10(abs(tone_at(after, 1.0, 2.5, 60.0 * k)) / abs(tone_at(before, 1.0, 2.5, 60.0 * k)))
+        assert drop <= -30.0, (k, drop)
+    for f in (54.0, 66.0, 220.0, 330.0, 440.0, 587.3, 880.0):
+        kept = 20 * math.log10(abs(tone_at(after, 1.0, 2.5, f)) / abs(tone_at(before, 1.0, 2.5, f)))
+        assert abs(kept) < 1.0, (f, kept)
+
+
+def test_hum_detection():
+    rng = np.random.default_rng(5)
+    rate = somlimpo.HUM_RATE
+    t = np.arange(3 * rate) / rate
+    noise = rng.standard_normal(len(t)) * 0.02
+    voice = 0.1 * np.sin(2 * np.pi * 180 * t) * (1 + np.sin(2 * np.pi * 3 * t))   # uma "voz" que oscila
+    for base in (50, 60):
+        x = noise + voice + sum(0.02 / k * np.sin(2 * np.pi * base * k * t) for k in (1, 2, 3))
+        assert somlimpo.detect_hum(x, rate) == str(base)
+    m = sum(0.05 * np.sin(2 * np.pi * f * t) for f in (220.0, 330.0, 440.0, 523.3))
+    assert somlimpo.detect_hum(noise + m, rate) is None
+    assert somlimpo.detect_hum(noise, rate) is None
+    both = noise + sum(0.02 * np.sin(2 * np.pi * f * t) for f in (50, 100, 150, 60, 120, 180))
+    assert somlimpo.detect_hum(both, rate) is None   # os dois parecidos: não escolhe
+
+
+@pytest.mark.ffmpeg
+def test_hum_detection_reads_the_file(ffmpeg_ok, tmp_path):
+    src = write_wav16(tmp_path / "h.wav", np.repeat((hum(50.0) + music())[:, None], 2, axis=1))
+    assert somlimpo.detect_hum_file(src, 0.0, 3.0) == "50"
+    silent = write_wav16(tmp_path / "s.wav", np.zeros((R, 2)))
+    assert somlimpo.detect_hum_file(silent, 0.0, 1.0) is None

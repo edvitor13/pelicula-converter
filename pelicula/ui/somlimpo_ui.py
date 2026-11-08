@@ -2,7 +2,8 @@
 esquema.
 
 - Cartão "Limpar o som": botão "Aprender o ruído" (o trecho de `somlimpo.learn_range`, conferido numa thread de
-  trabalho pela fila de tarefas) e as linhas do trecho aprendido escondidas.
+  trabalho pela fila de tarefas) e as linhas do trecho aprendido escondidas; "Detectar" ao lado do zumbido
+  (`somlimpo.detect_hum_file` no trecho usado do clipe).
 
 Um gancho só: `ClipInspector` cria o `InspectorSound`. Tudo o que muda o clipe passa por
 `TimelineModel.set_clip_values` (um passo do desfazer); a mixagem lê os valores (`audiomix`, `somlimpo`).
@@ -21,6 +22,7 @@ from ..timeline import AUDIO
 from .job_bridge import bridge
 
 LEARN_KEY = "aprender_ruido"
+HUM_KEY = "detectar_zumbido"
 LEARN_STRENGTH = 0.8   # força posta ao aprender, se estava em 0 (para o resultado se ouvir logo)
 
 
@@ -65,6 +67,22 @@ class InspectorSound:
             hl.addWidget(self.learned, 1)
             body.insertWidget(at, line)
             body.insertWidget(at + 1, self.status)
+        self.hum_job: jobs.Job | None = None
+        self.btn_hum = QPushButton(_("Detectar"))
+        self.btn_hum.setObjectName("detect_hum")
+        self.btn_hum.setToolTip(_("Ouve o clipe e escolhe 50 Hz ou 60 Hz se um dos dois zumbidos se destaca."))
+        self.btn_hum.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_hum.clicked.connect(self.detect_hum)
+        hum = self.rows.get("zumbido")
+        if hum is not None:  # o botão ao lado da caixa de escolha
+            lay = hum.layout()
+            at = lay.indexOf(hum.combo)
+            lay.removeWidget(hum.combo)
+            line = QHBoxLayout()
+            line.setSpacing(6)
+            line.addWidget(hum.combo, 1)
+            line.addWidget(self.btn_hum)
+            lay.insertLayout(at, line)
         self.store.changed.connect(self._changed)
         self.model.selectionChanged.connect(lambda: self.say(""))
         self.update()
@@ -149,6 +167,47 @@ class InspectorSound:
             vals["ruido_perfil"] = LEARN_STRENGTH
         self.model.set_clip_values(cid, vals)
         self.say(_("Ruído aprendido de {ini} a {fim} do arquivo.").format(ini=_seconds(t0), fim=_seconds(t1)))
+
+    # -------------------------------------------------------- zumbido
+    def detect_hum(self) -> jobs.Job | None:
+        """Ouve o trecho usado do clipe (até `somlimpo.HUM_MAX_S`) numa thread de trabalho e escolhe 50 ou 60 Hz se um
+        dos dois se destaca; senão diz isso e não muda nada."""
+        c = self._clip()
+        if c is None or (self.hum_job is not None and self.hum_job.active):
+            return None
+        seq = self.model.seq
+        path = somlimpo.source_path(seq, c)
+        if path is None or not os.path.exists(path):
+            self.say(_("Este clipe não tem som de arquivo para ouvir."))
+            return None
+        t0, t1 = seq.source_range(c)
+        cid = c.id
+
+        def run(job: jobs.Job):
+            job.report(_("Procurando o zumbido…"))
+            return somlimpo.detect_hum_file(path, t0, t1, job.cancel_event)
+
+        self.btn_hum.setEnabled(False)
+        self.say(_("Procurando o zumbido…"))
+        self.hum_job = bridge().submit(run, _("Detectar o zumbido"), kind=jobs.CPU, key=HUM_KEY,
+                                       on_finished=lambda job: self._hum_found(job, cid))
+        return self.hum_job
+
+    def _hum_found(self, job: jobs.Job, cid: str) -> None:
+        if job is not self.hum_job:
+            return
+        self.btn_hum.setEnabled(True)
+        c = self.model.seq.find(cid)
+        if job.state == jobs.ERRO:
+            self.say(job.error)
+        elif job.state != jobs.CONCLUIDO or c is None:
+            self.say("")
+        elif job.result is None:
+            self.say(_("Nenhum zumbido de 50 ou 60 Hz se destaca neste clipe: nada mudou."))
+        else:
+            if c.values["zumbido"] != job.result:
+                self.model.set_clip_values(cid, {**c.values, "zumbido": job.result})
+            self.say(_("Zumbido de {hz} Hz encontrado: os entalhes já estão no clipe.").format(hz=job.result))
 
 
 __all__ = ["InspectorSound"]
