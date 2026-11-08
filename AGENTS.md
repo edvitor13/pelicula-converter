@@ -217,6 +217,9 @@ pelicula/
   mascaras_clipe.py          1.9 F2, máscara de forma do clipe (§50.2): efeito "mascara" (ordem 200; retângulo, elipse,
                              polígono em Clip.fx["mascara"]["pontos"]; recortar/desfocar/pixelar), GLSL mkMask + uniforms()
                              reutilizáveis (F4), referência numpy (distance, mask, outline)
+  tempo_imagem.py            1.9 F5, tempo da imagem (módulo Beta tempo_imagem, sem Qt, §53): deflicker (análise do arquivo em
+                             Source.analysis["deflicker"], média móvel, ganho na luz pela curva do clipe), ruído temporal
+                             (vizinhos n±1/n±2 pesados pela semelhança) e mistura de quadros na câmera lenta (vfx.WINDOWS)
   sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
                              "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
   sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
@@ -270,6 +273,8 @@ pelicula/
                              de ajuste, add_section/add_overlay/pick_point/clip_point/add_handles para as frentes),
                              alcas (View, Handles, HandleStack: alças arrastáveis na prévia, §50.4), recorte_ui (cartão
                              Recorte e conta-gotas do fundo), mascaras_ui (cartão Máscara, MaskHandles, polígono por cliques);
+                             1.9 F5, tempo_imagem_ui (cartão "Tempo da imagem" depois da Manivela; Analisar do deflicker
+                             na fila, estado da análise);
                              1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
                              de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
                              (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
@@ -545,6 +550,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_recorte.py` | recorte (1.9 F2, §50.1): ajustes neutros e esparsos, plano de passos; numpy do recorte e `picked_color`; na GPU == numpy (verde, azul, brilho), desligado bit a bit, faixa embaixo aparece, reflexo neutro no cinza, luz só perto da borda, encolher em px@1080, prévia == exportação, sem efeitos, gêmea aninhada |
 | `tests/test_mascaras_clipe.py` | máscara de forma (1.9 F2, §50.2): neutra, distâncias, coordenadas, pontos no JSON e formato 7, polígono sem pontos = nenhum passo; na GPU == numpy, passagem em px@1080 a 540 e 1080 linhas, inverter, desfocar/pixelar só dentro, recorte segue o enquadramento, recorte + máscara pela entrada "in", prévia == exportação com o centro animado |
 | `tests/test_recorte_ui.py` | casos de `recorte_ui_cases.py`: cartões Recorte e Máscara seguindo o módulo, conta-gotas num passo do desfazer (cinza recusado, Esc), alças da máscara (centro num passo, cantos, girar com Shift, chave no cursor com o centro animado), polígono por cliques e dois cliques, Esc cancela, alças fora do quadro renderizado |
+| `tests/test_tempo_imagem.py` | tempo da imagem (1.9, §53): ajustes neutros e esparsos, módulo, ordem, média móvel, análise (FFV1 sem perdas, carimbo), janela da mistura (0,5×, 1×, rápido com o obturador, fps menor, rampa, reverso = espelho, congelado, imagem), vizinhos só com o ruído; na GPU: cintilação some e a rampa de luz fica, cena parada e sem análise bit a bit, dividir/aparar, prévia == exportação, ruído cai, borda sem fantasma, `grab` == leitor, 0,5× == numpy e 1× bit a bit, reverso, gêmea aninhada |
+| `tests/test_tempo_imagem_ui.py` | casos de `tempo_imagem_ui_cases.py`: cartão seguindo o módulo e depois de Velocidade e Manivela, botão sem arquivo, Analisar na fila e fora do desfazer, aviso do arquivo mudado |
 | `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
 | `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
 | `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |

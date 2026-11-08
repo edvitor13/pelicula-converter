@@ -41,6 +41,7 @@ ADJUSTMENT_HIDE_CARDS = ("camera",)
 FRONT_UIS: tuple[str, ...] = (
     "recorte_ui",  # 1.9 F2: recorte por cor ou brilho (§50)
     "mascaras_ui",  # 1.9 F2: máscara de forma e as alças dela na prévia (§50)
+    "tempo_imagem_ui",  # 1.9 F5: cartão "Tempo da imagem" (deflicker: Analisar)
 )  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 

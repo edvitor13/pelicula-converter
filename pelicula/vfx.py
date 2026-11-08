@@ -105,6 +105,7 @@ EFFECTS: dict[str, Effect] = {}
 EFFECT_PACKAGES: tuple[str, ...] = (
     "recorte",  # 1.9 F2: recorte por cor ou brilho (§50)
     "mascaras_clipe",  # 1.9 F2: máscara de forma do clipe (§50)
+    "tempo_imagem",  # 1.9 F5: deflicker, ruído temporal, mistura de quadros (§53)
 )
 _LOADED = False
 _LOAD_LOCK = threading.Lock()

@@ -198,6 +198,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
             continue
         if key.startswith(("chave_", "mascara_")):  # 1.9: recorte e máscara (pilha `vfx`), tests/test_recorte.py e
             continue                                # tests/test_mascaras_clipe.py: cada ajuste só vale com o tipo
+        if key in {p.key for s in editparams.VIDEO_SECTIONS if s.key == "tempo_imagem" for p in s.params}:
+            continue  # 1.9: tempo da imagem (análise do arquivo, vizinhos, câmera lenta), tests/test_tempo_imagem.py
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)

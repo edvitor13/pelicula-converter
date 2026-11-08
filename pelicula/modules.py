@@ -141,6 +141,10 @@ MODULES: tuple[Module, ...] = (
            N_("Modo Edição: tirar o fundo verde, azul, de uma cor ou pelo brilho (com o reflexo do fundo e a luz dele "
               "na borda) e máscaras de forma no clipe (retângulo, elipse, polígono) para recortar, desfocar ou "
               "pixelar."), "efeitos_visuais", BETA),
+    Module("tempo_imagem", N_("Tempo da imagem"),
+           N_("Deflicker (tira a cintilação da luz), ruído temporal (pelos quadros vizinhos) e câmera lenta por "
+              "mistura de quadros, por clipe no modo Edição. Não vai para o plugin do DaVinci."), "efeitos_visuais",
+           BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
