@@ -49,6 +49,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
 42. [Look próprio de cada sequência](#42-look-próprio-de-cada-sequência)
+44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
 
 ---
 
@@ -4388,3 +4389,116 @@ estado). A chave do look é o id da sequência ou `""` quando ela está sozinha.
   próprio mudou), `choose`. Lugares: a linha "Look de …" no topo do painel de ajustes (só com mais de uma sequência ou com a
   aberta tendo look próprio), o submenu *Look de película* da aba (`SequenceTabs.lookRequested`, `TabInfo.own_look`, o ponto
   na aba) e o da sequência na Mídia (`add_menu`). O aviso de `nested_note` aparece no painel do clipe e ao inserir.
+
+## 44. Limpeza do som e sincronia
+
+1.8 (#39, som). Ajustes de clipe de som novos, todos com padrão neutro e em `editparams.SPARSE_KEYS`: no padrão o grafo do
+ffmpeg é o de antes, byte a byte (`tests/test_audio_fades.py`), e o JSON também. Nenhuma estrutura nova no JSON: o
+formato 6 vem sozinho pelo `ajustes_clipe_1_8`. Código em `pelicula/somlimpo.py` (limpeza, sem Qt), `pelicula/sincronia.py`
+(sincronia, sem Qt) e `pelicula/ui/somlimpo_ui.py`; nos arquivos de antes, só ganchos de uma linha.
+
+| Chave | Seção | Padrão | O que faz |
+|---|---|---|---|
+| `passa_alta` | eq | 0 (desligado) | `highpass=f=…:poles=2` (Hz, até 500) |
+| `passa_baixa` | eq | 0 (desligado) | `lowpass=f=…:poles=2` (Hz, até 20000) |
+| `nivelar_voz` | eq | 0 | `speechnorm` pela força (44.4) |
+| `ruido_perfil` | limpar | 0 | força da redução pelo ruído aprendido (44.1) |
+| `ruido_ini`, `ruido_fim` | limpar | 0, 0 (nada aprendido) | o trecho do arquivo (s) com o ruído; linhas escondidas, gravadas pelo botão |
+| `zumbido` | limpar | `"nao"` (`"50"`, `"60"`) | entalhes da rede elétrica (44.2) |
+| `zumbido_harmonicos` | limpar | 6 (1–10) | quantos entalhes (f, 2f, …) |
+
+A seção `"limpar"` vem no fim de `AUDIO_SECTIONS` (o inspetor a mostra depois do "eq" por `DISPLAY_AFTER`); os três do
+"eq" entram no fim da lista dele. **Lineares** (filtros fixos, LTI: valem igual sobre a soma de dois sons): `passa_alta`,
+`passa_baixa`, `zumbido`/`zumbido_harmonicos`. **Não lineares**: `ruido_perfil` (+ o trecho) e `nivelar_voz`.
+
+**Ordem na cadeia do clipe** (`audiomix._chain_tail`, ganchos `somlimpo.hum_filters` e `somlimpo.after_eq_filters`):
+entrada limpa (44.1) → `aresample`/`atempo` → volume → **entalhes** → voz → graves/médios/agudos → `afftdn` → **cortes** →
+**`speechnorm`** → `loudnorm` → balanço → fades → recorte → atraso.
+
+### 44.1 Ruído aprendido
+
+- **O que o clipe guarda**: só o trecho (`ruido_ini`/`ruido_fim`, segundos da fonte) e a força. O perfil é refeito do arquivo na
+  hora de mixar (`profile_for`, em memória por carimbo do arquivo + trecho, 16 entradas): JSON pequeno, render determinístico.
+- **Perfil** (`learn_profile`): STFT Hann periódica de 2048 com salto de 512 a 48 kHz sobre o trecho estéreo (lido pelo ffmpeg,
+  até `MAX_PROFILE_S` = 30 s); magnitude média e desvio por faixa, com os dois canais juntos (um perfil só, o mesmo ganho nos dois
+  canais: a imagem estéreo não muda). Potência do ruído = média² + desvio². Recusa (`CleanError`) trecho com menos de 0,25 s ou
+  RMS abaixo de −70 dBFS.
+- **Redução** (`_block`): potência dos dois canais suavizada em frequência e tempo (núcleo [1 2 3 2 1]/9), ganho
+  √max(0, 1 − 2·ruído/potência) (subtração espectral com sobra `BETA` = 2), piso de 10^(−força·30/20) (0% = ganho 1 em tudo, 100%
+  tira até 30 dB do que é só ruído; a força é em dB, então 50% tira cerca de 15), ganho suavizado de novo ([1 2 1]/4 nos dois
+  eixos: sem "ruído musical"). Medido: ruído branco e rosa −26 a −28 dB, tom de 1 kHz a ±0,01 dB.
+- **Blocos sem emenda**: o quadro k cobre [(k − 3)·512, (k + 1)·512); toda amostra recebe exatamente 4 quadros e a soma dos
+  quadrados da janela é 1,5 (reconstrução exata). O ganho de um quadro só usa ±3 quadros vizinhos (filtros simétricos, sem estado),
+  então um bloco de saída [o0, o1) lê só a entrada de que precisa (com zeros fora do arquivo) e o resultado é **igual** ao de
+  processar tudo de uma vez (diferença medida: 0). Memória: um bloco de 2¹⁸ amostras (~5,5 s).
+- **Na mixagem** (`clean_input`, gancho no fim do laço de `audiomix.segments`): como o WAV de uma sequência aninhada (41.5), a
+  entrada do clipe vira um WAV float32 limpo de [lo, hi] do arquivo — o trecho usado (`src_in`…`src_in + src_len`, ou os extremos
+  dos pedaços numa rampa/reverso) com `MARGIN_S` = 1 s de sobra e as pontas na grade de 0,5 s. `seg["path"]` aponta para ele, e
+  `src_in` (numa rampa/reverso, os pedaços e `length`) passa a contar do começo dele; `seg["clean"]` leva o pedido. O nome do WAV
+  sai de (`VERSION`, carimbo do arquivo, lo, hi, trecho do ruído, força); o carimbo de um WAV de sequência aninhada é só o
+  caminho (o conteúdo já está no nome e a data muda a cada uso).
+- **Quando é gravado** (`render_inputs`): no fim de `audiomix._render_nested` (depois dos WAVs aninhados, que podem ser a fonte),
+  na mesma thread que mixa (a prévia espera como espera qualquer mixagem). O ffmpeg decodifica [lo, hi] num WAV temporário, o
+  `denoise_stream` grava o limpo num parcial e `os.replace` troca no fim. Cache em `<temporário>/pelicula_som_limpo`, limitado a
+  2 GiB pelos mais antigos (`_prune`, como `_prune_nested`). Um trecho do ruído que ficou mudo (o arquivo mudou) não limpa: o WAV
+  sai igual à fonte. Cancelar não deixa parcial.
+- **"Aprender o ruído"** (`somlimpo.learn_range` + `InspectorSound.learn`): entrada e saída da janela (`inp`/`outp`) se as duas caem
+  dentro do clipe; senão 1 s a partir do cursor, recuado se o clipe acaba antes. Converte quadros em segundos do arquivo por
+  `Sequence.src_time`. O som do trecho é conferido na fila de tarefas (`profile_for`); no fim, `ruido_ini`/`ruido_fim` (e
+  `ruido_perfil` = 0,8 se estava em 0) num passo do desfazer.
+
+### 44.2 Zumbido da rede
+
+`hum_filters`: `bandreject=f=k·f0:width_type=q:width=20` para k = 1…`zumbido_harmonicos`, depois do volume e antes da voz e da
+equalização. Q = 20: no centro, mais de 30 dB (medido nas seis primeiras de 60 Hz); a ±10% de f, −0,3 dB (e −0,7 dB entre duas
+harmônicas vizinhas, o pior caso). **Detectar** (`detect_hum_file`): o trecho usado do clipe (até 20 s) em mono a 4 kHz, espectro
+médio de Welch (janelas de 4 s: 0,25 Hz), e para 50 e 60 Hz a média, nas três primeiras harmônicas (50/100/150 contra 60/120/180,
+que não se cruzam), do pico (±1 Hz) sobre a mediana da vizinhança (4 a 12 Hz de cada lado). Escolhe quando o melhor passa de
+10 dB e de 6 dB sobre o outro; senão não muda nada.
+
+### 44.3 Cortes e predefinições
+
+`highpass`/`lowpass` de 2 polos (Butterworth: −3 dB na frequência escolhida, 12 dB por oitava), depois do `afftdn`.
+Predefinições (`editparams.AUDIO_PRESETS`, ids estáveis, só acrescentar no fim): `voz_clara`, `voz_grave`, `telefone`
+(300–3400 Hz), `radio_antigo` (200–5000 Hz), `menos_vento`, `musica_cheia`, `podcast`, `sem_ajustes`.
+`apply_audio_preset` volta as chaves de `AUDIO_PRESET_KEYS` (graves, médios, agudos, voz, os dois cortes, nivelar a voz) ao padrão
+e aplica as da predefinição; nenhuma outra chave muda. A interface chama `set_clip_values` (um passo do desfazer).
+
+### 44.4 Nivelar a voz
+
+`speechnorm` do ffmpeg (existe desde o 4.4; está nos builds da gyan.dev e da BtbN), depois da equalização e antes do `loudnorm`.
+Força a: pico alvo `p` = 0,9; expansão máxima `e` = 10^(1,5·a) (até +30 dB, proporcional em dB); compressão `c` = 1 + a (até
+−6 dB); subida e descida `r` = `f` = 0,001 + 0,199·a por meio ciclo (0,001 é o padrão do ffmpeg; com menos de ~0,1 o ganho não
+chega ao alvo em poucas sílabas); limiar `t` = 0,01 (−40 dBFS: meio ciclo abaixo disso não é fala e as pausas não sobem);
+`l=1` (canais ligados). Medido numa "fala" sintética com uma metade 20 dB abaixo da outra: 100% → 0,9 dB de diferença; 50% →
+entre 3 e 20 dB.
+
+### 44.5 Sincronizar pelo som (`sincronia.py`)
+
+- **Correlação** (`find_lag`): `a` (o trecho usado da referência) contra `b` (o outro, numa janela de ±`SEARCH_S` = 10 s em volta
+  de onde está; até `MAX_SEARCH_S` = 60 s), em mono a 8 kHz com pré-ênfase. Correlação por FFT de `a` contra `b` com `len(a)`
+  zeros dos dois lados (atrasos negativos também), normalizada pela energia de `a` e pela de `b` sob cada atraso (soma
+  acumulada). Pico do módulo (polaridade invertida serve), parábola para a fração de amostra. Confiança: pico ÷ segundo pico
+  (fora de ±50 ms) ≥ 1,5 e pico ÷ RMS da correlação ≥ 8. Medido: atraso de 1,23 s achado a menos de 1 ms, também com −6 dB e
+  ruído por cima; som sem relação, silêncio e ritmo repetido recusados.
+- **O trecho lido**: só onde os dois podem se sobrepor — a parte do clipe de referência dentro de [início do outro − janela, fim
+  do outro + janela], até `MAX_ANALYSIS_S` = 120 s; `b` é esse trecho ± a janela no tempo atual do outro, com zeros fora do
+  arquivo. Atraso L (amostras) → o outro anda `janela − L/8000` s.
+- **Plano** (`plan`, sem mexer na sequência): `candidates` (o clipe de som de cada grupo ligado escolhido), `reference_of` (o som
+  do grupo com vídeo na faixa de vídeo de menor índice; sem vídeo, o primeiro escolhido). Cada outro grupo: atraso arredondado
+  para quadros (`Move.frames`) e a sobra (`Move.residue`, no máximo meio quadro). Recusados (`Plan.refused`, com o motivo):
+  velocidade ≠ 1×, rampa, reverso ou quadro congelado (na referência ou no outro), longe demais, sem confiança.
+- **Interface** (`somlimpo_ui.SyncController`, `MainWindow.som_sync`): "Sincronizar pelo som" no menu do botão direito do clipe
+  (`add_clip_actions`, com 2 ou mais grupos com som escolhidos). O plano roda na fila de tarefas numa cópia da sequência, com
+  progresso e Cancelar na barra de status (`bar`); no fim, `TimelineModel.move_groups([(clipe, quadros)])` move cada grupo pelo
+  seu deslocamento (`Sequence.move_many`, que leva os ligados e cobre o que estiver no destino, como arrastar) num passo só do
+  desfazer, e a mensagem diz quantos andaram, a maior sobra em ms e quem ficou (e por quê).
+
+### 44.6 Testes
+
+`tests/test_somlimpo.py` (numpy e ffmpeg: ruído branco e rosa, tom, blocos = de uma vez, 0% = entrada, perfil recusado, JSON
+esparso, grafo igual no padrão, entrada trocada e deslocada, mixagem limpa no mesmo instante (fase do tom), cache, cancelar,
+trecho do botão, entalhes, detecção, predefinições, resposta dos cortes, nivelar), `tests/test_sincronia.py` (atraso, fração de
+amostra, atraso negativo, recusas, referência, plano com arquivos) e `tests/test_somlimpo_ui.py` (casos de
+`somlimpo_ui_cases.py`: Aprender o ruído com as regras do trecho e um passo do desfazer, Detectar, Predefinições,
+Sincronizar pelo som pelo menu com desfazer, recusa e cancelar).

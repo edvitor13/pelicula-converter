@@ -186,6 +186,11 @@ pelicula/
                              (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe);
                              sequência aninhada (1.7): WAV da mixagem de dentro como entrada do clipe
                              (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5)
+  somlimpo.py                1.8, limpeza do som do clipe (sem Qt, §44): ruído aprendido (perfil do trecho, STFT em blocos
+                             sem emenda, entrada limpa em cache: clean_input/render_inputs), zumbido (entalhes, detect_hum),
+                             cortes e nivelar a voz (after_eq_filters), learn_range do botão
+  sincronia.py               1.8, sincronizar pelo som (sem Qt, §44.5): find_lag (correlação normalizada por FFT, confiança),
+                             candidates/reference_of, plan → Move/Plan
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -209,6 +214,8 @@ pelicula/
                              seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
                              1.8, look próprio de cada sequência (§42): look_sequencia_ui (SeqLookUI: o look em edição
                              acompanha a aba, a escolha no painel/aba/Mídia, alvos da exportação, aviso no clipe);
+                             1.8, limpeza do som (§44): somlimpo_ui (InspectorSound: Aprender o ruído, Detectar o zumbido,
+                             Predefinições do "eq"; SyncController: Sincronizar pelo som no menu do clipe, barra de status);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -459,6 +466,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_alfa_titulos_ui.py` | casos de `alfa_titulos_ui_cases.py`: imagens numeradas, Fundo transparente, janela Exportar com alfa, xadrez, menu Novo, campos do gerador e editor de títulos com desfazer, aviso de caractere, Sobre, módulo desligado |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
+| `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
+| `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
+| `tests/test_somlimpo_ui.py` | casos de `somlimpo_ui_cases.py`: Aprender o ruído (regras do trecho, recusas, um passo do desfazer), Detectar, Predefinições, Sincronizar pelo som pelo menu (move e desfaz num passo, recusa, cancelar) |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |

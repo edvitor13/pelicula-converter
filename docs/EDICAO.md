@@ -509,6 +509,38 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 **Sequência…**; projetos novos começam ligados e projetos das versões anteriores continuam como eram
 (desligados), para soar exatamente igual.
 
+### Limpar o som, cortes e predefinições (1.8)
+
+No cartão **Equalizar e limpar**:
+
+| Ajuste | O que faz |
+|---|---|
+| **Predefinições** | Botão no alto do cartão: *Voz mais clara*, *Voz grave e próxima*, *Telefone*, *Rádio antigo*, *Menos vento e estrondo*, *Música mais cheia*, *Podcast* e *Sem ajustes* (volta ao neutro). Mexem só em graves, médios, agudos, realçar voz, nos dois cortes e em nivelar a voz; o resto do clipe fica como está. Ctrl+Z desfaz de uma vez |
+| **Cortar graves abaixo de** | Tira o som abaixo da frequência (vento, estrondo, ronco de motor); 0 = não corta |
+| **Cortar agudos acima de** | Tira o som acima da frequência (chiado, sibilância); 0 = não corta |
+| **Nivelar a voz** | Sobe as falas baixas e segura as altas, sílaba a sílaba, para a voz ficar num volume parecido (as pausas não sobem). Com 100%, uma fala 20 dB mais baixa chega perto da alta |
+
+No cartão **Limpar o som** (logo depois):
+
+| Ajuste | O que faz |
+|---|---|
+| **Aprender o ruído** | Ouve um trecho **só com o ruído** (ar-condicionado, chiado, vento constante): a entrada e a saída marcadas (I / O) se as duas estão dentro do clipe; senão 1 s a partir do cursor. O trecho precisa ter pelo menos 0,25 s e algum som. O clipe guarda só o trecho (não o som), e a força vai para 80% se estava em 0 |
+| **Redução pelo ruído aprendido** | Quanto tirar do ruído aprendido, em todo o clipe: 100% tira até 30 dB do que é só ruído e deixa a voz e a música no volume delas. A limpeza vem antes de todos os outros ajustes do clipe |
+| **Zumbido da rede elétrica** | Tira o zumbido grave de 60 Hz (Brasil e Américas) ou 50 Hz (Europa) e as harmônicas (*Harmônicas do zumbido*, nos avançados: 6 = até 360 Hz). **Detectar** ouve o clipe e escolhe sozinho; se nenhum dos dois se destaca, diz isso e não muda nada |
+
+A primeira prévia depois de aprender o ruído demora um pouco mais (o som limpo é preparado e guardado); as
+próximas usam o que ficou guardado.
+
+### Sincronizar pelo som (1.8)
+
+Para juntar o som de um gravador com o da câmera (ou duas câmeras): escolha os clipes (dois ou mais com som),
+botão direito → **Sincronizar pelo som**. A referência é o som ligado ao vídeo da faixa de vídeo mais baixa (V1
+antes de V2); sem vídeo na escolha, o primeiro escolhido. Os outros (com os ligados) andam até o som bater,
+procurando até 10 s para cada lado de onde estão, tudo num passo do Ctrl+Z. O movimento é em quadros inteiros;
+a barra de status diz quanto sobrou (no máximo meio quadro). Um clipe cujo som não bate com o da referência (ou
+com velocidade, rampa, reverso ou quadro congelado) fica onde estava, e a mensagem diz qual. O progresso e o
+**Cancelar** aparecem na barra de status.
+
 ## 4. Sequência
 
 **Sequência…** abre o tamanho e o ritmo do vídeo montado:
