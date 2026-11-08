@@ -131,6 +131,7 @@ def test_add_to_timeline_places_a_sequence_as_a_linked_video_and_sound_clip(win,
     v = tone_video(tmp_path, "tom.mp4", "160x90", 24, 440)
     fresh(win)
     win.import_paths([v])
+    win.add_to_timeline(v)
     pump(lambda: win.cur is not None)
     accepting(monkeypatch)
     win.seqs_ui.new_sequence()
@@ -450,6 +451,7 @@ def test_the_waveform_of_a_nested_audio_clip_comes_from_the_wav_of_its_mix(win, 
     v = tone_video(tmp_path, "tom.mp4", "160x90", 24, 330, secs=2)
     fresh(win)
     win.import_paths([v])
+    win.add_to_timeline(v)
     pump(lambda: win.cur is not None)
     seq = win.model.seq
     win.model.select([c.id for c in seq.clips])

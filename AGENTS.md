@@ -207,6 +207,8 @@ pelicula/
                              sequencias_ui (SequencesUI: ponto único de ligação, estado de cada aba, Mídia, alvos da
                              exportação); 1.7, sequência dentro de sequência (§41.7): aninhar_ui (NestUI: Aninhar
                              seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
+                             1.8, look próprio de cada sequência (§42): look_sequencia_ui (SeqLookUI: o look em edição
+                             acompanha a aba, a escolha no painel/aba/Mídia, alvos da exportação, aviso no clipe);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -330,16 +332,17 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (5) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (6) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
     mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
-    algo da 1.6; 5 = usa algo da 1.7 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não
-    precisa de registro: o retrato do que a 1.6 lê (`pelicula/data/conhecidos_1_6.json`, `params.beyond_1_6`;
-    nunca editar, nem o da 1.5) faz o projeto ir para o 5 quando o valor sai do padrão ou é uma opção nova.
-    **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em
-    `timeline.FEATURES_V5` (da montagem) ou `project.FEATURES_V5` (do projeto) — os da 1.6 ficam em
-    `timeline.FEATURES_V4` e `project.FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
-    campo dele no JSON só quando usado. Assim um projeto que não usa nada novo continua abrindo nas versões
+    algo da 1.6; 5 = usa algo da 1.7; 6 = usa algo da 1.8 (listados em `"recursos"`). **Ajuste ou opção nova** (look
+    ou clipe) não precisa de registro: o retrato do que a 1.7 lê (`pelicula/data/conhecidos_1_7.json`,
+    `params.beyond_1_7`; nunca editar, nem os da 1.5 e da 1.6) faz o projeto ir para o 6 quando o valor sai do padrão
+    ou é uma opção nova. **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam:
+    **uma linha** em `timeline.FEATURES_V6` (da montagem) ou `project.FEATURES_V6` (do projeto) — os da 1.7 ficam em
+    `FEATURES_V5`, os da 1.6 em `FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
+    campo dele no JSON só quando usado. O look próprio de uma sequência (`Sequence.look`, 1.8) é o primeiro
+    registro de `timeline.FEATURES_V6` (`"look_proprio"`). Assim um projeto que não usa nada novo continua abrindo nas versões
     antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos
     puros de `project.MIGRATIONS` e `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 e pela 1.6 em
     `tests/data/projetos_1_4/` e `tests/data/projetos_1_6/`);
@@ -443,6 +446,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
 | `tests/test_aninhada.py` | imagem e som da sequência aninhada: a **gêmea** (a montagem e a mesma montagem num único clipe de sequência dão os mesmos bits, em 8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação, em dois níveis, e as mesmas amostras de som), `grab` × `SequenceReader`, fundo transparente × opaco, ajustes no clipe de sequência, janela útil, clipe log com o próprio perfil lá dentro, cache do quadro sem quadro velho, cache de WAVs, cancelar, `pelicula-cli exportar` |
 | `tests/test_aninhar.py` | aninhar e desaninhar: o que vai para onde (ids, faixas, volumes, mudo e solo, fundo, janela, magnética), recusas, legendas presas ao arquivo que atravessam a sequência, e na GPU/ffmpeg a prova de "nada muda" (quadros bit a bit em 8 e 16 bits, com e sem look, prévia reduzida, terminal; som de 24 bits; janela útil; faixas de cima; aninhar o que já tem clipe de sequência) |
+| `tests/test_look_sequencia.py` | look próprio de cada sequência sem Qt (1.8, #67): `SeqLook` e o JSON (cópia, duplicar, sozinha sem id, valores limpos), formato 6 só com look próprio e o JSON da 1.7 byte a byte sem ele, a 1.7 recusa, `Project.look_for`, o desfazer da montagem (look não é passo, fica o de agora, volta com a sequência apagada), a montagem de fora e o som não mudam, o terminal (`project_look`, `look_keys`, `info`, `lut --sequencia`) |
+| `tests/test_look_sequencia_ui.py` | casos de `look_sequencia_ui_cases.py`: look próprio começando igual ao do projeto, trocar de aba troca o look em edição, o desfazer de cada look e o da montagem, voltar ao do projeto (pergunta só se mudou), a linha do painel, os menus da aba e da Mídia, o ponto na aba, salvar e reabrir (com a de fora e a de dentro abertas; sozinha), exportação de cada sequência com o look dela e o aviso no clipe |
 | `tests/test_aninhar_ui.py` | casos de `aninhar_ui_cases.py`: pôr uma sequência da Mídia (e as recusas), dois cliques, Aninhar seleção (menu, atalho, um passo do desfazer), Desaninhar, desenho, forma de onda, inspetor e ferramentas que leem o arquivo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |

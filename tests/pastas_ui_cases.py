@@ -260,7 +260,7 @@ def test_sort_and_expanded_state():
     b.list.folder_item(f1).setExpanded(True)
     b.pastas.set_sort("nome")
     assert b.list.folder_item(f1).isExpanded()
-    assert m.seq.folders.has_folders() and m.seq.to_json()["formato"] == tl.FORMAT
+    assert m.seq.folders.has_folders() and m.seq.to_json()["formato"] == tl.FORMAT_17
 
 
 # ------------------------------------------------------------------ projeto e janela

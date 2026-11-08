@@ -66,6 +66,8 @@ class ExportTarget:
     subtitles: Any = None
     cues: list = field(default_factory=list)
     frame: int = 0                # o quadro da prévia do resultado
+    # 1.8 (#67): o look com que ela sai (valores, chaves, nome): o próprio dela ou o do projeto; None = o da janela
+    look: tuple[dict, dict, str] | None = None
 
 
 def safe_name(name: str) -> str:
@@ -490,6 +492,9 @@ class ExportDialog(QDialog):
         self.info, self.sequence = t.info, t.sequence
         self.chapters, self.subs_doc, self.subs_cues = list(t.chapters), t.subtitles, list(t.cues)
         self.in_out, self.frame_index = t.in_out, int(t.frame)
+        if t.look is not None:  # 1.8: cada sequência sai com o look dela
+            values, keys, name = t.look
+            self.values, self.look_keys, self.preset_name = dict(values), dict(keys), name
         self.title_label.setText(t.name)
         self.sub_label.setText(_("Look: {look}  •  {resumo}").format(look=self.preset_name, resumo=t.info.summary()))
         self._sync_seq_info()
@@ -574,10 +579,12 @@ class ExportDialog(QDialog):
                         or export.partial_clash(path, s, export.job_inputs(t.info, t.sequence))):
                     path = export.free_output(path, s, taken)
                 a, b = self._range_for(t)
+                values, keys, look_name = t.look if t.look is not None else (self.values, self.look_keys,
+                                                                             self.preset_name)
                 job = export.ExportJob(
-                    info=t.info, values=dict(self.values), settings=s, out_path=path, start_frame=a, end_frame=b,
-                    name=f"{Path(path).name}  •  {self.preset_name}", sequence=t.sequence,
-                    chapters=self._chapters_of(t.chapters), look_keys=dict(self.look_keys),
+                    info=t.info, values=dict(values), settings=s, out_path=path, start_frame=a, end_frame=b,
+                    name=f"{Path(path).name}  •  {look_name}", sequence=t.sequence,
+                    chapters=self._chapters_of(t.chapters), look_keys=dict(keys),
                     **subs_mod.delivery_fields(self.subtitle_choice() if t.cues and t.subtitles is not None else "nao",
                                                t.subtitles, t.cues, self.container.currentData()))
             made[tid] = job

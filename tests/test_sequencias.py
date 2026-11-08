@@ -231,12 +231,12 @@ def test_copy_keeps_the_sisters_and_is_independent():
 def test_several_sequences_go_to_the_1_7_format():
     a, b = _pair()
     d = a.to_json()
-    assert d["formato"] == tl.FORMAT and "varias_sequencias" in a.features()
+    assert d["formato"] == tl.FORMAT_17 and "varias_sequencias" in a.features()
     assert "sequencia_aninhada" not in a.features()
     a.insert_media(_nested_source(a, b), 48)
     assert "sequencia_aninhada" in a.features() and "gerador" not in a.features()
     p = project.Project(sequence=a.to_json())
-    assert p.to_json()["formato"] == project.FORMAT and {"varias_sequencias", "sequencia_aninhada"} <= set(p.features())
+    assert p.to_json()["formato"] == project.FORMAT_17 and {"varias_sequencias", "sequencia_aninhada"} <= set(p.features())
 
 
 def test_a_feature_of_a_sister_also_sets_the_format():

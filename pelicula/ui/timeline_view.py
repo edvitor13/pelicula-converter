@@ -614,7 +614,11 @@ class TimelineCanvas(QWidget):
                 continue
             o_start, o_dur, o_track = d["orig"][cid]
             if d["mode"] == "move":
-                track = d["track"] if cid == d["clip"] else o_track
+                if d.get("multi"):
+                    # A seleção anda junta: as faixas do tipo arrastado mudam todas pela mesma conta.
+                    track = o_track + d["track"] - d["orig"][d["clip"]][2] if c.kind == d["kind"] else o_track
+                else:
+                    track = d["track"] if cid == d["clip"] else o_track
                 out[cid] = (max(0, o_start + d["delta"]), o_dur, c.kind, track)
             elif d["mode"] == "left":
                 ns = min(o_start + d["delta"], o_start + o_dur - 1)
@@ -896,11 +900,20 @@ class TimelineCanvas(QWidget):
         if self.seq.locked(clip):
             return
         group = [g.id for g in self.seq.group(clip) if not self.seq.locked(g)]
+        multi = False
+        if zone == "body" and clip.id in self.model.selection:
+            # Arrastar pelo corpo leva a seleção inteira (#63); aparar as bordas continua só no clipe clicado.
+            many = [c.id for c in self.seq.expand(self.model.selection) if not self.seq.locked(c)]
+            if set(many) != set(group):
+                group, multi = many, True
         self._drag = {"mode": "move" if zone == "body" else zone, "clip": clip.id, "group": group,
                       "press_x": pos.x(), "press_frame": self.x_to_frame(pos.x()), "delta": 0,
-                      "track": clip.track, "active": False,
+                      "track": clip.track, "active": False, "multi": multi, "kind": clip.kind,
                       "orig": {g: (self.seq.find(g).start, self.seq.find(g).dur, self.seq.find(g).track)
                                for g in group}}
+        if multi:
+            # Menor faixa do tipo do clipe arrastado: o bloco não desce abaixo da primeira faixa.
+            self._drag["low"] = min(self.seq.find(g).track for g in group if self.seq.find(g).kind == clip.kind)
 
     def _set_volume_from(self, x: float) -> None:
         d = self._drag
@@ -978,6 +991,8 @@ class TimelineCanvas(QWidget):
                 d["track"] = len(rows)  # acima da última faixa de vídeo: cria uma nova
             elif rows and clip.kind == AUDIO and pos.y() >= rows[-1][2] + rows[-1][3]:
                 d["track"] = len(rows)  # abaixo da última faixa de áudio: cria uma nova
+            if d.get("multi"):
+                d["track"] = max(d["track"], _o_track - d["low"])
         else:
             edge = o_start if mode == "left" else o_start + o_dur
             f, s = self.snap_frame(edge + raw, exclude, snap_on)
@@ -1020,7 +1035,11 @@ class TimelineCanvas(QWidget):
         o_start, o_dur, o_track = d["orig"][cid]
         mods = e.modifiers()
         solo = bool(mods & Qt.KeyboardModifier.AltModifier) or bool(d.get("solo"))
-        if mode == "move":
+        if mode == "move" and d.get("multi"):
+            if d["delta"] or d["track"] != o_track:
+                self.model.move_clips(d["group"], d["delta"], d["track"] - o_track, d["kind"],
+                                      insert=self.insert_for(mods))
+        elif mode == "move":
             if d["delta"] or d["track"] != o_track:
                 self.model.move_clip(cid, o_start + d["delta"], d["track"] if d["track"] != o_track else None,
                                      insert=self.insert_for(mods))

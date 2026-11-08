@@ -233,6 +233,18 @@ class MediaBin(QWidget):
         """Itens escolhidos, na ordem em que aparecem (as pastas escolhidas não contam)."""
         return [it.path for it in self.list.selected_media()]
 
+    def select_paths(self, paths: list[str]) -> None:
+        """Escolhe estes itens (os que acabaram de ser importados, #64) e rola até eles."""
+        items = [it for it in (self.list.media(p) for p in paths) if it is not None]
+        if not items:
+            return
+        self.list.setCurrentItem(items[0])  # antes: o item atual troca a seleção inteira por ele
+        self.list.clearSelection()
+        for it in items:
+            it.setSelected(True)
+        self.list.scrollToItem(items[-1])
+        self._sync()
+
     def place(self, insert: bool) -> None:
         """"Inserir no cursor" (`,`) / "Sobrescrever no cursor" (`.`) com os itens escolhidos."""
         paths = self.selected_paths()
@@ -524,8 +536,13 @@ class ClipInspector(QWidget):
         speed = "" if abs(c.speed - 1) < 1e-6 else "  •  " + f"{c.speed:g}".replace(".", decimal_sep()) + "×"
         n = len({(x.link or x.id) for x in self.model.selected_clips()})
         many = "" if n <= 1 else "  •  " + _("{n} selecionados").format(n=n)
+        note = ""
+        if nested:  # 1.8: a sequência de dentro com look próprio entra sem look
+            look = getattr(self.window(), "seq_look", None)
+            note = look.nested_note(c) if look is not None else ""
         self.info.setText(_("{tipo} • {duracao} • começa em {inicio}").format(
-            tipo=kind, duracao=timecode(c.dur, fps), inicio=timecode(c.start, fps)) + speed + many)
+            tipo=kind, duracao=timecode(c.dur, fps), inicio=timecode(c.start, fps)) + speed + many
+            + ("\n" + note if note else ""))
         if c.kind == VIDEO:
             self.btn_paste.setEnabled(self.model.has_clipboard())
 

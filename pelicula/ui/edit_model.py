@@ -144,11 +144,11 @@ class TimelineModel(QObject):
 
     def undo(self) -> None:
         self.commit()
-        self._restore(self.history.undo())
+        self._restore(self.history.undo(self.seq))
 
     def redo(self) -> None:
         self.commit()
-        self._restore(self.history.redo())
+        self._restore(self.history.redo(self.seq))
 
     def _done(self, kind: str = "structure") -> None:
         self._filter_selection(emit=True)
@@ -280,6 +280,18 @@ class TimelineModel(QObject):
             delta = (self.seq.move_insert if insert else self.seq.move)(cid, int(start), track)
         after = self.history._dump(self.seq) if self.seq.magnetic else (c.start, c.track)
         if after != before or delta:
+            self._done("structure")
+        return delta
+
+    def move_clips(self, ids: list[str], delta: int, track_delta: int = 0, kind: str = VIDEO,
+                   insert: bool = False) -> int:
+        """Move a seleção inteira (e os ligados) pelo mesmo deslocamento, num passo só de desfazer (#63).
+        `track_delta` muda a faixa dos clipes do tipo `kind` (o do clipe arrastado)."""
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            delta = (self.seq.move_many_insert if insert else self.seq.move_many)(ids, int(delta), int(track_delta),
+                                                                                  kind)
+        if self.history._dump(self.seq) != before:
             self._done("structure")
         return delta
 

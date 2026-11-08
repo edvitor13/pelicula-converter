@@ -579,7 +579,8 @@ def test_recover_an_edit_mode_montage_with_its_view(win):
     scene = win.file_info.path
     win.project_path = None
     win.set_mode("edicao")
-    win.import_paths([scene])  # a cena no fim: a montagem deixa de ser "o arquivo inteiro"
+    win.import_paths([scene])
+    win.add_to_timeline(scene)  # a cena no fim: a montagem deixa de ser "o arquivo inteiro"
     assert pump(lambda: len(win.model.seq.clips) >= 2, 10)
     clip = win.model.seq.clips[-1].id
     win.model.select([clip])

@@ -43,8 +43,11 @@ class View:
 
 
 def tab_tip(seq: timeline.Sequence) -> str:
-    """A dica da aba: o nome inteiro, o tamanho e os quadros por segundo."""
-    return f"{seq.display_name}\n{seq.width} × {seq.height} • {fps_label(seq.fps_str)}"
+    """A dica da aba: o nome inteiro, o tamanho, os quadros por segundo e (1.8) se o look é próprio."""
+    tip = f"{seq.display_name}\n{seq.width} × {seq.height} • {fps_label(seq.fps_str)}"
+    if seq.look is not None:
+        tip += "\n" + _("Look de película próprio")
+    return tip
 
 
 class SequencesUI(QObject):
@@ -62,6 +65,7 @@ class SequencesUI(QObject):
         self.tabs.settingsRequested.connect(self.settings)
         self.tabs.deleteRequested.connect(self.delete)
         self.tabs.moved.connect(self.move)
+        self.tabs.lookRequested.connect(lambda sid, own: self.win.seq_look.choose(sid, own))  # 1.8
         win.tl_editor.add_header(self.tabs)
         win.bin.extra_menu = self.bin_menu
         self._bin_seen: dict[str, tuple] = {}
@@ -78,7 +82,8 @@ class SequencesUI(QObject):
     def sync(self) -> None:
         """As abas como o modelo tem agora (nomes, ordem, a aberta)."""
         seq = self.model.seq
-        self.tabs.set_tabs([TabInfo(s.id, s.display_name, tab_tip(s)) for s in seq.family()], seq.id)
+        self.tabs.set_tabs([TabInfo(s.id, s.display_name, tab_tip(s), s.look is not None) for s in seq.family()],
+                           seq.id)
 
     def _adopt_lone(self) -> None:
         """A sequência de um projeto antigo ganha o conjunto e um id antes da primeira operação; o estado dela fica
@@ -130,6 +135,8 @@ class SequencesUI(QObject):
             menu.addAction(_("Sobrescrever no cursor (.)"), lambda: self.win.bin.place(False))
             menu.addSeparator()
             menu.addAction(_("Duplicar"), lambda: self.duplicate(sid)).setEnabled(one)
+            if one:
+                self.win.seq_look.add_menu(menu, sid)  # 1.8: look próprio ou o do projeto
             menu.addSeparator()
             menu.addAction(_("Apagar a sequência…"), lambda: self.delete(sid)).setEnabled(one)
             return True
@@ -325,7 +332,7 @@ class SequencesUI(QObject):
                     inout = (w.inp or 0, w.outp if w.outp is not None else w.info.frames - 1)
                 out.append(ExportTarget(s.id, s.display_name, w.info, w.src_seq.copy() if w.src_seq is not None
                                         else None, inout, w._export_chapters(), s.subtitles, w.subs_ui.ctl.cues(),
-                                        int(w.frame_idx)))
+                                        int(w.frame_idx), w.seq_look.export_look(s)))
                 continue
             if not s.clips:
                 continue
@@ -335,7 +342,7 @@ class SequencesUI(QObject):
             frame = min(max(0, view.frame if view is not None else 0), info.frames - 1)
             cues = [it.cue for it in subedit.items(c, c.subtitles)]
             out.append(ExportTarget(s.id, s.display_name, info, c, None, chapters.points(c) if c.markers else [],
-                                    c.subtitles, cues, frame))
+                                    c.subtitles, cues, frame, w.seq_look.export_look(s)))
         return out
 
     def problems(self, texts=()) -> None:

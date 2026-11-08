@@ -23,6 +23,9 @@
 - **Várias sequências** (1.7, `SequenceSet`): as sequências de um projeto dividem a mesma Mídia, e uma pode entrar em
   outra como clipe (fonte do tipo `SOURCE_SEQUENCE`, `Source.for_sequence`), sem ciclos. O JSON de uma sequência leva as
   irmãs junto (`to_json`/`from_json`, "sequencias"): nenhum caminho que grava ou copia uma sequência perde as outras.
+- **Look próprio** (1.8, `Sequence.look`, `SeqLook`): uma sequência pode ter o look de película dela; None = "Igual
+  ao do projeto". Só vale quando ela é a sequência aberta ou exportada: dentro de outra, ela entra sem look (a montagem
+  nunca aplica look). Não é passo do desfazer da montagem (`History` guarda e compara sem ele).
 
 Tudo aqui é determinístico e puro: o mesmo JSON gera sempre a mesma montagem, e a prévia e a
 exportação usam as mesmas funções (`src_frame`, `clips_at`, `layers_at`).
@@ -40,7 +43,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Callable, Iterable
 
-from . import editparams, keyframes, timemap
+from . import editparams, keyframes, params, timemap
 from .i18n import N_, _
 from .pastas import Folders
 
@@ -49,11 +52,13 @@ AUDIO = "audio"
 KINDS = (VIDEO, AUDIO)
 # Versão do bloco "edicao" dentro do projeto .plc: FORMAT é a maior que esta versão lê; uma montagem sem nada da
 # 1.5 continua sendo gravada com FORMAT_BASE (o bloco de antes), uma com algo da 1.5 e nada da 1.6 com FORMAT_15,
-# uma com algo da 1.6 e nada da 1.7 com FORMAT_16. Veja `features()` e `migrate()`.
-FORMAT = 4
+# uma com algo da 1.6 e nada da 1.7 com FORMAT_16, uma com algo da 1.7 e nada da 1.8 com FORMAT_17. Veja `features()` e
+# `migrate()`.
+FORMAT = 5
 FORMAT_BASE = 1
 FORMAT_15 = 2
 FORMAT_16 = 3
+FORMAT_17 = 4
 # Tipos de fonte (`Source.kind`, chave "tipo" no JSON). "arquivo" = arquivo de mídia (o de sempre); os outros
 # ids estão reservados para clipes sem arquivo (gerados: `sequence.RENDERERS`). Nunca renomear.
 # "sequencia" (1.7): outra sequência do projeto usada como clipe; não é gerada: `Source.is_nested`.
@@ -544,6 +549,36 @@ def aspect_size(width: int, height: int, ratio: float, aspect: float | None = No
 
 # ------------------------------------------------------------------ sequência
 @dataclass
+class SeqLook:
+    """1.8 (#67): o look de película próprio de uma sequência, no lugar do look do projeto. Os mesmos campos do
+    projeto (`Project.values`, `preset_id`, `look_keys`), com as chaves de animação em quadros desta sequência. No JSON
+    do bloco: `"look": {"preset", "valores", "chaves"?}`, só quando a sequência tem look próprio."""
+
+    values: dict[str, Any] = field(default_factory=params.defaults)
+    preset_id: str = ""
+    keys: dict[str, list] = field(default_factory=dict)  # `keyframes.to_json`; {} = look fixo
+
+    def to_json(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"preset": self.preset_id, "valores": copy.deepcopy(self.values)}
+        keys = keyframes.to_json(keyframes.clean_keys(params.FILM, self.keys))
+        if keys:
+            out["chaves"] = keys
+        return out
+
+    @classmethod
+    def from_json(cls, d: Any) -> "SeqLook | None":
+        """O look do bloco, ou None (sem look próprio, ou um campo que não é um dicionário)."""
+        if not isinstance(d, dict):
+            return None
+        vals = d.get("valores")
+        return cls(values=params.sanitize(vals if isinstance(vals, dict) else {}), preset_id=str(d.get("preset") or ""),
+                   keys=keyframes.to_json(keyframes.clean_keys(params.FILM, d.get("chaves"))))
+
+    def copy(self) -> "SeqLook":
+        return SeqLook(copy.deepcopy(self.values), self.preset_id, copy.deepcopy(self.keys))
+
+
+@dataclass
 class Sequence:
     width: int = 1920
     height: int = 1080
@@ -570,6 +605,9 @@ class Sequence:
     # (`SequenceSet`; None = sozinha, como sempre foi).
     id: str = ""
     siblings: "SequenceSet | None" = field(default=None, repr=False, compare=False)
+    # 1.8 (#67): o look de película próprio (`SeqLook`); None = "Igual ao do projeto". Só vale com esta sequência aberta
+    # ou exportada (dentro de outra ela entra sem look). "look" no JSON, só quando há.
+    look: "SeqLook | None" = None
 
     def __post_init__(self) -> None:
         fr = parse_fps(self.fps_str)
@@ -1486,6 +1524,63 @@ class Sequence:
         self.open_space(lo + delta, span, targets, exclude={c.id for c in group}, all_tracks=not self.magnet_active)
         return self.move(cid, clip.start + delta, track if track != clip.track else None)
 
+    # -------------------------------------------------------- mover vários clipes juntos (a seleção, #63)
+    def _many_for_edit(self, ids: Iterable[str]) -> list[Clip]:
+        """Os clipes pedidos mais os ligados, sem os de faixa travada."""
+        return [c for c in self.expand(ids) if not self.locked(c)]
+
+    def _track_shift(self, group: list[Clip], kind: str, track_delta: int) -> int:
+        """Quantas faixas os clipes do tipo `kind` do grupo sobem (+) ou descem (−) juntos: as distâncias entre eles
+        ficam, nenhum passa da primeira faixa e vídeo nunca vira áudio. Destino travado: nenhum muda de faixa."""
+        movers = [c for c in group if c.kind == kind]
+        if not track_delta or not movers:
+            return 0
+        shift = max(int(track_delta), -min(c.track for c in movers))
+        for c in movers:
+            tr = self.track(kind, c.track + shift)
+            if tr is not None and tr.locked:
+                return 0
+        if shift:
+            self.ensure_track(kind, max(c.track for c in movers) + shift)
+        return shift
+
+    def _shift_many(self, group: list[Clip], delta: int, kind: str, shift: int) -> None:
+        for c in group:
+            c.start += delta
+            if c.kind == kind:
+                c.track += shift
+        keep = {c.id for c in group}
+        for c in group:
+            self._clear_range(c.kind, c.track, c.start, c.end, keep)
+
+    def move_many(self, ids: Iterable[str], delta: int, track_delta: int = 0, kind: str = VIDEO) -> int:
+        """Move vários clipes (e os ligados de cada um) pelo mesmo deslocamento em quadros, cobrindo o que estiver no
+        destino, como `move`. `track_delta` muda a faixa só dos clipes do tipo `kind` (o do clipe arrastado; os
+        ligados do outro tipo ficam nas faixas deles, como em `move`). Devolve o deslocamento aplicado."""
+        group = self._many_for_edit(ids)
+        if not group:
+            return 0
+        delta = max(int(delta), -min(c.start for c in group))
+        self._shift_many(group, delta, kind, self._track_shift(group, kind, track_delta))
+        return delta
+
+    def move_many_insert(self, ids: Iterable[str], delta: int, track_delta: int = 0, kind: str = VIDEO) -> int:
+        """`move_many` inserindo: no destino abre um espaço só, do tamanho do bloco (do primeiro começo ao último
+        fim), como `move_insert` faz com um clipe e os ligados."""
+        group = self._many_for_edit(ids)
+        if not group:
+            return 0
+        delta = max(int(delta), -min(c.start for c in group))
+        shift = self._track_shift(group, kind, track_delta)
+        if not delta and not shift:
+            return 0
+        lo = min(c.start for c in group)
+        span = max(c.end for c in group) - lo
+        targets = {(c.kind, c.track + (shift if c.kind == kind else 0)) for c in group}
+        self.open_space(lo + delta, span, targets, exclude={c.id for c in group}, all_tracks=not self.magnet_active)
+        self._shift_many(group, delta, kind, shift)
+        return delta
+
     # -------------------------------------------------------- ferramentas de corte: aparar só um, Q/W
     def trim_start_only(self, cid: str, new_start: int) -> int:
         """Apara o começo só deste clipe, sem o ligado (Alt ao arrastar a borda): o som pode começar antes ou
@@ -2108,17 +2203,20 @@ class Sequence:
 
     def features(self) -> set[str]:
         """Recursos que esta montagem usa: os da 1.5 (`FEATURES`, o projeto vai para o formato 3), os da 1.6
-        (`FEATURES_V4`, formato 4) e os da 1.7 (`FEATURES_V5`, formato 5). Vale para o projeto: conta as irmãs."""
+        (`FEATURES_V4`, formato 4), os da 1.7 (`FEATURES_V5`, formato 5) e os da 1.8 (`FEATURES_V6`, formato 6). Vale
+        para o projeto: conta as irmãs."""
         seqs = self.family()
-        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5) for fid, check in reg.items()
+        return {fid for reg in (FEATURES, FEATURES_V4, FEATURES_V5, FEATURES_V6) for fid, check in reg.items()
                 if any(check(s) for s in seqs)}
 
     def block_format(self) -> int:
-        """O formato do bloco "edicao": FORMAT com algo da 1.7, FORMAT_16 com algo da 1.6, FORMAT_15 com algo da
-        1.5, FORMAT_BASE sem nada."""
+        """O formato do bloco "edicao": FORMAT com algo da 1.8, FORMAT_17 com algo da 1.7, FORMAT_16 com algo da 1.6,
+        FORMAT_15 com algo da 1.5, FORMAT_BASE sem nada."""
         feats = self.features()
-        if feats & set(FEATURES_V5):
+        if feats & set(FEATURES_V6):
             return FORMAT
+        if feats & set(FEATURES_V5):
+            return FORMAT_17
         if feats & set(FEATURES_V4):
             return FORMAT_16
         return FORMAT_15 if feats else FORMAT_BASE
@@ -2167,6 +2265,8 @@ class Sequence:
             out["janela"] = float(self.window)
         if folders and self.folders.has_folders():
             out["pastas"] = self._folders_json({c.src for s in self.family() for c in s.clips})
+        if self.look is not None:
+            out["look"] = self.look.to_json()
         return out
 
     def _folders_json(self, used: set[str]) -> dict[str, Any]:
@@ -2217,7 +2317,7 @@ class Sequence:
         seq = cls(width=w, height=h, fps_str=str(d.get("fps") or "24/1"), name=str(d.get("nome") or ""),
                   background=bg, tracks=tracks, micro_fade=d.get("micro_fades") is True,
                   magnetic=d.get("faixa_magnetica") is True, transparent=d.get("fundo_transparente") is True,
-                  window=d.get("janela", 0.0), id=str(d.get("id") or ""))
+                  window=d.get("janela", 0.0), id=str(d.get("id") or ""), look=SeqLook.from_json(d.get("look")))
         for sd in d.get("fontes") or []:
             if isinstance(sd, dict) and sd.get("caminho"):
                 src = Source.from_json(sd)
@@ -2469,6 +2569,22 @@ FEATURES_V5: dict[str, Callable[[Sequence], bool]] = {
 }
 
 
+def _clips_beyond_1_7(seq: Sequence) -> bool:
+    """Algum clipe usa um ajuste (ou opção, ou chave de animação) que a 1.7 não lê (`params.beyond_1_7`)."""
+    from .params import beyond_1_7, known_1_7
+    known = known_1_7()
+    return any(beyond_1_7(editparams.SCHEMAS[c.kind], known[c.kind], c.values, c.keys) for c in seq.clips)
+
+
+# Recursos da 1.8 numa montagem (mesma regra de `FEATURES`): o bloco vai para o formato 5 e o projeto para o 6, que a
+# 1.7 recusa. Ajuste novo de clipe não precisa de linha: "ajustes_clipe_1_8" pega tudo o que a 1.7 não lê.
+FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
+    "ajustes_clipe_1_8": _clips_beyond_1_7,
+    # look próprio da sequência (`Sequence.look`): a 1.7 abriria a sequência com o look do projeto, sem avisar
+    "look_proprio": lambda seq: seq.look is not None,
+}
+
+
 def _seq_v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
     """Bloco da 1.4 (formato 1) → formato 2: toda fonte é um arquivo ("tipo") e a transparência ("alfa") sai
     do formato de pixel que o ffprobe informou (a 1.4 não guardava; `media.pix_has_alpha`)."""
@@ -2500,9 +2616,16 @@ def _seq_v3_to_v4(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _seq_v4_to_v5(d: dict[str, Any]) -> dict[str, Any]:
+    """Bloco da 1.7 (formato 4) → formato 5: nada muda nos campos (a 1.8 só acrescenta)."""
+    out = dict(d)
+    out["formato"] = 5
+    return out
+
+
 # formato de origem → passo para o formato seguinte (puros: devolvem um dicionário novo).
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _seq_v1_to_v2, 2: _seq_v2_to_v3,
-                                                                     3: _seq_v3_to_v4}
+                                                                     3: _seq_v3_to_v4, 4: _seq_v4_to_v5}
 
 
 def migrate(d: dict[str, Any]) -> dict[str, Any]:
@@ -2524,7 +2647,12 @@ def migrate(d: dict[str, Any]) -> dict[str, Any]:
 class History:
     """Desfazer/refazer por instantâneos JSON (até `limit` passos). O instantâneo é do projeto inteiro, com as sequências
     irmãs: "Aninhar seleção" mexe em duas e é um passo só. Trocar de aba não é edição: ele sai sempre a partir da primeira
-    sequência; desfazer volta à sequência em que a mudança foi feita."""
+    sequência; desfazer volta à sequência em que a mudança foi feita.
+
+    1.8: o look próprio das sequências (`Sequence.look`) não é passo da montagem (ele tem o desfazer do look). Cada estado
+    guarda o JSON sem os looks (é o que se compara) e os looks à parte; gravar sem mudança na montagem só atualiza os looks
+    do estado atual. Desfazer e refazer mantêm o look de agora de cada sequência que continua existindo; uma sequência que
+    volta (apagada e desfeita) volta com o look que tinha."""
 
     def __init__(self, seq: Sequence, limit: int = 200):
         self.limit = limit
@@ -2533,12 +2661,31 @@ class History:
         self._pos = 0
 
     @staticmethod
-    def _dump(seq: Sequence) -> str:
-        return json.dumps(seq.family()[0].to_json(), sort_keys=True, ensure_ascii=False)
+    def _look_key(seq: Sequence) -> str:
+        return "" if len(seq.family()) < 2 else seq.id  # sozinha, a sequência não tem id no JSON
 
-    def _load(self, pos: int, prefer: str) -> Sequence:
-        """O estado `pos`, com `prefer` como a sequência atual (ou a do próprio estado, se ela ainda não existia)."""
-        seq = Sequence.from_json(json.loads(self._states[pos]))
+    @staticmethod
+    def _dump(seq: Sequence) -> tuple[str, dict[str, Any]]:
+        top = seq.family()[0].to_json()
+        blocks = [top, *[b for b in top.get("sequencias") or [] if isinstance(b, dict)]]
+        looks = {}
+        for b in blocks:
+            looks["" if len(blocks) < 2 else str(b.get("id") or "")] = b.pop("look", None)
+            b["formato"] = FORMAT  # o formato muda com o look; o resto do bloco já está no formato atual
+        return json.dumps(top, sort_keys=True, ensure_ascii=False), looks
+
+    def _load(self, pos: int, prefer: str, live: Sequence | None = None) -> Sequence:
+        """O estado `pos`, com `prefer` como a sequência atual (ou a do próprio estado, se ela ainda não existia) e, nas
+        sequências que `live` (a montagem de agora) ainda tem, o look de agora."""
+        text, looks = self._states[pos]
+        seq = Sequence.from_json(json.loads(text))
+        now = {self._look_key(s): s.look for s in live.family()} if live is not None else {}
+        for s in seq.family():
+            key = self._look_key(s)
+            if key in now:
+                s.look = now[key].copy() if now[key] is not None else None
+            else:
+                s.look = SeqLook.from_json(looks.get(key))
         for sid in (prefer, self._active[pos]):
             hit = next((s for s in seq.family() if sid and s.id == sid), None)
             if hit is not None:
@@ -2551,11 +2698,13 @@ class History:
         self._pos = 0
 
     def push(self, seq: Sequence) -> bool:
-        """Grava o estado atual se mudou. Devolve True se gravou."""
-        s = self._dump(seq)
-        if s == self._states[self._pos]:
+        """Grava o estado atual se a montagem mudou (sem mudança, só os looks do estado atual são atualizados). Devolve
+        True se gravou um passo."""
+        state = self._dump(seq)
+        if state[0] == self._states[self._pos][0]:
+            self._states[self._pos] = state
             return False
-        self._states = self._states[: self._pos + 1] + [s]
+        self._states = self._states[: self._pos + 1] + [state]
         self._active = self._active[: self._pos + 1] + [seq.id]
         if len(self._states) > self.limit:
             self._states.pop(0)
@@ -2569,14 +2718,15 @@ class History:
     def can_redo(self) -> bool:
         return self._pos < len(self._states) - 1
 
-    def undo(self) -> Sequence | None:
+    def undo(self, live: Sequence | None = None) -> Sequence | None:
+        """O estado anterior (None se não há). `live`: a montagem de agora, para os looks continuarem os de agora."""
         if not self.can_undo():
             return None
         self._pos -= 1
-        return self._load(self._pos, self._active[self._pos + 1])
+        return self._load(self._pos, self._active[self._pos + 1], live)
 
-    def redo(self) -> Sequence | None:
+    def redo(self, live: Sequence | None = None) -> Sequence | None:
         if not self.can_redo():
             return None
         self._pos += 1
-        return self._load(self._pos, self._active[self._pos])
+        return self._load(self._pos, self._active[self._pos], live)

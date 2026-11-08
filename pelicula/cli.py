@@ -207,13 +207,21 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
-def look_keys(proj, preset, sets) -> dict:
-    """Chaves de animação do look do projeto (`Project.look_keys`). Um --preset troca o look inteiro (sai sem
-    animação) e um --set fixa o ajuste dado (a chave dele sai)."""
-    if proj is None or preset or not proj.look_keys:
+def project_look(proj, sequence_name=None) -> tuple[dict, str, dict]:
+    """O look que vale para a sequência de `--sequencia` (sem ela, a que estava aberta ao salvar): o próprio dela
+    (1.8, `Sequence.look`) ou o do projeto (`Project.look_for`). Devolve (valores, preset, chaves de animação)."""
+    seq = pick_sequence(proj, sequence_name)[0] if proj.sequence else None
+    return proj.look_for(seq)
+
+
+def look_keys(proj, preset, sets, sequence_name=None) -> dict:
+    """Chaves de animação do look (`Project.look_keys`, ou as do look próprio da sequência de `--sequencia`). Um
+    --preset troca o look inteiro (sai sem animação) e um --set fixa o ajuste dado (a chave dele sai)."""
+    keys = project_look(proj, sequence_name)[2] if proj is not None else {}
+    if preset or not keys:
         return {}
     fixed = {item.split("=", 1)[0].strip() for item in sets or [] if "=" in item}
-    return {k: v for k, v in proj.look_keys.items() if k not in fixed}
+    return {k: v for k, v in keys.items() if k not in fixed}
 
 
 def sequence_list(seq) -> str:
@@ -287,15 +295,16 @@ def _source_and_values(path: str, preset, sets, sequence_name=None):
             proj = project.load(path)
         except project.ProjectError as exc:
             raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
-        values, pid = build_values(proj.values, preset, sets)
+        base, base_pid, _keys = project_look(proj, sequence_name)  # 1.8: o look da sequência escolhida
+        values, pid = build_values(base, preset, sets)
         seq = project_sequence(proj, sequence_name)
         if seq is not None:
             from . import sequence
             _prepare_text(seq)
-            return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
+            return sequence.media_info(seq).path, values, pid or base_pid, proj, seq
         if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
+        return proj.media_path, values, pid or base_pid, proj, alpha_sequence(proj.media_path)
     if not _exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
@@ -469,7 +478,8 @@ def cmd_export(a) -> int:
     if values.get("scan_on") or sub_fields["burn"]:
         _gui_app()  # texto da borda do scan e legendas gravadas: desenhados pelo Qt
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set),
+                           name=Path(out).name, sequence=seq,
+                           look_keys=look_keys(proj, a.preset, a.set, a.sequencia),
                            **sub_fields)
     if not a.json:
         w, h = export.output_size(info, s)
@@ -598,7 +608,8 @@ def cmd_frame(a) -> int:
     # "Fundo transparente" da montagem: PNG e TIFF guardam a transparência (como "Salvar quadro" na janela).
     alpha = seq is not None and seq.transparent and ext in export.STILL_ALPHA_ARGS
     recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
-                               keys=look_keys(proj, a.preset, a.set), burn=burn, alpha=alpha)
+                               keys=look_keys(proj, a.preset, a.set, a.sequencia), burn=burn,
+                               alpha=alpha)
     engine = Engine()
     try:
         if seq is not None:
@@ -621,9 +632,17 @@ def cmd_lut(a) -> int:
     from .engine import Engine
     if a.projeto:
         from . import project
-        p = project.load(a.projeto)
-        values, pid = build_values(p.values, a.preset, a.set)
+        try:
+            p = project.load(a.projeto)
+        except project.ProjectError as exc:
+            raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
+        if a.sequencia and not p.sequence:
+            raise CliError(_("Este projeto não tem sequências para escolher com --sequencia."))
+        base, _pid, _keys = project_look(p, a.sequencia)  # 1.8: o look da sequência (o próprio ou o do projeto)
+        values, pid = build_values(base, a.preset, a.set)
     else:
+        if a.sequencia:
+            raise CliError(_("--sequencia só vale com --projeto."))
         values, pid = build_values(None, a.preset, a.set)
     if values.get("scan_on"):
         _gui_app()
@@ -740,7 +759,9 @@ def project_info(path: str, as_json: bool) -> int:
         for s in top.family():
             rows.append({"nome": s.display_name, "id": s.id or None, "largura": s.width, "altura": s.height,
                          "fps": round(s.fps, 3), "quadros": s.duration, "duracao_s": round(s.duration / s.fps, 3),
-                         "clipes": len(s.clips), "aberta": s is top})
+                         "clipes": len(s.clips), "aberta": s is top,
+                         "look": "proprio" if s.look is not None else "projeto",
+                         "preset": s.look.preset_id if s.look is not None else proj.preset_id})
     data = {"projeto": str(Path(path).resolve()), "nome": proj.name, "formato": proj.to_json()["formato"],
             "modo": proj.mode, "arquivo": proj.media_path or None, "sequencias": rows}
     if as_json:
@@ -756,7 +777,9 @@ def project_info(path: str, as_json: bool) -> int:
         fps = f"{r['fps']:g}"
         print("  " + _("{nome}: {w}×{h} • {fps} quadros/s • {dur} s • clipes: {n}").format(
             nome=r["nome"], w=r["largura"], h=r["altura"], fps=fps, dur=f"{r['duracao_s']:g}", n=r["clipes"])
-            + (f" • id {r['id']}" if r["id"] and len(rows) > 1 else "") + mark)
+            + (f" • id {r['id']}" if r["id"] and len(rows) > 1 else "")
+            + (" • " + _("look próprio ({preset})").format(preset=r["preset"] or "-") if r["look"] == "proprio" else "")
+            + mark)
     if len(rows) > 1:
         print("  " + _("* a que estava aberta ao salvar (a padrão de --sequencia)"))
     return 0
@@ -994,6 +1017,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("lut", help=_("grava a cor de um look num LUT .cube"))
     p.add_argument("-o", "--saida", help=_("arquivo .cube"))
     p.add_argument("--projeto", help=_("usa os ajustes de um projeto .plc"))
+    p.add_argument("--sequencia", metavar=_("NOME"),
+                   help=_("com --projeto: o look desta sequência (o próprio dela ou o do projeto; padrão: a que estava "
+                          "aberta ao salvar)"))
     p.add_argument("--tamanho", type=int, default=33, choices=[17, 33, 65], help=_("pontos por eixo"))
     look_args(p)
     p.set_defaults(func=cmd_lut)

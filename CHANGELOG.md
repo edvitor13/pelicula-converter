@@ -7,6 +7,25 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Look de película de cada sequência** (#67): uma sequência pode ter o look dela (preset, ajustes e chaves de animação)
+  no lugar do look do projeto, que continua sendo o padrão (*Igual ao do projeto*). A escolha fica no painel de ajustes, no
+  botão direito da aba e na Mídia; trocar de aba troca o look em edição, cada um com o seu desfazer. Dentro de outra
+  sequência, a de look próprio entra sem look (nada de grão em dobro); exportada, sai com o dela. No terminal, `exportar`,
+  `quadro` e `lut --projeto` com `--sequencia` usam o look da sequência, e `info` mostra quais têm look próprio.
+
+### Mudado
+- **Importar só põe na Mídia** (#64): o botão *Importar…*, o **Ctrl+I** e os arquivos soltos na janela deixam os
+  arquivos escolhidos na Mídia, sem ir para a linha do tempo; use arrastar, **,** ou **.** para montar. Soltar direto na
+  linha do tempo continua inserindo no ponto do mouse.
+- Projeto com alguma sequência de look próprio é gravado no **formato 6**, que a 1.7 recusa com aviso. Sem isso, o arquivo
+  sai igual ao da 1.7.
+
+### Corrigido
+- **Arrastar vários clipes escolhidos** (#63) move a seleção inteira, com o mesmo deslocamento, as mesmas distâncias entre
+  faixas e um passo só do desfazer; antes só o clipe sob o mouse andava. No modo inserir, abre um espaço só, do tamanho do
+  bloco. Aparar as bordas continua só no clipe clicado.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

@@ -41,11 +41,13 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 
 ## 2. Montar
 
-1. Clique em **Importar…** (Ctrl+I): os arquivos entram na lista de mídia **e** vão para o fim da
-   montagem (músicas começam no início, na primeira faixa de áudio livre). Arrastar arquivos para a
-   lista de mídia só os guarda ali; arrastar direto para a linha do tempo põe no ponto e na faixa do mouse.
-2. Arraste um item da lista para a linha do tempo, na faixa e no ponto que quiser — ou dê **dois cliques**
-   nele (vai para o fim da montagem).
+1. Clique em **Importar…** (Ctrl+I) ou solte arquivos na janela: eles entram **só na lista de mídia**, já
+   escolhidos (desde a 1.8; antes iam também para o fim da montagem). Arrastar direto para a linha do tempo
+   põe no ponto e na faixa do mouse.
+2. Arraste um item da lista para a linha do tempo, na faixa e no ponto que quiser; use **Inserir no cursor**
+   (`,`) ou **Sobrescrever no cursor** (`.`) com os escolhidos; ou dê **dois cliques** nele (vai para o fim da
+   montagem; músicas começam no início, na primeira faixa de áudio livre). O primeiro vídeo que entra numa
+   montagem vazia define o tamanho e os quadros por segundo dela.
 3. Vídeos com som entram como **dois clipes ligados** (imagem em V1 e som em A1): mover, cortar ou apagar
    um mexe no outro junto. Para separar, use **Desligar** na barra da linha do tempo.
 
@@ -123,7 +125,7 @@ exportado não tem transparência (sai sempre com a cor por baixo), e sequência
 | Ação | Como |
 |---|---|
 | Selecionar | Clique no clipe (Ctrl+clique soma ou tira; Shift+clique soma) |
-| Mover | Arraste o meio do clipe (para os lados e para outra faixa do mesmo tipo) |
+| Mover | Arraste o meio do clipe (para os lados e para outra faixa do mesmo tipo). Com vários escolhidos, a seleção inteira anda junta, num passo só do desfazer; os de faixa travada ficam |
 | Aparar o começo / o fim | Arraste a borda esquerda / direita do clipe |
 | Cortar no cursor | **Dividir** (S): corta os selecionados — ou tudo sob o cursor, se nada estiver selecionado |
 | Cortar onde clicar | Ferramenta **Lâmina** (B) e clique no clipe; volte com **Selecionar** (V) |
@@ -557,6 +559,32 @@ faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são
 - **No terminal**, `pelicula-cli info projeto.plc` lista as sequências (a aberta ao salvar vem marcada) e `exportar` e
   `quadro` aceitam `--sequencia NOME` (o nome ou o id; sem ela vale a que estava aberta ao salvar). Um nome que não existe
   é um erro que lista os válidos.
+
+### Look de película de cada sequência (1.8)
+
+Cada sequência pode ter **o look de película dela**, para ter variações no mesmo projeto: um corte com outra película,
+outra cópia ou outro ajuste de grão, sem duplicar o projeto.
+
+- **O padrão é o look do projeto.** Toda sequência começa em **Igual ao do projeto** e sai exatamente como antes; mexer no
+  look com ela aberta muda o look do projeto, que vale para todas as que o seguem.
+- **Look próprio**: no painel de ajustes (modo Película), a linha **Look de "nome"** escolhe entre *Igual ao do projeto* e
+  *Próprio desta sequência*; o mesmo fica no **botão direito da aba** (*Look de película*) e no da sequência na **Mídia**. O
+  look próprio começa como cópia do look do projeto (a imagem não muda) e, daí em diante, presets, ajustes e chaves de
+  animação mexem só nele. A aba ganha um **ponto** na cor de destaque, e a dica dela diz *Look de película próprio*.
+- **Trocar de aba troca o look em edição**: o painel, o preset e o **Ctrl+Z** do look passam a ser os da sequência aberta
+  (cada look tem o seu desfazer). O Ctrl+Z da linha do tempo não mexe no look.
+- **Voltar a *Igual ao do projeto*** descarta o look próprio; se ele estava diferente do do projeto, o app pergunta antes.
+- **Dentro de outra sequência**, uma sequência com look próprio **entra sem look** e recebe o look da sequência de fora, uma
+  vez só: nada de grão, halação ou trepidação em dobro. O look próprio vale quando ela é **aberta** ou **exportada**. O painel
+  do clipe e a barra de status lembram isso.
+- **Exportar**: cada sequência sai com o look dela, também em *Pôr várias sequências na fila*; a linha *Look:* no topo da
+  janela acompanha a sequência escolhida. *Exportar a cor como LUT* e *Exportar preset* usam o look em edição (o da aba
+  aberta). O plugin do DaVinci Resolve não muda: ele instala os presets, não o look de um projeto.
+- **No terminal**, `exportar` e `quadro` com `--sequencia NOME` usam o look dela (o próprio ou o do projeto); `lut --projeto
+  projeto.plc --sequencia NOME` grava o LUT dela; `info` mostra *look próprio (preset)* nas que têm. `projeto --preset` e
+  `--set` mudam o look do projeto.
+- **Projeto**: com alguma sequência de look próprio, o projeto é gravado no formato 6, que a 1.7 recusa com aviso (ela
+  abriria tudo com o look do projeto, sem dizer). Sem nenhuma, o arquivo sai igual ao da 1.7.
 
 ### Sequências dentro de sequências (1.7)
 

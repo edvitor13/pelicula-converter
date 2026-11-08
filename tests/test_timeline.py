@@ -750,3 +750,54 @@ def test_magnetic_off_changes_nothing():
         pass
     seq.settle_main()
     assert seq.to_json() == before
+
+
+# ------------------------------------------------------------------ mover a seleção inteira (1.8, #63)
+def three_on_v1() -> tl.Sequence:
+    seq = tl.Sequence(1920, 1080, "24/1")
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        seq.insert_media(src(name))  # 0–240, 240–480, 480–720, cada um com o som ligado
+    return seq
+
+
+def test_move_many_shifts_every_clip_and_its_links_by_the_same_delta():
+    seq = three_on_v1()
+    a, b = video(seq)[0], video(seq)[1]
+    assert seq.move_many([a.id, b.id], 50) == 50  # c fica: o fim de b cobre os 50 primeiros quadros dele
+    assert spans(video(seq)) == spans(audio(seq)) == [(50, 290), (290, 530), (530, 720)]
+    assert seq.move_many([a.id, b.id], -500) == -50  # o bloco para no quadro 0 (o menor começo)
+
+
+def test_move_many_changes_tracks_of_the_dragged_kind_keeping_the_distances():
+    seq = three_on_v1()
+    seq.add_track(tl.VIDEO)
+    a, b = video(seq)[0], video(seq)[1]
+    seq.move_many([a.id], 0, 1, tl.VIDEO)
+    assert a.track == 1 and b.track == 0
+    seq.move_many([a.id, b.id], 0, 1, tl.VIDEO)  # V2 e V1 sobem juntos: V3 (nova) e V2
+    assert (a.track, b.track) == (2, 1) and len(seq.kind_tracks(tl.VIDEO)) == 3
+    assert {c.track for c in audio(seq)} == {0}  # o som ligado fica na faixa dele
+    seq.move_many([a.id, b.id], 0, -5, tl.VIDEO)  # não passa da primeira faixa: b volta para a V1, a vai para a V2
+    assert (a.track, b.track) == (1, 0)
+
+
+def test_move_many_skips_locked_tracks():
+    seq = three_on_v1()
+    seq.add_track(tl.VIDEO)
+    a, b = video(seq)[0], video(seq)[1]
+    seq.track(tl.VIDEO, 1).locked = True
+    seq.move_many([a.id, b.id], 0, 1, tl.VIDEO)  # destino travado: ninguém muda de faixa
+    assert (a.track, b.track) == (0, 0)
+    seq.track(tl.VIDEO, 1).locked = False
+    seq.move_many([a.id], 0, 1, tl.VIDEO)
+    seq.track(tl.VIDEO, 1).locked = True
+    seq.move_many([a.id, b.id], 30)  # a está numa faixa travada: só b (e o som de a, ligado e destravado) andam
+    assert a.start == 0 and b.start == 270 and audio(seq)[0].start == 30
+
+
+def test_move_many_insert_opens_one_space_the_size_of_the_block():
+    seq = three_on_v1()
+    a, b, c = video(seq)
+    seq.move_many_insert([a.id, b.id], 600)  # o bloco (480 quadros) entra no meio de c
+    assert spans(video(seq)) == spans(audio(seq)) == [(480, 600), (600, 840), (840, 1080), (1080, 1200)]
+    assert (a.start, b.start) == (600, 840)

@@ -48,6 +48,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
+42. [Look próprio de cada sequência](#42-look-próprio-de-cada-sequência)
 
 ---
 
@@ -4326,3 +4327,64 @@ motivo e o que fazer, na barra de status; nada muda, nem uma sequência nova) ou
   24 bits no meio), desaninhar volta **exato**. Faixas de cima sobre uma V1 de fora (dentro transparente): 1 passo em 8 bits e
   em 16 bits sem look; com look, até 15 passos de 16 bits. Janela útil de fora: sem clipe gerado, 1 passo em 8 bits (205 de 65535
   em 16); com o título, 4 a 9 passos em 8 bits (999 a 2240 em 16). Fade curto de 5 ms nas pontas de uma emenda sem corte.
+
+
+## 42. Look próprio de cada sequência
+
+Issue #67 (1.8). Uma sequência pode ter o look de película dela no lugar do look do projeto. Testes em
+`tests/test_look_sequencia.py` (modelo, formato, desfazer, terminal), `tests/look_sequencia_ui_cases.py` (janela) e, na
+GPU, `test_inner_own_look_is_ignored_inside_and_used_when_it_is_exported` em `tests/test_aninhada.py`.
+
+### 42.1 Modelo e formato
+
+- **`timeline.SeqLook`** (`values`, `preset_id`, `keys`): os mesmos campos do look do projeto (`Project.values`, `preset_id`,
+  `look_keys`), com as chaves de animação em quadros desta sequência. **`Sequence.look`**: `None` = "Igual ao do projeto".
+- **JSON**: `"look": {"preset", "valores", "chaves"?}` no bloco da sequência, só quando há (vale também para a sequência
+  sozinha, que não tem id). `from_json` passa os valores por `params.sanitize`. `copy()` e `SequenceSet.duplicate` levam o
+  look (saem do `_block_json`).
+- **Formato** (a base da 1.8, como a §36 foi a da 1.7): `timeline.FEATURES_V6["look_proprio"]` leva o bloco ao formato 5
+  (`timeline.FORMAT`; `FORMAT_17` = 4) e o projeto ao 6 (`project.FORMAT`; `FORMAT_17` = 5), que a 1.7 recusa. Passos
+  `_seq_v4_to_v5` e `_v5_to_v6`, sem mudança de campos. **Projeto sem look próprio grava o JSON da 1.7, byte a byte.**
+- **Retrato da 1.7** (`pelicula/data/conhecidos_1_7.json`, `params.known_1_7()`/`beyond_1_7`): gerado rodando o código da tag
+  `v1.7.0`. Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção sumiu e que ele contém o da
+  1.6. `project.FEATURES_V6["ajustes_1_8"]` e `timeline.FEATURES_V6["ajustes_clipe_1_8"]` pegam todo ajuste ou opção da 1.8
+  (look ou clipe) fora do padrão: ajuste novo não precisa de registro.
+- **Quando a 1.9 ganhar ajuste novo no look**, o retrato `known_1_8` precisa olhar também os valores e as chaves dos looks
+  próprios (hoje o formato 6 já vem do `"look_proprio"`).
+- **`Project.look_for(seq)`**: o look que vale para uma sequência (o dela, senão o do projeto), em cópias. É a única regra; a
+  janela tem a mesma em `SeqLookUI.look_of`.
+
+### 42.2 Imagem: o look entra uma vez só
+
+Decisão da #67: a sequência de dentro com look próprio **entra sem look**. Nada muda na montagem: `Engine.compose`,
+`_nested_texture`, `layers_at`, `mix_key` e `is_trivial` nunca leem `Sequence.look`; o look sai de `look.build_plan()` uma vez,
+com os valores da sequência aberta ou exportada. Por isso a gêmea da §41.5 continua bit a bit com o look de fora, e a
+sequência de dentro exportada sozinha sai igual à mesma montagem num projeto cujo look é o dela.
+
+### 42.3 Desfazer
+
+O look próprio **não é passo da montagem** (ele tem o desfazer do look, no `ParamStore`). `timeline.History` guarda cada estado
+como (JSON sem os looks e com `"formato"` fixo em `FORMAT`, looks por sequência à parte): é o JSON sem looks que se compara, e
+`push` sem mudança na montagem só atualiza os looks do estado atual. `undo(live)`/`redo(live)` recebem a montagem de agora e
+mantêm o look de agora de cada sequência que continua existindo; uma que volta (apagada e desfeita) volta com o look que
+tinha quando o estado foi deixado (todo comando do modelo chama `commit` antes de mexer, e é aí que o look de agora entra no
+estado). A chave do look é o id da sequência ou `""` quando ela está sozinha.
+
+### 42.4 Janela
+
+`ui/look_sequencia_ui.SeqLookUI` (`MainWindow.seq_look`; padrão de `sequencias_ui`):
+
+- **Um look em edição**: o `ParamStore` é o look da sequência aberta, se ela tem look próprio, senão o do projeto (`owner`:
+  a chave da sequência ou `None`). `sync()` (chamado em `_model_changed`, logo depois de `seqs_ui.model_changed`, e depois
+  de abrir um projeto) troca: guarda o que sai (o do projeto em `project`; o desfazer de cada look em `hist`) e carrega o
+  outro com `ParamStore.load(valores, chaves, desfazer)`, que não é passo. `reset()` em cada recomeço (arquivo aberto,
+  projeto novo ou aberto): o que está no `ParamStore` passa a ser o look do projeto.
+- **Escrita**: `write()` copia o `ParamStore` para `Sequence.look` a cada ajuste e preset (chamado de `_update_modified`).
+  Não emite `model.changed`: a prévia já se refaz pelo `ParamStore`.
+- **O que grava e exporta**: `_state`, `_make_project` e a sessão (`session_values`) usam `project_look()`; `_seq_json` grava
+  o bloco também para a sequência sozinha com look próprio; `ExportTarget.look` (de `export_look(seq)`, que respeita *Sem
+  efeitos* e o modo Edição sem película) é trocado pela janela de exportar em `_set_target` e usado em `jobs`.
+- **Escolha**: `set_own` (cópia do look do projeto, a imagem não muda), `set_shared` (pergunta em `confirm_discard` se o look
+  próprio mudou), `choose`. Lugares: a linha "Look de …" no topo do painel de ajustes (só com mais de uma sequência ou com a
+  aberta tendo look próprio), o submenu *Look de película* da aba (`SequenceTabs.lookRequested`, `TabInfo.own_look`, o ponto
+  na aba) e o da sequência na Mídia (`add_menu`). O aviso de `nested_note` aparece no painel do clipe e ao inserir.
