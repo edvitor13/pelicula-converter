@@ -544,6 +544,58 @@ a barra de status diz quanto sobrou (no máximo meio quadro). Um clipe cujo som 
 com velocidade, rampa, reverso ou quadro congelado) fica onde estava, e a mensagem diz qual. O progresso e o
 **Cancelar** aparecem na barra de status.
 
+### Efeitos sonoros e sons livres (1.8, Beta)
+
+Ligue **Efeitos sonoros** em Configurações › Recursos (começa desligado). Ele traz três coisas:
+
+**Efeitos feitos pelo app.** Em **Mídia › Novo › Efeito sonoro**, escolha **Whoosh**, **Swish**, **Riser**,
+**Impacto**, **Clique**, **Máquina de escrever** ou **Obturador**. O efeito entra no cursor, na faixa de som mais
+baixa que está livre ali (ou numa nova). Os sons são calculados pelo app, sem gravações, e saem sempre iguais:
+o mesmo efeito no mesmo lugar soa igual na prévia e na exportação.
+
+- O efeito ocupa o clipe, como um título: esticar o clipe de um whoosh deixa o whoosh mais longo, o riser
+  sempre termina no pico no último quadro e a cauda do impacto cabe no clipe. Clique e obturador têm o tamanho
+  deles e silêncio depois. A máquina de escrever bate durante o clipe inteiro.
+- No painel do clipe (página **Som**), o cartão do efeito tem **Intensidade** (100% chega a −1 dBFS, sem
+  saturar), **Brilho** (mais grave ou mais agudo), **Largura estéreo** (0% é mono) e **Variação** (outro número
+  dá outra versão do mesmo efeito). O riser tem **Tom subindo**; o impacto, **Grave**; a máquina de escrever,
+  **Teclas por segundo**, **Sino e retorno do carro** e **Som das teclas** (máquina ou clique); o obturador,
+  **Abrir → fechar** (ms). Cada mudança é um passo do Ctrl+Z.
+- Volume, chaves de volume, equalização, fades, balanço, mudo/solo, o mixer, os stems e o som de película valem
+  para o efeito como para qualquer clipe de som.
+
+**Pôr efeitos sonoros sozinho.** O botão **Efeitos** na barra da linha do tempo (ou **Ctrl+Alt+E**) abre uma
+janela com o que pôr:
+
+- **Whoosh nas transições**: dura a transição e termina no corte (no fim de uma transição de entrada, ou no fim
+  do clipe numa de saída);
+- **Impacto nos cortes secos** da V1 entre planos diferentes (começa desligado: use com moderação);
+- **Swish na entrada dos títulos**: o pico cai no primeiro quadro do título;
+- **Teclas nos títulos "Máquina de escrever"**: uma tecla por letra, no quadro exato em que a letra aparece, com
+  o sino e o retorno do carro na troca de linha (ou um clique por letra);
+- **Obturador** nos quadros congelados e nas fotos que entram depois de um corte;
+- **Riser antes dos marcadores** com **!** no nome (por exemplo *Gol!*) ou, se você escolher, de uma cor: o riser
+  termina no quadro do marcador.
+
+A janela diz quantos efeitos vai pôr. Eles entram numa faixa de som chamada **Efeitos** (criada se precisar, nunca
+por cima de um clipe; havendo sobreposição, numa segunda faixa "Efeitos"), tudo num passo só do Ctrl+Z. Rodar de
+novo não repete o que já está lá; apagando um efeito, ele volta na próxima vez.
+
+**Sons livres (CC0).** Em **Mídia › Novo › Buscar sons (CC0)…**, digite o que procura (em inglês acha mais:
+*whoosh*, *rain*, *door*) e clique em **Buscar**. Só aparecem sons **CC0** (domínio público). **Ouvir** toca uma
+prévia; **Adicionar à Mídia** baixa o som para a pasta `<nome do projeto>_sons`, ao lado do projeto (projeto ainda
+não salvo: a pasta `sons_cc0` do app, e a janela avisa) e o põe na Mídia.
+
+- A busca usa o **Openverse**, sem cadastro. Com a **chave da API do Freesound** (Configurações › **Sons livres**;
+  a página explica como pedir uma, de graça), busca também no Freesound. A chave fica só neste computador, nunca no
+  projeto. Do Freesound vem a prévia de alta qualidade (MP3), porque o arquivo original pede login.
+- Nada vai para a internet antes de você clicar em **Buscar**, **Ouvir** ou **Adicionar à Mídia**.
+- O **crédito** (título, autor, licença e endereço) fica guardado no projeto. Toda exportação que usar o som (vídeo
+  ou só o som) grava ao lado um `<nome do arquivo>.creditos.txt`, com uma linha por som, e a fila diz onde. CC0 não
+  obriga a dar crédito, mas é uma gentileza com quem gravou.
+
+Projetos com efeitos sonoros ou sons com crédito só abrem na 1.8 ou mais nova.
+
 ## 4. Sequência
 
 **Sequência…** abre o tamanho e o ritmo do vídeo montado:
@@ -816,6 +868,7 @@ nada toca.
 | Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
 | Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
 | Ctrl+Alt+M | Mostrar / esconder o mixer |
+| Ctrl+Alt+E | Pôr efeitos sonoros (módulo Efeitos sonoros) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

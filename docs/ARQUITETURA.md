@@ -52,6 +52,7 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 43. [Mixer e cache de som por clipe](#43-mixer-e-cache-de-som-por-clipe)
 44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
 45. [Som de película](#45-som-de-película)
+47. [Efeitos sonoros e sons CC0](#47-efeitos-sonoros-e-sons-cc0)
 
 ---
 
@@ -4738,3 +4739,127 @@ As chaves de animação do look não entram no som (o motor lê os valores fixos
 Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
 preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
 de 48 kHz com o contrato do contexto (`before`).
+
+
+## 47. Efeitos sonoros e sons CC0
+
+Frente X da 1.8 (#39, onda B). Módulo Beta `efeitos_sonoros` (grupo "audio", começa desligado; só esconde as
+ferramentas: o submenu "Efeito sonoro" e o "Buscar sons (CC0)…" no **Novo** da Mídia, o editor no inspetor de som, o botão
+**Efeitos** e o Ctrl+Alt+E). Três peças: efeitos feitos pelo app (`sfx.py`), pôr efeitos sozinho (`sfx_auto.py`) e a busca de
+sons CC0 com o crédito (`sons_cc0.py`). Interface em `ui/sfx_ui.py` (ponto único de ligação, `install(win)`),
+`ui/sons_cc0_ui.py` e `ui/pages/sons.py`. Testes: `tests/test_sfx.py`, `tests/test_sfx_auto.py`, `tests/test_sons_cc0.py` e
+`tests/sfx_ui_cases.py` (via `tests/test_sfx_ui.py`).
+
+### 47.1 A fonte "efeito" e o JSON
+
+- `timeline.SOURCE_KINDS` ganhou `"efeito"` (no fim). A fonte vem de `Source.virtual` com `has_video=False`,
+  `has_audio=True` e sem fim (como um título: o clipe dá a duração; `insert_media` cria só o clipe de som). Os dados em
+  `Source.data` ("dados" no JSON): `efeito` (id de `sfx.EFFECTS`), `nome`, os campos do tipo (`generators.Field`, chaves sem
+  acento: `intensidade`, `brilho`, `largura`, `semente` em todos; `tom` no riser; `grave` no impacto; `ritmo`, `sino` e
+  `tecla` na máquina; `intervalo` no obturador) e, postos pelo planejador, `toques`/`retornos` (segundos desde o começo do
+  clipe) e `auto` (a marca do que pediu o efeito).
+- `timeline.DEFAULT_SECONDS[tipo]` (novo, `fn(fonte) -> s`): a duração de um clipe novo de uma fonte sem fim; o efeito
+  registra `sfx.default_seconds` (whoosh 1 s, swish 0,4, riser 3, impacto 2, clique 0,2, máquina 3, obturador 0,5). Sem
+  registro, `IMAGE_SECONDS` como antes.
+- `FEATURES_V6`: `"efeito_sonoro"` (uma fonte usada de tipo "efeito") e `"credito_som"` (uma fonte usada com `credit`). A 1.7
+  leria a fonte "efeito" como um arquivo que não existe e perderia o crédito ao salvar, então recusa o projeto pelo formato 6.
+- `modules.used_by` marca `efeitos_sonoros` pela fonte "efeito" (e não marca mais `titulos_geradores` por ela).
+
+### 47.2 Síntese (`sfx.py`)
+
+Tudo em numpy, 48 kHz estéreo, sem amostras gravadas. **Determinismo**: o ruído é um hash inteiro de 32 bits (lowbias32) do
+índice da amostra e da `semente` (`white`, `_unit`); nada de `random` nem relógio. Ruído moldado (`shaped_noise`): STFT de
+1024 pontos com salto de 256 e janela seno (análise e síntese), um sino no log da frequência que anda no tempo, em blocos de
+`NOISE_BLOCK` quadros (memória limitada). `render(dados, n)`: o efeito em `n` amostras, fade de 4 ms no fim e o pico do
+trecho em `PEAK × intensidade` (−1 dBFS em 100%: nunca satura); passando de `MAX_SECONDS` (120 s), o resto é silêncio.
+
+| Efeito | Como é feito |
+|---|---|
+| whoosh / swish | ruído num passa-banda que sobe e desce (pico em 62% / 42% do clipe), envelope seno², passa de um lado ao outro com a largura |
+| riser | ruído que sobe de 220 Hz a ~6,5 kHz com volume em u^2,2, mais um tom em glissando de três oitavas (`tom`), desafinado ±4 cents entre os lados |
+| impacto | estrondo grave (38 Hz + queda exponencial), golpe de ruído brilhante (14 ms) e cauda que cabe no clipe (τ = clipe/4) |
+| clique | dois toques curtos (seno amortecido + sopro de ruído), 8 ms entre eles |
+| máquina | uma tecla por toque (estalo, corpo, "clac", variação por tecla) com o carro andando da esquerda para a direita; sino e retorno do carro (catraca + deslizar) na troca de linha; `tecla = "clique"` troca por cliques |
+| obturador | dois estalos mecânicos (abrir com a batida do espelho e fechar), `intervalo` ms entre eles |
+
+`VERSION` muda quando a síntese muda (os WAVs antigos deixam de valer pelo nome).
+
+### 47.3 Na mixagem: entrada derivada do clipe
+
+Decisão: o efeito **não** tem caminho próprio de som. `audiomix.segments` trata o clipe de efeito como um clipe de arquivo cuja
+entrada é um WAV gerado (`sfx.effect_input`, chamado antes de `somlimpo.clean_input`), como o WAV de uma aninhada (§41.5) e a
+entrada limpa (§44): o WAV cobre o trecho da fonte que o clipe mostra (`Sequence.source_range`) mais `MARGIN_S` (0,1 s) de
+silêncio e as sobras de uma transição; os tempos do "arquivo" (`src_in`; numa rampa/reverso, os pedaços e `length`) passam a
+contar do começo do WAV. O nome é o SHA-1 de (`VERSION`, `sound_data(dados)`, amostras antes/corpo/depois), na pasta
+`effect_dir()` (temporário do sistema, `pelicula_som_efeitos`, até 512 MB). `somcache.CONTENT_NAMED_DIRS` recebe
+`sfx.effect_dir` (a chave do pedaço usa só o caminho) e `somcache.PRERENDER` começa com `sfx.render_inputs` (antes da limpeza,
+que pode ler o WAV do efeito); o grafo único (`audiomix._render_nested`) chama os dois na mesma ordem (`_derived_inputs`).
+`mix_key` ganhou `"efeitos"` (os dados que mudam o som de cada fonte de efeito usada; nome e `auto` não contam), só quando
+há. Com isso volume, chaves, EQ, fades, balanço, velocidade, mudo/solo, ganho e balanço da faixa, stems, o som de película e
+as sequências aninhadas valem sem regra nova, e a chave do pedaço é (tipo, campos, `VERSION`, trecho) pelo nome do WAV.
+`audiomix.has_audio` passa a ver o efeito, então a exportação mixa uma montagem só com efeitos.
+
+### 47.4 Pôr efeitos sozinho (`sfx_auto.py`)
+
+`plan(seq, Options, glyphs=)` → `[Placement(effect, start, dur, tag, data)]` em quadros da sequência; `apply(seq, plano)`
+põe os clipes; a interface faz `commit` → `apply` dentro de `keep_main` → `_done("structure")` (um passo do desfazer).
+
+| Regra | Onde |
+|---|---|
+| whoosh (`transicoes`) | entrada ≠ corte: termina no fim da transição (`transition_frames`); saída ≠ corte: termina no fim do clipe (pula se o próximo colado tem entrada); dura a transição, de 0,4 a 2 s |
+| impacto (`impactos`, desligado) | corte seco na V1 com clipe colado antes de outra fonte; começa no corte |
+| swish (`titulos`) | título (fonte "texto") sem entrada "maquina": começa 0,17 s antes (o pico do swish de 0,4 s no 1º quadro) |
+| máquina (`maquina`, `tecla`) | título com entrada "maquina": um toque por letra no quadro em que `titles.motion` revela a letra (`floor(p·n)` com `clip_time`, como `titles.render`); k letras num quadro se espalham dentro dele; `retornos` 60 ms depois da última letra de cada linha; o clipe vai até a última tecla + 0,6 s |
+| obturador (`congelados`) | clipe congelado, ou imagem parada com clipe colado antes; começa no 1º quadro |
+| riser (`marcadores`, `cor_marcador`) | marcador com "!" no nome (ou da cor escolhida): termina no quadro do marcador, até 3 s (pula com menos de 0,5 s) |
+
+As letras de um título (`title_glyphs`) são contadas como `titles._glyph_map` (glifos das palavras, linha a linha, pelo
+`textrender`, que precisa de uma `QGuiApplication`); os testes podem passar `glyphs=`. **Sem repetir**: cada efeito leva
+`data["auto"]` = `transicao:<clipe>:entrada|saida`, `corte:<clipe>`, `titulo:<clipe>`, `parado:<clipe>` ou
+`marcador:<id>`, e `plan` pula as marcas das fontes usadas. **Faixa**: a primeira faixa de som destravada chamada
+"Efeitos" (ou o nome traduzido) livre no trecho; senão uma nova com esse nome. Nunca cobre clipe. Semente de cada efeito =
+crc32 da marca (cada whoosh soa um pouco diferente, sempre igual no mesmo lugar).
+
+### 47.5 Sons CC0 (`sons_cc0.py`, sem Qt)
+
+- **Openverse** sem chave: `GET https://api.openverse.org/v1/audio/?q=…&license=cc0&page_size=20` (duração em ms; `url` é o
+  arquivo e a prévia; `foreign_landing_url` é a página). **Freesound** só com a chave da pessoa (preferência
+  `sons_cc0/freesound_chave`, Configurações › Sons livres; nunca no projeto, mascarada na tela):
+  `GET https://freesound.org/apiv2/search/text/?query=…&filter=license:"Creative Commons 0"&fields=id,name,username,license,previews,duration,url&token=…`.
+  Do Freesound baixamos `preview-hq-mp3` (o original pede OAuth; a janela diz isso).
+- **Só CC0** (`is_cc0_openverse`: `license == "cc0"`; `is_cc0_freesound`: URL `publicdomain/zero` ou "Creative Commons 0"),
+  mesmo que a API mande outra coisa. `merge` tira o mesmo som das duas fontes (título e autor; fica o do Freesound).
+- **Rede**: `urllib` com `TIMEOUT` 10 s, `User-Agent: PeliculaConverter/<versão>` (nada da pessoa), JSON até 4 MB; erros
+  viram `NetError` com texto em PT-BR (chave recusada, muitas buscas, sem conexão, tempo esgotado, resposta estranha); uma
+  fonte que falha não derruba a outra. Download num `.parte` ao lado e troca no fim; limite de 200 MB (40 MB na prévia); já
+  baixado = reaproveitado. Nada vai para a rede antes de "Buscar"; nos testes o `opener` é falso e o `urlopen` de verdade falha.
+- **Pastas** (`target_dir`): `<projeto>_sons/` ao lado do `.plc`; sem projeto salvo, `config_dir()/sons_cc0/`. Prévias em
+  `<temp>/pelicula_sons_cc0_previa/`. Nome (`file_name`): título, autor, origem e id, sem caracteres proibidos.
+- **Crédito**: `Source.credit` (novo campo; `"credito": {"titulo","autor","licenca","url","origem"}` no JSON, só quando há,
+  conferido por `timeline.clean_credit`). "Adicionar à Mídia" abre o arquivo pelo `_probe_source` da janela e põe o crédito
+  na fonte (e na da montagem, se já estava lá).
+- **Exportação**: `export_credits(job, início, fim)` no fim de `export.run_job` (depois do `.srt`) e de `somexport.run`:
+  `credits_for(seq, a, b)` (clipes de som que tocam no trecho, mudo/solo valem, e dentro de aninhadas no trecho que o clipe
+  mostra) → `<saída sem extensão>.creditos.txt` (cabeçalho e uma linha por som: título — autor — licença — URL) e
+  `ExportJob.note` (novo) = "Créditos dos sons em …", mostrado na fila, na barra de status e no terminal. Falha ao gravar não
+  derruba a exportação (a nota diz o que faltou). `pelicula-cli info projeto.plc` lista os créditos (`"creditos"` no
+  `--json`; `project_credits`), e `exportar` grava o mesmo arquivo.
+
+### 47.6 Interface
+
+`sfx_ui.install(win)` (depois do `scrub_ui`): o submenu e o "Buscar sons (CC0)…" entram no menu do botão **Novo** da
+Mídia (`btn_new`, que é de `titulos_geradores`: `SfxUI.apply_modules` mostra o botão com qualquer um dos dois módulos e só os
+itens de cada um); `EffectEditor` no alto da página de som do inspetor (`SectionCard` de um `params.Schema` montado dos
+`Field`, % nos de 0 a 1; com `toques`, o "Teclas por segundo" some); o botão **Efeitos** entra na barra da linha do tempo logo
+depois de **Silêncios** só pela API do `QLayout` (`takeAt`/`addItem`, sem mexer em `timeline_view.py`) e vai para a lista
+`compact` da barra; `QShortcut` Ctrl+Alt+E (só no modo Edição e com o módulo). `sons_cc0_ui.SearchDialog` (não modal, a
+mesma janela volta) faz busca, prévia e download numa thread com uma ponte de sinais; "Ouvir" toca com `QMediaPlayer`.
+
+### 47.7 Para a onda B e depois
+
+- Um som novo preso a um quadro: crie uma fonte `sfx.new_source(id, seq, **campos)` e um clipe de som; ou registre um tipo
+  em `sfx.EFFECTS` (id ASCII no fim de `MENU_ORDER`; campos novos com padrão que não mude o som de antes, ou suba `VERSION`).
+- Outro planejador pode reaproveitar `sfx_auto.apply` (faixa "Efeitos", sem cobrir clipes) com marcas próprias em `auto`.
+- Música e narração baixadas de fora podem usar `Source.credit` e ganham o `.creditos.txt` sem nada novo.
+- Fora desta versão: forma de onda dos clipes de efeito na linha do tempo (`_peaks_for` devolve None para fonte sem arquivo),
+  paginação da busca, filtro por duração, guardar as escolhas da janela "Pôr efeitos sonoros…".
