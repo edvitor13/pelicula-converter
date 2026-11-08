@@ -777,6 +777,28 @@ mudo e o volume da prévia. Para desligar, use o botão **Som ao arrastar o curs
 barra da linha do tempo; a escolha fica guardada. Enquanto o som da montagem ainda está sendo preparado,
 nada toca.
 
+### Gravar narração (1.8)
+
+O botão do **microfone** na barra da linha do tempo (ou **Ctrl+Shift+R**) abre o painel **Gravar narração**:
+
+- **Microfone**: o padrão do sistema já vem escolhido; a sua escolha fica guardada. A barra de **Nível** anda enquanto você fala
+  (vermelho perto do estouro); procure ficar entre o amarelo e o verde.
+- **Contagem antes de gravar** (ligada): 3, 2, 1 com bipes, para respirar e pôr os fones.
+- **Tocar a montagem enquanto grava** (ligada): a prévia toca a partir de onde a gravação começa. **Use fones de ouvido**: o som
+  dos alto-falantes entra no microfone.
+- **Compensar o atraso do microfone** (0 ms): o som do microfone chega um pouco depois de acontecer, e a prévia também demora
+  a começar. Para medir, ponha o cursor num bipe (**Novo ▸ Contagem** tem um na ponta), grave uma palma junto com ele e veja na
+  forma de onda quantos milissegundos a palma ficou depois; digite esse valor. O começo da gravação é cortado por ele.
+- **Gravar / Parar**: a gravação começa no cursor, ou na **entrada** (I) se ela estiver marcada, e para sozinha na **saída**
+  (O). Ao parar, o som entra na **Mídia** e na linha do tempo, numa faixa de áudio **livre** ali (uma faixa **Narração** nova se
+  não houver), já selecionado; **Ctrl+Z** desfaz o clipe e a faixa de uma vez. A gravação é um áudio comum: volume, fades,
+  equalização, redução de ruído e as demais ferramentas do clipe valem para ela.
+
+Os arquivos ficam em `nome-do-projeto_narracao/narracao_001.wav`, ao lado do projeto salvo. Sem projeto salvo, ficam na pasta do
+app (`narracao`), e a barra de status avisa; salvar o projeto depois não move nada. Um microfone mono sai centrado nos dois lados.
+Sem microfone, com o acesso negado pelo sistema ou se o microfone for desconectado durante a gravação, o painel explica e nada é
+inserido.
+
 ## 6. Depois da edição
 
 - Vá para o modo **Película** (Ctrl+1) para escolher o look; a prévia já mostra a montagem.
@@ -816,6 +838,7 @@ nada toca.
 | Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
 | Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
 | Ctrl+Alt+M | Mostrar / esconder o mixer |
+| Ctrl+Shift+R | Gravar narração (abre o painel; com ele aberto, grava / para) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |
