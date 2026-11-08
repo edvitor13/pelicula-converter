@@ -132,7 +132,12 @@ VIDEO_SECTIONS: list[Section] = [
         C("mesclagem", "Mesclagem", "normal", [
             ("normal", N_("Normal")), ("tela", N_("Tela (clareia)")), ("multiplicar", N_("Multiplicar (escurece)")),
             ("sobrepor", N_("Sobrepor (contraste)")), ("adicionar", N_("Adicionar (luz)")),
-            ("clarear", N_("Só o mais claro")), ("escurecer", N_("Só o mais escuro"))],
+            ("clarear", N_("Só o mais claro")), ("escurecer", N_("Só o mais escuro")),
+            # 1.9: modos novos (`mesclagem.py`; ids 7 em diante em `compositor.BLEND_IDS`)
+            ("diferenca", N_("Diferença")), ("exclusao", N_("Exclusão")), ("luz_suave", N_("Luz suave")),
+            ("luz_forte", N_("Luz forte")), ("subtrair", N_("Subtrair")), ("dividir", N_("Dividir")),
+            ("matiz", N_("Matiz")), ("saturacao_m", N_("Saturação")), ("cor", N_("Cor")),
+            ("luminosidade", N_("Luminosidade"))],
           "Como este clipe se mistura com as faixas de baixo."),
     ], "Escala, posição, rotação, corte e opacidade"),
 

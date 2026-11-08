@@ -156,20 +156,27 @@ def is_adjustment(seq, clip) -> bool:
     return src is not None and src.kind == ADJUSTMENT_KIND
 
 
+def new_adjustment(seq):
+    """Uma fonte de camada de ajuste do tamanho e do fps da sequência (sem fim, como uma imagem: entra com a duração
+    padrão e estica à vontade). Media › Novo › "Camada de ajuste" (`ui/vfx_ui.py`)."""
+    from .i18n import _
+    from .timeline import Source
+    return Source.virtual(ADJUSTMENT_KIND, seq.width, seq.height, seq.fps_str, None, {"nome": _("Camada de ajuste")},
+                          alpha=False)
+
+
 def modules_used(seq) -> set[str]:
-    """Módulos dos efeitos visuais que a montagem (com as irmãs) usa: a camada de ajuste e os efeitos ligados (ou com
-    chaves de animação) em algum clipe. Só para o aviso de `modules.used_by`."""
+    """Módulos dos efeitos visuais que esta montagem usa (`modules.used_by` passa por cada sequência do projeto): a
+    camada de ajuste e os efeitos ligados (ou com chaves de animação) em algum clipe. Só para o aviso."""
     used: set[str] = set()
-    family = getattr(seq, "family", lambda: [seq])() if seq is not None else []
-    for s in family:
-        for c in getattr(s, "clips", []):
-            if c.kind != "video":
-                continue
-            if is_adjustment(s, c):
-                used.add(ADJUSTMENT_MODULE)
-            for e in EFFECTS.values():
-                if e.active(c.values) or any(k in c.keys for k in e.keys):
-                    used.add(e.module)
+    for c in getattr(seq, "clips", []) if seq is not None else []:
+        if c.kind != "video":
+            continue
+        if is_adjustment(seq, c):
+            used.add(ADJUSTMENT_MODULE)
+        for e in list(EFFECTS.values()):
+            if e.active(c.values) or any(k in c.keys for k in e.keys):
+                used.add(e.module)
     return used
 
 

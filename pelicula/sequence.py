@@ -65,6 +65,7 @@ class Nested:
 # `LayerImage.image` de um clipe de sequência: quem amostra a imagem de uma camada (conta-gotas, cor automática) vê preto.
 _NO_IMAGE = np.zeros((2, 2, 3), np.uint8)
 _NO_IMAGE.setflags(write=False)
+ADJUSTMENT = "ajuste"  # 1.9: fonte da camada de ajuste (`vfx.ADJUSTMENT_KIND`): sem imagem própria
 
 
 # ------------------------------------------------------------------ tamanhos
@@ -232,6 +233,9 @@ def grab(seq: timeline.Sequence, frame: int, canvas_w: int, canvas_h: int, depth
                 size = nested_canvas(inner, w, h)
                 got = grab(inner, layer.src_frame, size[0], size[1], depth, hq, shutter, no_effects)
                 out.append(LayerImage(layer, _NO_IMAGE, nested=Nested(inner, got, size)))
+            continue
+        if src.kind == ADJUSTMENT:  # 1.9: camada de ajuste: a imagem é a tela embaixo (`Engine._canvas`)
+            out.append(LayerImage(layer, _NO_IMAGE))
             continue
         if not src.is_file:
             out.append(LayerImage(layer, render_source(seq, layer.clip, layer.src_frame, w, h, depth)))
@@ -568,6 +572,9 @@ class SequenceReader:
                     stream = self._stream(c, layer.src_frame)
                     got = stream.get(layer.src_frame, self.jump)
                     out.append(LayerImage(layer, _NO_IMAGE, nested=Nested(inner, got, stream.size)))
+                continue
+            if src.kind == ADJUSTMENT:  # 1.9: camada de ajuste (a imagem é a tela embaixo)
+                out.append(LayerImage(layer, _NO_IMAGE))
                 continue
             if not src.is_file:
                 out.append(LayerImage(layer, self._render(layer)))

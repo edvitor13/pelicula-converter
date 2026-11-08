@@ -29,6 +29,7 @@ GROUPS = (
     ("pelicula", N_("Película")),
     ("cor", N_("Cor")),
     ("audio", N_("Som")),
+    ("efeitos_visuais", N_("Efeitos visuais")),  # 1.9 (#68): recorte, estabilização, luz, tempo (`vfx.py`)
     ("integracoes", N_("Integrações")),
     ("sistema", N_("Sistema")),
 )
@@ -133,6 +134,9 @@ MODULES: tuple[Module, ...] = (
            N_("Whoosh, swish, riser, impacto, clique, máquina de escrever e obturador feitos pelo app no modo Edição, "
               "o \"Pôr efeitos sonoros…\" (nas transições, nos títulos e nos marcadores) e a busca de sons livres "
               "(CC0) no Openverse e no Freesound."), "audio", BETA),
+    Module("efeitos_clipe", N_("Efeitos de clipe"),
+           N_("Camada de ajuste no modo Edição (cor e efeitos de clipe valendo para tudo o que está embaixo dela) e a "
+              "base dos efeitos visuais da 1.9. Não vai para o plugin do DaVinci."), "efeitos_visuais", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -282,10 +286,12 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         if getattr(seq, "clips", True) and not trivial():
             used.add("edicao")
             sources = getattr(seq, "used_sources", lambda: [])()
-            if any(s.is_generated and s.kind != "efeito" for s in sources):
+            if any(s.is_generated and s.kind not in ("efeito", "ajuste") for s in sources):
                 used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
             if any(s.kind == "efeito" for s in sources):
                 used.add("efeitos_sonoros")  # 1.8: efeito sonoro feito pelo app (§47)
+        from . import vfx  # 1.9: camada de ajuste e efeitos de clipe (`vfx.modules_used`)
+        used |= vfx.modules_used(seq)
         if getattr(seq, "uses_extra_transitions", lambda: False)():
             used.add("transicoes")
         # 1.6: cor escolhida, degradê, pele natural ou grupo de cor num clipe

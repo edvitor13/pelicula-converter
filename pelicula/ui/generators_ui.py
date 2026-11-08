@@ -27,12 +27,17 @@ MENU_ORDER = (generators.KIND_COLOR, generators.GRADIENT, generators.LEADER)
 # Outros itens do menu "Novo" (o título acrescenta o seu): (id, rótulo N_(), dica N_(), fn(seq) -> Source).
 # Acrescente no fim.
 EXTRA_ITEMS: list[tuple[str, str, str, Callable]] = []
+# 1.9: itens do "Novo" que outro módulo põe no menu por conta própria (e mostra ou esconde): id → fn(seq) -> Source.
+# `MainWindow.new_generated(id)` cria a fonte com eles do mesmo jeito (a camada de ajuste, `ui/vfx_ui.py`).
+MODULE_MAKERS: dict[str, Callable] = {}
 
 
 def maker_of(item_id: str) -> Callable | None:
     """Quem cria a fonte do item `item_id` do menu "Novo" (fn(seq) -> Source), ou None."""
     if item_id in generators.GENERATORS:
         return lambda seq: generators.new_source(item_id, seq)
+    if item_id in MODULE_MAKERS:
+        return MODULE_MAKERS[item_id]
     return next((fn for i, _l, _t, fn in EXTRA_ITEMS if i == item_id), None)
 
 

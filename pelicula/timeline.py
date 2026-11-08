@@ -2669,6 +2669,9 @@ def _own_look_beyond_1_8(seq: Sequence) -> bool:
 FEATURES_V7: dict[str, Callable[[Sequence], bool]] = {
     "ajustes_clipe_1_9": _clips_beyond_1_8,
     "look_proprio_1_9": _own_look_beyond_1_8,
+    # Camada de ajuste (fonte "ajuste", `vfx.is_adjustment`): a 1.8 a leria como um clipe gerado vazio, sem efeito.
+    "camada_ajuste": lambda s: any(c.kind == VIDEO and (src := s.sources.get(c.src)) is not None
+                                   and src.kind == "ajuste" for c in s.clips),
 }
 
 
