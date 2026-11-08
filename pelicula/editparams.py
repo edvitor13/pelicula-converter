@@ -286,7 +286,45 @@ VIDEO_SECTIONS += [
 _N_BASE = len(VIDEO_SECTIONS)
 
 # 1.9 F2: recorte e máscaras (§50)
+# Recorte por cor ou por brilho (`recorte.py`) e máscara de forma do clipe (`mascaras_clipe.py`), módulo Beta
+# "recorte_mascaras". Distâncias em px@1080 do clipe; os números animam (`_anim`). Padrão: nenhum recorte, nenhuma forma.
+from .params import COR  # noqa: E402
+
+
+def _anim(p: Param) -> Param:
+    p.animatable = True
+    return p
+
+
 VIDEO_SECTIONS += [
+    Section("recorte", "Recorte (chroma/luma)", None, [
+        C("chave_tipo", "Recortar", "nenhuma", [
+            ("nenhuma", N_("Nada")), ("verde", N_("Fundo verde")), ("azul", N_("Fundo azul")),
+            ("cor", N_("Uma cor escolhida")), ("luma", N_("Pelo brilho"))],
+          "Tira o fundo do clipe e mostra as faixas de baixo no lugar. Para uma tela verde ou azul fora do comum, "
+          "use o conta-gotas: ele escolhe a cor do fundo."),
+        COR("chave_cor", "Cor do fundo", (0.15, 0.70, 0.25),
+            "A cor que sai em \"Uma cor escolhida\" (o conta-gotas acerta este valor clicando no fundo)."),
+        _anim(_pct("chave_tolerancia", "Tolerância", 0.4, 0.0, 1.0,
+                   tip="Quanto uma cor pode se afastar da cor do fundo e ainda sair. Aumente se sobrar fundo; "
+                       "diminua se o recorte comer a pessoa.")),
+        _anim(_pct("chave_suavidade", "Suavidade", 0.25, 0.0, 1.0,
+                   tip="Largura da passagem entre o que sai e o que fica (cabelo, desfoque de movimento).")),
+        _anim(F("chave_limpar", "Encolher a borda", 0.0, -20, 20, 0.5, 1, " px",
+                "Positivo encolhe o recorte (tira a franja do fundo); negativo aumenta. Pixels de um quadro de "
+                "1080 linhas.")),
+        _anim(_pct("chave_spill", "Tirar o reflexo do fundo", 0.0, 0.0, 1.0,
+                   tip="Tira a cor do fundo que respingou na pessoa (o verde no cabelo e nos ombros). Cinzas e "
+                       "brancos não mudam.")),
+        _anim(_pct("chave_luz_borda", "Luz do fundo na borda", 0.0, 0.0, 1.0,
+                   tip="Traz a luz das faixas de baixo para a borda do recorte, como se a pessoa estivesse lá.")),
+        _anim(F("chave_luz_largura", "Largura da luz na borda", 20.0, 1, 200, 1, 0, " px",
+                "Até onde a luz do fundo entra na borda (pixels de um quadro de 1080 linhas).")),
+        _anim(_pct("chave_luma_min", "Brilho mínimo", 0.0, 0.0, 1.0,
+                   tip="\"Pelo brilho\": o que é mais escuro que isto sai.")),
+        _anim(_pct("chave_luma_max", "Brilho máximo", 1.0, 0.0, 1.0,
+                   tip="\"Pelo brilho\": o que é mais claro que isto sai.")),
+    ], "Tirar um fundo verde, azul, de uma cor ou pelo brilho"),
 ]
 
 # 1.9 F3: estabilização e rastreio (§51)

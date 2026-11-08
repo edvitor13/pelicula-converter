@@ -37,6 +37,7 @@ ADJUSTMENT_HIDE_CARDS = ("camera",)
 # A interface de cada frente (`pelicula.ui.<nome>`, com `install(vfx_ui)`), chamada no fim de `VfxUI.__init__`. Frente
 # nova: **uma linha** aqui.
 FRONT_UIS: tuple[str, ...] = (
+    "recorte_ui",  # 1.9 F2: recorte por cor ou brilho (§50)
 )  # o perfil de câmera é do arquivo; a camada de ajuste já está no espaço do look
 
 
@@ -114,11 +115,16 @@ class VfxUI:
         """Conta-gotas da prévia: o próximo clique chama `fn(fx, fy)` (fração da imagem, y para baixo)."""
         viewer = self.win.viewer
 
-        def done(fx, fy):
+        def drop():
             viewer.picked.disconnect(done)
+            viewer.pickCanceled.disconnect(drop)
+
+        def done(fx, fy):
+            drop()
             fn(float(fx), float(fy))
 
         viewer.picked.connect(done)
+        viewer.pickCanceled.connect(drop)  # Esc ou outro conta-gotas: este clique não é mais nosso
         viewer.start_pick()
 
     def clip_point(self, clip, fx: float, fy: float) -> tuple[float, float] | None:

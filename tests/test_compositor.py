@@ -84,6 +84,8 @@ def _non_default(p):
         return p.max if p.default != p.max else p.min
     if p.kind == "wheel":
         return [0.6, 0.3]
+    if p.kind == "color":  # 1.9: a cor do fundo do recorte
+        return [1.0 - x for x in p.default]
     raise AssertionError(p.kind)
 
 
@@ -194,6 +196,8 @@ def test_compose_every_param_runs(gl_engine, test_rgb):
             continue
         if key.startswith("luz_"):  # 1.6: luz da copiadora por plano, no look (`luz_plano.py`, tests/test_luz_plano.py)
             continue
+        if key.startswith(("chave_", "mascara_")):  # 1.9: recorte e máscara (pilha `vfx`), tests/test_recorte.py e
+            continue                                # tests/test_mascaras_clipe.py: cada ajuste só vale com o tipo
         seq, c = one_clip(**{key: _non_default(p)})
         out = gl_engine.compose(frame_of(seq, test_rgb), seq, W, H, 8)
         assert out.shape == (H, W, 3)
