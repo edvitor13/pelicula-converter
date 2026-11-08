@@ -4499,6 +4499,9 @@ botão para desligar.
   máximo alguns passos de 24 bits); nomes `somexport.stem_path` (`<nome>_A1_<faixa>.<ext>`, o nome padrão "A1" não se
   repete; tons das barras na faixa de vídeo: `_V1`); sem volume alvo. Aninhadas vão na faixa onde está o clipe delas. Cada
   arquivo vai para o parcial e só troca de nome quando todos terminaram.
+- **Som de película** (§45, decisão da integração): *Só o som* passa por `export._film_sound` antes do volume alvo, como o som
+  do vídeo (sai o que a prévia toca); os **stems** saem crus (faixas de trabalho para outro programa).
+  `tests/test_somexport.py::test_sound_only_goes_through_the_film_sound_and_stems_stay_raw`.
 - **Janela**: `som_export_ui.SoundChoice` (`ExportDialog.sound`), grupo *O que exportar* logo abaixo do destino. No modo de som
   some o que é de vídeo (plataforma e prévia, qualidade, desempenho, capítulos, legendas, linhas de vídeo dos ajustes) e volta
   como estava; o resumo não mede velocidade. Stems desligados (com o porquê) sem montagem; sem som, os dois desligados.

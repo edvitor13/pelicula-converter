@@ -97,11 +97,11 @@ class SoundChoice(QObject):
         self.form.setRowVisible(self.fmt, on)
         if self.mode == "stems":
             self.note.setText(_("Um arquivo por faixa de som, todos do mesmo tamanho e no mesmo começo (somados dão a "
-                                "mixagem). Sem o volume alvo: cada faixa sai no nível que tem na mixagem. Os tons das "
-                                "barras de cor vão na faixa de vídeo deles."))
+                                "mixagem). Sem o volume alvo nem o som de película: cada faixa sai crua, no nível que tem na "
+                                "mixagem. Os tons das barras de cor vão na faixa de vídeo deles."))
         elif self.mode == "som":
             self.note.setText(_("Só o som do trecho, sem vídeo (a mixagem da montagem ou o som do arquivo). O volume "
-                                "alvo vale."))
+                                "alvo e o som de película do look valem, como no vídeo."))
         else:
             self.note.setText("")
         self.form.setRowVisible(self.note, on)
