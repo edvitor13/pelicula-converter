@@ -58,6 +58,7 @@ from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
 from . import mixer_ui, narracao_ui, scrub_ui
+from . import musica_ui
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -398,6 +399,7 @@ class MainWindow(QMainWindow):
         self.mixer = mixer_ui.install(self)  # 1.8: mixer das faixas de som (`ui/mixer_ui.py`)
         self.scrub = scrub_ui.install(self)  # 1.8: som ao arrastar o cursor (`ui/scrub_ui.py`)
         self.narracao = narracao_ui.install(self)  # 1.8: gravar narração (`ui/narracao_ui.py`)
+        self.musica = musica_ui.install(self)  # 1.8: batidas, encaixar a música, abaixar sob a voz (`ui/musica_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)

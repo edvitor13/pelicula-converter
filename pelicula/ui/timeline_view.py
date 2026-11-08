@@ -37,6 +37,7 @@ from .keyframes_ui import merged_marks, paint_diamond, param_names
 from .widgets import FilmSlider, timecode
 from . import transitions_ui  # 1.5: transições de película (módulo "transicoes")
 from . import somlimpo_ui  # 1.8: "Sincronizar pelo som" no menu do clipe
+from . import musica_ui  # 1.8: batidas, ímã nas batidas, encaixar a música e abaixá-la sob a voz
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
 HEADER_W = 156               # coluna dos nomes e botões das faixas
@@ -282,6 +283,7 @@ class TimelineCanvas(QWidget):
             if c.id not in exclude:
                 pts.add(c.start)
                 pts.add(c.end)
+        pts.update(musica_ui.snap_points(self, exclude))  # 1.8: ímã nas batidas das músicas
         return sorted(pts)
 
     def snap_frame(self, frame: float, exclude: set[str], enabled: bool | None = None) -> tuple[int, int | None]:
@@ -403,6 +405,7 @@ class TimelineCanvas(QWidget):
         p.setClipRect(r.adjusted(1, 1, -1, -1))
         if c.kind == AUDIO:
             self._paint_wave(p, c, r)
+            musica_ui.paint_beats(self, p, c, r)  # 1.8: marcas das batidas no pé do clipe
         else:
             self._paint_transitions(p, c, r)
         # Rótulo: nome, velocidade, ligação.
@@ -1317,6 +1320,7 @@ class TimelineCanvas(QWidget):
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())
             somlimpo_ui.add_clip_actions(menu, self, clip)  # 1.8: "Sincronizar pelo som" (2+ grupos com som)
+            musica_ui.add_clip_actions(menu, self, clip)  # 1.8: batidas, encaixar a música, abaixar sob a voz
             transitions_ui.add_menu(self, menu, clip, pos.x())  # 1.5: "Transição ▸" (módulo "transicoes")
             self.split_edit_actions(menu, clip, pos.x())
             menu.addSeparator()
@@ -1632,7 +1636,9 @@ class TimelineEditor(QWidget):
                                                      "em vez de cobrir. Ctrl inverte ao arrastar."), checkable=True)
         self.btn_insert.setChecked(c.insert_mode)
         self.btn_insert.toggled.connect(c.set_insert_mode)
-        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_insert):
+        self.btn_beat_snap = musica_ui.snap_button(self)  # 1.8: ímã nas batidas
+        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_beat_snap,
+                  self.btn_insert):
             hl.addWidget(b)
         hl.add_spacing(8)
         self.btn_marker = self._btn("marker", _("Adicionar marcador no cursor (M)"), _("Marcador"))

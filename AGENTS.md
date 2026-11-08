@@ -204,6 +204,12 @@ pelicula/
                              next_take_path, plan_span, free_track/place_take (a faixa "Narração")
   sincronia.py               1.8, sincronizar pelo som (sem Qt, §44.5): find_lag (correlação normalizada por FFT, confiança),
                              candidates/reference_of, plan → Move/Plan
+  batidas.py                 1.8, batidas da música (sem Qt, §46.1): fluxo espectral, andamento por autocorrelação (60–200
+                             BPM), batidas por programação dinâmica, compassos estimados, confiança → Beats; analyze_file
+                             com cache em disco/memória pelo carimbo do arquivo (pelicula_batidas/)
+  musica.py                  1.8, música na montagem (sem Qt, §46): beat_frames/snap_frames (batidas no tempo do clipe),
+                             fit_plan/fade_plan/apply_fit (encaixar por compassos inteiros), speech_regions/duck_spans/
+                             apply_duck/voice_mix (abaixar sob a voz com chaves de volume)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -237,6 +243,8 @@ pelicula/
                              medidores dos picos gravados ao lado da mixagem), scrub_ui (ScrubUI: som ao arrastar o
                              cursor, grão de um quadro por um QAudioSink próprio, preferência som_ao_arrastar),
                              som_export_ui (SoundChoice: "O que exportar" na janela Exportar);
+                             1.8, música (§46): musica_ui (MusicUI: Detectar batidas e análise sozinha, marcas no clipe,
+                             botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -499,6 +507,9 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
 | `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
 | `tests/test_somlimpo_ui.py` | casos de `somlimpo_ui_cases.py`: Aprender o ruído (regras do trecho, recusas, um passo do desfazer), Detectar, Predefinições, Sincronizar pelo som pelo menu (move e desfaz num passo, recusa, cancelar) |
+| `tests/test_batidas.py` | batidas (1.8): cliques a 90/120/150 BPM limpos, com ruído e tocados à mão (BPM a 1%, batidas a 15 ms, compasso), mudança de andamento e ruído sem confiança, determinismo e JSON, cache pelo carimbo (memória, disco, arquivo mudado), cancelar |
+| `tests/test_musica.py` | música na montagem: batidas no tempo do clipe (aparar, 2×, reverso, rampa), ímã sem o clipe arrastado, encaixe (compassos inteiros no meio, emendas nos compassos com transição de uma batida, fim exato, grade mantida a 25 qps, velocidade), recusas e saída simples, alvo e impedimentos, um passo do desfazer; fala sintética (ruído não conta), chaves da descida, chaves de antes substituídas, mixagem mais baixa sob a voz |
+| `tests/test_musica_ui.py` | casos de `musica_ui_cases.py`: Detectar batidas pelo menu e cache, análise sozinha (preferência, > 20 s), marcas com o zoom e a velocidade, Ímã nas batidas, Encaixar pelo menu (In/Out, desfazer num passo, recusas e saída suave, faixa travada), Abaixar sob a voz (chaves, pergunta das chaves de antes, sem voz) e o diálogo que lembra os números |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |

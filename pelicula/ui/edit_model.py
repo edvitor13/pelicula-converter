@@ -1120,5 +1120,18 @@ class TimelineModel(QObject):
             self._done("values")
         return n
 
+    # ------------------------------------------------------------ 1.8: uma edição pronta num passo (música, §46)
+    def apply_edit(self, fn, kind: str = "structure") -> bool:
+        """Roda `fn(seq)` (uma edição feita por um módulo puro: encaixar a música, abaixá-la sob a voz) como um passo
+        só do desfazer, com a faixa principal magnética acertada no fim. True se a sequência mudou."""
+        self.commit()
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            fn(self.seq)
+        if self.history._dump(self.seq) == before:
+            return False
+        self._done(kind)
+        return True
+
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

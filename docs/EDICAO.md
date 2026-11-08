@@ -544,6 +544,32 @@ a barra de status diz quanto sobrou (no máximo meio quadro). Um clipe cujo som 
 com velocidade, rampa, reverso ou quadro congelado) fica onde estava, e a mensagem diz qual. O progresso e o
 **Cancelar** aparecem na barra de status.
 
+### Música: batidas, encaixe e abaixar sob a voz (1.8)
+
+**Batidas.** Botão direito num clipe de som → **Detectar batidas**: o app acha o andamento (BPM), as batidas e o começo de
+cada compasso (uma estimativa, com 4 batidas por compasso). Uma música (arquivo só de som) com mais de 20 s que entra na
+montagem é analisada sozinha, em segundo plano. O resultado fica guardado: reabrir o projeto mostra as batidas na hora.
+As batidas aparecem como risquinhos no pé do clipe (o começo do compasso mais alto) e acompanham o aparar e a velocidade
+do clipe. Música com o andamento irregular mostra as batidas como ajuda visual, mas não serve para o encaixe.
+
+**Ímã nas batidas.** O botão ao lado do ímã, na barra da linha do tempo (ligado por padrão), faz os clipes, o cursor e as
+pontas grudarem também nas batidas das músicas, com o ímã ligado.
+
+**Encaixar a música na duração do vídeo.** Botão direito no clipe da música → **Encaixar a música na duração do vídeo**:
+a música passa a acabar exatamente junto com a imagem (ou no Out, se houver um trecho In/Out marcado; aí ela começa no
+In). Para encurtar, o app tira compassos inteiros do meio; para alongar, repete compassos do meio — a introdução e o
+final da música ficam. Cada emenda leva uma transição de som curta (uma batida), e tudo volta com um Ctrl+Z. Se as
+batidas não são confiáveis ou o vídeo é curto demais para a introdução e o final juntos, o app explica e oferece só
+acabar a música no ponto certo com **Diminuir no fim**. A faixa precisa estar livre no trecho, e o clipe não pode estar
+ligado ao vídeo (som da câmera).
+
+**Abaixar a música sob a voz.** Botão direito no clipe da música (ou em um dos clipes de música selecionados) →
+**Abaixar a música sob a voz…**: escolha quanto abaixar (−12 dB), em quanto tempo a música desce antes da fala (0,3 s) e
+volta depois dela (0,6 s), e as faixas que têm voz. O app ouve essas faixas e escreve chaves de volume comuns na música
+— dá para mexer nelas depois, como em qualquer chave. Falas a menos de 1 s uma da outra viram um trecho só (a música não
+sobe e desce no meio da conversa). Se a música já tem chaves de volume onde ela vai abaixar, o app pergunta se pode
+substituí-las. Os três números ficam lembrados para a próxima vez; tudo volta com um Ctrl+Z.
+
 ## 4. Sequência
 
 **Sequência…** abre o tamanho e o ritmo do vídeo montado:
