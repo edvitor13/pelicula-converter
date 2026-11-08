@@ -58,6 +58,7 @@ from . import aninhar_ui
 from . import luz_fotometro_ui
 from . import sem_efeitos_ui
 from . import mixer_ui, scrub_ui
+from . import sfx_ui  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`, ARQUITETURA §47)
 
 MEDIA_PATTERNS = ("*.mp4 *.mov *.mkv *.avi *.mxf *.webm *.m4v *.mts *.m2ts *.wmv *.mpg *.ts "
                   "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.dpx *.exr")
@@ -397,6 +398,7 @@ class MainWindow(QMainWindow):
         self.som_sync = somlimpo_ui.install(self)  # 1.8: sincronizar pelo som (`ui/somlimpo_ui.py`)
         self.mixer = mixer_ui.install(self)  # 1.8: mixer das faixas de som (`ui/mixer_ui.py`)
         self.scrub = scrub_ui.install(self)  # 1.8: som ao arrastar o cursor (`ui/scrub_ui.py`)
+        self.sfx = sfx_ui.install(self)  # 1.8: efeitos sonoros e sons CC0 (`ui/sfx_ui.py`)
         self.store.changed.connect(self._on_param)
         self.store.historyChanged.connect(self._update_history)
         self.model.changed.connect(self._model_changed)
@@ -3486,6 +3488,7 @@ class MainWindow(QMainWindow):
         self.subs_ui.apply_modules(on)
         for editor in (self.gen_editor, self.title_editor):  # aparecem só com um clipe deles escolhido
             editor.set_allowed("titulos_geradores" in on)
+        self.sfx.apply_modules(on)  # 1.8: depois de "titulos_geradores" (o botão "Novo" é dos dois)
         self._check_modules()
         for filtro in (getattr(self, "look_filter", None), getattr(self.inspector, "filtro", None)):
             if filtro is not None:

@@ -38,7 +38,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import audiomix, editparams, media, somlimpo, timeline
+from . import audiomix, editparams, media, sfx, somlimpo, timeline
 from .i18n import _
 
 RATE = audiomix.RATE
@@ -61,13 +61,14 @@ LINEAR_KEYS: set[str] = {"volume", "mudo", "balanco", "fade_in", "fade_out", "tr
 
 # Pastas de WAVs derivados com o conteúdo no nome (a mixagem de uma aninhada, a entrada limpa de um clipe): a chave do
 # pedaço usa o caminho, sem a data (que muda a cada uso, e o arquivo pode ainda não existir quando a chave é calculada).
-CONTENT_NAMED_DIRS: list[Callable[[], Path]] = [audiomix.nested_dir, somlimpo.clean_dir]
+CONTENT_NAMED_DIRS: list[Callable[[], Path]] = [audiomix.nested_dir, somlimpo.clean_dir, sfx.effect_dir]
 
 # Etapas que preparam entradas derivadas antes de renderizar os pedaços: fn(segmentos, cancel, perf) -> bool (False =
 # cancelado). Recebem as entradas de `audiomix.segments(seq)` da sequência INTEIRA (são elas que `clip_parts` lê) só dos
 # clipes que tocam no trecho. Ex.: `somlimpo.render_inputs` (frente L) grava o WAV limpo que `segments` já pôs em
 # `seg["path"]`.
-PRERENDER: list[Callable] = [somlimpo.render_inputs]
+# 1.8, efeitos sonoros (§47): `sfx.render_inputs` vem antes da limpeza (a entrada limpa de um efeito lê o WAV dele).
+PRERENDER: list[Callable] = [sfx.render_inputs, somlimpo.render_inputs]
 
 
 def cache_dir() -> Path:

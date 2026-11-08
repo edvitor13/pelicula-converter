@@ -43,7 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media, somlimpo, timeline
+from . import media, sfx, somlimpo, timeline
 from .i18n import _
 
 RATE = 48000
@@ -122,6 +122,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             if not has_audio(inner):
                 continue
             path = nested_mix_path(inner)
+        elif src is not None and src.kind == sfx.KIND:
+            path = ""  # 1.8: efeito sonoro feito pelo app (§47): o WAV dele entra no lugar do arquivo (`effect_input`)
         elif src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
             continue  # clipes gerados não têm som
         else:
@@ -179,7 +181,10 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             out[-1]["pieces"] = m.pieces(-pre, c.dur / fps + post)
             out[-1]["reverse"] = c.reverse
             out[-1]["length"] = src.length
-        somlimpo.clean_input(out[-1], src.length if src is not None else 0.0)  # 1.8: ruído aprendido (§44)
+        length = src.length if src is not None else 0.0
+        if src is not None and src.kind == sfx.KIND:
+            length = sfx.effect_input(out[-1], seq)
+        somlimpo.clean_input(out[-1], length)  # 1.8: ruído aprendido (§44)
     return out
 
 
@@ -565,6 +570,9 @@ def mix_key(seq: timeline.Sequence) -> str:
     tns = tones(seq)
     if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
         data["tons"] = sorted([t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns)
+    effects = {p: sfx.sound_data(s.data) for p, s in seq.sources.items() if p in used and s.kind == sfx.KIND}
+    if effects:  # 1.8: os campos de um efeito sonoro (§47) mudam o som
+        data["efeitos"] = effects
     nested = {c.src: mix_key(inner) for c in clips if (inner := seq.nested(c)) is not None}
     if nested:  # 1.7: o som de dentro, em qualquer nível
         data["aninhadas"] = nested
@@ -641,7 +649,7 @@ def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threadi
         if inner is not None:
             wanted[seg["path"]] = inner
     if not wanted:
-        return not clean or somlimpo.render_inputs(segments(seq, start, end), cancel, perf)  # 1.8: entradas limpas
+        return not clean or _derived_inputs(seq, start, end, cancel, perf)  # 1.8: efeitos e entradas limpas
     nested_dir().mkdir(parents=True, exist_ok=True)
     keep = {nested_mix_path(s) for root in wanted.values() for s in root.closure()}
     _prune_nested(keep)
@@ -661,7 +669,15 @@ def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threadi
             os.replace(part, path)
         finally:
             _remove(part)
-    return not clean or somlimpo.render_inputs(segments(seq, start, end), cancel, perf)  # 1.8: depois das aninhadas
+    return not clean or _derived_inputs(seq, start, end, cancel, perf)  # 1.8: depois das aninhadas
+
+
+def _derived_inputs(seq: timeline.Sequence, start: int, end: int, cancel: threading.Event | None,
+                    perf: media.Perf | None) -> bool:
+    """As entradas derivadas do trecho no grafo único (a mesma ordem de `somcache.PRERENDER`): os WAVs dos efeitos
+    sonoros (§47) e depois as entradas limpas (§44), que podem ler um deles."""
+    segs = segments(seq, start, end)
+    return sfx.render_inputs(segs, cancel, perf) and somlimpo.render_inputs(segs, cancel, perf)
 
 
 # ------------------------------------------------------------------ forma de onda

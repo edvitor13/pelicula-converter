@@ -64,7 +64,10 @@ FORMAT_17 = 4
 # "sequencia" (1.7): outra sequência do projeto usada como clipe; não é gerada: `Source.is_nested`.
 SOURCE_FILE = "arquivo"
 SOURCE_SEQUENCE = "sequencia"
-SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste", SOURCE_SEQUENCE)
+SOURCE_KINDS = (SOURCE_FILE, "cor", "gerador", "texto", "legenda", "ajuste", SOURCE_SEQUENCE,
+                "efeito")  # 1.8: efeito sonoro feito pelo app (`sfx.py`; só som, numa faixa de áudio)
+# Duração do clipe novo de uma fonte sem fim, por tipo (fn(fonte) -> segundos; sem registro, `IMAGE_SECONDS`).
+DEFAULT_SECONDS: dict[str, Callable[["Source"], float]] = {}
 MAX_NEST = 8  # níveis de sequência dentro de sequência (cada nível usa as suas telas na GPU)
 IMAGE_SECONDS = 5.0      # duração inicial de uma imagem parada
 MAX_HOLD_SECONDS = 4 * 3600.0  # limite de duração de imagens e quadros congelados
@@ -889,8 +892,9 @@ class Sequence:
         return lo, hi
 
     def default_dur(self, src: Source) -> int:
-        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS
-            return self.frames_for(IMAGE_SECONDS)
+        if src.unbounded:  # imagem ou gerador sem fim: começa com IMAGE_SECONDS (ou o do tipo, `DEFAULT_SECONDS`)
+            fn = DEFAULT_SECONDS.get(src.kind)
+            return self.frames_for(fn(src) if fn is not None else IMAGE_SECONDS)
         return self.frames_for(src.length)
 
     # -------------------------------------------------------- consulta
@@ -2598,6 +2602,8 @@ FEATURES_V6: dict[str, Callable[[Sequence], bool]] = {
     "look_proprio": lambda seq: seq.look is not None,
     # balanço da faixa de áudio (`Track.pan`, "balanco" na faixa): a 1.7 tocaria a faixa no centro
     "balanco_faixa": lambda seq: any(t.pan for t in seq.tracks),
+    # efeito sonoro feito pelo app (`sfx.py`, fonte de tipo "efeito"): a 1.7 leria a fonte como um arquivo que não existe
+    "efeito_sonoro": lambda seq: any(s.kind == "efeito" for s in seq.used_sources()),
 }
 
 
