@@ -97,7 +97,7 @@ class QtCapture(QObject):
                 raise RuntimeError(_("Este microfone não entrega um formato de som que o app consiga ler."))
         self.rate, self.channels, self.fmt = fmt.sampleRate(), fmt.channelCount(), name
         self.source = QAudioSource(dev, fmt, self)
-        self.source.errorChanged.connect(self._error)
+        self.source.stateChanged.connect(self._state)
         self.io = None
 
     def start(self) -> None:
@@ -112,14 +112,15 @@ class QtCapture(QObject):
         if chunk:
             self.data.emit(chunk)
 
-    def _error(self) -> None:
+    def _state(self, _state) -> None:
+        """O dispositivo parou sozinho com erro (desconectado, tomado por outro programa)?"""
         from PySide6.QtMultimedia import QAudio
-        if self.source.error() != QAudio.Error.NoError:
+        if self.io is not None and self.source.error() != QAudio.Error.NoError:
             self.failed.emit(_("O microfone parou de responder."))
 
     def stop(self) -> None:
         try:
-            self.source.errorChanged.disconnect(self._error)
+            self.source.stateChanged.disconnect(self._state)
         except (RuntimeError, TypeError):
             pass
         self.source.stop()
