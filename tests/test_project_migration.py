@@ -1,5 +1,8 @@
 """Projetos gravados pela 1.4 e pela 1.6 abrem, montam e soam exatamente como nessas versões.
 
+`tests/data/projetos_1_8/` tem os da 1.6 com recursos da 1.8 por cima (formato 6; bloco no formato 5), gravados antes da
+1.9, e também o JSON que a 1.8 grava ao salvar de novo (tem que sair igual com o código atual).
+
 `tests/data/projetos_1_4/` tem um projeto simples (formato 1) e uma montagem (formato 2, com cortes, transições,
 velocidade, quadro congelado, imagem, fades e transição de som, marcadores e volume de faixa), gravados pela 1.4.0,
 e `referencia.json`: o que a 1.4 fez ao abrir esses arquivos (veja `gerar.py`). `tests/data/projetos_1_6/` tem os
@@ -20,7 +23,8 @@ import pytest
 from pelicula import params
 
 DATA = Path(__file__).with_name("data")
-RECORDED = {"projetos_1_4": (1, 2), "projetos_1_6": (4, 4)}  # pasta → formatos gravados (simples, edicao)
+# pasta → formatos gravados (simples, edicao); a pasta da 1.8 foi gravada pelo main com a 1.8 (6de08de)
+RECORDED = {"projetos_1_4": (1, 2), "projetos_1_6": (4, 4), "projetos_1_8": (6, 6)}
 
 
 def _gerar(name: str):
@@ -507,13 +511,103 @@ def test_a_new_look_or_clip_setting_of_1_8_writes_format_6(monkeypatch):
     assert p.to_json()["formato"] == project.FORMAT_SIMPLE  # ajuste novo no padrão: nada muda
     p.values = {**p.values, "exposicao": 0.5}
     data = p.to_json()
-    assert data["formato"] == project.FORMAT == 6 and "ajustes_1_8" in data["recursos"]
+    assert data["formato"] == project.FORMAT_18 == 6 and "ajustes_1_8" in data["recursos"]
     monkeypatch.undo()
     seq = tl.Sequence.for_source(_plain_source())
     known = _known_17_without("video", "exposicao")
     monkeypatch.setattr(params, "known_1_7", lambda: known)
     v = next(c for c in seq.clips if c.kind == tl.VIDEO)
     seq.set_values(v.id, {**v.values, "exposicao": 1.0})
-    assert "ajustes_clipe_1_8" in seq.features() and seq.to_json()["formato"] == tl.FORMAT == 5
+    assert "ajustes_clipe_1_8" in seq.features() and seq.to_json()["formato"] == tl.FORMAT_18 == 5
     p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json())
     assert p.to_json()["formato"] == 6
+
+
+# ------------------------------------------------------------------ formato 7 (1.9)
+def _known_18_without(schema: str, key: str) -> dict:
+    """O retrato da 1.8 como se `key` tivesse vindo na 1.9."""
+    known = {k: dict(v) for k, v in params.known_1_8().items()}
+    del known[schema][key]
+    return known
+
+
+def test_the_1_8_snapshot_keeps_every_key_and_choice():
+    """O retrato da 1.8 nunca perde chave nem opção e contém o da 1.7."""
+    from pelicula import editparams
+    raw = json.loads(params.KNOWN_1_8_FILE.read_text(encoding="utf-8"))
+    assert raw["versao"] == "1.8.0"
+    for name, schema in (("look", params.FILM), ("video", editparams.VIDEO), ("audio", editparams.AUDIO)):
+        for k, choices in params.known_1_8()[name].items():
+            p = schema.params.get(k)
+            assert p is not None, f"{name}/{k}"
+            if choices is not None:
+                assert p.kind == "choice" and set(choices) <= {c[0] for c in p.choices}, f"{name}/{k}"
+        assert not params.beyond_1_8(schema, params.known_1_8()[name], schema.defaults()), name
+        for k, choices in params.known_1_7()[name].items():
+            assert k in params.known_1_8()[name], f"{name}/{k}"
+            assert set(choices or ()) <= set(params.known_1_8()[name][k] or ()), f"{name}/{k}"
+
+
+def test_a_new_look_or_clip_setting_of_1_9_writes_format_7(monkeypatch):
+    from pelicula import project, timeline as tl
+    p = project.Project(media_path="C:/v/fundo.mp4")
+    known = _known_18_without("look", "exposicao")
+    monkeypatch.setattr(params, "known_1_8", lambda: known)
+    assert p.to_json()["formato"] == project.FORMAT_SIMPLE  # ajuste novo no padrão: nada muda
+    p.values = {**p.values, "exposicao": 0.5}
+    data = p.to_json()
+    assert data["formato"] == project.FORMAT == 7 and "ajustes_1_9" in data["recursos"]
+    # o mesmo ajuste no look próprio de uma sequência (ARQUITETURA §42.1)
+    seq = tl.Sequence.for_source(_plain_source())
+    seq.look = tl.SeqLook(values={**params.defaults(), "exposicao": 0.5})
+    assert "look_proprio_1_9" in seq.features() and seq.to_json()["formato"] == tl.FORMAT == 6
+    monkeypatch.undo()
+    seq = tl.Sequence.for_source(_plain_source())
+    known = _known_18_without("video", "exposicao")
+    monkeypatch.setattr(params, "known_1_8", lambda: known)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_values(v.id, {**v.values, "exposicao": 1.0})
+    assert "ajustes_clipe_1_9" in seq.features() and seq.to_json()["formato"] == tl.FORMAT == 6
+    p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json())
+    assert p.to_json()["formato"] == 7
+
+
+def test_step_6_to_7_is_pure_and_keeps_the_fields():
+    from pelicula import project, timeline as tl
+    seq = tl.Sequence.for_source(_plain_source())
+    old = {"app": "PeliculaConverter", "formato": 6, "valores": {"exposicao": 0.2}, "edicao": seq.to_json(),
+           "recursos": ["look_proprio"]}
+    new = project._v6_to_v7(old)
+    assert new["formato"] == 7 and new["recursos"] == ["look_proprio"] and new["valores"] == {"exposicao": 0.2}
+    assert new["edicao"] == old["edicao"] and old["formato"] == 6
+    assert tl._seq_v5_to_v6({"formato": 5, "clipes": []}) == {"formato": 6, "clipes": []}
+
+
+def test_a_1_8_reader_refuses_a_format_7_project(tmp_path, monkeypatch):
+    """O que a 1.8 faz (FORMAT = 6, bloco 5) com um projeto que usa algo da 1.9: recusa com aviso."""
+    from pelicula import project, timeline as tl
+    known = _known_18_without("video", "exposicao")
+    monkeypatch.setattr(params, "known_1_8", lambda: known)
+    seq = tl.Sequence.for_source(_plain_source())
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_values(v.id, {**v.values, "exposicao": 1.0})
+    p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json(), mode="edicao")
+    project.save(p, str(tmp_path / "novo.plc"))
+    block = seq.to_json()
+    monkeypatch.setattr(project, "FORMAT", 6)
+    with pytest.raises(project.ProjectError):
+        project.load(str(tmp_path / "novo.plc"))
+    monkeypatch.setattr(tl, "FORMAT", 5)
+    with pytest.raises(tl.FormatError):
+        tl.Sequence.from_json(block)
+
+
+@pytest.mark.ffmpeg
+def test_a_1_8_project_saved_again_is_the_same_json(ffmpeg_ok, tmp_path):
+    """Um projeto da 1.8 sem nada novo sai, ao ser gravado de novo, no mesmo JSON que a 1.8 gravava (formato 6)."""
+    g = _gerar("projetos_1_8")
+    ref = json.loads((DATA / "projetos_1_8" / "referencia.json").read_text(encoding="utf-8"))
+    for name, p in zip(("simples", "edicao"), g.open_copies(tmp_path, ffmpeg_ok)):
+        now = g.recorded(p, str(tmp_path))
+        assert now["formato"] == 6
+        assert json.dumps(now, sort_keys=True) == json.dumps(ref["gravado_de_novo"][name], sort_keys=True), name

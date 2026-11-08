@@ -48,7 +48,7 @@ def test_a_sequence_follows_the_project_until_it_gets_its_own_look():
     d = a.to_json()
     blk = d["sequencias"][0]
     assert blk["look"]["preset"] == OTHER and blk["look"]["chaves"] == {"exposicao": [[0, 0.0], [10, 0.5]]}
-    assert "look" not in d and "look_proprio" in a.features() and d["formato"] == tl.FORMAT == 5
+    assert "look" not in d and "look_proprio" in a.features() and d["formato"] == tl.FORMAT_18 == 5
     back = tl.Sequence.from_json(json.loads(json.dumps(d)))
     got = back.family()[1].look
     assert back.family()[0].look is None and got == b.look
@@ -72,7 +72,7 @@ def test_a_lone_sequence_keeps_its_own_look_without_an_id():
     seq = tl.Sequence.for_source(_src())
     seq.look = _own()
     d = seq.to_json()
-    assert "id" not in d and d["look"]["preset"] == OTHER and d["formato"] == tl.FORMAT
+    assert "id" not in d and d["look"]["preset"] == OTHER and d["formato"] == tl.FORMAT_18
     assert tl.Sequence.from_json(d).look == seq.look
 
 
@@ -84,7 +84,7 @@ def test_the_project_goes_to_format_6_only_with_an_own_look():
     b.look = _own()
     p.sequence = a.to_json()
     data = p.to_json()
-    assert data["formato"] == project.FORMAT == 6 and "look_proprio" in data["recursos"]
+    assert data["formato"] == project.FORMAT_18 == 6 and "look_proprio" in data["recursos"]
     back = project.from_json(json.loads(json.dumps(data)))
     assert tl.Sequence.from_json(back.sequence).family()[1].look == b.look
 
@@ -117,7 +117,7 @@ def test_a_1_7_project_opens_with_every_sequence_following_the_project(tmp_path)
         blk["formato"] = 4
     p = project.from_json(data)
     assert all(s.look is None for s in tl.Sequence.from_json(p.sequence).family())
-    assert project.migrate({"formato": 5})["formato"] == 6 and tl.migrate({"formato": 4})["formato"] == 5
+    assert project.MIGRATIONS[5]({"formato": 5})["formato"] == 6 and tl.MIGRATIONS[4]({"formato": 4})["formato"] == 5
 
 
 def test_look_for_gives_the_own_look_or_the_projects():

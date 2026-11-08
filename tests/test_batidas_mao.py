@@ -111,7 +111,7 @@ def seq_with_music(fix=None) -> tuple[tl.Sequence, tl.Source]:
 def test_fix_json_round_trip_and_format_6_only_when_not_neutral():
     seq, src = seq_with_music()
     assert "batidas" not in src.to_json() and "batidas_corrigidas" not in seq.features()
-    assert seq.block_format() < tl.FORMAT                                # nada novo: a 1.7 ainda abre
+    assert seq.block_format() < tl.FORMAT_18                                # nada novo: a 1.7 ainda abre
     data = project.Project(media_path="", sequence=seq.to_json(), mode="edicao").to_json()
     assert data["formato"] < 6
     for fix in ({"fator": 2.0}, {"fator": 0.5, "compasso": 3}, {"compasso": 3}):
@@ -119,7 +119,7 @@ def test_fix_json_round_trip_and_format_6_only_when_not_neutral():
         assert src.to_json()["batidas"] == fix
         back = tl.Sequence.from_json(json.loads(json.dumps(seq.to_json())))
         assert back.sources["musica.wav"].beats_fix == fix
-        assert "batidas_corrigidas" in seq.features() and seq.block_format() == tl.FORMAT
+        assert "batidas_corrigidas" in seq.features() and seq.block_format() == tl.FORMAT_18
         data = project.Project(media_path="", sequence=seq.to_json(), mode="edicao").to_json()
         assert data["formato"] == 6 and "batidas_corrigidas" in data["recursos"]
     src.beats_fix = {}

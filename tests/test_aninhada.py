@@ -1395,7 +1395,7 @@ def test_inner_own_look_is_ignored_inside_and_used_when_it_is_exported(gl_engine
             capsys.readouterr().err
         got[name] = _decoded(out, ffmpeg_ok, tmp_path)
     raw = project.load(str(tmp_path / "gemea.plc")).to_json()
-    assert raw["formato"] == project.FORMAT and "look_proprio" in raw["recursos"]
+    assert raw["formato"] == project.FORMAT_18 and "look_proprio" in raw["recursos"]
     for a_name, b_name in (("plano", "gemea"), ("plano_outro", "dentro")):
         (fa, sa), (fb, sb) = got[a_name], got[b_name]
         assert len(fa) == len(fb) == flat.duration

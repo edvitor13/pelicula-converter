@@ -132,7 +132,12 @@ VIDEO_SECTIONS: list[Section] = [
         C("mesclagem", "Mesclagem", "normal", [
             ("normal", N_("Normal")), ("tela", N_("Tela (clareia)")), ("multiplicar", N_("Multiplicar (escurece)")),
             ("sobrepor", N_("Sobrepor (contraste)")), ("adicionar", N_("Adicionar (luz)")),
-            ("clarear", N_("Só o mais claro")), ("escurecer", N_("Só o mais escuro"))],
+            ("clarear", N_("Só o mais claro")), ("escurecer", N_("Só o mais escuro")),
+            # 1.9: modos novos (`mesclagem.py`; ids 7 em diante em `compositor.BLEND_IDS`)
+            ("diferenca", N_("Diferença")), ("exclusao", N_("Exclusão")), ("luz_suave", N_("Luz suave")),
+            ("luz_forte", N_("Luz forte")), ("subtrair", N_("Subtrair")), ("dividir", N_("Dividir")),
+            ("matiz", N_("Matiz")), ("saturacao_m", N_("Saturação")), ("cor", N_("Cor")),
+            ("luminosidade", N_("Luminosidade"))],
           "Como este clipe se mistura com as faixas de baixo."),
     ], "Escala, posição, rotação, corte e opacidade"),
 
@@ -272,6 +277,244 @@ VIDEO_SECTIONS += [
         F("luz_densidade", "Densidade (as três)", 0.0, -24, 24, 1, 0, " pt",
           "Pontos nas três luzes juntas: mais pontos = plano mais escuro na cópia, sem mudar a cor."),
     ], "Marcação de luz deste plano (pontos da copiadora do Laboratório)"),
+]
+
+# 1.9 (#68, efeitos visuais; ARQUITETURA §49–§53): as seções dos efeitos de clipe vêm depois destas, em blocos
+# reservados, um por frente, nesta ordem (acrescente só dentro do seu bloco; nunca mude a ordem dos blocos). Toda chave
+# das seções depois de `_N_BASE` vai para o JSON só fora do padrão (`SPARSE_KEYS`) e todo padrão é neutro (efeito
+# desligado: nenhum passo na GPU, `vfx.Effect.active`). Não ponha estas seções em `COLOR_SECTIONS`.
+_N_BASE = len(VIDEO_SECTIONS)
+
+# 1.9 F2: recorte e máscaras (§50)
+# Recorte por cor ou por brilho (`recorte.py`) e máscara de forma do clipe (`mascaras_clipe.py`), módulo Beta
+# "recorte_mascaras". Distâncias em px@1080 do clipe; os números animam (`_anim`). Padrão: nenhum recorte e nenhuma
+# forma.
+from .params import COR  # noqa: E402
+
+
+def _anim(p: Param) -> Param:
+    p.animatable = True
+    return p
+
+
+VIDEO_SECTIONS += [
+    Section("recorte", "Recorte (chroma/luma)", None, [
+        C("chave_tipo", "Recortar", "nenhuma", [
+            ("nenhuma", N_("Nada")), ("verde", N_("Fundo verde")), ("azul", N_("Fundo azul")),
+            ("cor", N_("Uma cor escolhida")), ("luma", N_("Pelo brilho"))],
+          "Tira o fundo do clipe e mostra as faixas de baixo no lugar. Para uma tela verde ou azul fora do comum, "
+          "use o conta-gotas: ele escolhe a cor do fundo."),
+        COR("chave_cor", "Cor do fundo", (0.15, 0.70, 0.25),
+            "A cor que sai em \"Uma cor escolhida\" (o conta-gotas acerta este valor clicando no fundo)."),
+        _anim(_pct("chave_tolerancia", "Tolerância", 0.4, 0.0, 1.0,
+                   tip="Quanto uma cor pode se afastar da cor do fundo e ainda sair. Aumente se sobrar fundo; "
+                       "diminua se o recorte comer a pessoa.")),
+        _anim(_pct("chave_suavidade", "Suavidade", 0.25, 0.0, 1.0,
+                   tip="Largura da passagem entre o que sai e o que fica (cabelo, desfoque de movimento).")),
+        _anim(F("chave_limpar", "Encolher a borda", 0.0, -20, 20, 0.5, 1, " px",
+                "Positivo encolhe o recorte (tira a franja do fundo); negativo aumenta. Pixels de um quadro de "
+                "1080 linhas.")),
+        _anim(_pct("chave_spill", "Tirar o reflexo do fundo", 0.0, 0.0, 1.0,
+                   tip="Tira a cor do fundo que respingou na pessoa (o verde no cabelo e nos ombros). Cinzas e "
+                       "brancos não mudam.")),
+        _anim(_pct("chave_luz_borda", "Luz do fundo na borda", 0.0, 0.0, 1.0,
+                   tip="Traz a luz das faixas de baixo para a borda do recorte, como se a pessoa estivesse lá.")),
+        _anim(F("chave_luz_largura", "Largura da luz na borda", 20.0, 1, 200, 1, 0, " px",
+                "Até onde a luz do fundo entra na borda (pixels de um quadro de 1080 linhas).")),
+        _anim(_pct("chave_luma_min", "Brilho mínimo", 0.0, 0.0, 1.0,
+                   tip="\"Pelo brilho\": o que é mais escuro que isto sai.")),
+        _anim(_pct("chave_luma_max", "Brilho máximo", 1.0, 0.0, 1.0,
+                   tip="\"Pelo brilho\": o que é mais claro que isto sai.")),
+    ], "Tirar um fundo verde, azul, de uma cor ou pelo brilho"),
+
+    Section("mascara", "Máscara", None, [
+        C("mascara_forma", "Forma", "nenhuma", [
+            ("nenhuma", N_("Nenhuma")), ("retangulo", N_("Retângulo")), ("elipse", N_("Elipse")),
+            ("poligono", N_("Polígono"))],
+          "Uma forma no clipe: arraste as alças na prévia. No polígono, clique para pôr os pontos e dê dois "
+          "cliques para fechar (Esc cancela)."),
+        _anim(F("mascara_x", "Centro horizontal", 0.0, -4000, 4000, 1, 0, " px",
+                "Centro da forma a partir do centro do clipe (pixels de um quadro de 1080 linhas do clipe).")),
+        _anim(F("mascara_y", "Centro vertical", 0.0, -4000, 4000, 1, 0, " px", "Negativo sobe; positivo desce.")),
+        _anim(F("mascara_largura", "Largura", 800.0, 1, 8000, 1, 0, " px", "Largura do retângulo ou da elipse.")),
+        _anim(F("mascara_altura", "Altura", 600.0, 1, 8000, 1, 0, " px", "Altura do retângulo ou da elipse.")),
+        _anim(F("mascara_rotacao", "Rotação", 0.0, -180, 180, 0.5, 1, "°",
+                "Gira a forma (positivo: sentido horário).")),
+        _anim(F("mascara_suavidade", "Suavidade da borda", 10.0, 0, 500, 1, 0, " px",
+                "Largura da borda suave (0 = borda seca).")),
+        _anim(F("mascara_expandir", "Expandir", 0.0, -500, 500, 1, 0, " px",
+                "Aumenta (positivo) ou encolhe (negativo) a forma em todos os lados.")),
+        B("mascara_inverter", "Inverter", False, "Troca o dentro pelo fora."),
+        C("mascara_uso", "O que fazer dentro", "recortar", [
+            ("recortar", N_("Mostrar só o que está dentro")), ("desfocar", N_("Desfocar")),
+            ("pixelar", N_("Pixelar")), ("so_forma", N_("Nada (só a forma, para o desfoque de lente)"))],
+          "Recortar deixa ver as faixas de baixo fora da forma; desfocar e pixelar escondem o que está dentro (um "
+          "rosto, uma placa); \"Nada\" guarda a forma para o desfoque de lente usar."),
+        _anim(F("mascara_forca", "Força", 20.0, 1, 200, 1, 0, " px",
+                "Raio do desfoque ou tamanho dos quadradinhos do pixelado (pixels de um quadro de 1080 linhas).")),
+    ], "Retângulo, elipse ou polígono para recortar, desfocar ou pixelar"),
+]
+
+# 1.9 F3: estabilização e rastreio (§51)
+VIDEO_SECTIONS += [
+    # `estabilizacao.py`: a correção sai da análise guardada na fonte (botão "Analisar" do cartão) e entra na geometria
+    # do clipe (`vfx.GEOMETRY`). Desligada (padrão) ou sem análise, o clipe de sempre.
+    Section("estabilizar", "Estabilizar", "estab_on", [
+        B("estab_on", "Estabilizar", False, "Tira o tremor da câmera na mão. Analise o arquivo antes (botão Analisar)."),
+        F("estab_suavizar", "Suavizar", 1.0, 0.1, 10.0, 0.1, 1, " s",
+          "Quanto do movimento fica: pouco segue a câmera de perto (só some o tremor); muito deixa o movimento lento e "
+          "liso, como num tripé com cabeça fluida."),
+        B("estab_rotacao", "Corrigir a rotação", True, "Desligado, a imagem só anda (o horizonte pode balançar)."),
+        C("estab_bordas", "Bordas", "ampliar", [
+            ("ampliar", N_("Ampliar (sem bordas)")), ("preto", N_("Mostrar as bordas"))],
+          "Ao corrigir, a imagem anda e as bordas aparecem. Ampliar escolhe o menor zoom que as esconde no arquivo "
+          "inteiro."),
+        _pct("estab_zoom_extra", "Zoom a mais", lo=0.0, hi=0.5, tip="Amplia mais um pouco, além do necessário."),
+    ], "Tira o tremor da câmera na mão"),
+    # `rastreio.py`: o tamanho do alvo e a busca do rastreio de ponto (botão "Rastrear ponto"); não mudam a imagem.
+    Section("rastreio", "Rastrear ponto", None, [
+        F("rastreio_caixa", "Tamanho do alvo", 64, 16, 256, 2, 0, " px",
+          "Lado do quadrado em volta do ponto que é procurado nos outros quadros (px num quadro de 1080 linhas). "
+          "Pegue algo com detalhe e que não mude muito."),
+        F("rastreio_busca", "Busca por quadro", 48, 8, 256, 2, 0, " px",
+          "Quanto o ponto pode andar de um quadro para o outro. Aumente para movimentos rápidos.", advanced=True),
+    ], "Um título (ou o próprio clipe) seguindo um ponto da imagem"),
+]
+
+# 1.9 F4: luz e atmosfera (§52)
+VIDEO_SECTIONS += [
+    # `luzes_clipe.py` (módulo Beta "luzes_lente"): desfoque de lente (ordem 400) e listra, flares e raios (500).
+    Section("desfoque_lente", "Desfoque de lente", None, [
+        F("desfoque_lente_raio", "Raio", 0.0, 0, 200, 0.5, 1, " px",
+          "Tamanho do círculo de desfoque (bokeh), em px de um quadro de 1080 linhas do clipe. 0 = desligado."),
+        C("desfoque_lente_forma", "Forma do bokeh", "disco", [
+            ("disco", N_("Disco (redondo)")), ("hexagono", N_("Hexágono (seis lâminas)"))],
+          "A forma das luzes desfocadas."),
+        C("desfoque_lente_mascara", "Onde desfocar", "tudo", [
+            ("tudo", N_("A imagem inteira")), ("degrade", N_("Pelo degradê (foco perto ou longe)")),
+            ("dentro_mascara", N_("Dentro da máscara do clipe")), ("fora_mascara", N_("Fora da máscara do clipe"))],
+          "Com o degradê, o lado marcado fica desfocado e o outro continua nítido."),
+        C("desfoque_lente_degrade", "Forma do degradê", "linear", [
+            ("linear", N_("Linear (fundo ou frente)")), ("radial", N_("Radial (fora do círculo)"))]),
+        F("desfoque_lente_angulo", "Direção", 0.0, -180, 180, 1, 0, "°",
+          "Que lado fica desfocado no degradê linear: 0° = em cima (o fundo), 180° = embaixo (a frente)."),
+        F("desfoque_lente_x", "Centro horizontal", 0.0, -1920, 1920, 10, 0, " px",
+          "Desloca a linha ou o círculo (px de um quadro de 1080 linhas do clipe; 0 = centro)."),
+        F("desfoque_lente_y", "Centro vertical", 0.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        F("desfoque_lente_circulo", "Raio do círculo", 400.0, 10, 2000, 10, 0, " px",
+          "No degradê radial, o que fica dentro do círculo continua nítido."),
+        F("desfoque_lente_suavidade", "Suavidade", 400.0, 0, 2000, 10, 0, " px",
+          "Largura da passagem entre o nítido e o desfocado."),
+        B("desfoque_lente_inverter", "Inverter", False, "Troca o lado desfocado."),
+    ], "Desfoque como o de uma lente aberta, com foco perto ou longe"),
+
+    Section("luzes", "Luz (listra, flares, raios)", None, [
+        _pct("listra_intensidade", "Listra anamórfica", lo=0.0, hi=2.0,
+             tip="Uma linha de luz longa nas luzes fortes, como a de uma lente anamórfica. 0% = desligada."),
+        F("listra_limiar", "Limiar da listra", 2.5, 0, 8, 0.1, 1, " EV",
+          "Só as partes mais claras que o cinza médio mais estes stops espalham a listra."),
+        F("listra_comprimento", "Comprimento da listra", 400.0, 20, 2000, 10, 0, " px",
+          "Até onde a listra vai de cada lado (px de um quadro de 1080 linhas do clipe)."),
+        Param("listra_cor", "Cor da listra", "color", (0.35, 0.6, 1.0)),
+        F("listra_angulo", "Ângulo da listra", 0.0, -90, 90, 1, 0, "°", "0° = horizontal.", advanced=True),
+        _pct("flare_intensidade", "Flare", lo=0.0, hi=2.0,
+             tip="Reflexos da lente (fantasmas) na linha que vai da luz ao centro do quadro. 0% = desligado."),
+        C("flare_fonte", "Origem do flare", "auto", [
+            ("auto", N_("As luzes mais fortes da imagem")), ("ponto", N_("Um ponto escolhido"))],
+          "Automático: cada luz forte da imagem faz os seus fantasmas. Ponto: os fantasmas saem do ponto escolhido "
+          "na prévia, mesmo sem uma luz ali."),
+        F("flare_x", "Ponto do flare (horizontal)", 0.0, -1920, 1920, 10, 0, " px",
+          "De onde sai o flare com a origem \"Um ponto escolhido\" (px de um quadro de 1080 linhas; 0 = centro)."),
+        F("flare_y", "Ponto do flare (vertical)", -300.0, -1080, 1080, 10, 0, " px", "Negativo sobe; positivo desce."),
+        I("flare_fantasmas", "Fantasmas", 4, 1, 8, "Quantos reflexos aparecem."),
+        F("flare_limiar", "Limiar do flare", 3.0, 0, 8, 0.1, 1, " EV",
+          "Na origem automática, só as partes mais claras que o cinza médio mais estes stops fazem fantasmas."),
+        F("flare_tamanho", "Tamanho dos fantasmas", 80.0, 10, 600, 5, 0, " px",
+          "Raio dos fantasmas de um ponto escolhido; na origem automática, o quanto eles ficam macios."),
+        Param("flare_cor", "Cor do flare", "color", (1.0, 0.85, 0.7)),
+        _pct("raios_intensidade", "Raios de luz", lo=0.0, hi=2.0,
+             tip="Raios que saem de um ponto atravessando as partes claras (luz por entre folhas, janela, "
+                 "poeira). 0% = desligados."),
+        F("raios_x", "Origem dos raios (horizontal)", 0.0, -1920, 1920, 10, 0, " px",
+          "De onde saem os raios (px de um quadro de 1080 linhas; 0 = centro). Pode ficar fora do quadro."),
+        F("raios_y", "Origem dos raios (vertical)", -400.0, -2160, 2160, 10, 0, " px", "Negativo sobe; positivo desce."),
+        _pct("raios_comprimento", "Comprimento dos raios", 0.5, 0.05, 1.0,
+             tip="Fração da distância até a origem que cada raio percorre."),
+        _pct("raios_decaimento", "Decaimento dos raios", 0.5, 0.0, 1.0,
+             tip="Quanto os raios enfraquecem ao se afastar da luz."),
+        F("raios_limiar", "Limiar dos raios", 1.5, 0, 8, 0.1, 1, " EV",
+          "Só as partes mais claras que o cinza médio mais estes stops viram raios."),
+        Param("raios_cor", "Cor dos raios", "color", (1.0, 0.95, 0.85)),
+    ], "Listra anamórfica, reflexos da lente e raios de luz"),
+
+    # `atmosfera.py` (módulo Beta "atmosfera"): névoa (ordem 600) e partículas (700).
+    Section("nevoa", "Névoa", None, [
+        _pct("nevoa_densidade", "Densidade", lo=0.0, tip="Quanto a névoa cobre a imagem. 0% = sem névoa."),
+        Param("nevoa_cor", "Cor da névoa", "color", (0.82, 0.85, 0.9),
+              tip="A cor da névoa onde ela é total, como num vídeo comum (Rec.709)."),
+        C("nevoa_forma", "Forma", "degrade", [
+            ("degrade", N_("Degradê (chão ou céu)")), ("uniforme", N_("Por igual (o quadro todo)"))]),
+        F("nevoa_angulo", "Direção", 180.0, -180, 180, 1, 0, "°",
+          "Que lado tem névoa: 180° = embaixo (chão), 0° = em cima (céu)."),
+        F("nevoa_posicao", "Altura", 0.0, -1080, 1080, 10, 0, " px",
+          "Desloca a linha do degradê (px de um quadro de 1080 linhas; negativo sobe)."),
+        F("nevoa_suavidade", "Suavidade", 600.0, 0, 3000, 10, 0, " px", "Largura da passagem do degradê."),
+        _pct("nevoa_textura", "Textura", 0.5, 0.0, 1.0, tip="0% = névoa lisa; mais = nuvens mais marcadas."),
+        F("nevoa_escala", "Tamanho das nuvens", 300.0, 20, 2000, 10, 0, " px", advanced=True),
+        F("nevoa_movimento", "Movimento", 20.0, -400, 400, 1, 0, " px/s",
+          "Velocidade com que a névoa anda na horizontal (negativo = para a esquerda)."),
+        I("nevoa_semente", "Semente", 1, 0, 9999, "Muda o desenho das nuvens.", advanced=True),
+    ], "Névoa por degradê, com nuvens que andam"),
+
+    Section("particulas", "Partículas", None, [
+        C("part_tipo", "Tipo", "nenhuma", [
+            ("nenhuma", N_("Nenhuma")), ("chuva", N_("Chuva")), ("neve", N_("Neve")), ("poeira", N_("Poeira no ar")),
+            ("brasas", N_("Brasas"))]),
+        _pct("part_quantidade", "Quantidade", 0.5, 0.0, 1.0),
+        F("part_tamanho", "Tamanho", 6.0, 1, 60, 0.5, 1, " px",
+          "Diâmetro das partículas da frente (px de um quadro de 1080 linhas do clipe)."),
+        F("part_velocidade", "Velocidade", 1.0, 0.0, 4.0, 0.05, 2, "×", "1× = a velocidade natural do tipo."),
+        _pct("part_vento", "Vento", tip="Empurra as partículas para a esquerda (negativo) ou para a direita."),
+        _pct("part_profundidade", "Profundidade", 0.5, 0.0, 1.0,
+             tip="Camadas ao fundo menores, mais lentas e mais apagadas (paralaxe)."),
+        _pct("part_opacidade", "Opacidade", 0.8, 0.0, 1.0),
+        Param("part_cor", "Cor", "color", (1.0, 1.0, 1.0), tip="Tinge as partículas (as brasas e a poeira já têm cor)."),
+        _pct("part_desfoque", "Desfoque de movimento", 0.5, 0.0, 1.0,
+             tip="Rastro de cada partícula durante a exposição (50% = obturador de 180°)."),
+        I("part_semente", "Semente", 1, 0, 9999, "Muda onde cada partícula aparece.", advanced=True),
+    ], "Chuva, neve, poeira ou brasas"),
+]
+# Os números e as cores destas seções aceitam chaves de animação, menos os que desenham a grade das partículas (tamanho,
+# rastro, profundidade) e a posição delas e das nuvens pelo tempo (velocidade × tempo): animá-los faria tudo pular.
+for _s in VIDEO_SECTIONS[_N_BASE:]:
+    for _p in _s.params if _s.key in ("desfoque_lente", "luzes", "nevoa", "particulas") else ():
+        if _p.kind in ("float", "color") and _p.key not in ("part_tamanho", "part_velocidade", "part_vento",
+                                                              "part_profundidade", "part_desfoque", "nevoa_movimento",
+                                                              "nevoa_escala"):
+            _p.animatable = True
+del _s, _p
+
+# 1.9 F5: tempo da imagem (§53)
+VIDEO_SECTIONS += [
+    # `tempo_imagem.py` (módulo Beta "tempo_imagem"): deflicker pela análise do arquivo, ruído temporal pelos quadros
+    # vizinhos e câmera lenta por mistura de quadros. Padrão: tudo desligado (nenhum passo, nenhuma janela).
+    Section("tempo_imagem", "Tempo da imagem", None, [
+        _pct("deflicker", "Deflicker", lo=0.0,
+             tip="Tira a cintilação (o brilho que pisca de um quadro para o outro, de luz fluorescente, LED ou "
+                 "timelapse) igualando o brilho de cada quadro à média dos vizinhos. Precisa da análise do arquivo "
+                 "(botão Analisar)."),
+        F("deflicker_janela", "Janela do deflicker", 0.5, 0.1, 5.0, 0.05, 2, " s",
+          "O tempo em que o brilho é igualado: mais curto segue mudanças de luz de verdade; mais longo tira "
+          "cintilações lentas.", advanced=True),
+        _pct("ruido_temporal", "Ruído temporal", lo=0.0,
+             tip="Tira o ruído do sensor misturando cada pixel com o mesmo pixel nos quadros vizinhos, só onde a "
+                 "imagem não mudou (o que se mexe não deixa rastro). Melhor em cenas paradas ou de tripé."),
+        I("ruido_temporal_quadros", "Quadros de cada lado", 2, 1, 2,
+          "Quantos quadros antes e depois entram na média (mais quadros: menos ruído, mais lento).", advanced=True),
+        B("mistura_quadros", "Mistura de quadros", False,
+          "Na câmera lenta (menos de um quadro do vídeo por quadro da sequência), mistura os dois quadros mais "
+          "próximos em vez de repetir o mesmo: o movimento fica mais contínuo, sem saltos. Não muda o som."),
+    ], "Deflicker, ruído temporal e câmera lenta por mistura"),
 ]
 
 AUDIO_SECTIONS: list[Section] = [
@@ -432,6 +675,7 @@ SPARSE_KEYS |= {"escala_x", "escala_y"}  # 1.7: escala por eixo (`compositor.axi
 SPARSE_KEYS |= {"desespremer", "desespremer_taxa"}  # 1.7: desespremer do clipe (`compositor.desqueeze`)
 SPARSE_KEYS |= {"passa_alta", "passa_baixa", "nivelar_voz", "ruido_perfil", "ruido_ini", "ruido_fim", "zumbido",
                 "zumbido_harmonicos"}  # 1.8: limpeza do som (`somlimpo.py`)
+SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS[_N_BASE:] for p in s.params}  # 1.9: efeitos visuais (todas as frentes)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

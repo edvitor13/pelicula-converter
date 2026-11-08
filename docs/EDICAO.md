@@ -237,6 +237,111 @@ Cor, degradê e título começam com 5 s e esticam como uma imagem. Para esconde
 desligue **Títulos e geradores** em Configurações › Recursos (os clipes que já estão na montagem continuam
 iguais na imagem e na exportação).
 
+### Camada de ajuste (1.9, Beta)
+
+**Novo › Camada de ajuste** cria um clipe sem imagem: a cor, o detalhe e os efeitos dele valem para **tudo o que está
+embaixo**, só no tempo em que ela aparece. Serve para corrigir ou dar um efeito a vários clipes de uma vez (estique a
+camada por cima deles). Ela entra no cursor, por cima do que já aparece, com 5 s, e estica como uma imagem.
+
+- Cobre sempre o quadro inteiro: no cartão **Enquadrar e posicionar** ficam só a **Opacidade** (meia opacidade = metade
+  do efeito) e a **Mesclagem**. O perfil de câmera não aparece (o que está embaixo já foi lido).
+- Transições de entrada e saída, chaves de animação, dividir e desfazer funcionam como em qualquer clipe.
+- Sem nenhum ajuste, não muda nada. Com **Desligar todos os efeitos** (Shift+D) ou no "Original" da comparação, ela não
+  vale.
+- Numa sequência com **Fundo transparente**, ela muda a cor do que está embaixo e não cria imagem onde não há nada.
+- **Aninhar** uma camada de ajuste sem o que está embaixo dela é recusado (dentro da sequência nova ela não teria o que
+  mudar).
+
+A camada de ajuste é do recurso **Efeitos de clipe** (Beta, grupo **Efeitos visuais** em Configurações › Recursos),
+desligado no começo; desligá-lo só esconde o item do Novo. Um projeto com camada de ajuste é gravado no formato da 1.9
+(versões anteriores não o abrem).
+
+### Recorte (fundo verde) e máscaras (1.9, Beta)
+
+Dois cartões no inspetor do clipe, logo depois de **Enquadrar e posicionar**, do recurso **Recorte e máscaras** (Beta,
+grupo **Efeitos visuais** em Configurações › Recursos; desligado no começo, desligar só esconde os cartões e as alças).
+
+**Tirar um fundo verde ou azul** (cartão **Recorte (chroma/luma)**):
+
+1. Ponha o clipe gravado no fundo verde numa faixa **acima** do fundo novo (uma imagem, outro vídeo ou um gerador).
+2. Em **Recortar**, escolha **Fundo verde** ou **Fundo azul**. Para um fundo de outra cor (ou um verde fora do comum),
+   clique em **Conta-gotas do fundo** e clique no fundo na prévia: o recorte passa a **Uma cor escolhida** com essa cor
+   (Esc cancela; uma cor quase cinza é recusada).
+3. **Tolerância**: aumente se sobrar fundo; diminua se o recorte comer a pessoa. **Suavidade**: a passagem entre o que
+   sai e o que fica (cabelo, desfoque de movimento).
+4. **Encolher a borda** (em pixels de um quadro de 1080 linhas): positivo tira a franja do fundo que ficou em volta;
+   negativo aumenta o recorte.
+5. **Tirar o reflexo do fundo**: tira o verde que respingou no cabelo e nos ombros (cinzas, brancos e amarelos não
+   mudam). **Luz do fundo na borda** e **Largura da luz na borda**: a luz das faixas de baixo entra na borda da pessoa,
+   como se ela estivesse lá.
+
+**Pelo brilho** tira o que é mais escuro que o **Brilho mínimo** ou mais claro que o **Brilho máximo** (um fundo preto
+ou branco), com a **Suavidade** para fora. O recorte vale na prévia, no "Salvar quadro" e na exportação; numa sequência
+com **Fundo transparente**, o que saiu fica transparente no arquivo exportado.
+
+**Máscara** (cartão **Máscara**): uma forma no clipe — **Retângulo**, **Elipse** ou **Polígono** — que acompanha o
+enquadramento dele (escala, posição, rotação, espelhar). Escolha a forma e **o que fazer dentro**:
+
+- **Mostrar só o que está dentro**: fora da forma aparecem as faixas de baixo (um recorte à mão, uma janela).
+- **Desfocar** ou **Pixelar**: esconde o que está dentro (um rosto, uma placa); **Força** é o raio do desfoque ou o
+  tamanho dos quadradinhos.
+- **Nada (só a forma, para o desfoque de lente)**: a máscara não muda o clipe; a forma serve ao **Desfoque de lente**
+  em *Dentro da máscara do clipe* ou *Fora da máscara do clipe* (fundo desfocado atrás de alguém, por exemplo).
+- **Suavidade da borda**, **Expandir** (aumenta ou encolhe a forma em todos os lados) e **Inverter** (troca dentro e
+  fora) valem para todos.
+
+Com o clipe escolhido e o cursor nele, a forma aparece na prévia com **alças**: arraste o **centro** (ou o meio da forma)
+para mover, os **cantos** para mudar o tamanho e a **bolinha de cima** para girar (Shift: de 15 em 15°). No
+**polígono**, clique em **Desenhar polígono** (ou clique na prévia com o polígono ainda vazio): cada clique põe um ponto,
+**dois cliques** (ou um clique no primeiro ponto) fecham, **Esc** cancela; depois, arraste um ponto para movê-lo ou o meio
+para mover tudo. **Apagar os pontos** recomeça. Centro, tamanho, rotação, suavidade e força aceitam **chaves de
+animação**: com chaves, arrastar uma alça grava uma chave no cursor (como os sliders), e assim a forma pode seguir algo
+que se move. Cada arrasto é um passo do Ctrl+Z.
+
+O recorte vem antes da máscara: dá para tirar o fundo verde e, com a máscara, cortar um tripé que aparece no canto.
+**Desligar todos os efeitos** (Shift+D) desliga os dois. Um projeto com recorte ou máscara é gravado no formato da 1.9.
+### Estabilizar e rastrear ponto (1.9, Beta)
+
+Do recurso **Estabilização e rastreio** (Beta, grupo **Efeitos visuais** em Configurações › Recursos), desligado no
+começo. Ligado, o inspetor de um clipe de vídeo ganha dois cartões, logo depois de **Enquadrar e posicionar**.
+
+**Estabilizar** tira o tremor da câmera na mão:
+
+1. Clique em **Analisar**. O app mede o movimento do arquivo inteiro (uma vez por arquivo; o progresso e o
+   **Cancelar** ficam na barra de status). Com a vid.stab no ffmpeg a análise é rápida; sem ela, o app usa um método
+   próprio, mais lento, e avisa. A análise fica guardada no projeto e a estabilização do clipe é ligada.
+2. Ajuste no cartão:
+   - **Suavizar** (segundos): quanto do movimento sai. Pouco tira só o tremor; muito deixa a câmera quase parada.
+     Uma panorâmica de verdade continua.
+   - **Corrigir a rotação**: desligado, só o deslocamento é corrigido.
+   - **Bordas**: **Ampliar (sem bordas)** aumenta a imagem o suficiente para nenhuma borda aparecer em todo o arquivo
+     (até 60%; o cartão diz quanto); **Mostrar as bordas** não amplia.
+   - **Zoom a mais**: um pouco mais de ampliação, se quiser.
+
+A correção é do arquivo: dividir, aparar e mudar a velocidade do clipe não mudam a imagem de cada quadro. Um arquivo de
+taxa de quadros variável é recusado (converta para uma taxa fixa antes). Se o arquivo mudar depois da análise, o cartão
+avisa: analise de novo. **Desligar todos os efeitos** (Shift+D) mostra o clipe sem a estabilização.
+
+**Rastrear ponto** faz um título (ou o próprio clipe) seguir um ponto da imagem:
+
+1. Ponha o cursor sobre o clipe, clique em **Rastrear ponto** e clique na prévia num ponto com detalhe (um canto, uma
+   letra, uma marca). O ponto é seguido no arquivo para a frente e para trás; se ele sumir ou mudar demais, o rastro
+   para ali e o cartão diz em que quadro. **Tamanho do alvo** e **Busca por quadro** (avançado) ajudam em pontos grandes
+   ou que andam rápido.
+2. **Aplicar a…** transforma o rastro em chaves de animação:
+   - **O próprio clipe**: a posição do clipe anda ao contrário, e o ponto fica parado na tela.
+   - **Um clipe acima** (título, imagem, outro vídeo que passa junto): a posição dele segue o ponto, a partir do lugar
+     em que você o pôs.
+   - **O centro da máscara do clipe** (só com uma forma no cartão **Máscara**): a máscara acompanha o ponto, a partir
+     do lugar em que você a pôs — para desfocar ou pixelar um rosto ou uma placa que se mexe.
+   As chaves são poucas (só onde o caminho muda) e são chaves comuns: dá para editá-las, e elas andam com o clipe ao
+   aparar e mudar a velocidade. Aplicar é um passo do desfazer.
+3. **Reaplicar** refaz as chaves no último alvo (depois de mover o título ou rastrear de novo). **Apagar o rastro** tira
+   o rastro do clipe; as chaves já aplicadas ficam.
+
+O ponto rastreado aparece marcado na prévia (só na tela). Um projeto com estabilização ou rastro é gravado no formato da
+1.9.
+
 ### Títulos
 
 **Novo ▸ Título…** põe um título no cursor, com o texto já escolhido para você digitar por cima. No painel da
@@ -398,6 +503,55 @@ mesma câmera. Um clipe que fica em **Igual ao do look** não muda.
   projetos reabertos nunca mudam.
 - Um projeto com perfil de clipe pede a 1.6 ou mais nova para abrir.
 
+### Modos de mesclagem novos (1.9)
+
+Além de Normal, Tela, Multiplicar, Sobrepor, Adicionar, Só o mais claro e Só o mais escuro, a **Mesclagem** do cartão
+**Enquadrar e posicionar** tem: **Diferença** (a distância entre as duas imagens; igual = preto), **Exclusão** (a
+diferença mais suave), **Luz suave** e **Luz forte** (contraste: o clipe clareia onde é mais claro que o cinza médio e
+escurece onde é mais escuro), **Subtrair** (tira o clipe do que está embaixo), **Dividir** (clareia o que está embaixo pelo
+clipe), **Matiz**, **Saturação** e **Cor** (pegam só a cor, a saturação ou as duas do clipe, mantendo a luz de baixo) e
+**Luminosidade** (a luz do clipe com a cor de baixo). Escolher um deles grava o projeto no formato da 1.9.
+
+### Luz e atmosfera (1.9, Beta)
+
+Quatro cartões novos no inspetor do clipe, logo depois de **Efeitos**: **Desfoque de lente** e **Luz (listra, flares,
+raios)** (recurso **Luzes e lente**) e **Névoa** e **Partículas** (recurso **Atmosfera**). Os dois recursos são Beta,
+do grupo **Efeitos visuais** em Configurações › Recursos, e começam desligados; desligar só esconde os cartões (um
+projeto que já usa sai igual, e a janela avisa ao abrir). Tudo vale no tempo e no quadro do clipe: as medidas em **px**
+são de um quadro de 1080 linhas do clipe (o mesmo efeito em 720p, 1080p ou 4K), e numa **camada de ajuste** o efeito
+vale para tudo o que está embaixo dela. Todos começam desligados; usar qualquer um grava o projeto no formato da 1.9.
+O plugin do DaVinci não tem estes efeitos.
+
+- **Desfoque de lente**: **Raio** do círculo de desfoque (0 = desligado). As partes claras viram discos de luz, como
+  numa lente aberta; **Forma do bokeh**: disco ou hexágono. **Onde desfocar**: a imagem inteira ou **pelo degradê**
+  (foco perto ou longe): o lado marcado desfoca e o outro continua nítido. *Linear*: **Direção** 0° desfoca em cima (o
+  fundo), 180° embaixo (a frente); *Radial*: fica nítido dentro do círculo (**Raio do círculo**, **Centro**). **Suavidade**
+  é a passagem entre o nítido e o desfocado e **Inverter** troca os lados. **Dentro** ou **fora da máscara do clipe**
+  usa a forma do cartão **Máscara** (com o uso *Nada (só a forma…)* ela não recorta o clipe); sem forma, desfoca tudo.
+- **Listra anamórfica**: uma linha de luz longa, azulada por padrão, nas luzes mais fortes. **Limiar** em stops acima do
+  cinza médio (só o que passa dele espalha), **Comprimento**, **Cor** e, nos avançados, o **Ângulo**.
+- **Flare**: reflexos da lente (fantasmas coloridos) na linha que vai da luz ao centro do quadro. Com a origem **As
+  luzes mais fortes da imagem**, cada luz acima do **Limiar** faz os seus; com **Um ponto escolhido**, o flare sai do
+  ponto (horizontal e vertical em px a partir do centro), mesmo sem luz ali. **Escolher o ponto do flare na prévia**:
+  clique no botão e depois na prévia, onde está a luz. **Fantasmas** (1 a 8), **Tamanho dos fantasmas** e **Cor**.
+- **Raios de luz**: raios que saem de uma origem atravessando as partes claras (sol entre as folhas, janela, poeira no
+  ar). **Origem** (pode ficar fora do quadro; o botão **Escolher a origem dos raios na prévia** acerta com um clique),
+  **Comprimento**, **Decaimento**, **Limiar** e **Cor**. Abaixo do limiar nada muda.
+- **Névoa**: **Densidade** (0% = sem névoa) e **Cor** (como num vídeo comum). **Forma**: *Degradê* (chão ou céu) ou *Por
+  igual*. No degradê, **Direção** 180° põe a névoa embaixo (chão) e 0° em cima (céu); **Altura** sobe ou desce a linha e
+  **Suavidade** alarga a passagem. **Textura** desenha nuvens (0% = lisa), que andam na horizontal pelo **Movimento**
+  (px por segundo; 0 = paradas); nos avançados, **Tamanho das nuvens** e **Semente**.
+- **Partículas**: **Tipo** chuva, neve, poeira no ar ou brasas (Nenhuma = desligado). **Quantidade**, **Tamanho**,
+  **Velocidade** (1× = a natural do tipo), **Vento** (empurra para os lados), **Profundidade** (camadas ao fundo menores,
+  mais lentas e mais apagadas), **Opacidade**, **Cor** (tinge; brasas e poeira já têm cor), **Desfoque de movimento** (o
+  rastro durante a exposição: 50% = obturador de 180°) e, nos avançados, **Semente** (outro desenho). Chuva e neve
+  cobrem a imagem; poeira e brasas somam luz, e as brasas cintilam. As partículas seguem o tempo do clipe: dividir o
+  clipe ou exportar um trecho não muda nenhum quadro.
+
+Os números e cores aceitam chaves de animação (um flare que acompanha a luz, um foco que passa da frente para o fundo, a
+névoa que chega), menos os que mexem na grade e no movimento das partículas e das nuvens (tamanho, velocidade, vento,
+profundidade, desfoque de movimento, movimento e tamanho das nuvens).
+
 ### Escala por eixo
 
 No cartão **Enquadrar e posicionar**, **Escala horizontal** e **Escala vertical** esticam o clipe só em um eixo, de
@@ -486,6 +640,32 @@ duração e o Shift+F usa a última escolhida). O quadro parado leva a cor e o e
 - O som ligado fica em **silêncio** enquanto a imagem está parada e continua em sincronia depois.
 - É um passo só do desfazer. A caixa **Congelar quadro** do cartão continua igual (congela o clipe inteiro no
   primeiro quadro).
+
+### Tempo da imagem: deflicker, ruído temporal e mistura de quadros (1.9, Beta)
+
+O cartão **Tempo da imagem** do clipe (depois de *Velocidade* e da *Manivela*) tem três efeitos que olham os quadros vizinhos do
+vídeo. Ele aparece com o recurso **Tempo da imagem** (Beta, grupo **Efeitos visuais** em Configurações › Recursos),
+desligado no começo; desligá-lo só esconde o cartão (um projeto que já usa os efeitos sai igual).
+
+| Ajuste | O que faz |
+|---|---|
+| **Deflicker** | Tira a **cintilação**: o brilho que pisca de um quadro para o outro (luz fluorescente ou LED filmada com o obturador errado, timelapse, película escaneada). Iguala o brilho de cada quadro à média dos quadros em volta. Precisa da **análise**: clique em **Analisar** no alto do cartão |
+| **Janela do deflicker** (avançado) | O tempo em que o brilho é igualado (padrão 0,5 s). Mais curto segue mudanças de luz de verdade (uma nuvem, uma luz que acende); mais longo tira cintilações lentas |
+| **Ruído temporal** | Tira o ruído do sensor misturando cada pixel com o mesmo pixel nos quadros vizinhos, **só onde a imagem não mudou**: o que se mexe não deixa rastro. Melhor em cenas paradas ou de tripé; numa câmera na mão o efeito diminui sozinho |
+| **Quadros de cada lado** (avançado) | 1 ou 2 quadros antes e depois na média (padrão 2: menos ruído, um pouco mais lento) |
+| **Mistura de quadros** | Na **câmera lenta** (velocidade abaixo de 1×, um trecho lento de uma rampa ou um vídeo de 12/15 qps numa sequência de 24/30), mistura os dois quadros mais próximos em vez de repetir o mesmo: o movimento fica contínuo, sem saltos. A 1× ou mais rápido não faz nada. Não inventa quadros novos (não é interpolação por movimento): objetos rápidos ficam "duplicados" no meio do caminho, como no Premiere e no Resolve |
+
+- **Analisar** mede o brilho de cada quadro do arquivo do clipe numa tarefa em segundo plano (a barra de tarefas mostra o
+  progresso e deixa cancelar). A análise fica guardada no **projeto** e vale para todos os clipes do mesmo arquivo, em
+  todas as sequências; não é passo do desfazer. Se o arquivo mudar depois (outra versão com o mesmo nome), o cartão
+  avisa para analisar de novo. Sem análise o deflicker não muda nada.
+- O deflicker corrige no máximo **1 stop** para cada lado, então um corte para o preto ou um flash continua lá; um
+  **fade** dentro do próprio vídeo, mais curto que a janela, pode ser amaciado: diminua a janela.
+- Tudo vale do mesmo jeito na prévia, no "Salvar quadro" e na exportação, e é igual a cada reprodução. Dividir ou
+  aparar o clipe não muda o resultado (cada quadro do arquivo tem a sua correção). **Desligar todos os efeitos**
+  (Shift+D) desliga os três. O som não muda.
+- Um projeto que usa algum deles é gravado no formato da 1.9. O plugin do DaVinci não tem estes efeitos (o Resolve
+  tem deflicker e redução de ruído próprios).
 
 ### Som
 
@@ -945,7 +1125,8 @@ inserido.
 | Shift+M | Som da prévia liga/desliga (no modo Película, **M** também) |
 | + / − | Aproximar / afastar a linha do tempo |
 | Ctrl+A | Selecionar todos os clipes (com a linha do tempo em foco) |
-| Esc | Tirar a seleção e voltar para Selecionar |
+| Esc | Tirar a seleção e voltar para Selecionar (desenhando um polígono de máscara: cancela o polígono) |
+| Shift ao girar a máscara | Gira de 15 em 15° |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer a edição |
 | Ctrl+Alt+C / Ctrl+Alt+V | Copiar / colar os ajustes de cor |
 | Alt+R / G / B / D | +1 ponto de luz vermelha / verde / azul / densidade da copiadora no plano (Shift: −1; seção 10) |

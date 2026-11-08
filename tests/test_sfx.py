@@ -137,10 +137,10 @@ def test_json_round_trip_and_format_6():
     back = tl.Sequence.from_json(json.loads(json.dumps(seq.to_json())))
     s2 = back.sources[src.path]
     assert s2.kind == sfx.KIND and not s2.has_video and s2.has_audio and s2.data == src.data
-    assert "efeito_sonoro" in seq.features() and seq.block_format() == tl.FORMAT
+    assert "efeito_sonoro" in seq.features() and seq.block_format() == tl.FORMAT_18
     p = project.Project(media_path="", sequence=seq.to_json(), mode="edicao")
     data = p.to_json()
-    assert data["formato"] == project.FORMAT == 6 and "efeito_sonoro" in data["recursos"]
+    assert data["formato"] == project.FORMAT_18 == 6 and "efeito_sonoro" in data["recursos"]
     plain = tl.Sequence(640, 360, FPS)
     assert "efeito_sonoro" not in plain.features()
     assert "efeitos_sonoros" in modules.used_by({}, seq)

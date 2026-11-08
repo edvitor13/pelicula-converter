@@ -51,6 +51,9 @@ class Viewer(QWidget):
         self.reference: QImage | None = None    # quadro fixado ou imagem para comparar
         self.compare_reference = False          # True: a comparação mostra a referência no lugar do original
         self._pick = False                      # conta-gotas ligado: o clique escolhe um ponto da imagem
+        # 1.9 (`ui/alcas.py`): alças de ferramentas por cima da prévia (só na tela); o mouse vai a elas primeiro.
+        self.handles = None
+        self._handle_drag = False
         self._build_empty()
         self.hint_timer = QTimer(self)
         self.hint_timer.setSingleShot(True)
@@ -149,8 +152,8 @@ class Viewer(QWidget):
     def picking(self) -> bool:
         return self._pick
 
-    def image_point(self, pos: QPointF) -> tuple[float, float] | None:
-        """Fração (0 a 1) da imagem processada sob um ponto da tela, ou None fora dela."""
+    def proc_rect(self) -> QRectF | None:
+        """Onde a imagem processada está desenhada no widget (no lado a lado, a da direita); None sem imagem."""
         if self.proc is None:
             return None
         area = self._area()
@@ -158,15 +161,46 @@ class Viewer(QWidget):
             half = (area.width() - 10) / 2
             sub = QRectF(area.left() + half + 10, area.top(), half, area.height())
             s = min(sub.width() / self.proc.width(), sub.height() / self.proc.height())
-            r = QRectF(sub.center().x() - self.proc.width() * s / 2, sub.center().y() - self.proc.height() * s / 2,
-                       self.proc.width() * s, self.proc.height() * s)
-        else:
-            r = self._image_rect(self.proc, area)
+            return QRectF(sub.center().x() - self.proc.width() * s / 2, sub.center().y() - self.proc.height() * s / 2,
+                          self.proc.width() * s, self.proc.height() * s)
+        return self._image_rect(self.proc, area)
+
+    def image_point(self, pos: QPointF) -> tuple[float, float] | None:
+        """Fração (0 a 1) da imagem processada sob um ponto da tela, ou None fora dela."""
+        r = self.proc_rect()
+        if r is None:
+            return None
         fx = (pos.x() - r.left()) / max(r.width(), 1e-6)
         fy = (pos.y() - r.top()) / max(r.height(), 1e-6)
         if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
             return None
         return fx, fy
+
+    # ------------------------------------------------------------ 1.9: alças (ui/alcas.py)
+    def set_handles(self, handles) -> None:
+        """As alças desenhadas por cima da prévia (`alcas.HandleStack` ou None). Só na tela."""
+        self.handles = handles
+        self._handle_drag = False
+        self.update()
+
+    def _handles_on(self) -> bool:
+        return (self.handles is not None and self.proc is not None and not self._peek and self.mode != "orig"
+                and self.handles.visible())
+
+    def _draw_handles(self, p: QPainter) -> None:
+        if self._handles_on():
+            from .alcas import View
+            p.save()
+            self.handles.paint(p, View(self.proc_rect()))
+            p.restore()
+
+    def escape_handles(self) -> bool:
+        """Esc: as alças cancelam o que estavam fazendo (o polígono pela metade). True se havia algo."""
+        if self.handles is not None and self.handles.escape():
+            self._handle_drag = False
+            self.update()
+            return True
+        return False
 
     @staticmethod
     def _fit_in(img: QImage, r: QRectF) -> QRectF:
@@ -392,6 +426,7 @@ class Viewer(QWidget):
                     self._draw_overlay(p, r)
                     self._draw_safe(p, r)
                 self._pill(p, r.left() + 10, r.top() + 10, lab)
+            self._draw_handles(p)
             if self._hint:
                 self._draw_hint(p)
             p.end()
@@ -438,6 +473,7 @@ class Viewer(QWidget):
             self._pill(p, xs + 10, top + 10, self.label_proc)
         else:
             self._pill(p, r.left() + 10, max(r.top(), 0) + 10, self.label_proc)
+        self._draw_handles(p)
         if self._hint:
             self._draw_hint(p)
         p.end()
@@ -449,10 +485,16 @@ class Viewer(QWidget):
         r = self._image_rect(self.proc, self._area())
         return r.left() + r.width() * self.split
 
-    def _hover_cursor(self, x: float) -> None:
+    def _hover_cursor(self, x: float, pos: QPointF | None = None) -> None:
         if self._pick:
             self.setCursor(Qt.CursorShape.CrossCursor)
             return
+        if pos is not None and self._handles_on():
+            from .alcas import View
+            shape = self.handles.cursor(View(self.proc_rect()), pos)
+            if shape is not None:
+                self.setCursor(shape)
+                return
         xs = self._split_x()
         if xs is not None and abs(x - xs) < 22:
             self.setCursor(Qt.CursorShape.SplitHCursor)
@@ -472,6 +514,12 @@ class Viewer(QWidget):
             else:
                 self.cancel_pick()
             return
+        if e.button() == Qt.MouseButton.LeftButton and self._handles_on():
+            from .alcas import View
+            if self.handles.press(View(self.proc_rect()), e.position(), e.modifiers()):
+                self._handle_drag = True
+                self.update()
+                return
         if e.button() == Qt.MouseButton.RightButton:
             self._peek = True
             self.update()
@@ -492,6 +540,11 @@ class Viewer(QWidget):
         self.update()
 
     def mouseMoveEvent(self, e):
+        if self._handle_drag and self.handles is not None and self.proc is not None:
+            from .alcas import View
+            self.handles.drag(View(self.proc_rect()), e.position(), e.modifiers())
+            self.update()
+            return
         if self._drag_split:
             self._move_split(e.position().x())
         elif self._pan is not None and self.proc is not None:
@@ -501,9 +554,16 @@ class Viewer(QWidget):
             self.center = QPointF(min(max(c0.x() - d.x() / r.width(), 0), 1), min(max(c0.y() - d.y() / r.height(), 0), 1))
             self.update()
         else:
-            self._hover_cursor(e.position().x())
+            self._hover_cursor(e.position().x(), e.position())
 
     def mouseReleaseEvent(self, e):
+        if self._handle_drag and e.button() == Qt.MouseButton.LeftButton:
+            self._handle_drag = False
+            if self.handles is not None and self.proc is not None:
+                from .alcas import View
+                self.handles.release(View(self.proc_rect()), e.position(), e.modifiers())
+            self.update()
+            return
         if e.button() == Qt.MouseButton.RightButton and self._peek:
             self._peek = False
             self.update()
@@ -514,6 +574,11 @@ class Viewer(QWidget):
     def mouseDoubleClickEvent(self, e):
         if self.proc is None or e.button() != Qt.MouseButton.LeftButton:
             return
+        if self._handles_on():
+            from .alcas import View
+            if self.handles.double_click(View(self.proc_rect()), e.position()):
+                self.update()
+                return
         if self.zoom is None:
             self._zoom_at(1.0, e.position())
         else:

@@ -31,9 +31,9 @@ def video_seq(frames=240):
 
 # ------------------------------------------------------------------ esquema
 def test_new_sections_are_appended_neutral_and_sparse():
-    keys = [s.key for s in editparams.VIDEO_SECTIONS]
+    keys = [s.key for s in editparams.VIDEO_SECTIONS[:editparams._N_BASE]]  # 1.9: os efeitos visuais vêm depois
     i = keys.index(NEW_SECTIONS[0])  # 1.6, frente E: a manivela vem depois
-    assert tuple(keys[i:i + 3]) == NEW_SECTIONS and keys[i + 3:] == ["manivela", "luz_copiadora"]
+    assert tuple(keys[i:i + 3]) == NEW_SECTIONS and keys[i + 3:editparams._N_BASE] == ["manivela", "luz_copiadora"]  # 1.9: efeitos depois de _N_BASE
     assert editparams.COLOR_SECTIONS[:7] == ("luz", "cor", "rodas", "curva", "hsl", "detalhe", "efeitos")
     assert editparams.COLOR_SECTIONS[7:] == NEW_SECTIONS
     new = {p.key for s in editparams.VIDEO_SECTIONS if s.key in NEW_SECTIONS for p in s.params}

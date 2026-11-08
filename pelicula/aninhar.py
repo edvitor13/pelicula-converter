@@ -153,6 +153,12 @@ def _plan_nest(seq: Sequence, ids, look: dict | None) -> _Plan:
         if prev is not None and (c.id in sel_ids) != (prev.id in sel_ids):
             raise Refusal(_("Uma transição liga um clipe da seleção a um que não está nela. Inclua o vizinho ou tire a "
                             "transição."))
+    from . import vfx  # 1.9: a camada de ajuste muda o que está embaixo dela; dentro da sequência, só o de dentro
+    for adj in (c for c in sel if c.kind == VIDEO and vfx.is_adjustment(seq, c) and not _hidden(seq, VIDEO, c.track)):
+        if any(o.kind == VIDEO and o.track < adj.track and _overlaps(o, adj.start, adj.end)
+               and not _hidden(seq, VIDEO, o.track) for o in others):
+            raise Refusal(_("A camada de ajuste da faixa {faixa} muda clipes que ficariam fora da sequência. Inclua na "
+                            "seleção o que está embaixo dela.").format(faixa=_label(seq, VIDEO, adj.track)))
     heads, _tails = audiomix.crossfades(seq)
     for c in seq.clips:
         prev = seq.previous_on_track(c) if c.id in heads else None
