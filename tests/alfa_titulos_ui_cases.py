@@ -111,14 +111,17 @@ def test_import_numbered_images_as_a_sequence(win, answer):
     win.import_paths(files)  # três quadros da mesma sequência: uma pergunta só
     assert len(answer.seen) == 1 and answer.seen[0][2] is True
     pattern = answer.seen[0][0].pattern
-    src = win.model.seq.sources[pattern]
+    src = win._sources[pattern]
     assert src.is_sequence and src.frames == 6 and src.fps_str == "25/1"
-    assert pattern in win._sources and sum(1 for c in win.model.seq.clips if c.src == pattern) == 1
+    assert not win.model.seq.clips  # 1.8 (#64): importar só põe na Mídia
+    assert win.bin.selected_paths() == [pattern]
+    win.add_to_timeline(pattern)
+    assert sum(1 for c in win.model.seq.clips if c.src == pattern) == 1
     # como imagens separadas: cada arquivo vira uma imagem parada
     answer.set(imageseq_dialog.IMAGE)
     other = frames_dir(4, prefix="outra_")
     win.import_paths([str(other / "outra_0002.png")])
-    assert str(other / "outra_0002.png") in win.model.seq.sources
+    assert str(other / "outra_0002.png") in win._sources
     # cancelar não importa nada
     answer.set(None)
     n = len(win.model.seq.clips)
@@ -203,6 +206,7 @@ def test_preview_shows_the_transparency_over_a_checkerboard(win):
     d = Path(tempfile.mkdtemp(prefix="pelicula_alfa_ui_"))
     write_png(d / "quadrado.png", np.full((36, 36, 3), 200, np.uint8))
     win.import_paths([str(d / "quadrado.png")])
+    win.add_to_timeline(str(d / "quadrado.png"))
     assert pump(lambda: bool(win.model.seq.clips))
     seq = win.model.seq
     win.model.set_settings(64, 36, seq.fps_str, (1.0, 0.0, 0.0), transparent=True)
@@ -295,7 +299,8 @@ def test_new_title_from_the_menu(win):
     win.new_project()
     win.set_mode("edicao")
     labels = [a.text() for a in win.bin.btn_new.menu().actions()]
-    assert labels == ["Cor sólida", "Degradê", "Ponta com contagem", "Título…"]
+    # 1.8: depois deles vêm o submenu "Efeito sonoro" e "Buscar sons (CC0)…" (módulo efeitos_sonoros)
+    assert labels[:4] == ["Cor sólida", "Degradê", "Ponta com contagem", "Título…"]
     _menu_action(win, "cor").trigger()
     win.seek(24)
     _menu_action(win, "titulo").trigger()  # por cima da cor (V2), no cursor

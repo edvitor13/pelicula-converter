@@ -298,6 +298,50 @@ AUDIO_SECTIONS: list[Section] = [
     Section("tempo", "Velocidade", None, list(SPEED), "Acompanha o vídeo ligado"),
 ]
 
+# 1.8, limpeza do som (`somlimpo.py`, ARQUITETURA §44): cortes de graves/agudos e o nivelamento da voz no fim do
+# "eq"; o ruído aprendido e o zumbido da rede numa seção nova (o inspetor a mostra depois do "eq":
+# `ui/edit_panels.DISPLAY_AFTER`). Todo padrão é neutro (o grafo do som de antes) e as chaves vão para o JSON só fora
+# do padrão (`SPARSE_KEYS`). `ruido_ini`/`ruido_fim` são o trecho do arquivo aprendido pelo botão (linhas escondidas).
+next(s for s in AUDIO_SECTIONS if s.key == "eq").params.extend([
+    F("passa_alta", "Cortar graves abaixo de", 0.0, 0, 500, 5, 0, " Hz",
+      "Tira o som abaixo desta frequência (vento, estrondo, ronco de motor). 0 = não corta."),
+    F("passa_baixa", "Cortar agudos acima de", 0.0, 0, 20000, 100, 0, " Hz",
+      "Tira o som acima desta frequência (chiado, sibilância). 0 = não corta."),
+    _pct("nivelar_voz", "Nivelar a voz", lo=0.0,
+         tip="Sobe as falas baixas e segura as altas, sílaba a sílaba, para a voz ficar num volume parecido."),
+])
+AUDIO_SECTIONS += [
+    Section("limpar", "Limpar o som", None, [
+        _pct("ruido_perfil", "Redução pelo ruído aprendido", lo=0.0,
+             tip="Tira o ruído que o botão \"Aprender o ruído\" ouviu num trecho só com ele (ar-condicionado, chiado, "
+                 "vento constante). 100% tira até 30 dB."),
+        F("ruido_ini", "Início do ruído aprendido", 0.0, 0, 86400, 0.01, 2, " s"),
+        F("ruido_fim", "Fim do ruído aprendido", 0.0, 0, 86400, 0.01, 2, " s"),
+        C("zumbido", "Zumbido da rede elétrica", "nao", [("nao", N_("Não")), ("50", N_("50 Hz")), ("60", N_("60 Hz"))],
+          "Tira o zumbido grave dos cabos e da rede elétrica (60 Hz no Brasil e nas Américas, 50 Hz na Europa) e "
+          "as harmônicas dele."),
+        I("zumbido_harmonicos", "Harmônicas do zumbido", 6, 1, 10,
+          "Quantas frequências tirar: o zumbido e os múltiplos dele (6 = até 360 Hz numa rede de 60 Hz).",
+          advanced=True),
+    ], "Ruído aprendido e zumbido da rede elétrica"),
+]
+
+# Predefinições do "eq" (1.8): cada uma acerta só as chaves de `AUDIO_PRESET_KEYS` (as que não cita voltam ao padrão)
+# num passo do desfazer (`apply_audio_preset`). Ids sem acento e estáveis; só acrescentar no fim.
+AUDIO_PRESET_KEYS = ("graves", "medios", "agudos", "voz", "passa_alta", "passa_baixa", "nivelar_voz")
+AUDIO_PRESETS: list[tuple[str, str, dict[str, Any]]] = [
+    ("voz_clara", N_("Voz mais clara"), dict(voz=True, passa_alta=80.0, graves=-2.0, medios=1.5, agudos=3.0)),
+    ("voz_grave", N_("Voz grave e próxima"), dict(passa_alta=60.0, graves=4.0, medios=-1.0, agudos=1.0,
+                                                    nivelar_voz=0.2)),
+    ("telefone", N_("Telefone"), dict(passa_alta=300.0, passa_baixa=3400.0, medios=4.0)),
+    ("radio_antigo", N_("Rádio antigo"), dict(passa_alta=200.0, passa_baixa=5000.0, graves=-4.0, medios=5.0,
+                                              nivelar_voz=0.5)),
+    ("menos_vento", N_("Menos vento e estrondo"), dict(passa_alta=120.0, graves=-3.0)),
+    ("musica_cheia", N_("Música mais cheia"), dict(graves=3.0, medios=-1.0, agudos=2.5)),
+    ("podcast", N_("Podcast"), dict(passa_alta=80.0, graves=1.5, medios=1.5, agudos=2.0, nivelar_voz=0.6)),
+    ("sem_ajustes", N_("Sem ajustes"), {}),
+]
+
 VIDEO = Schema(VIDEO_SECTIONS)
 AUDIO = Schema(AUDIO_SECTIONS)
 SCHEMAS = {"video": VIDEO, "audio": AUDIO}
@@ -345,6 +389,19 @@ def apply_quick_look(values: dict[str, Any], key: str) -> dict[str, Any]:
     return VIDEO.sanitize(out)
 
 
+def apply_audio_preset(values: dict[str, Any], key: str) -> dict[str, Any]:
+    """Valores do clipe de som com uma predefinição do "eq": as chaves de `AUDIO_PRESET_KEYS` voltam ao padrão e
+    recebem as da predefinição; o resto do clipe fica como está."""
+    out = AUDIO.sanitize(values)
+    base = AUDIO.defaults()
+    for k in AUDIO_PRESET_KEYS:
+        out[k] = base[k]
+    preset = next((v for k, _label, v in AUDIO_PRESETS if k == key), None)
+    if preset:
+        out.update(preset)
+    return AUDIO.sanitize(out)
+
+
 def is_neutral(kind: str, values: dict[str, Any]) -> bool:
     """True se todos os ajustes do clipe estão no padrão (o clipe sai igual ao arquivo)."""
     schema = SCHEMAS[kind]
@@ -373,6 +430,8 @@ SPARSE_KEYS |= {p.key for s in VIDEO_SECTIONS if s.key in ("pele", "alvo", "degr
 SPARSE_KEYS |= {"luz_r", "luz_g", "luz_b", "luz_densidade"}  # 1.6: marcação de luz por plano (`luz_plano.py`)
 SPARSE_KEYS |= {"escala_x", "escala_y"}  # 1.7: escala por eixo (`compositor.axis_scale`)
 SPARSE_KEYS |= {"desespremer", "desespremer_taxa"}  # 1.7: desespremer do clipe (`compositor.desqueeze`)
+SPARSE_KEYS |= {"passa_alta", "passa_baixa", "nivelar_voz", "ruido_perfil", "ruido_ini", "ruido_fim", "zumbido",
+                "zumbido_harmonicos"}  # 1.8: limpeza do som (`somlimpo.py`)
 _DEFAULTS = {kind: schema.defaults() for kind, schema in SCHEMAS.items()}
 
 

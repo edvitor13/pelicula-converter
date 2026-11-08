@@ -173,6 +173,8 @@ def test_the_preview_follows_the_clip_that_stayed(win, two_tones):
     m = win.model
     m.delete_clips([c.id for c in m.seq.clips])
     win.import_paths([a, b])
+    for p in (a, b):
+        win.add_to_timeline(p)
     wait_for_mix(win)
     assert heard(win)[0] == pytest.approx(440, abs=5)
 
@@ -214,6 +216,8 @@ def test_the_preview_comes_back_after_a_silent_moment(win, two_tones):
     m = win.model
     m.delete_clips([c.id for c in m.seq.clips])
     win.import_paths([a, b])
+    for p in (a, b):
+        win.add_to_timeline(p)
     wait_for_mix(win)
     m.delete_clips([only(m.seq, a, tl.VIDEO).id])
     wait_for_mix(win)
@@ -237,6 +241,8 @@ def test_only_one_mix_per_key_and_the_file_in_use_stays(win, two_tones, monkeypa
     m = win.model
     m.delete_clips([c.id for c in m.seq.clips])
     win.import_paths([a, b])
+    for p in (a, b):
+        win.add_to_timeline(p)
     wait_for_mix(win)
     gate, calls, real = threading.Event(), [], audiomix.render_mix
 
@@ -278,6 +284,8 @@ def test_the_preview_hears_a_clip_dragged_before_another(win, two_tones):
     m = win.model
     m.delete_clips([c.id for c in m.seq.clips])
     win.import_paths([a, b])
+    for p in (a, b):
+        win.add_to_timeline(p)
     wait_for_mix(win)
     m.move_clip(only(m.seq, b, tl.VIDEO).id, 200)
     wait_for_mix(win)

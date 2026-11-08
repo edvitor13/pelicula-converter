@@ -294,6 +294,48 @@ def test_editor_drag_to_another_video_track():
     assert aclip(m).track == 0  # o áudio ligado fica na faixa dele
 
 
+def test_editor_drag_moves_the_whole_selection():
+    """1.8 (#63): com vários clipes escolhidos, arrastar um deles leva todos, num passo só de desfazer."""
+    m = model_with(src(), src("C:/v/b.mp4"), src("C:/v/c.mp4"))
+    ed = editor(m)
+    c = ed.canvas
+    c.snap = False
+    m.select([x.id for x in m.seq.clips])
+    r = c.clip_rect(vclip(m, 1))
+    a = pt(r.center().x(), r.center().y())
+    QTest.mousePress(c, LMB, NOMOD, a)
+    QTest.mouseMove(c, a + QPoint(50, 0))
+    QTest.mouseMove(c, a + QPoint(100, 0))  # 100 px a 2 px/quadro = 50 quadros
+    assert len(c.ghosts()) == 6  # o fantasma mostra a seleção inteira
+    QTest.mouseRelease(c, LMB, NOMOD, a + QPoint(100, 0))
+    assert [vclip(m, i).start for i in range(3)] == [aclip(m, i).start for i in range(3)] == [50, 290, 530]
+    m.undo()
+    assert [vclip(m, i).start for i in range(3)] == [0, 240, 480]
+    # Fora da seleção, o terceiro não anda: o fim do segundo cobre o começo dele (sobrescrever).
+    m.select([x.id for x in m.seq.clips if x.start != 480])
+    drag(c, a, a + QPoint(40, 0))
+    assert [vclip(m, i).start for i in range(3)] == [20, 260, 500]
+    # Aparar a borda continua só no clipe clicado.
+    r = c.clip_rect(vclip(m, 1))
+    y = int(r.center().y())
+    drag(c, pt(r.right() - 2, y), pt(r.right() - 42, y))
+    assert vclip(m, 1).end == 480 and vclip(m, 0).end == 260
+
+
+def test_editor_drag_selection_to_another_track_keeps_the_sound_in_place():
+    m = model_with(src(), src("C:/v/b.mp4"))
+    m.add_track(VIDEO)
+    ed = editor(m)
+    c = ed.canvas
+    m.select([x.id for x in m.seq.clips])
+    r = c.clip_rect(vclip(m))
+    top_row = c.track_rect(VIDEO, 1)
+    a = pt(r.center().x(), r.center().y())
+    drag(c, a, pt(r.center().x(), top_row.center().y()))
+    assert [x.track for x in m.seq.clips if x.kind == VIDEO] == [1, 1]
+    assert [x.track for x in m.seq.clips if x.kind == AUDIO] == [0, 0]
+
+
 def test_editor_trim_edges():
     m = model_with(src())
     ed = editor(m)

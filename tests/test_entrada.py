@@ -870,7 +870,9 @@ assert win.store.get("entrada") == "slog3"
 win.new_project()                              # projeto novo: tudo no padrão
 assert win.store.get("entrada") == "rec709"
 win.set_mode("edicao")
-win.import_paths([hlg])                        # primeiro clipe numa montagem vazia
+win.import_paths([hlg])                        # 1.8 (#64): importar só põe na Mídia, o perfil não muda ainda
+assert win.store.get("entrada") == "rec709" and not win.model.seq.clips
+win.add_to_timeline(hlg)                       # primeiro clipe numa montagem vazia
 assert win.store.get("entrada") == "hlg", win.store.get("entrada")
 assert "HDR" in win.statusBar().currentMessage(), win.statusBar().currentMessage()
 print("OK")

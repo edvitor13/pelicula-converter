@@ -5,7 +5,9 @@ várias. Aqui só se desenha e se ouve a pessoa; quem muda o projeto é o `Timel
 desfazer) e a janela liga os dois.
 
 - clique abre a aba; dois cliques (ou o menu) renomeiam ali mesmo; arrastar muda a ordem;
-- botão direito: Renomear, Duplicar, Configurar…, Apagar (desligado quando só resta uma);
+- botão direito: Renomear, Duplicar, Configurar…, Look de película (1.8: o do projeto ou próprio), Apagar (desligado
+  quando só resta uma);
+- uma aba com look próprio ganha um ponto na cor de destaque, no fim;
 - os nomes se cortam com "…" e a dica traz o nome inteiro, o tamanho e os quadros por segundo;
 - com abas demais para a largura, a roda do mouse anda pela fileira.
 """
@@ -35,6 +37,7 @@ class TabInfo:
     id: str
     name: str
     tip: str = ""
+    own_look: bool = False   # 1.8: a sequência tem look de película próprio (o ponto no fim da aba)
 
 
 class SequenceTabs(QWidget):
@@ -45,6 +48,7 @@ class SequenceTabs(QWidget):
     settingsRequested = Signal(str)
     deleteRequested = Signal(str)
     moved = Signal(str, int)           # (id, posição nova) — arrastada
+    lookRequested = Signal(str, bool)  # (id, look próprio?) — "Look de película" no menu (1.8)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,9 +205,14 @@ class SequenceTabs(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), 7, 7)
         self._tab_icon[on].paint(p, int(r.left() + 9), int(r.center().y() - ICON / 2), ICON, ICON)
-        tr = QRectF(r.left() + 9 + ICON + 6, r.top(), max(0.0, r.width() - ICON - 9 - 6 - 9), r.height())
+        dot = 9.0 if tab.own_look else 0.0
+        tr = QRectF(r.left() + 9 + ICON + 6, r.top(), max(0.0, r.width() - ICON - 9 - 6 - 9 - dot), r.height())
         if self._editing == tab.id and self._editor is not None:
             return  # o campo do nome está sobre a aba
+        if tab.own_look:  # 1.8: look de película próprio
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(theme.ACCENT if on else theme.ACCENT_DIM))
+            p.drawEllipse(QPointF(r.right() - 11, r.center().y()), 3.0, 3.0)
         p.setFont(theme.font(9, QFont.Weight.DemiBold if on else QFont.Weight.Normal))
         p.setPen(QColor(theme.TEXT if on or hot else theme.MUTED))
         text = fm.elidedText(tab.name, Qt.TextElideMode.ElideRight, int(tr.width()))
@@ -297,6 +306,13 @@ class SequenceTabs(QWidget):
         menu.addAction(_("Renomear"), lambda: self.rename(sid))
         menu.addAction(_("Duplicar"), lambda: self.duplicateRequested.emit(sid))
         menu.addAction(_("Configurar…"), lambda: self.settingsRequested.emit(sid))
+        i = self.index_of(sid)
+        own = 0 <= i < len(self.tabs) and self.tabs[i].own_look
+        sub = menu.addMenu(_("Look de película"))
+        for label, value in ((_("Igual ao do projeto"), False), (_("Próprio desta sequência"), True)):
+            act = sub.addAction(label, lambda v=value: self.lookRequested.emit(sid, v))
+            act.setCheckable(True)
+            act.setChecked(own == value)
         menu.addSeparator()
         act = menu.addAction(_("Apagar"), lambda: self.deleteRequested.emit(sid))
         act.setEnabled(len(self.tabs) > 1)  # a última sequência do projeto não se apaga

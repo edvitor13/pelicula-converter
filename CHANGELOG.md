@@ -7,6 +7,60 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Look de película de cada sequência** (#67): uma sequência pode ter o look dela (preset, ajustes e chaves de animação)
+  no lugar do look do projeto, que continua sendo o padrão (*Igual ao do projeto*). A escolha fica no painel de ajustes, no
+  botão direito da aba e na Mídia; trocar de aba troca o look em edição, cada um com o seu desfazer. Dentro de outra
+  sequência, a de look próprio entra sem look (nada de grão em dobro); exportada, sai com o dela. No terminal, `exportar`,
+  `quadro` e `lut --projeto` com `--sequencia` usam o look da sequência, e `info` mostra quais têm look próprio.
+- **Mixer** (#39): o botão *Mixer* na barra da linha do tempo (ou **Ctrl+Alt+M**) mostra um canal por faixa de som, com
+  fader, balanço, mudo, solo e medidor, mais a tira *Mixagem* com o pico e o loudness de tudo. Cada gesto é um passo
+  só do desfazer.
+- **Som ao arrastar o cursor** (#39): arrastar o cursor na linha do tempo toca pedacinhos do som, para achar uma palavra
+  ou uma batida sem dar play.
+- **Exportar só o som** (#39): a janela de exportação grava só a mixagem (WAV, FLAC, AAC ou MP3), com o volume alvo e o
+  som de película, ou uma faixa por arquivo (*stems*, crus, para mixar em outro programa).
+- **Limpar o som** (#39): *Aprender o ruído* (ar-condicionado, chiado, vento constante) e tirá-lo do clipe, tirar o
+  zumbido da rede elétrica (60 ou 50 Hz, com **Detectar**), cortar graves e agudos, *Nivelar a voz* e predefinições
+  (*Voz mais clara*, *Telefone*, *Rádio antigo*, *Podcast* e outras).
+- **Sincronizar pelo som** (#39): escolha os clipes e use o botão direito; o som de um gravador ou de outra câmera anda
+  até bater com o da câmera, num passo só do desfazer.
+- **Som de película** (#39, Beta): a trilha ótica ou magnética de cada bitola, o tremor do projetor no som, chiado,
+  estalos nas emendas (no mesmo quadro em que a imagem mostra a emenda ou a troca de rolo do Super 8), o projetor
+  rodando e a sala de cinema. Vale na prévia e na exportação. Quatro presets novos já vêm com ele ligado: *Super 8
+  caseiro com som*, *16 mm de arquivo com som ótico*, *Cinema anos 30 (som ótico antigo)* e *Cine de bairro (cópia gasta e
+  sala)*.
+- **Batidas da música** (#39): *Detectar batidas* no menu do clipe de som (uma música com mais de 20 s é analisada
+  sozinha) marca as batidas e o começo dos compassos no clipe. *Andamento ×2*, *Andamento ÷2* e *Compasso de 3 / 4*
+  corrigem à mão. O botão *Ímã nas batidas* faz os clipes grudarem nelas.
+- **Encaixar a música na duração do vídeo** (#39): tira ou repete compassos inteiros no meio da música para ela acabar
+  junto com a imagem (ou no trecho In/Out), com uma transição de som em cada emenda.
+- **Abaixar a música sob a voz** (#39): acha as falas nas outras faixas e abaixa a música enquanto alguém fala, com
+  chaves de volume comuns, que dá para ajustar depois.
+- **Efeitos sonoros** (#39, Beta): whoosh, swish, riser, impacto, clique, máquina de escrever e obturador feitos pelo app
+  (*Mídia › Novo › Efeito sonoro*). *Pôr efeitos sonoros* (**Ctrl+Alt+E**) os põe sozinho nas transições, nos títulos
+  (uma tecla por letra na máquina de escrever), nos congelados e nos marcadores com **!**.
+- **Buscar sons (CC0)** (#39, Beta): sons de domínio público do Openverse, sem cadastro, e do Freesound, com a sua chave
+  em *Configurações › Sons livres*. Cada exportação que usa um deles grava ao lado um `.creditos.txt`.
+- **Gravar narração** (#39): o botão do microfone na linha do tempo (ou **Ctrl+Shift+R**) grava no cursor, com contagem
+  3, 2, 1 e a montagem tocando, e põe a gravação numa faixa *Narração*.
+
+### Mudado
+- **Importar só põe na Mídia** (#64): o botão *Importar…*, o **Ctrl+I** e os arquivos soltos na janela deixam os
+  arquivos escolhidos na Mídia, sem ir para a linha do tempo; use arrastar, **,** ou **.** para montar. Soltar direto na
+  linha do tempo continua inserindo no ponto do mouse.
+- Projeto com alguma sequência de look próprio, efeito sonoro, som com crédito ou batidas corrigidas à mão é gravado no
+  **formato 6**, que a 1.7 recusa com aviso. Sem isso, o arquivo sai igual ao da 1.7.
+- **A mixagem é feita clipe a clipe e guardada** (até 2 GiB na pasta temporária): mexer num clipe refaz só o som dele. O
+  clipe de som agora cai na amostra exata; num projeto antigo ele pode andar até 0,5 ms (inaudível), então o som
+  exportado não sai idêntico, bit a bit, ao da 1.7.
+- Com o som de película ligado, *Copiar original* recodifica o som. A janela de exportação, a fila e o terminal avisam.
+
+### Corrigido
+- **Arrastar vários clipes escolhidos** (#63) move a seleção inteira, com o mesmo deslocamento, as mesmas distâncias entre
+  faixas e um passo só do desfazer; antes só o clipe sob o mouse andava. No modo inserir, abre um espaço só, do tamanho do
+  bloco. Aparar as bordas continua só no clipe clicado.
+
 ### Planejado
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).

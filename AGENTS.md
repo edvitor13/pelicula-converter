@@ -65,7 +65,7 @@ pelicula/
                              (tudo desligado, ARQUITETURA §40)
   keyframes.py               chaves de animação (sem Qt): Key (tempo, valor, curva), as 4 curvas (EASINGS),
                              value_at, clean_keys/to_json (JSON "chaves"), look_values_at, ffmpeg_expr (volume)
-  presets.py                 FILM_BASE, BUILTIN (48 presets em 7 grupos), presets do usuário em JSON
+  presets.py                 FILM_BASE, BUILTIN (52 presets em 7 grupos), presets do usuário em JSON
   luts.py                    .cube (ler/gravar), LUTs instalados (Premiere/Resolve/Meus LUTs), instalar
   media.py                   ffmpeg/ffprobe: localizar, probe(), NamedPipe, FrameReader, Perf, encoders;
                              transparência: has_alpha, decodes_alpha, leitura RGBA pré-multiplicada (_alpha_graph);
@@ -158,7 +158,13 @@ pelicula/
                              BASE com a tira deitada (rotated, por substituição de texto; Engine._base_program)
   maquina.py                 1.6, máquina do tempo (módulo maquina_tempo): tabela época × lugar → valores do look
   montagem_filme.py          1.6, a montagem na película (módulo Beta montagem_pelicula): cortes secos da V1
-                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8
+                             (edit_info, via frame.Recipe.plan → build_plan(edit=)) e rolos de Super 8 (roll_at,
+                             reel_frames: o pulo da troca de rolo, que o som de película também estala)
+  somfilme.py                1.8, som de película (módulo Beta som_pelicula, seção "som_pelicula" do look; ARQUITETURA §45):
+                             motor numpy sobre o som final (trilha ótica/magnética, estalos nos quadros das emendas de
+                             look.emenda_frames/montagem_filme.splice_frames/reel_frames, poeira, wow por look.weave,
+                             projetor, sala),
+                             pelo índice absoluto da amostra, com contexto antes (process, process_wav, export_sound)
   luz_plano.py               1.6, marcação de luz por plano: pontos da copiadora por clipe (luz_r/g/b, luz_densidade)
                              somados a lab_luz_* no plano da V1 (shot_lights, via frame.Recipe.plan; transição de dois
                              clipes interpolada), mostrador TAPE 25-25-25 (classic); ARQUITETURA §35
@@ -185,7 +191,36 @@ pelicula/
                              emendas, transição de potência constante; forma de onda; decode_wav/WavReader
                              (som do arquivo para o medidor); TONES/tones() (tons exatos à amostra, o bipe);
                              sequência aninhada (1.7): WAV da mixagem de dentro como entrada do clipe
-                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5)
+                             (nested_mix_path, _render_nested, _prune_nested, source_peaks; seção 41.5);
+                             1.8: render_mix chama somcache.mix; o grafo único ficou em render_mix_graph (referência)
+  somcache.py                1.8 (§43): cache do som de cada clipe (Part, PROVIDERS = clip_parts + tone_parts, chave com
+                             arquivo/tempo/valores/chaves) e a soma em numpy (mix: ganho e balanço da faixa, trecho exato,
+                             24 bits como o ffmpeg, picos por faixa a cada 10 ms, stems); LINEAR_KEYS; WavWriter
+  somexport.py               1.8 (§43.6): exportar só o som e stems (ExportSettings.sound_only, FORMATS, stem_path),
+                             chamado por export.run_job; o som do arquivo no modo Película
+  somlimpo.py                1.8, limpeza do som do clipe (sem Qt, §44): ruído aprendido (perfil do trecho, STFT em blocos
+                             sem emenda, entrada limpa em cache: clean_input/render_inputs), zumbido (entalhes, detect_hum),
+                             cortes e nivelar a voz (after_eq_filters), learn_range do botão
+  narracao.py                1.8, gravar narração (sem Qt, §48): Recorder/BackgroundRecorder (PCM de qualquer taxa, canais e
+                             formato → WAV de 48 kHz em 24 bits, Resampler sinc em fluxo, parcial seguro), take_folder,
+                             next_take_path, plan_span, free_track/place_take (a faixa "Narração")
+  sfx.py                     1.8, efeitos sonoros feitos pelo app (sem Qt, §47): EFFECTS (whoosh, swish, riser, impacto,
+                             clique, maquina, obturador) com Field, síntese numpy determinística (render), fonte "efeito"
+                             (new_source), entrada derivada do clipe na mixagem (effect_input, render_inputs, effect_dir)
+  sfx_auto.py                1.8, pôr efeitos sonoros sozinho (sem Qt, §47.4): plan (Options → Placement), apply (faixa
+                             "Efeitos" sem cobrir clipes), marca "auto", teclas nos quadros de titles.motion
+  sons_cc0.py                1.8, busca de sons CC0 (sem Qt, §47.5): Openverse e Freesound (só com a chave), parse_*,
+                             download, target_dir, crédito (credit_of, credits_for, export_credits → <saída>.creditos.txt)
+  sincronia.py               1.8, sincronizar pelo som (sem Qt, §44.5): find_lag (correlação normalizada por FFT, confiança),
+                             candidates/reference_of, plan → Move/Plan
+  batidas.py                 1.8, batidas da música (sem Qt, §46.1): fluxo espectral, andamento por autocorrelação (60–200
+                             BPM), batidas por programação dinâmica, compassos estimados, confiança → Beats; analyze_file
+                             com cache em disco/memória pelo carimbo do arquivo (pelicula_batidas/); corrected(beats, fator,
+                             compasso) = correção à mão (×2, ÷2, compasso de 3; guardada em Source.beats_fix, §46.5):
+                             quem usa batidas lê MusicUI.beats_for (corrigidas), nunca o cache cru
+  musica.py                  1.8, música na montagem (sem Qt, §46): beat_frames/snap_frames (batidas no tempo do clipe),
+                             fit_plan/fade_plan/apply_fit (encaixar por compassos inteiros), speech_regions/duck_spans/
+                             apply_duck/voice_mix (abaixar sob a voz com chaves de volume)
   resolve.py                 plugin do DaVinci Resolve: gera os DCTLs (Cor, Textura, Projetor, presets) e LUTs;
                              dialetos dctl/glsl/cpp do mesmo kernel; atalhos ofx_* (instalar o plugin OpenFX)
   ofx.py                     plugin OpenFX: gera plugins/ofx/generated (dialeto cpp), parâmetros/presets, pacote e
@@ -207,6 +242,23 @@ pelicula/
                              sequencias_ui (SequencesUI: ponto único de ligação, estado de cada aba, Mídia, alvos da
                              exportação); 1.7, sequência dentro de sequência (§41.7): aninhar_ui (NestUI: Aninhar
                              seleção, Desaninhar, abrir a sequência de um clipe, forma de onda, atalho Ctrl+Shift+G);
+                             1.8, look próprio de cada sequência (§42): look_sequencia_ui (SeqLookUI: o look em edição
+                             acompanha a aba, a escolha no painel/aba/Mídia, alvos da exportação, aviso no clipe);
+                             1.8, som_pelicula_ui (SomPeliculaUI: o som da prévia passa pelo somfilme em `_set_audio`,
+                             cartão do módulo som_pelicula);
+                             1.8, limpeza do som (§44): somlimpo_ui (InspectorSound: Aprender o ruído, Detectar o zumbido,
+                             Predefinições do "eq"; SyncController: Sincronizar pelo som no menu do clipe, barra de status);
+                             1.8, narração (§48): narracao_ui (NarrationUI: botão do microfone, Ctrl+Shift+R, painel com
+                             microfone, nível, contagem, tocar junto e atraso; grava pelo QAudioSource e insere o WAV);
+                             1.8, som (§43): mixer_ui (MixerUI: tiras das faixas no lugar do inspetor, Ctrl+Alt+M,
+                             medidores dos picos gravados ao lado da mixagem), scrub_ui (ScrubUI: som ao arrastar o
+                             cursor, grão de um quadro por um QAudioSink próprio, preferência som_ao_arrastar),
+                             som_export_ui (SoundChoice: "O que exportar" na janela Exportar);
+                             1.8, música (§46): musica_ui (MusicUI: Detectar batidas e análise sozinha, marcas no clipe,
+                             botão Ímã nas batidas, Encaixar a música na duração do vídeo, Abaixar a música sob a voz);
+                             1.8, efeitos sonoros (§47): sfx_ui (SfxUI: Novo ▸ Efeito sonoro, EffectEditor no inspetor
+                             de som, botão Efeitos e Ctrl+Alt+E com AutoDialog), sons_cc0_ui (SearchDialog: Buscar sons
+                             (CC0)…), pages/sons (Configurações › Sons livres: chave do Freesound);
                              resolve_dialog (plugin do DaVinci);
                              imageseq_dialog (imagens numeradas), alphaview (xadrez da transparência),
                              generators_ui (menu Novo da Mídia, GeneratorEditor), titles_panel (TitleEditor);
@@ -274,8 +326,8 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
    Todo efeito vive em `look.build_plan()` + `shaders.py`/`Engine.render()`. Nunca implemente um efeito só
    na interface, só na exportação ou só no "Salvar quadro". No modo Edição vale o mesmo: ajuste de clipe só
    em `compositor.py` + `editshaders.py` / `Engine.compose()`; qual quadro de qual arquivo aparece só em
-   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` (a prévia toca a mesma mixagem
-   que a exportação grava). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
+   `timeline.Sequence.src_frame()` / `layers_at()`; som só em `audiomix.py` + `somcache.py` (a prévia toca a
+   mesma mixagem que a exportação grava; ARQUITETURA §43). Chaves de animação viram valores num lugar só: `Sequence.values_at()` →
    `Layer.values` (imagem e volume do som) e `keyframes.look_values_at()` pela receita (look); nunca leia
    `clip.values` para desenhar um quadro. Imagem de camada com 4 canais é sempre RGBA **pré-multiplicado**
    (transparência: `media.FrameReader(alpha=)` e geradores de `sequence.RENDERERS`); com 3 canais, opaca.
@@ -330,16 +382,17 @@ build.bat / build.sh         build local: executáveis + .zip/.msi (Windows) ou 
     definem `PELICULA_SETTINGS_DIR` (preferências num `.ini` temporário) e `APPDATA` (presets e
     LUTs) — a `conftest.py` já faz os dois — e encerram com `app.exit(0)`, nunca fechando a
     `MainWindow` (o `closeEvent` grava a sessão).
-13. **Projetos `.plc` são um formato público.** `project.FORMAT` (5) é o maior formato que o app lê; o
+13. **Projetos `.plc` são um formato público.** `project.FORMAT` (6) é o maior formato que o app lê; o
     gravador usa o **menor** que o projeto precisa (`project.needed_format`): 1 = só o arquivo inteiro, sem
     mudanças; 2 = com o bloco `"edicao"` (JSON de `timeline.Sequence`); 3 = usa algum recurso da 1.5; 4 = usa
-    algo da 1.6; 5 = usa algo da 1.7 (listados em `"recursos"`). **Ajuste ou opção nova** (look ou clipe) não
-    precisa de registro: o retrato do que a 1.6 lê (`pelicula/data/conhecidos_1_6.json`, `params.beyond_1_6`;
-    nunca editar, nem o da 1.5) faz o projeto ir para o 5 quando o valor sai do padrão ou é uma opção nova.
-    **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam: **uma linha** em
-    `timeline.FEATURES_V5` (da montagem) ou `project.FEATURES_V5` (do projeto) — os da 1.6 ficam em
-    `timeline.FEATURES_V4` e `project.FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
-    campo dele no JSON só quando usado. Assim um projeto que não usa nada novo continua abrindo nas versões
+    algo da 1.6; 5 = usa algo da 1.7; 6 = usa algo da 1.8 (listados em `"recursos"`). **Ajuste ou opção nova** (look
+    ou clipe) não precisa de registro: o retrato do que a 1.7 lê (`pelicula/data/conhecidos_1_7.json`,
+    `params.beyond_1_7`; nunca editar, nem os da 1.5 e da 1.6) faz o projeto ir para o 6 quando o valor sai do padrão
+    ou é uma opção nova. **Estrutura nova no JSON** (campo, bloco, tipo de fonte) que versões antigas não entenderiam:
+    **uma linha** em `timeline.FEATURES_V6` (da montagem) ou `project.FEATURES_V6` (do projeto) — os da 1.7 ficam em
+    `FEATURES_V5`, os da 1.6 em `FEATURES_V4`, os da 1.5 em `timeline.FEATURES` e `project.FEATURES_V3` — e o
+    campo dele no JSON só quando usado. O look próprio de uma sequência (`Sequence.look`, 1.8) é o primeiro
+    registro de `timeline.FEATURES_V6` (`"look_proprio"`). Assim um projeto que não usa nada novo continua abrindo nas versões
     antigas, e um que usa é recusado com aviso em vez de abrir sem o recurso. Formato antigo abre pelos passos
     puros de `project.MIGRATIONS` e `timeline.MIGRATIONS` (testados com os projetos gravados pela 1.4 e pela 1.6 em
     `tests/data/projetos_1_4/` e `tests/data/projetos_1_6/`);
@@ -443,6 +496,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_geometria_ui.py` | casos de `geometria_ui_cases.py`: taxa manual e aviso do desespremer, "Proporção" e "Como aplicar" em Configurar a sequência, desfazer, área segura na janela útil |
 | `tests/test_aninhada.py` | imagem e som da sequência aninhada: a **gêmea** (a montagem e a mesma montagem num único clipe de sequência dão os mesmos bits, em 8 e 16 bits, com e sem look, com `no_effects`, na prévia e na exportação, em dois níveis, e as mesmas amostras de som), `grab` × `SequenceReader`, fundo transparente × opaco, ajustes no clipe de sequência, janela útil, clipe log com o próprio perfil lá dentro, cache do quadro sem quadro velho, cache de WAVs, cancelar, `pelicula-cli exportar` |
 | `tests/test_aninhar.py` | aninhar e desaninhar: o que vai para onde (ids, faixas, volumes, mudo e solo, fundo, janela, magnética), recusas, legendas presas ao arquivo que atravessam a sequência, e na GPU/ffmpeg a prova de "nada muda" (quadros bit a bit em 8 e 16 bits, com e sem look, prévia reduzida, terminal; som de 24 bits; janela útil; faixas de cima; aninhar o que já tem clipe de sequência) |
+| `tests/test_look_sequencia.py` | look próprio de cada sequência sem Qt (1.8, #67): `SeqLook` e o JSON (cópia, duplicar, sozinha sem id, valores limpos), formato 6 só com look próprio e o JSON da 1.7 byte a byte sem ele, a 1.7 recusa, `Project.look_for`, o desfazer da montagem (look não é passo, fica o de agora, volta com a sequência apagada), a montagem de fora e o som não mudam, o terminal (`project_look`, `look_keys`, `info`, `lut --sequencia`) |
+| `tests/test_look_sequencia_ui.py` | casos de `look_sequencia_ui_cases.py`: look próprio começando igual ao do projeto, trocar de aba troca o look em edição, o desfazer de cada look e o da montagem, voltar ao do projeto (pergunta só se mudou), a linha do painel, os menus da aba e da Mídia, o ponto na aba, salvar e reabrir (com a de fora e a de dentro abertas; sozinha), exportação de cada sequência com o look dela e o aviso no clipe |
 | `tests/test_aninhar_ui.py` | casos de `aninhar_ui_cases.py`: pôr uma sequência da Mídia (e as recusas), dois cliques, Aninhar seleção (menu, atalho, um passo do desfazer), Desaninhar, desenho, forma de onda, inspetor e ferramentas que leem o arquivo |
 | `tests/test_sequence.py` | `grab` × `SequenceReader` iguais quadro a quadro; exportação de uma montagem com corte e som |
 | `tests/test_virtual_sources.py` | clipes sem arquivo com um gerador de teste: JSON (`"tipo"`, `"dados"`) e formato 3, tempo do clipe, quem ignora a fonte (arquivos que faltam, relocalizar, entradas da exportação, `media_info`, `legal_range`, som, `"relativo"` do projeto), `grab` = `SequenceReader`, saída conferida/convertida, tipo sem gerador = transparente e, na GPU, o gerador sobre um arquivo com prévia = exportação |
@@ -453,7 +508,29 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_titles.py` | títulos: dados conferidos, estilos prontos, pré-multiplicação, posição, animações em quadros fixos, tempo do clipe (aparar, velocidade, congelar), **hashes fixos** (iguais no Windows e no Linux), módulo e `used_by` |
 | `tests/test_alfa_titulos_ui.py` | casos de `alfa_titulos_ui_cases.py`: imagens numeradas, Fundo transparente, janela Exportar com alfa, xadrez, menu Novo, campos do gerador e editor de títulos com desfazer, aviso de caractere, Sobre, módulo desligado |
 | `tests/test_audiomix.py` | comando do ffmpeg (filtros por clipe) e mixagem de verdade |
+| `tests/test_somcache.py` | cache por clipe e soma (1.8, §43): igual ao grafo antigo (`render_mix_graph`, ≤ 2 passos de 24 bits) em cortes, transição, velocidade, rampa, reverso, chaves, mudo/solo, volume da faixa, tons, aninhada e trechos do meio; posição na amostra exata; mover/aparar/fader sem renderizar; chave do pedaço; 24 bits como o ffmpeg; cancelar e erro; picos e stems; balanço da faixa (lei do clipe, JSON, formato 6, `mix_key`, aninhar e desaninhar); velocidade |
+| `tests/test_somexport.py` | só o som = `render_mix` (e o trecho), stems somam a mixagem, FLAC/AAC/MP3, volume alvo, o som do arquivo no modo Película, cancelar, `--so-som`/`--stems` |
+| `tests/test_scrub.py` | som ao arrastar o cursor: tamanho do grão, fades de 5 ms, 16 bits com o volume, um grão por vez (nada toca) |
+| `tests/test_mixer_ui.py` | casos de `mixer_ui_cases.py`: mixer no lugar do inspetor (botão, atalho), uma tira por faixa, fader e balanço num passo do desfazer, dois cliques, mudo/solo/trava, medidores pelos picos gravados, a prévia grava os picos e a limpeza apaga, scrub com sink falso (passo, régua, mudo, preferência) e "O que exportar" na janela Exportar |
+| `tests/test_narracao.py` | gravador sem Qt nem microfone (1.8, §48): WAV de 24 bits exato, mono centrado/estéreo, 8/16/32 bits e float, 44,1 → 48 kHz (erro, ganho, duração, blocos de qualquer tamanho), outras taxas e o que passa do Nyquist, níveis, atraso à amostra, duração máxima, cancelar sem deixar nada, fila em segundo plano, pasta/numeração, intervalo (entrada/saída), escolha da faixa "Narração" |
+| `tests/test_narracao_ui.py` | casos de `narracao_ui_cases.py`: botão e painel, microfone lembrado, atalho, gravar do cursor ou da entrada à saída (um passo do desfazer, faixa nova), pastas, contagem, tocar junto, atraso, medidor e erros (sem microfone, negado, desconectado, vazio) com microfone falso |
 | `tests/test_audio_fades.py` | emendas de som: projeto antigo gera o mesmo grafo da 1.3, fades curtos só nos cortes, tempo da transição e potência constante medida com o ffmpeg |
+| `tests/test_somfilme.py` | som de película sem ffmpeg: seção e módulo, desligado = bit a bit, trecho com contexto = pedaço do som inteiro, determinismo, faixa medida de cada trilha, mono e chiado, limite suave, estalos na amostra exata dos quadros de `u_splice` (defeitos e montagem), wow correlacionado com o tremor do quadro, `process_wav` em blocos, imagem/LUT/plugin sem a seção |
+| `tests/test_somfilme_export.py` | som de película com o ffmpeg: trecho exportado = prévia (montagem e arquivo), estalo no corte, agudos cortados; na GPU, som do arquivo recodificado (desligado: copiado) e o estalo na exportação de uma montagem |
+| `tests/test_som_pelicula_ui.py` | casos de `som_pelicula_ui_cases.py`: cartão do módulo Beta, prévia do arquivo = motor da exportação, só o processamento refaz (a mixagem fica), sem efeitos/sem película/desligado voltam ao som de sempre |
+| `tests/test_somfilme_rolo.py` | estalo na troca de rolo de Super 8: `reel_frames` = os quadros em que a imagem pula (cadências e fps), estalo na amostra exata, trecho com contexto = som inteiro, nada sem os rolos, prévia = exportação (rolos de 1 s num arquivo de 2 s) |
+| `tests/test_export_film_note.py` | aviso de "Copiar original" com o som de película: formato que sai por recipiente, quando não se aplica, nota no começo do terminal e, na GPU, `job.note` no fim (o caso da janela está em `export_ui_cases.py`) |
+| `tests/test_somlimpo.py` | limpeza do som (1.8): ruído aprendido em numpy (ruído branco/rosa cai ≥ 15 dB, tom a ±0,5 dB, blocos = de uma vez, 0% = entrada, perfil recusado) e na mixagem (entrada trocada no instante certo, cache, cancelar), JSON esparso e grafo igual no padrão, trecho do botão, entalhes do zumbido e detecção, predefinições do "eq", resposta dos cortes, nivelar a voz |
+| `tests/test_sincronia.py` | sincronizar pelo som: atraso de 1,23 s a menos de 1 ms (também −6 dB com ruído e polaridade invertida), fração de amostra, atraso negativo, recusas (sem relação, silêncio, ritmo), referência, plano com arquivos |
+| `tests/test_sfx.py` | efeitos sonoros (1.8, §47): determinismo e semente de cada tipo, pico (−1 dBFS × intensidade, nunca satura) e RMS, largura/brilho, clique e obturador curtos, teclas nos tempos dados, a fonte "efeito" (só som, duração do tipo), JSON e formato 6, `mix_key`, o segmento aponta para o WAV do efeito e a mixagem toca o efeito igual à síntese (e no grafo antigo) |
+| `tests/test_sfx_auto.py` | pôr efeitos sozinho: whoosh, impacto, swish, teclas (quadros exatos de `titles.motion`, também com o `textrender` de verdade comparando com o desenho), obturador e riser em montagens sintéticas; faixa "Efeitos" sem cobrir clipes; não repete (também depois de salvar) |
+| `tests/test_sons_cc0.py` | sons CC0 sem rede (`urlopen` falso): respostas do Openverse e do Freesound (só CC0), endereços, User-Agent e tempo limite, erros claros, download e limite, nomes e pastas, crédito no JSON e formato 6, `.creditos.txt` só com o som no trecho (faixa muda não conta), aninhada, e a exportação de verdade + `pelicula-cli info`/`exportar` |
+| `tests/test_sfx_ui.py` | casos de `sfx_ui_cases.py`: módulo Beta, Novo ▸ Efeito sonoro na faixa de som livre, editor num passo do desfazer, botão Novo dividido com títulos, "Pôr efeitos sonoros…" num passo (sem repetir), janela e caixas, botão e Ctrl+Alt+E, página Sons livres (chave mascarada nas preferências), busca/ouvir/adicionar com rede falsa e o crédito na fonte |
+| `tests/test_somlimpo_ui.py` | casos de `somlimpo_ui_cases.py`: Aprender o ruído (regras do trecho, recusas, um passo do desfazer), Detectar, Predefinições, Sincronizar pelo som pelo menu (move e desfaz num passo, recusa, cancelar) |
+| `tests/test_batidas.py` | batidas (1.8): cliques a 90/120/150 BPM limpos, com ruído e tocados à mão (BPM a 1%, batidas a 15 ms, compasso), mudança de andamento e ruído sem confiança, determinismo e JSON, cache pelo carimbo (memória, disco, arquivo mudado), cancelar |
+| `tests/test_batidas_mao.py` | correção à mão das batidas (1.8): `corrected` (×2 no meio exato, ÷2 pela paridade dos compassos, compasso de 3 por acento, sem acentos), JSON da fonte e formato 6 só com correção, encaixe nos compassos corrigidos |
+| `tests/test_musica.py` | música na montagem: batidas no tempo do clipe (aparar, 2×, reverso, rampa), ímã sem o clipe arrastado, encaixe (compassos inteiros no meio, emendas nos compassos com transição de uma batida, fim exato, grade mantida a 25 qps, velocidade), recusas e saída simples, alvo e impedimentos, um passo do desfazer; fala sintética (ruído não conta), chaves da descida, chaves de antes substituídas, mixagem mais baixa sob a voz |
+| `tests/test_musica_ui.py` | casos de `musica_ui_cases.py`: Detectar batidas pelo menu e cache, análise sozinha (preferência, > 20 s), marcas com o zoom e a velocidade, Ímã nas batidas, Encaixar pelo menu (In/Out, desfazer num passo, recusas e saída suave, faixa travada), Abaixar sob a voz (chaves, pergunta das chaves de antes, sem voz) e o diálogo que lembra os números |
 | `tests/test_loudness.py` | loudness (casos da EBU Tech 3341/3342, true peak, contra o `ebur128` do ffmpeg) e o WAV do medidor (`WavReader`, `decode_wav`) |
 | `tests/test_chapters.py` | capítulos: tempos relativos ao trecho, regras do YouTube, FFMETADATA e o comando do codificador |
 | `tests/test_edicao_som_ui.py` | casos de `edicao_som_ui_cases.py`: marcadores (teclas, mouse, menus, diálogo), capítulos, transição de som, medidor e a janela (M/Shift+M, medidor no relógio da prévia, módulo desligado) |
@@ -466,7 +543,8 @@ Testes do modo Edição, do plugin e dos módulos:
 | `tests/test_lab_ui.py` | os controles novos do Laboratório da 1.6 no cartão da seção (casos em `lab_ui_cases.py`, subprocesso offscreen) |
 | `tests/test_lab_datasheet.py` | filmes "(datasheet)" do Laboratório (M8): constantes = `tools/ajustar_lab.py`, fonte e tolerância nos JSONs, ids no fim, cinza e escala de cinza do par |
 | `tests/test_luz_plano.py` | marcação de luz por plano: neutra no padrão, pontos do clipe da V1 nos quadros certos (cortes, transições interpoladas, V2 não muda o plano), 12 pontos = 1 stop da cópia, JSON esparso e formato 4, desfazer, prévia = exportação |
-| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): no fim da lista, processo certo, efeito no eixo do cinza |
+| `tests/test_presets_16.py` | presets da 1.6 (slide reversível, revelação cruzada, vencida, pré-exposição): logo depois de "original", processo certo, efeito no eixo do cinza |
+| `tests/test_presets_som.py` | presets da 1.8 com som de película (Super 8 caseiro, 16 mm de arquivo, Cinema anos 30, Cine de bairro): no fim da lista, imagem copiada do preset mais parecido, som ligado com a trilha certa e níveis moderados, aviso do módulo, sem saturar |
 | `tests/test_fotometro.py` | fotômetro: latitude por negativo (Vision3 × Double-X), revelação, vencida e pré-exposição movem os limites como documentado, zonas da camada em stops conhecidos, leitura de um ponto, nada no caminho de render |
 | `tests/test_luz_fotometro_ui.py` | casos de `luz_fotometro_ui_cases.py`: cartão "Luz da copiadora" (mostrador, aviso, ±1, zerar, copiar, desfazer), atalhos Alt+R/G/B/D, módulo "laboratorio"; botão Fotômetro (Beta desligado, camada só na tela, leitura de um ponto, some com o módulo) |
 | `tests/test_resolve.py` | DCTLs gerados (estrutura, limites de controles) e paridade de cor com o app na GPU |
@@ -562,7 +640,9 @@ Widgets do Qt só rodam em teste dentro de um **subprocesso** com `QT_QPA_PLATFO
    chave em `editparams.SPARSE_KEYS`: no padrão ela não vai para o JSON e um projeto antigo grava igual.
 2. **Imagem**: `compositor.py` transforma o valor em uniform(s) e `editshaders.CLIP` usa; mantenha
    o atalho de "tudo neutro = cópia exata". **Som**: `audiomix.py` acrescenta o filtro do ffmpeg na
-   cadeia do clipe.
+   cadeia do clipe. Se o filtro é linear (só multiplica e soma amostras, como volume e equalizador), ponha a
+   chave em `somcache.LINEAR_KEYS` (o ganho da faixa vai para a soma e o fader não renderiza o clipe de novo);
+   senão, nada a fazer. O cache por clipe já leva todos os valores na chave.
 3. Teste em `tests/test_compositor.py` (ou `test_audiomix.py`) e documente em `docs/EDICAO.md`.
 4. Se ele deve aceitar chaves de animação, veja *Tornar um ajuste animável*.
 

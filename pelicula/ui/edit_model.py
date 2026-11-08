@@ -38,7 +38,7 @@ from ..timeline import AUDIO, VIDEO, Clip, Sequence, Source
 
 FREEZE_SECONDS = 2.0  # duração padrão de "Congelar este quadro"
 
-TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name"}
+TRACK_ATTRS = {"muted", "locked", "solo", "volume", "name", "pan"}  # 1.8: "pan" (balanço da faixa, o mixer)
 AUDIO_TRANSITION_S = 1.0  # duração padrão da transição de som criada pelo menu do corte
 
 
@@ -144,11 +144,11 @@ class TimelineModel(QObject):
 
     def undo(self) -> None:
         self.commit()
-        self._restore(self.history.undo())
+        self._restore(self.history.undo(self.seq))
 
     def redo(self) -> None:
         self.commit()
-        self._restore(self.history.redo())
+        self._restore(self.history.redo(self.seq))
 
     def _done(self, kind: str = "structure") -> None:
         self._filter_selection(emit=True)
@@ -282,6 +282,31 @@ class TimelineModel(QObject):
         if after != before or delta:
             self._done("structure")
         return delta
+
+    def move_clips(self, ids: list[str], delta: int, track_delta: int = 0, kind: str = VIDEO,
+                   insert: bool = False) -> int:
+        """Move a seleção inteira (e os ligados) pelo mesmo deslocamento, num passo só de desfazer (#63).
+        `track_delta` muda a faixa dos clipes do tipo `kind` (o do clipe arrastado)."""
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            delta = (self.seq.move_many_insert if insert else self.seq.move_many)(ids, int(delta), int(track_delta),
+                                                                                  kind)
+        if self.history._dump(self.seq) != before:
+            self._done("structure")
+        return delta
+
+    def move_groups(self, moves: list[tuple[str, int]]) -> list[int]:
+        """Move cada clipe (e os ligados) pelo próprio deslocamento, todos num passo só de desfazer (1.8: sincronizar
+        pelo som, `sincronia.py`). Devolve o deslocamento aplicado a cada um (menor se esbarrou no começo)."""
+        before = self.history._dump(self.seq)
+        done = []
+        with self.seq.keep_main():
+            for cid, delta in moves:
+                c = self.seq.find(cid)
+                done.append(self.seq.move_many([cid], int(delta), 0, c.kind) if c is not None and delta else 0)
+        if self.history._dump(self.seq) != before:
+            self._done("structure")
+        return done
 
     def trim_start(self, cid: str, frame: int, solo: bool = False) -> int:
         """Apara o começo; `solo` (Alt) apara só este clipe, sem o ligado (corte J/L)."""
@@ -540,21 +565,37 @@ class TimelineModel(QObject):
             self.seq.close_gaps(kind, idx)
         self._done("structure")
 
-    def set_track(self, kind: str, idx: int, **attrs) -> None:
+    def set_track(self, kind: str, idx: int, record: bool = True, **attrs) -> None:
+        """Muda propriedades da faixa (`TRACK_ATTRS`). `record=False` (arrastando o volume ou o balanço) agrupa o
+        histórico em 400 ms, como os sliders do clipe; quem arrasta chama `commit()` ao soltar: um passo por gesto."""
         tr = self.seq.track(kind, idx)
         if tr is None:
             return
+        trivial = self.seq.is_trivial()
         changed = False
         for k, v in attrs.items():
             if k not in TRACK_ATTRS:
                 raise KeyError(k)
             if k == "volume":
                 v = min(max(float(v), -60.0), 12.0)
+            if k == "pan":
+                v = timeline.clean_pan(v)
             if getattr(tr, k) != v:
                 setattr(tr, k, v)
                 changed = True
-        if changed:
-            self._done("structure")
+        if not changed:
+            return
+        # Volume e balanço de uma faixa de som só mudam o som: a prévia remonta o quadro e refaz a mixagem, sem
+        # recarregar a fonte (a não ser que a montagem deixe de ser, ou volte a ser, só o arquivo).
+        kind_changed = ("values" if kind == AUDIO and set(attrs) <= {"volume", "pan"}
+                        and self.seq.is_trivial() == trivial else "structure")
+        if record:
+            self._done(kind_changed)
+            return
+        self._filter_selection(emit=True)
+        self._timer.start()
+        self.changed.emit(kind_changed)
+        self.historyChanged.emit()
 
     # ------------------------------------------------------------ sequência
     def set_settings(self, width: int, height: int, fps_str: str, background=None,
@@ -1078,6 +1119,19 @@ class TimelineModel(QObject):
         if n:
             self._done("values")
         return n
+
+    # ------------------------------------------------------------ 1.8: uma edição pronta num passo (música, §46)
+    def apply_edit(self, fn, kind: str = "structure") -> bool:
+        """Roda `fn(seq)` (uma edição feita por um módulo puro: encaixar a música, abaixá-la sob a voz) como um passo
+        só do desfazer, com a faixa principal magnética acertada no fim. True se a sequência mudou."""
+        self.commit()
+        before = self.history._dump(self.seq)
+        with self.seq.keep_main():
+            fn(self.seq)
+        if self.history._dump(self.seq) == before:
+            return False
+        self._done(kind)
+        return True
 
 
 __all__ = ["TimelineModel", "VIDEO", "AUDIO"]

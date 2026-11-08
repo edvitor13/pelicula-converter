@@ -125,6 +125,14 @@ MODULES: tuple[Module, ...] = (
               "revelação, a película vencida e a pré-exposição): sem detalhe, pé, trecho reto, ombro ou estourado, "
               "a latitude em stops e a leitura de um ponto. Só na tela: nunca vai para a exportação."),
            "pelicula", BETA),
+    Module("som_pelicula", N_("Som de película"),
+           N_("O som passa pela trilha da cópia: ótica de 35 ou 16 mm, magnética do Super 8 ou ótica dos anos 30, com "
+              "estalos nas emendas (nos mesmos quadros da imagem), poeira, wow e flutter que seguem o tremor do "
+              "quadro, o projetor e a sala de cinema. Não vai para o plugin do DaVinci."), "pelicula", BETA),
+    Module("efeitos_sonoros", N_("Efeitos sonoros"),
+           N_("Whoosh, swish, riser, impacto, clique, máquina de escrever e obturador feitos pelo app no modo Edição, "
+              "o \"Pôr efeitos sonoros…\" (nas transições, nos títulos e nos marcadores) e a busca de sons livres "
+              "(CC0) no Openverse e no Freesound."), "audio", BETA),
 )
 
 _BY_ID = {m.id: m for m in MODULES}
@@ -260,6 +268,8 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         used.add("data_impressa")
     if v.get("mfilme_on"):  # 1.6: a montagem na película
         used.add("montagem_pelicula")
+    if v.get("somf_on"):  # 1.8: som de película
+        used.add("som_pelicula")
     if v.get("planos_on"):
         from . import planes
         if planes.active(v):
@@ -271,8 +281,11 @@ def used_by(values: dict | None = None, sequence=None, subtitles=None) -> set[st
         trivial = getattr(seq, "is_trivial", lambda: True)
         if getattr(seq, "clips", True) and not trivial():
             used.add("edicao")
-            if any(s.is_generated for s in getattr(seq, "used_sources", lambda: [])()):
+            sources = getattr(seq, "used_sources", lambda: [])()
+            if any(s.is_generated and s.kind != "efeito" for s in sources):
                 used.add("titulos_geradores")  # título, cor, degradê ou ponta na montagem
+            if any(s.kind == "efeito" for s in sources):
+                used.add("efeitos_sonoros")  # 1.8: efeito sonoro feito pelo app (§47)
         if getattr(seq, "uses_extra_transitions", lambda: False)():
             used.add("transicoes")
         # 1.6: cor escolhida, degradê, pele natural ou grupo de cor num clipe

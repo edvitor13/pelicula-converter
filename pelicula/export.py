@@ -117,6 +117,7 @@ class ExportSettings:
     true_peak: float = -1.0   # pico real máximo (dBTP) quando há volume alvo
     net_grain: bool = False   # "Grão para redes": grão com tamanho mínimo na saída (look.build_plan(net_grain=))
     no_effects: bool = False  # 1.7: "Desligar todos os efeitos" valia ao criar o trabalho (`frame.Recipe.no_effects`)
+    sound_only: str = ""      # 1.8: "" vídeo e som | "som" só o som | "stems" uma faixa por arquivo (`somexport.py`)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -357,6 +358,34 @@ def _audio_args(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.
 def audio_reencoded_for_volume(s: ExportSettings, info: media.MediaInfo) -> bool:
     """A escolha era "Copiar original", mas o volume alvo ou o tamanho alvo obrigam a recodificar (a janela avisa)."""
     return s.audio == "copy" and _audio_mode(s, info) not in ("", "copy") and (wants_loudness(s) or uses_target(s))
+
+
+def audio_reencoded_for_film(s: ExportSettings, info: media.MediaInfo, values: dict | None, sequence=None) -> str:
+    """1.8: a escolha era "Copiar original", mas o som de película do look está ligado: o som do arquivo passa pelo
+    `somfilme` e sai do WAV processado (`_film_sound`), nunca copiado. Devolve o modo que sai de fato (o de `_audio_mode`
+    para um WAV de 24 bits; "copy" = o PCM do WAV no MOV/MKV), ou "" quando não se aplica: outra escolha, sem som, som
+    de película desligado (ou "Desligar todos os efeitos") e a montagem do modo Edição, cujo som já é a mixagem."""
+    from . import somfilme
+    if s.audio != "copy" or sequence is not None or somfilme.film_values(values, s.no_effects) is None:
+        return ""
+    if not _audio_mode(s, info):
+        return ""
+    pcm = media.MediaInfo(**{**info.__dict__, "has_audio": True, "audio_codec": "pcm_s24le"})
+    return _audio_mode(s, pcm, 0.0)
+
+
+def film_sound_note(s: ExportSettings, info: media.MediaInfo, values: dict | None, sequence=None,
+                    done: bool = False) -> str:
+    """O aviso do som de película no lugar de "Copiar original" (`audio_reencoded_for_film`): a janela mostra ao lado
+    do áudio, o terminal no começo e a fila/barra de status no fim (`done`). "" quando não se aplica."""
+    mode = audio_reencoded_for_film(s, info, values, sequence)
+    if not mode:
+        return ""
+    labels = dict(AUDIO)
+    fmt = "FLAC" if mode == "flac" else _(labels["pcm24" if mode == "copy" else mode])
+    if done:
+        return _("O som de película estava ligado: o som foi recodificado em {formato}.").format(formato=fmt)
+    return _("O som de película está ligado: o som será recodificado em {formato}.").format(formato=fmt)
 
 
 def audio_kbps(s: ExportSettings, info: media.MediaInfo, start_time: float = 0.0) -> float:
@@ -837,6 +866,7 @@ class ExportJob:
     subtitles: dict = field(default_factory=dict)  # legendas em tempo da sequência (`subtitles.job_payload`)
     burn: dict = field(default_factory=dict)       # legendas gravadas no vídeo (`subtitles.Burn.to_json`)
     subtitle_file: dict = field(default_factory=dict)  # .srt/.vtt ao lado (`subtitle_file_payload`)
+    note: str = ""           # 1.8: aviso do fim para a fila, a barra de status e o terminal ("Créditos dos sons em …")
 
     @property
     def progress(self) -> float:
@@ -919,7 +949,8 @@ class ExportQueue:
                 job.status = "cancelado"
                 continue
             try:
-                if self._engine is None:
+                from . import somexport
+                if self._engine is None and not somexport.wants(job.settings):  # só o som não usa a GPU
                     self._engine = Engine()
                 run_job(job, self._engine)
             except Exception as exc:  # noqa: BLE001
@@ -932,6 +963,10 @@ def run_job(job: ExportJob, engine: Engine) -> None:
     """Exporta um trabalho. O ffmpeg grava num parcial ao lado do destino e o resultado só vai para o
     lugar do destino quando tudo deu certo; cancelado ou com erro, o parcial é apagado e o arquivo
     antigo (se havia) fica como estava."""
+    from . import somexport
+    if somexport.wants(job.settings):  # 1.8: só o som (ou os stems), sem vídeo nem GPU
+        somexport.run(job)
+        return
     info, s = job.info, job.settings
     perf = s.perf()
     job.status = "exportando"
@@ -990,6 +1025,15 @@ def run_job(job: ExportJob, engine: Engine) -> None:
                     mix_path = None
             has = mix_path is not None
             info = media.MediaInfo(**{**info.__dict__, "has_audio": has, "audio_codec": "pcm_s24le" if has else ""})
+        film = _film_sound(job, info, seq, start, end, mix_path, perf)  # 1.8: som de película (`somfilme.py`)
+        if film is False:
+            return
+        film_note = film_sound_note(s, info, job.values, seq, done=True) if film else ""
+        if film:
+            if mix_path:
+                system.remove_file(mix_path)
+            mix_path = film
+            info = media.MediaInfo(**{**info.__dict__, "has_audio": True, "audio_codec": "pcm_s24le"})
         run = _Run(info, perf, w, h, fps_str, fps_out, fps_val, depth, start, total, start_time, duration, target,
                    seq, mix_path, chapters_path, subs_embed)
         if job.burn:
@@ -1012,6 +1056,11 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             else:
                 job.status = "concluido"
                 _write_subtitle_file(job, start, end + 1)
+                if job.status == "concluido":  # 1.8: créditos dos sons CC0 do trecho (`sons_cc0.py`, §47)
+                    from . import sons_cc0
+                    sons_cc0.export_credits(job, start, end + 1)
+                if job.status == "concluido" and film_note:  # 1.8: som de película no lugar de "Copiar original"
+                    job.note = "  •  ".join(t for t in (film_note, job.note) if t)
     finally:
         if job.status != "concluido" and not keep_partial:
             _discard_output(job.out_path, s)
@@ -1021,6 +1070,33 @@ def run_job(job: ExportJob, engine: Engine) -> None:
             system.remove_file(chapters_path)
         if subs_embed is not None:
             system.remove_file(subs_embed.path)
+
+
+def _film_sound(job: ExportJob, info: media.MediaInfo, seq, start: int, end: int, mix_path: str | None,
+                perf: media.Perf) -> str | None | bool:
+    """1.8: com o "Som de película" no look da exportação, o som final passa por `somfilme` (ARQUITETURA §45): a
+    mixagem do trecho (montagem) ou o trecho do arquivo, nunca copiado. Devolve o WAV novo (vira o som do trabalho),
+    None quando nada muda e False quando cancelou ou deu erro (o trabalho já fica marcado)."""
+    from . import somfilme
+    values = somfilme.film_values(job.values, job.settings.no_effects)
+    if values is None or not info.has_audio:
+        return None
+    if _audio_args(job.settings, info, 0.0 if seq is not None else start / info.fps) == ["-an"]:
+        return None
+    if seq is not None and not mix_path:
+        return None
+    try:
+        path = somfilme.export_sound(values, info, seq, start, end + 1, mix_path, job.cancel, perf)
+    except (RuntimeError, OSError, ValueError) as exc:
+        job.status = "erro"
+        job.error = str(exc)[-1500:]
+        return False
+    if job.cancel.is_set():
+        if path:
+            system.remove_file(path)
+        job.status = "cancelado"
+        return False
+    return path
 
 
 @dataclass

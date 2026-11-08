@@ -201,11 +201,11 @@ def test_tabs_drag_moves_a_tab_and_a_short_move_is_just_a_click():
         t.close()
 
 
-def test_tabs_context_menu_has_the_four_actions_and_delete_is_off_for_the_last_one():
+def test_tabs_context_menu_has_its_actions_and_delete_is_off_for_the_last_one():
     t = tabs_widget(("Sequência 1",), 0)
     try:
         acts = [(x.text(), x.isEnabled()) for x in t.menu_for("id0").actions() if x.text()]
-        assert [n for n, _e in acts] == ["Renomear", "Duplicar", "Configurar…", "Apagar"]
+        assert [n for n, _e in acts] == ["Renomear", "Duplicar", "Configurar…", "Look de película", "Apagar"]
         assert dict(acts)["Apagar"] is False
         t.set_tabs([TabInfo("a", "A"), TabInfo("b", "B")], "a")
         assert dict((x.text(), x.isEnabled()) for x in t.menu_for("a").actions())["Apagar"] is True
@@ -410,6 +410,7 @@ def test_switching_between_empty_montage_and_other_fps_and_size_works_in_both_mo
     v2 = tone_video(tmp_path, "dois.mp4", "192x108", 30, 880)
     fresh(win)
     win.import_paths([v1])
+    win.add_to_timeline(v1)
     pump(lambda: win.cur is not None)
     a = win.model.seq.id or win.model.seq.ensure_set().items[0].id
     accepting(monkeypatch, fps="30/1", size=(192, 108))
@@ -420,7 +421,8 @@ def test_switching_between_empty_montage_and_other_fps_and_size_works_in_both_mo
         pump()
         assert win.info is None and win.src_seq is None and win._audio_src == ("", "")
         assert not win.btn_play.isEnabled() and win.edit_scopes is not None
-    win.import_paths([v2])                              # a vazia ganha um vídeo de 30 quadros/s
+    win.import_paths([v2])
+    win.add_to_timeline(v2)                             # a vazia ganha um vídeo de 30 quadros/s
     pump(lambda: win.cur is not None)
     assert abs(win.info.fps - 30) < 1e-6 and (win.info.width, win.info.height) == (192, 108)
     win.seqs_ui.activate(a)
@@ -843,7 +845,7 @@ def test_media_menu_of_a_sequence_and_of_a_video(win, monkeypatch, tmp_path):
     select_in_bin(win, key)
     texts = menu_texts(win)
     assert texts == ["Abrir a sequência", "Adicionar ao fim da linha do tempo", "Inserir no cursor (,)",
-                     "Sobrescrever no cursor (.)", "Duplicar", "Apagar a sequência…"]
+                     "Sobrescrever no cursor (.)", "Duplicar", "Look de película", "Apagar a sequência…"]
     src = win.model.sequences()[0].clips[0].src
     select_in_bin(win, src)
     texts = menu_texts(win)
@@ -1073,10 +1075,12 @@ def test_a_real_export_of_two_sequences_through_the_dialog(win, monkeypatch, tmp
     v2 = tone_video(tmp_path, "r2.mp4", "192x108", 30, 880, 1)
     fresh(win)
     win.import_paths([v1])
+    win.add_to_timeline(v1)
     pump(lambda: win.cur is not None)
     accepting(monkeypatch, fps="30/1", size=(192, 108))
     win.seqs_ui.new_sequence()
     win.import_paths([v2])
+    win.add_to_timeline(v2)
     pump(lambda: win.cur is not None)
     added = []
     monkeypatch.setattr(win.queue, "add", added.append)

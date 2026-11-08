@@ -409,7 +409,7 @@ def test_a_new_look_setting_or_choice_writes_format_5(monkeypatch):
     assert p.to_json()["formato"] == project.FORMAT_SIMPLE  # ajuste novo no padrão: nada muda
     p.values = {**p.values, "exposicao": 0.5}
     data = p.to_json()
-    assert data["formato"] == project.FORMAT == 5 and data["recursos"] == ["ajustes_1_7"]
+    assert data["formato"] == project.FORMAT_17 == 5 and data["recursos"] == ["ajustes_1_7"]
     p.values = params.defaults()
     p.look_keys = {"exposicao": [[0, 0.0], [10, 0.5]]}
     assert p.to_json()["formato"] == 5  # chaves num ajuste novo
@@ -435,7 +435,7 @@ def test_a_new_clip_setting_writes_block_4_and_project_5(monkeypatch):
     v = next(c for c in seq.clips if c.kind == tl.VIDEO)
     seq.set_values(v.id, {**v.values, "exposicao": 1.0})
     block = seq.to_json()
-    assert seq.features() == {"ajustes_clipe_1_7"} and block["formato"] == tl.FORMAT == 4
+    assert seq.features() == {"ajustes_clipe_1_7"} and block["formato"] == tl.FORMAT_17 == 4
     p.sequence = block
     assert p.to_json()["formato"] == 5 and p.to_json()["recursos"] == ["ajustes_clipe_1_7"]
     seq.insert_media(_alpha_source(), at=0, vtrack=1, with_audio=False)  # 1.5 + 1.7: continua 5
@@ -471,3 +471,49 @@ def test_a_1_6_reader_refuses_a_format_5_project(tmp_path, monkeypatch):
     monkeypatch.setattr(tl, "FORMAT", 3)
     with pytest.raises(tl.FormatError):
         tl.Sequence.from_json(block)
+
+
+# ------------------------------------------------------------------ formato 6 (1.8)
+def _known_17_without(schema: str, key: str) -> dict:
+    """O retrato da 1.7 como se `key` tivesse vindo na 1.8."""
+    known = {k: dict(v) for k, v in params.known_1_7().items()}
+    del known[schema][key]
+    return known
+
+
+def test_the_1_7_snapshot_keeps_every_key_and_choice():
+    """O retrato da 1.7 nunca perde chave nem opção e contém o da 1.6."""
+    from pelicula import editparams
+    raw = json.loads(params.KNOWN_1_7_FILE.read_text(encoding="utf-8"))
+    assert raw["versao"] == "1.7.0"
+    for name, schema in (("look", params.FILM), ("video", editparams.VIDEO), ("audio", editparams.AUDIO)):
+        for k, choices in params.known_1_7()[name].items():
+            p = schema.params.get(k)
+            assert p is not None, f"{name}/{k}"
+            if choices is not None:
+                assert p.kind == "choice" and set(choices) <= {c[0] for c in p.choices}, f"{name}/{k}"
+        assert not params.beyond_1_7(schema, params.known_1_7()[name], schema.defaults()), name
+        for k, choices in params.known_1_6()[name].items():
+            assert k in params.known_1_7()[name], f"{name}/{k}"
+            assert set(choices or ()) <= set(params.known_1_6()[name][k] or ()) <= set(
+                params.known_1_7()[name][k] or ()), f"{name}/{k}"
+
+
+def test_a_new_look_or_clip_setting_of_1_8_writes_format_6(monkeypatch):
+    from pelicula import project, timeline as tl
+    p = project.Project(media_path="C:/v/fundo.mp4")
+    known = _known_17_without("look", "exposicao")
+    monkeypatch.setattr(params, "known_1_7", lambda: known)
+    assert p.to_json()["formato"] == project.FORMAT_SIMPLE  # ajuste novo no padrão: nada muda
+    p.values = {**p.values, "exposicao": 0.5}
+    data = p.to_json()
+    assert data["formato"] == project.FORMAT == 6 and "ajustes_1_8" in data["recursos"]
+    monkeypatch.undo()
+    seq = tl.Sequence.for_source(_plain_source())
+    known = _known_17_without("video", "exposicao")
+    monkeypatch.setattr(params, "known_1_7", lambda: known)
+    v = next(c for c in seq.clips if c.kind == tl.VIDEO)
+    seq.set_values(v.id, {**v.values, "exposicao": 1.0})
+    assert "ajustes_clipe_1_8" in seq.features() and seq.to_json()["formato"] == tl.FORMAT == 5
+    p = project.Project(media_path="C:/v/fundo.mp4", sequence=seq.to_json())
+    assert p.to_json()["formato"] == 6

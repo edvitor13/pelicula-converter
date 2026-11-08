@@ -94,7 +94,7 @@ de proxy, e *Rápido* enquanto ajusta. As threads do plugin pedem desempenho ao 
 ### Igual ao app?
 
 - **Cor**: a mesma conta, gerada a partir do mesmo kernel dos DCTLs. Comparado com `Engine.bake_lut`
-  (GPU): diferença < 0,0001 nos 48 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
+  (GPU): diferença < 0,0001 nos 52 presets e nos 14 perfis de entrada, nas duas opções de *Faixa do vídeo*
   (no PQ, que vai até 10000 cd/m², cores HDR muito saturadas chegam a 0,001); em todas as combinações de
   negativo × cópia × processo, mediana 0,000001 e máximo 0,0005 (nos ombros mais íngremes, onde a precisão
   do float da GPU pesa).
@@ -301,7 +301,7 @@ Dicas:
 plugins/ofx/
   openfx/        OpenFX 1.4 oficial (cabeçalhos + biblioteca de apoio C++), BSD-3: LICENSE e SOURCE.txt
                  (endereço, commit e SHA-256 de cada arquivo); só leitura
-  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 48 presets),
+  generated/     pc_kernels.h (kernels + tabelas + etapas) e pc_params.h (parâmetros, grupos, 52 presets),
                  gerados por pelicula/ofx.py — não edite; rode python tools/gerar_ofx.py
   src/           pc_core.cpp (as passadas do Engine.render na CPU), pc_ofx.cpp (o efeito OpenFX),
                  pc_capi.cpp (interface C para os testes), pc_json.h (leitor dos looks .json/.plc)
@@ -355,3 +355,4 @@ Os nomes de filmes são aproximações artísticas, sem relação com os fabrica
     nos atributos do clipe e o risco num efeito de brilho);
   - *Data impressa* (desenhada na luz da cena antes da película: use um texto no Fusion antes dos nós do
     Película Converter).
+- **Som de película** (1.8): é som, e o plugin só mexe na imagem; os ajustes `somf_*` não viram controles do plugin.

@@ -24,6 +24,7 @@ PAGES = (
     ("componentes", N_("Componentes"), "folder", "pelicula.ui.pages.componentes"),
     ("notificacoes", N_("Notificações"), "volume", "pelicula.ui.pages.notificacoes"),
     ("recuperacao", N_("Recuperação"), "save", "pelicula.ui.pages.recuperacao"),
+    ("sons", N_("Sons livres"), "music", "pelicula.ui.pages.sons"),  # 1.8: chave do Freesound (§47)
 )
 
 

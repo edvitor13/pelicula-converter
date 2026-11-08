@@ -118,10 +118,10 @@ def test_folders_write_format_5_only_when_used():
     seq = tl.Sequence.for_source(_src())
     assert seq.block_format() == tl.FORMAT_BASE
     seq.folders.create("A")
-    assert seq.features() == {"pastas"} and seq.block_format() == tl.FORMAT
+    assert seq.features() == {"pastas"} and seq.block_format() == tl.FORMAT_17
     p = project.Project(media_path="C:/v/a.mp4", sequence=seq.to_json(), mode="edicao")
     d = p.to_json()
-    assert d["formato"] == project.FORMAT == 5 and d["recursos"] == ["pastas"]
+    assert d["formato"] == project.FORMAT_17 == 5 and d["recursos"] == ["pastas"]
 
 
 def test_older_reader_refuses_a_project_with_folders(tmp_path, monkeypatch):

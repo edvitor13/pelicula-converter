@@ -66,6 +66,8 @@ class ExportTarget:
     subtitles: Any = None
     cues: list = field(default_factory=list)
     frame: int = 0                # o quadro da prévia do resultado
+    # 1.8 (#67): o look com que ela sai (valores, chaves, nome): o próprio dela ou o do projeto; None = o da janela
+    look: tuple[dict, dict, str] | None = None
 
 
 def safe_name(name: str) -> str:
@@ -274,6 +276,11 @@ class ExportDialog(QDialog):
         form.addRow(_("Resolução"), self.res)
         form.addRow(_("Quadros/s"), self.fps)
         form.addRow(_("Áudio"), self.audio)
+        self.audio_note = QLabel()  # 1.8: "Copiar original" com o som de película ligado (`_film_note`)
+        self.audio_note.setObjectName("Faint")
+        self.audio_note.setWordWrap(True)
+        form.addRow("", self.audio_note)
+        form.setRowVisible(self.audio_note, False)
         form.addRow("", self.grain)
         form.addRow("", self.dither)
         self.form = form
@@ -285,7 +292,8 @@ class ExportDialog(QDialog):
                 form.setRowVisible(w, False)
 
         # desempenho
-        lay.addWidget(self._perf_group(perf or {}))
+        self.perf_box = self._perf_group(perf or {})
+        lay.addWidget(self.perf_box)
 
         # trecho
         self.r_all = QRadioButton(_("Vídeo inteiro"))
@@ -392,6 +400,14 @@ class ExportDialog(QDialog):
         self._update_mem()
         self._sync_chapters()
         self._init_subtitles()
+        # 1.8: "O que exportar" (vídeo e som, só o som, stems), logo abaixo do destino (`ui/som_export_ui.py`)
+        from . import som_export_ui
+        self.sound = som_export_ui.install(self, lay, g0)
+
+    def _sound_on(self) -> bool:
+        """1.8: a exportação é só de som (`som_export_ui`)?"""
+        sound = getattr(self, "sound", None)
+        return sound is not None and sound.active
 
     # ------------------------------------------------------------ várias sequências
     def _title_of(self, sequence, info) -> str:
@@ -490,6 +506,9 @@ class ExportDialog(QDialog):
         self.info, self.sequence = t.info, t.sequence
         self.chapters, self.subs_doc, self.subs_cues = list(t.chapters), t.subtitles, list(t.cues)
         self.in_out, self.frame_index = t.in_out, int(t.frame)
+        if t.look is not None:  # 1.8: cada sequência sai com o look dela
+            values, keys, name = t.look
+            self.values, self.look_keys, self.preset_name = dict(values), dict(keys), name
         self.title_label.setText(t.name)
         self.sub_label.setText(_("Look: {look}  •  {resumo}").format(look=self.preset_name, resumo=t.info.summary()))
         self._sync_seq_info()
@@ -574,10 +593,12 @@ class ExportDialog(QDialog):
                         or export.partial_clash(path, s, export.job_inputs(t.info, t.sequence))):
                     path = export.free_output(path, s, taken)
                 a, b = self._range_for(t)
+                values, keys, look_name = t.look if t.look is not None else (self.values, self.look_keys,
+                                                                             self.preset_name)
                 job = export.ExportJob(
-                    info=t.info, values=dict(self.values), settings=s, out_path=path, start_frame=a, end_frame=b,
-                    name=f"{Path(path).name}  •  {self.preset_name}", sequence=t.sequence,
-                    chapters=self._chapters_of(t.chapters), look_keys=dict(self.look_keys),
+                    info=t.info, values=dict(values), settings=s, out_path=path, start_frame=a, end_frame=b,
+                    name=f"{Path(path).name}  •  {look_name}", sequence=t.sequence,
+                    chapters=self._chapters_of(t.chapters), look_keys=dict(keys),
                     **subs_mod.delivery_fields(self.subtitle_choice() if t.cues and t.subtitles is not None else "nao",
                                                t.subtitles, t.cues, self.container.currentData()))
             made[tid] = job
@@ -984,6 +1005,8 @@ class ExportDialog(QDialog):
             s.threads, s.priority, s.hwaccel, s.gpu, s.buffer = (p["threads"], p["priority"], p["hwaccel"],
                                                                  p["gpu"], p["buffer"])
         s.no_effects = self.no_effects
+        if self._sound_on():
+            self.sound.apply(s)  # 1.8: só o som / stems e o formato do som
         return s
 
     def _quality_changed(self) -> None:
@@ -991,7 +1014,7 @@ class ExportDialog(QDialog):
         for k, label, s in self.presets:
             if k == key:
                 self._apply(s)
-                self.qdesc.setText(_describe(k))
+                self._quality_text(k)
                 return
         if not self.platform_id():  # "Nenhuma" no ajuste livre: tira o que a plataforma tinha posto
             s, neutral = self.settings(), export.ExportSettings()
@@ -1037,7 +1060,7 @@ class ExportDialog(QDialog):
         self._summary()
 
     def _fix_ext(self, *_args):
-        ext = self.container.currentData() or "mp4"
+        ext = self.sound.ext() if self._sound_on() else self.container.currentData() or "mp4"
         cur = self.path.text().strip()
         if not cur:
             stem = self._stem()
@@ -1048,13 +1071,16 @@ class ExportDialog(QDialog):
         self.path.setText(cur)
 
     def _browse(self) -> None:
-        ext = self.container.currentData() or "mp4"
+        ext = self.sound.ext() if self._sound_on() else self.container.currentData() or "mp4"
         path, _filter = QFileDialog.getSaveFileName(self, _("Salvar como"), self.path.text(),
                                                     _("Arquivo (*.{ext})").format(ext=ext))
         if path:
             self.path.setText(str(Path(path).with_suffix("." + ext)))
 
     def _summary(self, *_args):
+        if self._sound_on():
+            self.sound.summary()
+            return
         s = self.settings()
         if not s.codec:
             return
@@ -1065,6 +1091,7 @@ class ExportDialog(QDialog):
                 w=w, h=h, bits=16 if export.high_depth(s) else 8))
             return
         self._sync_rows(s)
+        self._film_note(s)
         self._platform_info()
         dur = self._duration()
         frames = round(dur * fps)
@@ -1084,6 +1111,27 @@ class ExportDialog(QDialog):
         self._schedule_estimate()
         self._warnings(s, dur)
         self._schedule_preview()
+
+    def _film_note(self, s: export.ExportSettings) -> None:
+        """1.8: com "Copiar original" e o som de película do look ligado, diz ao lado do áudio em que formato o som sai
+        (`export.film_sound_note`). Só informa: a exportação é a mesma."""
+        text = export.film_sound_note(s, self.info, self.values, self.sequence)
+        self.audio_note.setText(text)
+        self.form.setRowVisible(self.audio_note, bool(text))
+        if self.quality.currentData() == "original":   # a linha do áudio fica escondida: o aviso vai na descrição
+            self._quality_text("original", text)
+
+    def _quality_text(self, key: str, film_note: str | None = None) -> None:
+        """A descrição da qualidade escolhida. "Original" diz que o áudio é copiado; com o som de película ligado ele é
+        recodificado, e a descrição diz isso no lugar (`film_sound_note`)."""
+        if key == "original":
+            if film_note is None:
+                film_note = export.film_sound_note(self.settings(), self.info, self.values, self.sequence)
+            if film_note:
+                self.qdesc.setText(_("Mesmo codec, resolução, quadros por segundo e profundidade de cor do arquivo "
+                                     "original, com qualidade alta para não perder detalhe.") + " " + film_note)
+                return
+        self.qdesc.setText(_describe(key))
 
     def _warnings(self, s: export.ExportSettings, dur: float) -> None:
         """Avisos: limites da plataforma (duração, tamanho estimado), duas passadas e som recodificado."""
@@ -1138,6 +1186,8 @@ class ExportDialog(QDialog):
         self._est_timer.start()
 
     def _start_estimate(self) -> None:
+        if self._sound_on():
+            return
         s = self.settings()
         if not s.codec:
             return
@@ -1197,6 +1247,8 @@ class ExportDialog(QDialog):
         return self.info, dict(self.values), s, frame, self.sequence, scale, dict(self.look_keys), self.burn()
 
     def _start_preview(self) -> None:
+        if self._sound_on():
+            return
         args = self._preview_args()
         s = args[2]
         key = (export.output_size(self.info, s), s.frame, s.fit, s.net_grain, s.fps, s.dither, args[3],
@@ -1255,7 +1307,10 @@ class ExportDialog(QDialog):
         if clash:
             QMessageBox.warning(self, _("Exportar"), export.partial_clash_message(clash))
             return
-        if export.output_exists(path, s):
+        if self._sound_on():
+            if not self.sound.confirm_overwrite(path, s):
+                return
+        elif export.output_exists(path, s):
             if export.is_sequence(s):
                 text = _("A pasta já tem uma sequência de quadros com este nome:\n{caminho}\n\nSubstituir? Os "
                          "quadros antigos só são trocados quando a exportação terminar.")

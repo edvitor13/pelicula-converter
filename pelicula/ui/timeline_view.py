@@ -36,6 +36,8 @@ from . import tempo_ui
 from .keyframes_ui import merged_marks, paint_diamond, param_names
 from .widgets import FilmSlider, timecode
 from . import transitions_ui  # 1.5: transições de película (módulo "transicoes")
+from . import somlimpo_ui  # 1.8: "Sincronizar pelo som" no menu do clipe
+from . import musica_ui  # 1.8: batidas, ímã nas batidas, encaixar a música e abaixá-la sob a voz
 
 PEAKS_PER_SECOND = 100       # o provedor de ondas devolve picos (0..1) nesta taxa
 HEADER_W = 156               # coluna dos nomes e botões das faixas
@@ -281,6 +283,7 @@ class TimelineCanvas(QWidget):
             if c.id not in exclude:
                 pts.add(c.start)
                 pts.add(c.end)
+        pts.update(musica_ui.snap_points(self, exclude))  # 1.8: ímã nas batidas das músicas
         return sorted(pts)
 
     def snap_frame(self, frame: float, exclude: set[str], enabled: bool | None = None) -> tuple[int, int | None]:
@@ -402,6 +405,7 @@ class TimelineCanvas(QWidget):
         p.setClipRect(r.adjusted(1, 1, -1, -1))
         if c.kind == AUDIO:
             self._paint_wave(p, c, r)
+            musica_ui.paint_beats(self, p, c, r)  # 1.8: marcas das batidas no pé do clipe
         else:
             self._paint_transitions(p, c, r)
         # Rótulo: nome, velocidade, ligação.
@@ -614,7 +618,11 @@ class TimelineCanvas(QWidget):
                 continue
             o_start, o_dur, o_track = d["orig"][cid]
             if d["mode"] == "move":
-                track = d["track"] if cid == d["clip"] else o_track
+                if d.get("multi"):
+                    # A seleção anda junta: as faixas do tipo arrastado mudam todas pela mesma conta.
+                    track = o_track + d["track"] - d["orig"][d["clip"]][2] if c.kind == d["kind"] else o_track
+                else:
+                    track = d["track"] if cid == d["clip"] else o_track
                 out[cid] = (max(0, o_start + d["delta"]), o_dur, c.kind, track)
             elif d["mode"] == "left":
                 ns = min(o_start + d["delta"], o_start + o_dur - 1)
@@ -896,17 +904,26 @@ class TimelineCanvas(QWidget):
         if self.seq.locked(clip):
             return
         group = [g.id for g in self.seq.group(clip) if not self.seq.locked(g)]
+        multi = False
+        if zone == "body" and clip.id in self.model.selection:
+            # Arrastar pelo corpo leva a seleção inteira (#63); aparar as bordas continua só no clipe clicado.
+            many = [c.id for c in self.seq.expand(self.model.selection) if not self.seq.locked(c)]
+            if set(many) != set(group):
+                group, multi = many, True
         self._drag = {"mode": "move" if zone == "body" else zone, "clip": clip.id, "group": group,
                       "press_x": pos.x(), "press_frame": self.x_to_frame(pos.x()), "delta": 0,
-                      "track": clip.track, "active": False,
+                      "track": clip.track, "active": False, "multi": multi, "kind": clip.kind,
                       "orig": {g: (self.seq.find(g).start, self.seq.find(g).dur, self.seq.find(g).track)
                                for g in group}}
+        if multi:
+            # Menor faixa do tipo do clipe arrastado: o bloco não desce abaixo da primeira faixa.
+            self._drag["low"] = min(self.seq.find(g).track for g in group if self.seq.find(g).kind == clip.kind)
 
     def _set_volume_from(self, x: float) -> None:
         d = self._drag
         r = QRectF(10, 0, HEADER_W - 26, 1)
         t = (x - r.left()) / r.width()
-        self.model.set_track(d["kind"], d["idx"], volume=self.t_to_volume(t))
+        self.model.set_track(d["kind"], d["idx"], record=False, volume=self.t_to_volume(t))  # um passo ao soltar
 
     def mouseMoveEvent(self, e):
         pos = e.position()
@@ -978,6 +995,8 @@ class TimelineCanvas(QWidget):
                 d["track"] = len(rows)  # acima da última faixa de vídeo: cria uma nova
             elif rows and clip.kind == AUDIO and pos.y() >= rows[-1][2] + rows[-1][3]:
                 d["track"] = len(rows)  # abaixo da última faixa de áudio: cria uma nova
+            if d.get("multi"):
+                d["track"] = max(d["track"], _o_track - d["low"])
         else:
             edge = o_start if mode == "left" else o_start + o_dur
             f, s = self.snap_frame(edge + raw, exclude, snap_on)
@@ -1020,7 +1039,11 @@ class TimelineCanvas(QWidget):
         o_start, o_dur, o_track = d["orig"][cid]
         mods = e.modifiers()
         solo = bool(mods & Qt.KeyboardModifier.AltModifier) or bool(d.get("solo"))
-        if mode == "move":
+        if mode == "move" and d.get("multi"):
+            if d["delta"] or d["track"] != o_track:
+                self.model.move_clips(d["group"], d["delta"], d["track"] - o_track, d["kind"],
+                                      insert=self.insert_for(mods))
+        elif mode == "move":
             if d["delta"] or d["track"] != o_track:
                 self.model.move_clip(cid, o_start + d["delta"], d["track"] if d["track"] != o_track else None,
                                      insert=self.insert_for(mods))
@@ -1296,6 +1319,8 @@ class TimelineCanvas(QWidget):
             menu.addAction(_("Restaurar ajustes"), lambda: m.reset_values(clip.id))
             if clip.kind == AUDIO:
                 self.audio_transition_action(menu, clip, pos.x())
+            somlimpo_ui.add_clip_actions(menu, self, clip)  # 1.8: "Sincronizar pelo som" (2+ grupos com som)
+            musica_ui.add_clip_actions(menu, self, clip)  # 1.8: batidas, encaixar a música, abaixar sob a voz
             transitions_ui.add_menu(self, menu, clip, pos.x())  # 1.5: "Transição ▸" (módulo "transicoes")
             self.split_edit_actions(menu, clip, pos.x())
             menu.addSeparator()
@@ -1611,7 +1636,9 @@ class TimelineEditor(QWidget):
                                                      "em vez de cobrir. Ctrl inverte ao arrastar."), checkable=True)
         self.btn_insert.setChecked(c.insert_mode)
         self.btn_insert.toggled.connect(c.set_insert_mode)
-        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_insert):
+        self.btn_beat_snap = musica_ui.snap_button(self)  # 1.8: ímã nas batidas
+        for b in (self.btn_split, self.btn_delete, self.btn_ripple, self.btn_link, self.btn_snap, self.btn_beat_snap,
+                  self.btn_insert):
             hl.addWidget(b)
         hl.add_spacing(8)
         self.btn_marker = self._btn("marker", _("Adicionar marcador no cursor (M)"), _("Marcador"))
@@ -1641,6 +1668,17 @@ class TimelineEditor(QWidget):
                                       _("Silêncios"))
         self.btn_silences.setVisible(False)
         hl.addWidget(self.btn_silences)
+        # 1.8: o mixer (`ui/mixer_ui.py` liga e troca o inspetor por ele) e o som ao arrastar o cursor (`ui/scrub_ui.py`)
+        self.btn_mixer = self._btn("mixer", _("Mixer: volume, balanço, mudo e solo de cada faixa de som, com "
+                                              "medidores (Ctrl+Alt+M)"), _("Mixer"), checkable=True)
+        hl.addWidget(self.btn_mixer)
+        self.btn_scrub = self._btn("scrub", _("Som ao arrastar o cursor: um pedacinho do som no quadro, ao arrastar o "
+                                              "cursor na régua ou andar quadro a quadro"), checkable=True)
+        hl.addWidget(self.btn_scrub)
+        # 1.8: gravar narração (`ui/narracao_ui.py` liga e abre o painel)
+        self.btn_narrar = self._btn("mic", _("Gravar narração: grava o microfone no cursor e põe numa faixa de som "
+                                             "(Ctrl+Shift+R)"))
+        hl.addWidget(self.btn_narrar)
         hl.add_stretch()
         zo = self.btn_zoom_out = self._btn("zoom_out", _("Afastar (−). Ctrl + roda do mouse também. Botão direito: opções do zoom."))
         zo.clicked.connect(lambda: c.zoom_to(c.ppf * 0.8))
@@ -1658,7 +1696,7 @@ class TimelineEditor(QWidget):
             b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             b.customContextMenuRequested.connect(lambda pos, w=b: self.zoom_menu().exec(w.mapToGlobal(pos)))
         # Linha do tempo estreita: botões só com ícone, some o slider de zoom e, se precisar, quebra a linha.
-        bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit],
+        bar.set_adaptive(compact=[self.btn_split, self.btn_marker, self.btn_add_v, self.btn_add_a, fit, self.btn_mixer],
                          optional=[self.zoom])
         return bar
 

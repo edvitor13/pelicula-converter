@@ -107,7 +107,7 @@ def test_axis_scale_json_is_sparse_and_writes_format_5():
     seq.set_values(c.id, {**c.values, "escala_x": 1.5})
     js = seq.to_json()
     assert "escala_x" in str(js["clipes"]) and "escala_y" not in str(js["clipes"])
-    assert "ajustes_clipe_1_7" in seq.features() and js["formato"] == tl.FORMAT
+    assert "ajustes_clipe_1_7" in seq.features() and js["formato"] == tl.FORMAT_17
     back = tl.Sequence.from_json(js)
     assert back.clips[0].values["escala_x"] == 1.5 and back.clips[0].values["escala_y"] == 1.0
     assert "escala_x" not in params.known_1_6()["video"]
@@ -283,11 +283,11 @@ def test_window_json_round_trip_format_5_and_trivial():
     s = tl.Source("v.mp4", W, H, 24.0, "24/1", 48, 2.0, has_audio=False)
     seq = tl.Sequence.for_source(s)
     base = seq.to_json()
-    assert "janela" not in base and seq.features() == set() and base["formato"] != tl.FORMAT
+    assert "janela" not in base and seq.features() == set() and base["formato"] != tl.FORMAT_17
     assert seq.is_trivial() == "v.mp4"
     seq.window = 2.39
     js = seq.to_json()
-    assert js["janela"] == 2.39 and seq.features() == {"janela_util"} and js["formato"] == tl.FORMAT
+    assert js["janela"] == 2.39 and seq.features() == {"janela_util"} and js["formato"] == tl.FORMAT_17
     assert seq.is_trivial() is None and seq.direct_file() is None
     assert tl.Sequence.from_json(js).window == 2.39 and seq.copy().to_json() == js
     p = project.Project(media_path="v.mp4", sequence=js)

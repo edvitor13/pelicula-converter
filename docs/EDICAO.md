@@ -41,11 +41,13 @@ O modo Edição foi feito para o básico ser fácil — sem nós, sem páginas, 
 
 ## 2. Montar
 
-1. Clique em **Importar…** (Ctrl+I): os arquivos entram na lista de mídia **e** vão para o fim da
-   montagem (músicas começam no início, na primeira faixa de áudio livre). Arrastar arquivos para a
-   lista de mídia só os guarda ali; arrastar direto para a linha do tempo põe no ponto e na faixa do mouse.
-2. Arraste um item da lista para a linha do tempo, na faixa e no ponto que quiser — ou dê **dois cliques**
-   nele (vai para o fim da montagem).
+1. Clique em **Importar…** (Ctrl+I) ou solte arquivos na janela: eles entram **só na lista de mídia**, já
+   escolhidos (desde a 1.8; antes iam também para o fim da montagem). Arrastar direto para a linha do tempo
+   põe no ponto e na faixa do mouse.
+2. Arraste um item da lista para a linha do tempo, na faixa e no ponto que quiser; use **Inserir no cursor**
+   (`,`) ou **Sobrescrever no cursor** (`.`) com os escolhidos; ou dê **dois cliques** nele (vai para o fim da
+   montagem; músicas começam no início, na primeira faixa de áudio livre). O primeiro vídeo que entra numa
+   montagem vazia define o tamanho e os quadros por segundo dela.
 3. Vídeos com som entram como **dois clipes ligados** (imagem em V1 e som em A1): mover, cortar ou apagar
    um mexe no outro junto. Para separar, use **Desligar** na barra da linha do tempo.
 
@@ -123,7 +125,7 @@ exportado não tem transparência (sai sempre com a cor por baixo), e sequência
 | Ação | Como |
 |---|---|
 | Selecionar | Clique no clipe (Ctrl+clique soma ou tira; Shift+clique soma) |
-| Mover | Arraste o meio do clipe (para os lados e para outra faixa do mesmo tipo) |
+| Mover | Arraste o meio do clipe (para os lados e para outra faixa do mesmo tipo). Com vários escolhidos, a seleção inteira anda junta, num passo só do desfazer; os de faixa travada ficam |
 | Aparar o começo / o fim | Arraste a borda esquerda / direita do clipe |
 | Cortar no cursor | **Dividir** (S): corta os selecionados — ou tudo sob o cursor, se nada estiver selecionado |
 | Cortar onde clicar | Ferramenta **Lâmina** (B) e clique no clipe; volte com **Selecionar** (V) |
@@ -143,7 +145,10 @@ Cada faixa tem botões no cabeçalho:
 - **alto-falante** (áudio): silencia a faixa;
 - **fones** (áudio): *solo* — só as faixas em solo tocam;
 - **cadeado**: trava a faixa (nada muda nela);
-- **barrinha de volume** (áudio): arraste para mudar o volume da faixa; dois cliques voltam a 0 dB.
+- **barrinha de volume** (áudio): arraste para mudar o volume da faixa; dois cliques voltam a 0 dB. Cada
+  arraste é um passo só do Ctrl+Z.
+
+O **balanço** da faixa (esquerda/direita) fica no **Mixer** (abaixo).
 
 **+ Vídeo** e **+ Áudio** criam faixas novas. Arrastar um clipe de vídeo para cima da última faixa de
 vídeo também cria uma faixa nova. Para apagar uma faixa: botão direito nela → **Remover esta faixa**.
@@ -507,6 +512,122 @@ ou uma transição, nem num corte que não foi mexido (o som continua igual). Li
 **Sequência…**; projetos novos começam ligados e projetos das versões anteriores continuam como eram
 (desligados), para soar exatamente igual.
 
+### Limpar o som, cortes e predefinições (1.8)
+
+No cartão **Equalizar e limpar**:
+
+| Ajuste | O que faz |
+|---|---|
+| **Predefinições** | Botão no alto do cartão: *Voz mais clara*, *Voz grave e próxima*, *Telefone*, *Rádio antigo*, *Menos vento e estrondo*, *Música mais cheia*, *Podcast* e *Sem ajustes* (volta ao neutro). Mexem só em graves, médios, agudos, realçar voz, nos dois cortes e em nivelar a voz; o resto do clipe fica como está. Ctrl+Z desfaz de uma vez |
+| **Cortar graves abaixo de** | Tira o som abaixo da frequência (vento, estrondo, ronco de motor); 0 = não corta |
+| **Cortar agudos acima de** | Tira o som acima da frequência (chiado, sibilância); 0 = não corta |
+| **Nivelar a voz** | Sobe as falas baixas e segura as altas, sílaba a sílaba, para a voz ficar num volume parecido (as pausas não sobem). Com 100%, uma fala 20 dB mais baixa chega perto da alta |
+
+No cartão **Limpar o som** (logo depois):
+
+| Ajuste | O que faz |
+|---|---|
+| **Aprender o ruído** | Ouve um trecho **só com o ruído** (ar-condicionado, chiado, vento constante): a entrada e a saída marcadas (I / O) se as duas estão dentro do clipe; senão 1 s a partir do cursor. O trecho precisa ter pelo menos 0,25 s e algum som. O clipe guarda só o trecho (não o som), e a força vai para 80% se estava em 0 |
+| **Redução pelo ruído aprendido** | Quanto tirar do ruído aprendido, em todo o clipe: 100% tira até 30 dB do que é só ruído e deixa a voz e a música no volume delas. A limpeza vem antes de todos os outros ajustes do clipe |
+| **Zumbido da rede elétrica** | Tira o zumbido grave de 60 Hz (Brasil e Américas) ou 50 Hz (Europa) e as harmônicas (*Harmônicas do zumbido*, nos avançados: 6 = até 360 Hz). **Detectar** ouve o clipe e escolhe sozinho; se nenhum dos dois se destaca, diz isso e não muda nada |
+
+A primeira prévia depois de aprender o ruído demora um pouco mais (o som limpo é preparado e guardado); as
+próximas usam o que ficou guardado.
+
+### Sincronizar pelo som (1.8)
+
+Para juntar o som de um gravador com o da câmera (ou duas câmeras): escolha os clipes (dois ou mais com som),
+botão direito → **Sincronizar pelo som**. A referência é o som ligado ao vídeo da faixa de vídeo mais baixa (V1
+antes de V2); sem vídeo na escolha, o primeiro escolhido. Os outros (com os ligados) andam até o som bater,
+procurando até 10 s para cada lado de onde estão, tudo num passo do Ctrl+Z. O movimento é em quadros inteiros;
+a barra de status diz quanto sobrou (no máximo meio quadro). Um clipe cujo som não bate com o da referência (ou
+com velocidade, rampa, reverso ou quadro congelado) fica onde estava, e a mensagem diz qual. O progresso e o
+**Cancelar** aparecem na barra de status.
+
+### Música: batidas, encaixe e abaixar sob a voz (1.8)
+
+**Batidas.** Botão direito num clipe de som → **Detectar batidas**: o app acha o andamento (BPM), as batidas e o começo de
+cada compasso (uma estimativa, com 4 batidas por compasso). Uma música (arquivo só de som) com mais de 20 s que entra na
+montagem é analisada sozinha, em segundo plano. O resultado fica guardado: reabrir o projeto mostra as batidas na hora.
+As batidas aparecem como risquinhos no pé do clipe (o começo do compasso mais alto) e acompanham o aparar e a velocidade
+do clipe. Música com o andamento irregular mostra as batidas como ajuda visual, mas não serve para o encaixe.
+
+**Corrigir as batidas à mão.** O detector às vezes acha a metade ou o dobro do andamento (87 em vez de 174 BPM) e sempre
+supõe 4 batidas por compasso. No mesmo menu, **Andamento ×2** põe uma batida no meio de cada par, **Andamento ÷2** deixa uma
+batida sim, outra não, e **Compasso de 3** / **Compasso de 4** refazem os começos de compasso (pelo acento mais forte).
+**Voltar ao detectado** desfaz tudo. A correção vale para a música (o arquivo) em toda a sequência, fica salva no projeto, e
+as marcas, o ímã e o **Encaixar a música** passam a usá-la. Cada mudança volta com um Ctrl+Z.
+
+**Ímã nas batidas.** O botão ao lado do ímã, na barra da linha do tempo (ligado por padrão), faz os clipes, o cursor e as
+pontas grudarem também nas batidas das músicas, com o ímã ligado.
+
+**Encaixar a música na duração do vídeo.** Botão direito no clipe da música → **Encaixar a música na duração do vídeo**:
+a música passa a acabar exatamente junto com a imagem (ou no Out, se houver um trecho In/Out marcado; aí ela começa no
+In). Para encurtar, o app tira compassos inteiros do meio; para alongar, repete compassos do meio — a introdução e o
+final da música ficam. Cada emenda leva uma transição de som curta (uma batida), e tudo volta com um Ctrl+Z. Se as
+batidas não são confiáveis ou o vídeo é curto demais para a introdução e o final juntos, o app explica e oferece só
+acabar a música no ponto certo com **Diminuir no fim**. A faixa precisa estar livre no trecho, e o clipe não pode estar
+ligado ao vídeo (som da câmera).
+
+**Abaixar a música sob a voz.** Botão direito no clipe da música (ou em um dos clipes de música selecionados) →
+**Abaixar a música sob a voz…**: escolha quanto abaixar (−12 dB), em quanto tempo a música desce antes da fala (0,3 s) e
+volta depois dela (0,6 s), e as faixas que têm voz. O app ouve essas faixas e escreve chaves de volume comuns na música
+— dá para mexer nelas depois, como em qualquer chave. Falas a menos de 1 s uma da outra viram um trecho só (a música não
+sobe e desce no meio da conversa). Se a música já tem chaves de volume onde ela vai abaixar, o app pergunta se pode
+substituí-las. Os três números ficam lembrados para a próxima vez; tudo volta com um Ctrl+Z.
+
+### Efeitos sonoros e sons livres (1.8, Beta)
+
+Ligue **Efeitos sonoros** em Configurações › Recursos (começa desligado). Ele traz três coisas:
+
+**Efeitos feitos pelo app.** Em **Mídia › Novo › Efeito sonoro**, escolha **Whoosh**, **Swish**, **Riser**,
+**Impacto**, **Clique**, **Máquina de escrever** ou **Obturador**. O efeito entra no cursor, na faixa de som mais
+baixa que está livre ali (ou numa nova). Os sons são calculados pelo app, sem gravações, e saem sempre iguais:
+o mesmo efeito no mesmo lugar soa igual na prévia e na exportação.
+
+- O efeito ocupa o clipe, como um título: esticar o clipe de um whoosh deixa o whoosh mais longo, o riser
+  sempre termina no pico no último quadro e a cauda do impacto cabe no clipe. Clique e obturador têm o tamanho
+  deles e silêncio depois. A máquina de escrever bate durante o clipe inteiro.
+- No painel do clipe (página **Som**), o cartão do efeito tem **Intensidade** (100% chega a −1 dBFS, sem
+  saturar), **Brilho** (mais grave ou mais agudo), **Largura estéreo** (0% é mono) e **Variação** (outro número
+  dá outra versão do mesmo efeito). O riser tem **Tom subindo**; o impacto, **Grave**; a máquina de escrever,
+  **Teclas por segundo**, **Sino e retorno do carro** e **Som das teclas** (máquina ou clique); o obturador,
+  **Abrir → fechar** (ms). Cada mudança é um passo do Ctrl+Z.
+- Volume, chaves de volume, equalização, fades, balanço, mudo/solo, o mixer, os stems e o som de película valem
+  para o efeito como para qualquer clipe de som.
+
+**Pôr efeitos sonoros sozinho.** O botão **Efeitos** na barra da linha do tempo (ou **Ctrl+Alt+E**) abre uma
+janela com o que pôr:
+
+- **Whoosh nas transições**: dura a transição e termina no corte (no fim de uma transição de entrada, ou no fim
+  do clipe numa de saída);
+- **Impacto nos cortes secos** da V1 entre planos diferentes (começa desligado: use com moderação);
+- **Swish na entrada dos títulos**: o pico cai no primeiro quadro do título;
+- **Teclas nos títulos "Máquina de escrever"**: uma tecla por letra, no quadro exato em que a letra aparece, com
+  o sino e o retorno do carro na troca de linha (ou um clique por letra);
+- **Obturador** nos quadros congelados e nas fotos que entram depois de um corte;
+- **Riser antes dos marcadores** com **!** no nome (por exemplo *Gol!*) ou, se você escolher, de uma cor: o riser
+  termina no quadro do marcador.
+
+A janela diz quantos efeitos vai pôr. Eles entram numa faixa de som chamada **Efeitos** (criada se precisar, nunca
+por cima de um clipe; havendo sobreposição, numa segunda faixa "Efeitos"), tudo num passo só do Ctrl+Z. Rodar de
+novo não repete o que já está lá; apagando um efeito, ele volta na próxima vez.
+
+**Sons livres (CC0).** Em **Mídia › Novo › Buscar sons (CC0)…**, digite o que procura (em inglês acha mais:
+*whoosh*, *rain*, *door*) e clique em **Buscar**. Só aparecem sons **CC0** (domínio público). **Ouvir** toca uma
+prévia; **Adicionar à Mídia** baixa o som para a pasta `<nome do projeto>_sons`, ao lado do projeto (projeto ainda
+não salvo: a pasta `sons_cc0` do app, e a janela avisa) e o põe na Mídia.
+
+- A busca usa o **Openverse**, sem cadastro. Com a **chave da API do Freesound** (Configurações › **Sons livres**;
+  a página explica como pedir uma, de graça), busca também no Freesound. A chave fica só neste computador, nunca no
+  projeto. Do Freesound vem a prévia de alta qualidade (MP3), porque o arquivo original pede login.
+- Nada vai para a internet antes de você clicar em **Buscar**, **Ouvir** ou **Adicionar à Mídia**.
+- O **crédito** (título, autor, licença e endereço) fica guardado no projeto. Toda exportação que usar o som (vídeo
+  ou só o som) grava ao lado um `<nome do arquivo>.creditos.txt`, com uma linha por som, e a fila diz onde. CC0 não
+  obriga a dar crédito, mas é uma gentileza com quem gravou.
+
+Projetos com efeitos sonoros ou sons com crédito só abrem na 1.8 ou mais nova.
+
 ## 4. Sequência
 
 **Sequência…** abre o tamanho e o ritmo do vídeo montado:
@@ -557,6 +678,32 @@ faixas, os seus marcadores e as suas legendas; a **Mídia** e as **pastas** são
 - **No terminal**, `pelicula-cli info projeto.plc` lista as sequências (a aberta ao salvar vem marcada) e `exportar` e
   `quadro` aceitam `--sequencia NOME` (o nome ou o id; sem ela vale a que estava aberta ao salvar). Um nome que não existe
   é um erro que lista os válidos.
+
+### Look de película de cada sequência (1.8)
+
+Cada sequência pode ter **o look de película dela**, para ter variações no mesmo projeto: um corte com outra película,
+outra cópia ou outro ajuste de grão, sem duplicar o projeto.
+
+- **O padrão é o look do projeto.** Toda sequência começa em **Igual ao do projeto** e sai exatamente como antes; mexer no
+  look com ela aberta muda o look do projeto, que vale para todas as que o seguem.
+- **Look próprio**: no painel de ajustes (modo Película), a linha **Look de "nome"** escolhe entre *Igual ao do projeto* e
+  *Próprio desta sequência*; o mesmo fica no **botão direito da aba** (*Look de película*) e no da sequência na **Mídia**. O
+  look próprio começa como cópia do look do projeto (a imagem não muda) e, daí em diante, presets, ajustes e chaves de
+  animação mexem só nele. A aba ganha um **ponto** na cor de destaque, e a dica dela diz *Look de película próprio*.
+- **Trocar de aba troca o look em edição**: o painel, o preset e o **Ctrl+Z** do look passam a ser os da sequência aberta
+  (cada look tem o seu desfazer). O Ctrl+Z da linha do tempo não mexe no look.
+- **Voltar a *Igual ao do projeto*** descarta o look próprio; se ele estava diferente do do projeto, o app pergunta antes.
+- **Dentro de outra sequência**, uma sequência com look próprio **entra sem look** e recebe o look da sequência de fora, uma
+  vez só: nada de grão, halação ou trepidação em dobro. O look próprio vale quando ela é **aberta** ou **exportada**. O painel
+  do clipe e a barra de status lembram isso.
+- **Exportar**: cada sequência sai com o look dela, também em *Pôr várias sequências na fila*; a linha *Look:* no topo da
+  janela acompanha a sequência escolhida. *Exportar a cor como LUT* e *Exportar preset* usam o look em edição (o da aba
+  aberta). O plugin do DaVinci Resolve não muda: ele instala os presets, não o look de um projeto.
+- **No terminal**, `exportar` e `quadro` com `--sequencia NOME` usam o look dela (o próprio ou o do projeto); `lut --projeto
+  projeto.plc --sequencia NOME` grava o LUT dela; `info` mostra *look próprio (preset)* nas que têm. `projeto --preset` e
+  `--set` mudam o look do projeto.
+- **Projeto**: com alguma sequência de look próprio, o projeto é gravado no formato 6, que a 1.7 recusa com aviso (ela
+  abriria tudo com o look do projeto, sem dizer). Sem nenhuma, o arquivo sai igual ao da 1.7.
 
 ### Sequências dentro de sequências (1.7)
 
@@ -687,6 +834,55 @@ medidor). No modo Película, o som do arquivo é preparado uma vez em segundo pl
 de o medidor andar. O medidor só mede a prévia: nada dele vai para a exportação. Para escondê-lo,
 desligue **Medidor de som** em Configurações › Recursos.
 
+### Mixer (1.8)
+
+O botão **Mixer** na barra da linha do tempo (ou **Ctrl+Alt+M**) põe o mixer no lugar do painel do clipe,
+à direita; clique de novo para voltar. Cada faixa de som tem uma tira:
+
+- **balanço**: arraste para a esquerda ou para a direita (o centro gruda; dois cliques voltam ao centro).
+  Funciona como o balanço do clipe: o lado para onde você puxa fica igual e o outro vai diminuindo;
+- **fader**: o volume da faixa em dB, de −60 a +12 (o mesmo da barrinha do cabeçalho; dois cliques voltam
+  a 0 dB; a roda do mouse anda 0,5 dB);
+- **medidor**: o pico da faixa enquanto a prévia toca (a luz no topo acende se chegou a 0 dBFS);
+- **mudo** e **solo**, os mesmos botões do cabeçalho da faixa.
+
+A última tira, **Mixagem**, mostra o pico de tudo junto e o loudness (M, S, I) do medidor de som. Cada
+arraste no fader ou no balanço é um passo só do Ctrl+Z, e o cabeçalho e o mixer mostram sempre o mesmo.
+Faixa travada não muda.
+
+O som ficou mais rápido de preparar: cada clipe é processado uma vez e guardado; mover clipes, mudar o
+trecho exportado ou mexer no volume e no balanço das faixas só soma de novo o que já estava pronto.
+
+### Som ao arrastar o cursor (1.8)
+
+Arrastando o cursor na régua da linha do tempo, ou andando quadro a quadro (← → e K + J/L), o app toca um
+pedacinho do som naquele quadro (um quadro, no mínimo 40 ms), como nos editores profissionais. Ele segue o
+mudo e o volume da prévia. Para desligar, use o botão **Som ao arrastar o cursor** (o cursor com ondas) na
+barra da linha do tempo; a escolha fica guardada. Enquanto o som da montagem ainda está sendo preparado,
+nada toca.
+
+### Gravar narração (1.8)
+
+O botão do **microfone** na barra da linha do tempo (ou **Ctrl+Shift+R**) abre o painel **Gravar narração**:
+
+- **Microfone**: o padrão do sistema já vem escolhido; a sua escolha fica guardada. A barra de **Nível** anda enquanto você fala
+  (vermelho perto do estouro); procure ficar entre o amarelo e o verde.
+- **Contagem antes de gravar** (ligada): 3, 2, 1 com bipes, para respirar e pôr os fones.
+- **Tocar a montagem enquanto grava** (ligada): a prévia toca a partir de onde a gravação começa. **Use fones de ouvido**: o som
+  dos alto-falantes entra no microfone.
+- **Compensar o atraso do microfone** (0 ms): o som do microfone chega um pouco depois de acontecer, e a prévia também demora
+  a começar. Para medir, ponha o cursor num bipe (**Novo ▸ Ponta com contagem** tem um), grave uma palma junto com ele e veja na
+  forma de onda quantos milissegundos a palma ficou depois; digite esse valor. O começo da gravação é cortado por ele.
+- **Gravar / Parar**: a gravação começa no cursor, ou na **entrada** (I) se ela estiver marcada, e para sozinha na **saída**
+  (O). Ao parar, o som entra na **Mídia** e na linha do tempo, numa faixa de áudio **livre** ali (uma faixa **Narração** nova se
+  não houver), já selecionado; **Ctrl+Z** desfaz o clipe e a faixa de uma vez. A gravação é um áudio comum: volume, fades,
+  equalização, redução de ruído e as demais ferramentas do clipe valem para ela.
+
+Os arquivos ficam em `nome-do-projeto_narracao/narracao_001.wav`, ao lado do projeto salvo. Sem projeto salvo, ficam na pasta do
+app (`narracao`), e a barra de status avisa; salvar o projeto depois não move nada. Um microfone mono sai centrado nos dois lados.
+Sem microfone, com o acesso negado pelo sistema ou se o microfone for desconectado durante a gravação, o painel explica e nada é
+inserido.
+
 ## 6. Depois da edição
 
 - Vá para o modo **Película** (Ctrl+1) para escolher o look; a prévia já mostra a montagem.
@@ -707,6 +903,13 @@ desligue **Medidor de som** em Configurações › Recursos.
   edição mudar de lugar, o app pergunta onde ele está ao abrir o projeto.
 - Com marcadores de capítulo, a exportação em MP4, MOV ou MKV grava os capítulos no arquivo
   (**Incluir capítulos**); para o YouTube, use **Copiar capítulos para o YouTube…**.
+- **Só o som** (1.8): em **O que exportar**, na janela de exportação, escolha **Só o som** para gravar só a
+  mixagem (WAV 24 bits, FLAC, AAC 320 kb/s ou MP3 320 kb/s), do vídeo inteiro ou do trecho, com o volume
+  alvo se você quiser. **Só o som, uma faixa por arquivo (stems)** grava um arquivo para cada faixa de som
+  (`nome_A1_Diálogo.wav`, `nome_A2_Música.wav`…), todos do mesmo tamanho e começando no mesmo ponto, para
+  levar a outro programa de som; somados, dão a mixagem. Nos stems não há volume alvo (cada faixa sai no
+  nível que tem na mixagem). No modo Película, com um arquivo sem montagem, **Só o som** grava o som do
+  próprio arquivo. No terminal: `pelicula-cli exportar projeto.plc -o som.wav --so-som` (ou `--stems`).
 
 ## 7. Atalhos do modo Edição
 
@@ -718,6 +921,9 @@ desligue **Medidor de som** em Configurações › Recursos.
 | Ctrl+Shift+N | Nova pasta na Mídia (F2 renomeia a pasta escolhida) |
 | Ctrl+Tab / Ctrl+Shift+Tab | Próxima / anterior sequência (abas sobre a linha do tempo) |
 | Ctrl+Shift+G | Aninhar a seleção numa sequência nova (Ctrl+Z desfaz); dois cliques num clipe de sequência abrem a dela |
+| Ctrl+Alt+M | Mostrar / esconder o mixer |
+| Ctrl+Shift+R | Gravar narração (abre o painel; com ele aberto, grava / para) |
+| Ctrl+Alt+E | Pôr efeitos sonoros (módulo Efeitos sonoros) |
 | Espaço | Reproduzir / pausar |
 | J / K / L | Para trás / pausar / para a frente; de novo no mesmo sentido: 2×, 4×, 8× (também no modo Película) |
 | K + J / K + L | Segurando o K: um quadro para trás / para a frente |

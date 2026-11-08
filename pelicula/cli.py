@@ -207,13 +207,21 @@ def _bar(done: int, total: int, rate: float, eta: float, width: int = 28) -> str
             + _("{q} quadros/s").format(q=f"{rate:.1f}") + "  " + _("faltam {tempo}").format(tempo=eta_txt))
 
 
-def look_keys(proj, preset, sets) -> dict:
-    """Chaves de animação do look do projeto (`Project.look_keys`). Um --preset troca o look inteiro (sai sem
-    animação) e um --set fixa o ajuste dado (a chave dele sai)."""
-    if proj is None or preset or not proj.look_keys:
+def project_look(proj, sequence_name=None) -> tuple[dict, str, dict]:
+    """O look que vale para a sequência de `--sequencia` (sem ela, a que estava aberta ao salvar): o próprio dela
+    (1.8, `Sequence.look`) ou o do projeto (`Project.look_for`). Devolve (valores, preset, chaves de animação)."""
+    seq = pick_sequence(proj, sequence_name)[0] if proj.sequence else None
+    return proj.look_for(seq)
+
+
+def look_keys(proj, preset, sets, sequence_name=None) -> dict:
+    """Chaves de animação do look (`Project.look_keys`, ou as do look próprio da sequência de `--sequencia`). Um
+    --preset troca o look inteiro (sai sem animação) e um --set fixa o ajuste dado (a chave dele sai)."""
+    keys = project_look(proj, sequence_name)[2] if proj is not None else {}
+    if preset or not keys:
         return {}
     fixed = {item.split("=", 1)[0].strip() for item in sets or [] if "=" in item}
-    return {k: v for k, v in proj.look_keys.items() if k not in fixed}
+    return {k: v for k, v in keys.items() if k not in fixed}
 
 
 def sequence_list(seq) -> str:
@@ -287,15 +295,16 @@ def _source_and_values(path: str, preset, sets, sequence_name=None):
             proj = project.load(path)
         except project.ProjectError as exc:
             raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
-        values, pid = build_values(proj.values, preset, sets)
+        base, base_pid, _keys = project_look(proj, sequence_name)  # 1.8: o look da sequência escolhida
+        values, pid = build_values(base, preset, sets)
         seq = project_sequence(proj, sequence_name)
         if seq is not None:
             from . import sequence
             _prepare_text(seq)
-            return sequence.media_info(seq).path, values, pid or proj.preset_id, proj, seq
+            return sequence.media_info(seq).path, values, pid or base_pid, proj, seq
         if not proj.media_path or not _exists(proj.media_path):
             raise CliError(_("O vídeo do projeto não foi encontrado: {caminho}").format(caminho=proj.media_path))
-        return proj.media_path, values, pid or proj.preset_id, proj, alpha_sequence(proj.media_path)
+        return proj.media_path, values, pid or base_pid, proj, alpha_sequence(proj.media_path)
     if not _exists(path):
         raise CliError(_("Arquivo não encontrado: {caminho}").format(caminho=path))
     values, pid = build_values(None, preset, sets)
@@ -384,7 +393,7 @@ def _platform_overrides(a, s) -> None:
         s.net_grain = True
 
 
-def _export_notes(plat, s, info, duration: float) -> list[str]:
+def _export_notes(plat, s, info, duration: float, values=None, seq=None) -> list[str]:
     """Avisos da exportação (os mesmos da janela): limites da plataforma, duas passadas, som recodificado."""
     from . import export, platforms
     out = []
@@ -397,10 +406,77 @@ def _export_notes(plat, s, info, duration: float) -> list[str]:
     if export.audio_reencoded_for_volume(s, info):
         out.append(_("O som vai ser recodificado: copiar o original não deixa acertar o volume nem o "
                      "tamanho do arquivo."))
+    film = export.film_sound_note(s, info, values, seq)  # 1.8: "Copiar original" com o som de película ligado
+    if film:
+        out.append(film)
     return out
 
 
 # ------------------------------------------------------------------ comandos
+def _export_sound(a, src: str, info, seq, start: int, end: int) -> int:
+    """`exportar --so-som` / `--stems` (1.8): o som do trecho (a mixagem da montagem ou o som do arquivo) num arquivo de
+    som, ou uma faixa por arquivo. Sem GPU: não abre o contexto OpenGL."""
+    from . import export, somexport
+    if a.so_som and a.stems:
+        raise CliError(_("Use --so-som ou --stems, não os dois."))
+    if a.stems and seq is None:
+        raise CliError(_("--stems precisa de um projeto com montagem no modo Edição (uma faixa por arquivo); para o "
+                         "som de um arquivo, use --so-som."))
+    if a.plataforma or a.qualidade:
+        raise CliError(_("--so-som e --stems não usam --plataforma nem --qualidade; escolha o formato com --audio "
+                         "(pcm24, flac, aac320, mp3) ou pela extensão da saída."))
+    s = export.ExportSettings(sound_only="stems" if a.stems else "som")
+    suffix = Path(a.saida).suffix.lower().lstrip(".") if a.saida else ""
+    s.audio = a.audio or somexport.FROM_EXT.get(suffix, "pcm24")
+    if s.audio not in somexport.EXT:
+        raise CliError(_("Formato de som inválido para --so-som/--stems: {valor}. Use pcm24, flac, aac320 ou mp3.")
+                       .format(valor=s.audio))
+    if a.volume is not None or a.pico is not None:
+        _platform_overrides(a, s)
+    if a.stems and export.wants_loudness(s):
+        print(_("Aviso: o volume alvo não vale nos stems (cada faixa sai no nível que tem na mixagem)."),
+              file=sys.stderr)
+    for k, v in (("threads", a.threads), ("priority", a.prioridade)):
+        if v is not None:
+            setattr(s, k, v)
+    out = a.saida or str(Path(src).with_name(Path(src).stem + "_pelicula"))
+    out = str(Path(out).with_suffix("." + somexport.ext(s)))
+    if os.path.abspath(out) == os.path.abspath(src):
+        raise CliError(_("A saída não pode ser o próprio arquivo de entrada."))
+    dests = somexport.stem_paths(seq, out, s.audio) if a.stems else [out]
+    for d in dests:
+        if os.path.exists(d) and not a.sobrescrever:
+            raise CliError(_("O arquivo já existe: {caminho} (use -y para substituir)").format(caminho=d))
+    job = export.ExportJob(info=info, values={}, settings=s, out_path=out, start_frame=start, end_frame=end,
+                           name=Path(out).name, sequence=seq)
+    if not a.json and not a.silencioso:
+        print(_("Exportando o som de {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
+
+    def on_sigint(*_args):
+        job.cancel.set()
+
+    old = signal.signal(signal.SIGINT, on_sigint)
+    th = threading.Thread(target=lambda: export.run_job(job, None), daemon=True)
+    th.start()
+    while th.is_alive():
+        th.join(0.25)
+    signal.signal(signal.SIGINT, old)
+    made = [d for d in dests if os.path.exists(d)] if job.status == "concluido" else []
+    if a.json:
+        print(json.dumps({"status": job.status, "saida": out, "arquivos": made, "erro": job.error}))
+    if job.status == "concluido":
+        if not a.json:
+            for d in made:
+                print(_("Pronto: {caminho}").format(caminho=d))
+            if job.note:  # 1.8: créditos dos sons CC0
+                print(job.note)
+        return 0
+    if job.status == "cancelado":
+        print(_("Exportação cancelada."), file=sys.stderr)
+        return 130
+    raise CliError(_("A exportação falhou:\n{erro}").format(erro=job.error))
+
+
 def cmd_export(a) -> int:
     from . import export, media, platforms, subtitles
     from .engine import Engine
@@ -420,6 +496,8 @@ def cmd_export(a) -> int:
     start = parse_time(a.inicio, info.fps) if a.inicio else (proj.in_point or 0 if proj and a.trecho else 0)
     end = parse_time(a.fim, info.fps) if a.fim else (proj.out_point if proj and a.trecho and proj.out_point else -1)
     duration = ((info.frames - 1 if end < 0 else min(end, info.frames - 1)) - start + 1) / info.fps
+    if a.so_som or a.stems:  # 1.8: só o som, ou uma faixa por arquivo (`somexport.py`)
+        return _export_sound(a, src, info, seq, start, end)
     plat = _platform_arg(a, info)
     if plat is not None:
         qkey = plat.id
@@ -469,14 +547,15 @@ def cmd_export(a) -> int:
     if values.get("scan_on") or sub_fields["burn"]:
         _gui_app()  # texto da borda do scan e legendas gravadas: desenhados pelo Qt
     job = export.ExportJob(info=info, values=values, settings=s, out_path=out, start_frame=start, end_frame=end,
-                           name=Path(out).name, sequence=seq, look_keys=look_keys(proj, a.preset, a.set),
+                           name=Path(out).name, sequence=seq,
+                           look_keys=look_keys(proj, a.preset, a.set, a.sequencia),
                            **sub_fields)
     if not a.json:
         w, h = export.output_size(info, s)
         print(_("Exportando {entrada} → {saida}").format(entrada=Path(src).name, saida=out), file=sys.stderr)
         print(_("Look: {preset} • qualidade: {qualidade} • {codec} {pix} • {w}×{h}").format(
             preset=pid or "-", qualidade=qkey, codec=s.codec, pix=s.pix, w=w, h=h), file=sys.stderr)
-        for line in _export_notes(plat, s, info, duration):
+        for line in _export_notes(plat, s, info, duration, values, seq):
             print(line, file=sys.stderr)
         if cues:
             print(_("Legendas: {modo} ({n})").format(modo=choice, n=len(cues)), file=sys.stderr)
@@ -526,6 +605,8 @@ def cmd_export(a) -> int:
         if not a.json:
             print(_("Pronto: {caminho} ({quadros} quadros em {tempo})").format(
                 caminho=export.output_target(out, s), quadros=job.done, tempo=elapsed))
+            if job.note:  # 1.8: créditos dos sons CC0
+                print(job.note)
         return 0
     if job.status == "cancelado":
         print(_("Exportação cancelada."), file=sys.stderr)
@@ -598,7 +679,8 @@ def cmd_frame(a) -> int:
     # "Fundo transparente" da montagem: PNG e TIFF guardam a transparência (como "Salvar quadro" na janela).
     alpha = seq is not None and seq.transparent and ext in export.STILL_ALPHA_ARGS
     recipe = Recipe.for_source(values, info.fps, 16, legal=legal, seq=seq, size=(w, h),
-                               keys=look_keys(proj, a.preset, a.set), burn=burn, alpha=alpha)
+                               keys=look_keys(proj, a.preset, a.set, a.sequencia), burn=burn,
+                               alpha=alpha)
     engine = Engine()
     try:
         if seq is not None:
@@ -621,9 +703,17 @@ def cmd_lut(a) -> int:
     from .engine import Engine
     if a.projeto:
         from . import project
-        p = project.load(a.projeto)
-        values, pid = build_values(p.values, a.preset, a.set)
+        try:
+            p = project.load(a.projeto)
+        except project.ProjectError as exc:
+            raise CliError(_("Projeto inválido: {erro}").format(erro=exc)) from exc
+        if a.sequencia and not p.sequence:
+            raise CliError(_("Este projeto não tem sequências para escolher com --sequencia."))
+        base, _pid, _keys = project_look(p, a.sequencia)  # 1.8: o look da sequência (o próprio ou o do projeto)
+        values, pid = build_values(base, a.preset, a.set)
     else:
+        if a.sequencia:
+            raise CliError(_("--sequencia só vale com --projeto."))
         values, pid = build_values(None, a.preset, a.set)
     if values.get("scan_on"):
         _gui_app()
@@ -740,9 +830,17 @@ def project_info(path: str, as_json: bool) -> int:
         for s in top.family():
             rows.append({"nome": s.display_name, "id": s.id or None, "largura": s.width, "altura": s.height,
                          "fps": round(s.fps, 3), "quadros": s.duration, "duracao_s": round(s.duration / s.fps, 3),
-                         "clipes": len(s.clips), "aberta": s is top})
+                         "clipes": len(s.clips), "aberta": s is top,
+                         "look": "proprio" if s.look is not None else "projeto",
+                         "preset": s.look.preset_id if s.look is not None else proj.preset_id})
+    credits = []
+    if proj.sequence:  # 1.8: créditos dos sons CC0 baixados pela busca (`sons_cc0.py`)
+        from . import sons_cc0
+        credits = sons_cc0.project_credits(top)
     data = {"projeto": str(Path(path).resolve()), "nome": proj.name, "formato": proj.to_json()["formato"],
             "modo": proj.mode, "arquivo": proj.media_path or None, "sequencias": rows}
+    if credits:
+        data["creditos"] = credits
     if as_json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
@@ -756,9 +854,16 @@ def project_info(path: str, as_json: bool) -> int:
         fps = f"{r['fps']:g}"
         print("  " + _("{nome}: {w}×{h} • {fps} quadros/s • {dur} s • clipes: {n}").format(
             nome=r["nome"], w=r["largura"], h=r["altura"], fps=fps, dur=f"{r['duracao_s']:g}", n=r["clipes"])
-            + (f" • id {r['id']}" if r["id"] and len(rows) > 1 else "") + mark)
+            + (f" • id {r['id']}" if r["id"] and len(rows) > 1 else "")
+            + (" • " + _("look próprio ({preset})").format(preset=r["preset"] or "-") if r["look"] == "proprio" else "")
+            + mark)
     if len(rows) > 1:
         print("  " + _("* a que estava aberta ao salvar (a padrão de --sequencia)"))
+    if credits:
+        from . import sons_cc0
+        print(_("Créditos dos sons ({n}):").format(n=len(credits)))
+        for c in credits:
+            print("  " + sons_cc0.credit_line(c))
     return 0
 
 
@@ -955,6 +1060,12 @@ def build_parser() -> argparse.ArgumentParser:
                                          "sai 1080×1920)"))
     p.add_argument("--fps", help=_("original, 24, 24000/1001, 30…"))
     p.add_argument("--audio", help=_("copy, aac320, aac192, mp3, opus, pcm24, none"))
+    p.add_argument("--so-som", action="store_true",
+                   help=_("exporta só o som (a mixagem da montagem ou o som do arquivo): pcm24 (WAV, padrão), flac, "
+                          "aac320 ou mp3 com --audio ou pela extensão da saída; vale o trecho e o --volume"))
+    p.add_argument("--stems", action="store_true",
+                   help=_("exporta só o som, uma faixa de som por arquivo (saida_A1_nome.wav…), todas do mesmo "
+                          "tamanho; sem o volume alvo"))
     p.add_argument("--inicio", help=_("início: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--fim", help=_("fim: segundos, 00:01:02.5 ou #quadro"))
     p.add_argument("--trecho", action="store_true", help=_("usa a entrada e a saída marcadas no projeto"))
@@ -994,6 +1105,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("lut", help=_("grava a cor de um look num LUT .cube"))
     p.add_argument("-o", "--saida", help=_("arquivo .cube"))
     p.add_argument("--projeto", help=_("usa os ajustes de um projeto .plc"))
+    p.add_argument("--sequencia", metavar=_("NOME"),
+                   help=_("com --projeto: o look desta sequência (o próprio dela ou o do projeto; padrão: a que estava "
+                          "aberta ao salvar)"))
     p.add_argument("--tamanho", type=int, default=33, choices=[17, 33, 65], help=_("pontos por eixo"))
     look_args(p)
     p.set_defaults(func=cmd_lut)

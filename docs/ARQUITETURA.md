@@ -48,6 +48,13 @@ rápidas, veja [AGENTS.md](../AGENTS.md); para o significado de cada ajuste, [EF
 39. [Pastas no painel de mídia](#39-pastas-no-painel-de-mídia)
 40. [Desligar todos os efeitos](#40-desligar-todos-os-efeitos)
 41. [Várias sequências e sequência aninhada](#41-várias-sequências-e-sequência-aninhada)
+42. [Look próprio de cada sequência](#42-look-próprio-de-cada-sequência)
+43. [Mixer e cache de som por clipe](#43-mixer-e-cache-de-som-por-clipe)
+44. [Limpeza do som e sincronia](#44-limpeza-do-som-e-sincronia)
+45. [Som de película](#45-som-de-película)
+46. [Música: batidas, encaixe e ducking](#46-música-batidas-encaixe-e-ducking)
+47. [Efeitos sonoros e sons CC0](#47-efeitos-sonoros-e-sons-cc0)
+48. [Gravar narração](#48-gravar-narração)
 
 ---
 
@@ -118,7 +125,7 @@ Três ideias guiam o projeto:
 | `pelicula/engine.py` | `Engine`: contexto moderngl, programas, alvos de render, textura de entrada, LUT 3D, texto da borda; `render()` e `bake_lut()`; cache de LUTs por `mtime`. |
 | `pelicula/frame.py` | `Recipe`: a receita única de um quadro (montagem → valores do look no quadro → `build_plan` → `render`/`render_fit`), usada por todo lugar que mostra ou grava um quadro (seção 22.1). |
 | `pelicula/keyframes.py` | Chaves de animação (sem Qt): `Key`, as quatro curvas, `value_at`, limpeza e JSON (`"chaves"`), `look_values_at` (look) e `ffmpeg_expr` (volume do som); âncora nas edições em `timeline.Clip.key_off` (seção 22.3). |
-| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (48 presets; os 4 da 1.6 no fim), presets do usuário (JSON), importar/exportar. |
+| `pelicula/presets.py` | `FILM_BASE`, `BUILTIN` (52 presets; os 4 da 1.6 e os 4 com som da 1.8 no fim), presets do usuário (JSON), importar/exportar. |
 | `pelicula/luts.py` | Ler/gravar `.cube`, palpite do espaço de entrada, LUTs instalados (Premiere, Resolve, Meus LUTs), instalar LUTs. |
 | `pelicula/media.py` | Localizar ffmpeg/ffprobe, `probe()` → `MediaInfo`, `NamedPipe` (Windows), `FrameReader`, `grab_frame()`, `Perf`, detecção de codificadores e hwaccels; transparência (`has_alpha`, `decodes_alpha`, leitura RGBA pré-multiplicada, seção 22.4). |
 | `pelicula/export.py` | `CODECS`, qualidades prontas, `ExportSettings`, `output_size()` (resolução = lado menor, ou o quadro fixo), `build_encoder_cmd()`, `frame_pipeline()`/`preview_frame()` (a receita de `frame.py` com os ajustes da exportação), `ExportJob`, `ExportQueue`, `run_job()` (gravação segura num parcial, volume alvo, duas passadas do tamanho alvo), `measure_speed()`, `save_still()`. |
@@ -614,7 +621,8 @@ o mesmo croma; senão x264 com o mesmo croma.
 converte: WebM → Opus, AVI → MP3, MOV → PCM 24 bits, demais → AAC 320. PCM em MP4 vira AAC. GIF,
 imagens e sequências não têm áudio. Com volume alvo ou tamanho alvo o som nunca é copiado
 (`_audio_mode`): "Copiar original" vira o formato do recipiente (AAC 128 kb/s no tamanho alvo) e a janela
-avisa (`audio_reencoded_for_volume`).
+avisa (`audio_reencoded_for_volume`). Com o som de película do look ligado o som do arquivo também nunca é copiado, e a
+janela diz em que formato ele sai (`audio_reencoded_for_film`, §45.8).
 
 ### 9.5 Plataformas (`platforms.py`)
 
@@ -4326,3 +4334,783 @@ motivo e o que fazer, na barra de status; nada muda, nem uma sequência nova) ou
   24 bits no meio), desaninhar volta **exato**. Faixas de cima sobre uma V1 de fora (dentro transparente): 1 passo em 8 bits e
   em 16 bits sem look; com look, até 15 passos de 16 bits. Janela útil de fora: sem clipe gerado, 1 passo em 8 bits (205 de 65535
   em 16); com o título, 4 a 9 passos em 8 bits (999 a 2240 em 16). Fade curto de 5 ms nas pontas de uma emenda sem corte.
+
+
+## 42. Look próprio de cada sequência
+
+Issue #67 (1.8). Uma sequência pode ter o look de película dela no lugar do look do projeto. Testes em
+`tests/test_look_sequencia.py` (modelo, formato, desfazer, terminal), `tests/look_sequencia_ui_cases.py` (janela) e, na
+GPU, `test_inner_own_look_is_ignored_inside_and_used_when_it_is_exported` em `tests/test_aninhada.py`.
+
+### 42.1 Modelo e formato
+
+- **`timeline.SeqLook`** (`values`, `preset_id`, `keys`): os mesmos campos do look do projeto (`Project.values`, `preset_id`,
+  `look_keys`), com as chaves de animação em quadros desta sequência. **`Sequence.look`**: `None` = "Igual ao do projeto".
+- **JSON**: `"look": {"preset", "valores", "chaves"?}` no bloco da sequência, só quando há (vale também para a sequência
+  sozinha, que não tem id). `from_json` passa os valores por `params.sanitize`. `copy()` e `SequenceSet.duplicate` levam o
+  look (saem do `_block_json`).
+- **Formato** (a base da 1.8, como a §36 foi a da 1.7): `timeline.FEATURES_V6["look_proprio"]` leva o bloco ao formato 5
+  (`timeline.FORMAT`; `FORMAT_17` = 4) e o projeto ao 6 (`project.FORMAT`; `FORMAT_17` = 5), que a 1.7 recusa. Passos
+  `_seq_v4_to_v5` e `_v5_to_v6`, sem mudança de campos. **Projeto sem look próprio grava o JSON da 1.7, byte a byte.**
+- **Retrato da 1.7** (`pelicula/data/conhecidos_1_7.json`, `params.known_1_7()`/`beyond_1_7`): gerado rodando o código da tag
+  `v1.7.0`. Nunca editar; `tests/test_project_migration.py` confere que nenhuma chave ou opção sumiu e que ele contém o da
+  1.6. `project.FEATURES_V6["ajustes_1_8"]` e `timeline.FEATURES_V6["ajustes_clipe_1_8"]` pegam todo ajuste ou opção da 1.8
+  (look ou clipe) fora do padrão: ajuste novo não precisa de registro.
+- **Quando a 1.9 ganhar ajuste novo no look**, o retrato `known_1_8` precisa olhar também os valores e as chaves dos looks
+  próprios (hoje o formato 6 já vem do `"look_proprio"`).
+- **`Project.look_for(seq)`**: o look que vale para uma sequência (o dela, senão o do projeto), em cópias. É a única regra; a
+  janela tem a mesma em `SeqLookUI.look_of`.
+
+### 42.2 Imagem: o look entra uma vez só
+
+Decisão da #67: a sequência de dentro com look próprio **entra sem look**. Nada muda na montagem: `Engine.compose`,
+`_nested_texture`, `layers_at`, `mix_key` e `is_trivial` nunca leem `Sequence.look`; o look sai de `look.build_plan()` uma vez,
+com os valores da sequência aberta ou exportada. Por isso a gêmea da §41.5 continua bit a bit com o look de fora, e a
+sequência de dentro exportada sozinha sai igual à mesma montagem num projeto cujo look é o dela.
+
+### 42.3 Desfazer
+
+O look próprio **não é passo da montagem** (ele tem o desfazer do look, no `ParamStore`). `timeline.History` guarda cada estado
+como (JSON sem os looks e com `"formato"` fixo em `FORMAT`, looks por sequência à parte): é o JSON sem looks que se compara, e
+`push` sem mudança na montagem só atualiza os looks do estado atual. `undo(live)`/`redo(live)` recebem a montagem de agora e
+mantêm o look de agora de cada sequência que continua existindo; uma que volta (apagada e desfeita) volta com o look que
+tinha quando o estado foi deixado (todo comando do modelo chama `commit` antes de mexer, e é aí que o look de agora entra no
+estado). A chave do look é o id da sequência ou `""` quando ela está sozinha.
+
+### 42.4 Janela
+
+`ui/look_sequencia_ui.SeqLookUI` (`MainWindow.seq_look`; padrão de `sequencias_ui`):
+
+- **Um look em edição**: o `ParamStore` é o look da sequência aberta, se ela tem look próprio, senão o do projeto (`owner`:
+  a chave da sequência ou `None`). `sync()` (chamado em `_model_changed`, logo depois de `seqs_ui.model_changed`, e depois
+  de abrir um projeto) troca: guarda o que sai (o do projeto em `project`; o desfazer de cada look em `hist`) e carrega o
+  outro com `ParamStore.load(valores, chaves, desfazer)`, que não é passo. `reset()` em cada recomeço (arquivo aberto,
+  projeto novo ou aberto): o que está no `ParamStore` passa a ser o look do projeto.
+- **Escrita**: `write()` copia o `ParamStore` para `Sequence.look` a cada ajuste e preset (chamado de `_update_modified`).
+  Não emite `model.changed`: a prévia já se refaz pelo `ParamStore`.
+- **O que grava e exporta**: `_state`, `_make_project` e a sessão (`session_values`) usam `project_look()`; `_seq_json` grava
+  o bloco também para a sequência sozinha com look próprio; `ExportTarget.look` (de `export_look(seq)`, que respeita *Sem
+  efeitos* e o modo Edição sem película) é trocado pela janela de exportar em `_set_target` e usado em `jobs`.
+- **Escolha**: `set_own` (cópia do look do projeto, a imagem não muda), `set_shared` (pergunta em `confirm_discard` se o look
+  próprio mudou), `choose`. Lugares: a linha "Look de …" no topo do painel de ajustes (só com mais de uma sequência ou com a
+  aberta tendo look próprio), o submenu *Look de película* da aba (`SequenceTabs.lookRequested`, `TabInfo.own_look`, o ponto
+  na aba) e o da sequência na Mídia (`add_menu`). O aviso de `nested_note` aparece no painel do clipe e ao inserir.
+
+
+## 43. Mixer e cache de som por clipe
+
+Issue #39 (1.8, só o som). Testes em `tests/test_somcache.py` (a soma contra o grafo antigo, cache, balanço da faixa,
+aninhar), `tests/test_somexport.py` (só o som, stems, terminal), `tests/test_scrub.py` (o grão) e
+`tests/mixer_ui_cases.py` (mixer, scrub e a janela Exportar).
+
+### 43.1 Cache por clipe e a soma (`somcache.py`)
+
+- **Antes (até a 1.7)**: um `filter_complex` só para a montagem inteira (`audiomix.build_graph`: cada clipe com a cadeia de
+  sempre, `adelay` em milissegundos, `amix normalize=0` sobre `anullsrc` e `atrim` no trecho). Mudar qualquer coisa refazia
+  tudo. O grafo continua em `build_graph` e **`audiomix.render_mix_graph`**, a referência dos testes.
+- **Agora**: `audiomix.render_mix` (mesma assinatura e mesmo WAV) chama `somcache.mix`. Cada pedaço de som da montagem é um
+  **`Part`**: os de `clip_parts` (um por entrada de `audiomix.segments`: o clipe com a extensão da transição, os
+  micro-fades, velocidade, rampa e reverso) e os de `tone_parts` (os tons de `audiomix.tones`). Cada um é renderizado **uma
+  vez** pela mesma cadeia do grafo (`_chain`/`_retimed_chain`, com `trim_start=0`, `trim_len = pre + duração + post`,
+  `delay=0`) num WAV float32 48 kHz estéreo em `cache_dir()` (`$PELICULA_SOM_CACHE` ou o temporário, pasta
+  `pelicula_som_clipes`; limite de 2 GiB pela mesma limpeza das aninhadas, `audiomix._prune_dir`).
+- **Chave** (`_key`, sha1 de JSON): o carimbo dos arquivos lidos (caminho, tamanho e mtime; o WAV de uma aninhada já tem o
+  conteúdo no nome, então sem carimbo), o grafo inteiro (tempo, velocidade, rampa, reverso, fades, ganho), todos os
+  `stored_values` do clipe, as chaves, `c.speed`/`c.ramp`/`c.reverse`, o fps e `somcache.VERSION`. **Posição, trecho, ganho
+  e balanço da faixa não entram**: mover um clipe, exportar outro trecho ou mexer no fader não renderiza nada.
+- **Renderizar**: os pedaços que faltam vão em lotes (`BATCH` = 24, balanceados pela duração) para até `WORKERS` processos
+  do ffmpeg ao mesmo tempo, cada processo com várias saídas (`_relabel` prefixa os rótulos e desloca as entradas
+  `[n:a…]`). Cancelar é visto antes de cada processo e durante; o parcial tem nome próprio (`<chave>.<pid>_<thread>.wav`) e
+  só vira `<chave>.wav` com `os.replace`.
+- **A soma** (`mix`): float64, em blocos de 10 s. Cada pedaço entra na amostra `offset = _at(start/fps − pre)` (amostra
+  exata; o grafo antigo arredondava o `adelay` para o milissegundo: **um projeto antigo pode ter um clipe até 0,5 ms em
+  outra posição**, nada audível; os testes usam 25 quadros/s, onde os dois coincidem). Por faixa: soma dos pedaços × ganho
+  da faixa (se a cadeia é linear, ver abaixo) × (esquerda, direita) do balanço; depois a soma das faixas. O trecho é
+  `range_samples`: começa em `_at(a/fps)` e tem o número de amostras do `atrim` antigo, então **exportar um trecho dá
+  exatamente o recorte da mixagem inteira**. A gravação em 24 bits (`to_s24`) repete o ffmpeg: float32 → s32 com `llrintf`
+  e corte, depois `>> 8`. Igualdade com o grafo antigo: no máximo 2 passos de 24 bits.
+- **Ganho da faixa na soma só com cadeia linear** (`LINEAR_KEYS`, `chain_is_linear`): volume, mudo, balanço, fades,
+  transição, graves/médios/agudos e velocidade são lineares; `voz`, `reducao_ruido`, `normalizar` e qualquer chave
+  desconhecida fora do padrão não são, e aí o ganho da faixa fica dentro da cadeia (como antes) e o pedaço muda com ele.
+  **Filtro novo de clipe**: se for linear, entra em `LINEAR_KEYS`; se não, nada a fazer (o padrão é "não linear").
+- **Aninhadas**: `audiomix._render_nested` mixa antes cada sequência de dentro pelo mesmo `render_mix` (cache e soma), e o
+  WAV dela entra como um clipe comum. `mix_key` não mudou (muda exatamente quando o som muda; igual no `copy()`).
+- **Velocidade** (montagem de 10 clipes de 3 s, esta máquina): grafo antigo 0,31 s; cache vazio 0,42 s; um clipe mudado
+  0,16 s; mexer no fader ou mover um clipe 0,03 s.
+
+### 43.2 Fontes de som (`PROVIDERS`) e pontos de entrada
+
+- **`somcache.PROVIDERS`**: lista de funções `fn(seq) → [Part]`. Hoje `clip_parts` e `tone_parts`. Uma fonte nova (voz
+  sintetizada, música gerada…) acrescenta uma função: cada `Part` tem `key` (com tudo que muda o som), `offset`, `kind` e
+  `track` (a faixa onde soa: ganho, balanço, stem e medidor), `length` (amostras) e **ou** `graph = (entradas, grafo)` (o
+  grafo lê `[0:a]`, `[1:a]`… e termina num rótulo `[out]`; rótulos internos com nomes `[a-z_]\w*`) **ou** `synth()` →
+  `(n, 2)` float32. `source` diferente de `"clipe"` toca no trecho pela sobreposição de `offset`/`length`.
+- **Filtros do clipe** (a cadeia, `audiomix._chain_tail` e abaixo): mudam o grafo e os `stored_values`, então a chave muda
+  sozinha; só a linearidade precisa de registro.
+- **Entradas derivadas** (o WAV de uma aninhada, o WAV limpo de um clipe da limpeza do som): `segments` troca
+  `seg["path"]` por um WAV com o conteúdo no nome, numa pasta de `CONTENT_NAMED_DIRS` (a chave usa o caminho, sem a data;
+  o arquivo pode ainda não existir). Quem grava esses WAVs entra em **`somcache.PRERENDER`**: `fn(segmentos, cancel, perf)
+  → bool`, chamado em `mix` depois de `audiomix._render_nested` e antes de `ensure`, com as entradas de `segments(seq)` da
+  sequência **inteira** (as que `clip_parts` lê) só dos clipes que tocam no trecho. As do trecho (`segments(seq, a, b)`)
+  têm outros tempos e não servem para o cache.
+- **A mixagem final**: o WAV existe inteiro, sem nada depois, em `MainWindow._mix_done` (prévia), em `run_job` logo depois
+  de `audiomix.render_mix` (exportação de vídeo) e em `somexport._mix_to` (só o som). Um processamento da mixagem inteira
+  entra nesses três pontos (ou dentro de `render_mix`, depois de `somcache.mix`), e antes do volume alvo.
+
+### 43.3 Balanço da faixa (`Track.pan`)
+
+`Track.pan` (−1 esquerda … 1 direita, padrão 0, em 2 casas por `timeline.clean_pan`). JSON `"balanco"` na faixa só fora do
+centro (o JSON de antes fica igual); `timeline.FEATURES_V6["balanco_faixa"]`; `is_trivial` exige centro. Lei do `balanco`
+do clipe: o lado para onde se puxa fica em 1 e o outro cai até 0 (`track_gains`). `TimelineModel.set_track(..., pan=)`
+(`TRACK_ATTRS`), com `record=False` para arrastar (um passo do desfazer quando quem arrasta chama `commit()` ao soltar; a
+barrinha de volume do cabeçalho também passou a ser assim). **Aninhar** (`aninhar._plan_audio`): a faixa de destino precisa
+ter balanço 0 ou igual ao de dentro (`pan_inside`); senão o som cai numa faixa nova, no centro. **Desaninhar** recusa quando
+os dois balanços (o de fora e o de uma faixa de dentro) estão fora do centro e são diferentes (`pan_outside`); a mensagem
+pede para centralizar um deles.
+
+### 43.4 Mixer (`ui/mixer_ui.py`)
+
+`MainWindow.mixer`: o painel fica no lugar do inspetor, no painel direito do modo Edição; o botão *Mixer* da barra da linha
+do tempo (`TimelineEditor.btn_mixer`) ou **Ctrl+Alt+M** troca um pelo outro. Uma tira por faixa de áudio (`Strip`: nome,
+balanço, fader de −60 a +12 dB linear em dB como a barrinha do cabeçalho, medidor de pico, mudo e solo; dois cliques voltam
+o fader a 0 dB e o balanço ao centro; faixa travada desliga os controles) e a tira da mixagem (pico e o M/S/I do medidor da
+prévia, quando ele está ligado). Tudo por `TimelineModel.set_track`; `model.changed` refaz as tiras, então o cabeçalho e o
+mixer andam juntos. **Medidores**: a mixagem da prévia chama `render_mix(..., track_peaks=True)`, que grava ao lado do WAV
+`<wav>.faixas.npz` (`somcache.save_peaks`: o pico de cada faixa de áudio e o da mistura a cada 10 ms, das mesmas somas); o
+`QTimer` de 40 ms indexa esse arquivo pelo relógio da prévia (`_play_f0`, `_play_t0`, o mesmo do medidor de som) e fica
+parado fora do 1× para a frente. `_clean_mixes` apaga o `.faixas.npz` com o WAV.
+
+### 43.5 Som ao arrastar o cursor (`ui/scrub_ui.py`)
+
+`MainWindow.scrub`. Ganchos em `MainWindow.seek` (só enquanto `TimelineEditor.scrubbing` está ligado, isto é, arrastando o
+cursor na régua) e `step` (quadro a quadro). O grão (`grain_span`, `make_grain`): um quadro, no mínimo 40 ms, com fades de
+5 ms, lido do WAV que a prévia toca (`_audio_src` do tipo "seq": a mixagem, ou o resultado de um processamento
+dela; `audiomix.WavReader`, só 48 kHz); sem mixagem pronta, nada toca. `Throttle`: um grão novo só
+depois que o anterior acabou. Saída: um `QAudioSink` próprio (48 kHz, estéreo, 16 bits, buffer de 200 ms), criado na
+primeira vez por uma fábrica que os testes trocam; com `QT_QPA_PLATFORM=offscreen` a fábrica real devolve None (testes e
+automações nunca tocam som). Respeita o mudo e o volume da prévia. Botão *Som ao arrastar o cursor* na barra da linha do
+tempo, preferência `som_ao_arrastar` (ligado por padrão). **Sem módulo**: é parte da linha do tempo, como o cursor, e tem o
+botão para desligar.
+
+### 43.6 Exportar só o som e stems (`somexport.py`, `ui/som_export_ui.py`)
+
+- `ExportSettings.sound_only`: `""` (vídeo e som), `"som"` ou `"stems"`; o formato em `ExportSettings.audio` entre
+  `somexport.FORMATS` (pcm24 → .wav, flac, aac320 → .m4a, mp3; os argumentos de `export.AUDIO_ARGS`). `run_job` passa para
+  `somexport.run` logo no começo; a fila não abre o contexto OpenGL para esses trabalhos.
+- **Só o som**: a mixagem do trecho (`somcache.mix`) ou, no modo Película com o arquivo sem montagem, o som do próprio arquivo
+  (`-ss`/`-t`); o volume alvo mede e aplica o `loudnorm` como na exportação de vídeo. **Stems**: `mix(..., stems=fn)` grava
+  junto um WAV por faixa que toca no trecho (com o ganho e o balanço dela, do mesmo tamanho; somados dão a mixagem com no
+  máximo alguns passos de 24 bits); nomes `somexport.stem_path` (`<nome>_A1_<faixa>.<ext>`, o nome padrão "A1" não se
+  repete; tons das barras na faixa de vídeo: `_V1`); sem volume alvo. Aninhadas vão na faixa onde está o clipe delas. Cada
+  arquivo vai para o parcial e só troca de nome quando todos terminaram.
+- **Som de película** (§45, decisão da integração): *Só o som* passa por `export._film_sound` antes do volume alvo, como o som
+  do vídeo (sai o que a prévia toca); os **stems** saem crus (faixas de trabalho para outro programa).
+  `tests/test_somexport.py::test_sound_only_goes_through_the_film_sound_and_stems_stay_raw`.
+- **Janela**: `som_export_ui.SoundChoice` (`ExportDialog.sound`), grupo *O que exportar* logo abaixo do destino. No modo de som
+  some o que é de vídeo (plataforma e prévia, qualidade, desempenho, capítulos, legendas, linhas de vídeo dos ajustes) e volta
+  como estava; o resumo não mede velocidade. Stems desligados (com o porquê) sem montagem; sem som, os dois desligados.
+  Ganchos no diálogo: `settings`, `_fix_ext`/`_browse`, `_summary`, `_start_estimate`/`_start_preview` e `_accept`.
+- **Terminal**: `exportar --so-som` e `--stems` (`cli._export_sound`; formato por `--audio` ou pela extensão da saída; vale
+  `--inicio`/`--fim`/`--trecho` e `--volume`/`--pico`; sem GPU).
+
+## 44. Limpeza do som e sincronia
+
+1.8 (#39, som). Ajustes de clipe de som novos, todos com padrão neutro e em `editparams.SPARSE_KEYS`: no padrão o grafo do
+ffmpeg é o de antes, byte a byte (`tests/test_audio_fades.py`), e o JSON também. Nenhuma estrutura nova no JSON: o
+formato 6 vem sozinho pelo `ajustes_clipe_1_8`. Código em `pelicula/somlimpo.py` (limpeza, sem Qt), `pelicula/sincronia.py`
+(sincronia, sem Qt) e `pelicula/ui/somlimpo_ui.py`; nos arquivos de antes, só ganchos de uma linha.
+
+| Chave | Seção | Padrão | O que faz |
+|---|---|---|---|
+| `passa_alta` | eq | 0 (desligado) | `highpass=f=…:poles=2` (Hz, até 500) |
+| `passa_baixa` | eq | 0 (desligado) | `lowpass=f=…:poles=2` (Hz, até 20000) |
+| `nivelar_voz` | eq | 0 | `speechnorm` pela força (44.4) |
+| `ruido_perfil` | limpar | 0 | força da redução pelo ruído aprendido (44.1) |
+| `ruido_ini`, `ruido_fim` | limpar | 0, 0 (nada aprendido) | o trecho do arquivo (s) com o ruído; linhas escondidas, gravadas pelo botão |
+| `zumbido` | limpar | `"nao"` (`"50"`, `"60"`) | entalhes da rede elétrica (44.2) |
+| `zumbido_harmonicos` | limpar | 6 (1–10) | quantos entalhes (f, 2f, …) |
+
+A seção `"limpar"` vem no fim de `AUDIO_SECTIONS` (o inspetor a mostra depois do "eq" por `DISPLAY_AFTER`); os três do
+"eq" entram no fim da lista dele. **Lineares** (filtros fixos, LTI: valem igual sobre a soma de dois sons): `passa_alta`,
+`passa_baixa`, `zumbido`/`zumbido_harmonicos`. **Não lineares**: `ruido_perfil` (+ o trecho) e `nivelar_voz`.
+
+**Ordem na cadeia do clipe** (`audiomix._chain_tail`, ganchos `somlimpo.hum_filters` e `somlimpo.after_eq_filters`):
+entrada limpa (44.1) → `aresample`/`atempo` → volume → **entalhes** → voz → graves/médios/agudos → `afftdn` → **cortes** →
+**`speechnorm`** → `loudnorm` → balanço → fades → recorte → atraso.
+
+### 44.1 Ruído aprendido
+
+- **O que o clipe guarda**: só o trecho (`ruido_ini`/`ruido_fim`, segundos da fonte) e a força. O perfil é refeito do arquivo na
+  hora de mixar (`profile_for`, em memória por carimbo do arquivo + trecho, 16 entradas): JSON pequeno, render determinístico.
+- **Perfil** (`learn_profile`): STFT Hann periódica de 2048 com salto de 512 a 48 kHz sobre o trecho estéreo (lido pelo ffmpeg,
+  até `MAX_PROFILE_S` = 30 s); magnitude média e desvio por faixa, com os dois canais juntos (um perfil só, o mesmo ganho nos dois
+  canais: a imagem estéreo não muda). Potência do ruído = média² + desvio². Recusa (`CleanError`) trecho com menos de 0,25 s ou
+  RMS abaixo de −70 dBFS.
+- **Redução** (`_block`): potência dos dois canais suavizada em frequência e tempo (núcleo [1 2 3 2 1]/9), ganho
+  √max(0, 1 − 2·ruído/potência) (subtração espectral com sobra `BETA` = 2), piso de 10^(−força·30/20) (0% = ganho 1 em tudo, 100%
+  tira até 30 dB do que é só ruído; a força é em dB, então 50% tira cerca de 15), ganho suavizado de novo ([1 2 1]/4 nos dois
+  eixos: sem "ruído musical"). Medido: ruído branco e rosa −26 a −28 dB, tom de 1 kHz a ±0,01 dB.
+- **Blocos sem emenda**: o quadro k cobre [(k − 3)·512, (k + 1)·512); toda amostra recebe exatamente 4 quadros e a soma dos
+  quadrados da janela é 1,5 (reconstrução exata). O ganho de um quadro só usa ±3 quadros vizinhos (filtros simétricos, sem estado),
+  então um bloco de saída [o0, o1) lê só a entrada de que precisa (com zeros fora do arquivo) e o resultado é **igual** ao de
+  processar tudo de uma vez (diferença medida: 0). Memória: um bloco de 2¹⁸ amostras (~5,5 s).
+- **Na mixagem** (`clean_input`, gancho no fim do laço de `audiomix.segments`): como o WAV de uma sequência aninhada (41.5), a
+  entrada do clipe vira um WAV float32 limpo de [lo, hi] do arquivo — o trecho usado (`src_in`…`src_in + src_len`, ou os extremos
+  dos pedaços numa rampa/reverso) com `MARGIN_S` = 1 s de sobra e as pontas na grade de 0,5 s. `seg["path"]` aponta para ele, e
+  `src_in` (numa rampa/reverso, os pedaços e `length`) passa a contar do começo dele; `seg["clean"]` leva o pedido. O nome do WAV
+  sai de (`VERSION`, carimbo do arquivo, lo, hi, trecho do ruído, força); o carimbo de um WAV de sequência aninhada é só o
+  caminho (o conteúdo já está no nome e a data muda a cada uso).
+- **Quando é gravado** (`render_inputs`): no fim de `audiomix._render_nested` (depois dos WAVs aninhados, que podem ser a fonte),
+  na mesma thread que mixa (a prévia espera como espera qualquer mixagem). O ffmpeg decodifica [lo, hi] num WAV temporário, o
+  `denoise_stream` grava o limpo num parcial e `os.replace` troca no fim. Cache em `<temporário>/pelicula_som_limpo`, limitado a
+  2 GiB pelos mais antigos (`_prune`, como `_prune_nested`). Um trecho do ruído que ficou mudo (o arquivo mudou) não limpa: o WAV
+  sai igual à fonte. Cancelar não deixa parcial.
+- **"Aprender o ruído"** (`somlimpo.learn_range` + `InspectorSound.learn`): entrada e saída da janela (`inp`/`outp`) se as duas caem
+  dentro do clipe; senão 1 s a partir do cursor, recuado se o clipe acaba antes. Converte quadros em segundos do arquivo por
+  `Sequence.src_time`. O som do trecho é conferido na fila de tarefas (`profile_for`); no fim, `ruido_ini`/`ruido_fim` (e
+  `ruido_perfil` = 0,8 se estava em 0) num passo do desfazer.
+
+### 44.2 Zumbido da rede
+
+`hum_filters`: `bandreject=f=k·f0:width_type=q:width=20` para k = 1…`zumbido_harmonicos`, depois do volume e antes da voz e da
+equalização. Q = 20: no centro, mais de 30 dB (medido nas seis primeiras de 60 Hz); a ±10% de f, −0,3 dB (e −0,7 dB entre duas
+harmônicas vizinhas, o pior caso). **Detectar** (`detect_hum_file`): o trecho usado do clipe (até 20 s) em mono a 4 kHz, espectro
+médio de Welch (janelas de 4 s: 0,25 Hz), e para 50 e 60 Hz a média, nas três primeiras harmônicas (50/100/150 contra 60/120/180,
+que não se cruzam), do pico (±1 Hz) sobre a mediana da vizinhança (4 a 12 Hz de cada lado). Escolhe quando o melhor passa de
+10 dB e de 6 dB sobre o outro; senão não muda nada.
+
+### 44.3 Cortes e predefinições
+
+`highpass`/`lowpass` de 2 polos (Butterworth: −3 dB na frequência escolhida, 12 dB por oitava), depois do `afftdn`.
+Predefinições (`editparams.AUDIO_PRESETS`, ids estáveis, só acrescentar no fim): `voz_clara`, `voz_grave`, `telefone`
+(300–3400 Hz), `radio_antigo` (200–5000 Hz), `menos_vento`, `musica_cheia`, `podcast`, `sem_ajustes`.
+`apply_audio_preset` volta as chaves de `AUDIO_PRESET_KEYS` (graves, médios, agudos, voz, os dois cortes, nivelar a voz) ao padrão
+e aplica as da predefinição; nenhuma outra chave muda. A interface chama `set_clip_values` (um passo do desfazer).
+
+### 44.4 Nivelar a voz
+
+`speechnorm` do ffmpeg (existe desde o 4.4; está nos builds da gyan.dev e da BtbN), depois da equalização e antes do `loudnorm`.
+Força a: pico alvo `p` = 0,9; expansão máxima `e` = 10^(1,5·a) (até +30 dB, proporcional em dB); compressão `c` = 1 + a (até
+−6 dB); subida e descida `r` = `f` = 0,001 + 0,199·a por meio ciclo (0,001 é o padrão do ffmpeg; com menos de ~0,1 o ganho não
+chega ao alvo em poucas sílabas); limiar `t` = 0,01 (−40 dBFS: meio ciclo abaixo disso não é fala e as pausas não sobem);
+`l=1` (canais ligados). Medido numa "fala" sintética com uma metade 20 dB abaixo da outra: 100% → 0,9 dB de diferença; 50% →
+entre 3 e 20 dB.
+
+### 44.5 Sincronizar pelo som (`sincronia.py`)
+
+- **Correlação** (`find_lag`): `a` (o trecho usado da referência) contra `b` (o outro, numa janela de ±`SEARCH_S` = 10 s em volta
+  de onde está; até `MAX_SEARCH_S` = 60 s), em mono a 8 kHz com pré-ênfase. Correlação por FFT de `a` contra `b` com `len(a)`
+  zeros dos dois lados (atrasos negativos também), normalizada pela energia de `a` e pela de `b` sob cada atraso (soma
+  acumulada). Pico do módulo (polaridade invertida serve), parábola para a fração de amostra. Confiança: pico ÷ segundo pico
+  (fora de ±50 ms) ≥ 1,5 e pico ÷ RMS da correlação ≥ 8. Medido: atraso de 1,23 s achado a menos de 1 ms, também com −6 dB e
+  ruído por cima; som sem relação, silêncio e ritmo repetido recusados.
+- **O trecho lido**: só onde os dois podem se sobrepor — a parte do clipe de referência dentro de [início do outro − janela, fim
+  do outro + janela], até `MAX_ANALYSIS_S` = 120 s; `b` é esse trecho ± a janela no tempo atual do outro, com zeros fora do
+  arquivo. Atraso L (amostras) → o outro anda `janela − L/8000` s.
+- **Plano** (`plan`, sem mexer na sequência): `candidates` (o clipe de som de cada grupo ligado escolhido), `reference_of` (o som
+  do grupo com vídeo na faixa de vídeo de menor índice; sem vídeo, o primeiro escolhido). Cada outro grupo: atraso arredondado
+  para quadros (`Move.frames`) e a sobra (`Move.residue`, no máximo meio quadro). Recusados (`Plan.refused`, com o motivo):
+  velocidade ≠ 1×, rampa, reverso ou quadro congelado (na referência ou no outro), longe demais, sem confiança.
+- **Interface** (`somlimpo_ui.SyncController`, `MainWindow.som_sync`): "Sincronizar pelo som" no menu do botão direito do clipe
+  (`add_clip_actions`, com 2 ou mais grupos com som escolhidos). O plano roda na fila de tarefas numa cópia da sequência, com
+  progresso e Cancelar na barra de status (`bar`); no fim, `TimelineModel.move_groups([(clipe, quadros)])` move cada grupo pelo
+  seu deslocamento (`Sequence.move_many`, que leva os ligados e cobre o que estiver no destino, como arrastar) num passo só do
+  desfazer, e a mensagem diz quantos andaram, a maior sobra em ms e quem ficou (e por quê).
+
+### 44.6 Testes
+
+`tests/test_somlimpo.py` (numpy e ffmpeg: ruído branco e rosa, tom, blocos = de uma vez, 0% = entrada, perfil recusado, JSON
+esparso, grafo igual no padrão, entrada trocada e deslocada, mixagem limpa no mesmo instante (fase do tom), cache, cancelar,
+trecho do botão, entalhes, detecção, predefinições, resposta dos cortes, nivelar), `tests/test_sincronia.py` (atraso, fração de
+amostra, atraso negativo, recusas, referência, plano com arquivos) e `tests/test_somlimpo_ui.py` (casos de
+`somlimpo_ui_cases.py`: Aprender o ruído com as regras do trecho e um passo do desfazer, Detectar, Predefinições,
+Sincronizar pelo som pelo menu com desfazer, recusa e cancelar).
+
+## 45. Som de película
+
+Frente P da 1.8 (#39, "Som de película (módulo)"). Uma seção nova do look, "som_pelicula" (`somf_*`, a última de
+`params.SECTIONS`), módulo Beta `som_pelicula` (grupo "pelicula", começa desligado e só esconde o cartão). É pós-processo
+do **som final**: nunca entra em `audiomix` (a mixagem e o cache por clipe da §43 não mudam) nem no plano da imagem.
+Testes: `tests/test_somfilme.py` (motor puro), `tests/test_somfilme_export.py` (exportação e prévia com o ffmpeg; dois
+casos na GPU) e `tests/som_pelicula_ui_cases.py` (janela).
+
+### 45.1 Parâmetros
+
+| Chave | Tipo | Padrão | |
+|---|---|---|---|
+| `somf_on` | liga/desliga | falso | chave da seção; desligado o som sai bit a bit igual |
+| `somf_trilha` | escolha | `auto` | `auto`, `otica_35`, `otica_16`, `magnetica_s8`, `otica_antiga` (opções novas só no fim) |
+| `somf_trilha_forca` | 0–1 | 1,0 | a curva em dB × força, a saturação, o mono e o chiado |
+| `somf_estalos` | 0–1 | 0,6 | estalos das emendas |
+| `somf_poeira` | 0–1 | 0,4 | cliques da poeira |
+| `somf_wow` | 0–1 | 0,5 | profundidade do wow e do flutter |
+| `somf_projetor` | 0–1 | 0,0 | projetor na sala |
+| `somf_sala` | 0–1 | 0,0 | reverberação da sala |
+| `somf_semente` | inteiro (avançado) | 19 | sorteios |
+
+Os valores só contam com `somf_on` (como os outros cartões), então os padrões não precisam ser zero. **Não animam**
+(`params` desmarca `animatable` da seção: o motor processa o som inteiro com um valor só). Nenhum registro de formato: ajuste
+novo cai no `ajustes_1_8` (§42.1). `modules.used_by` reconhece `somf_on`.
+
+### 45.2 O motor (`somfilme.py`, numpy)
+
+`process(amostras, taxa, valores, fps, amostra_inicial, eventos, before=)`. Ordem: mono (trilhas mono, × força) → wow e
+flutter → saturação da trilha (`_soft`, joelho por trilha) → chiado, ronco, poeira e estalos (estão na película, então
+passam pela curva) → curva de leitura (`track_filter`) → projetor (`_projector`) → sala (`room_ir`) → limite suave
+(`LIMIT_KNEE` 0,85, teto 0,98 ≈ −0,2 dBFS: um seno de −1 dBFS com tudo no máximo não satura).
+
+- **Determinismo.** Todo ruído vem do índice **absoluto** da amostra (amostra = tempo × taxa desde o quadro 0) e da
+  semente: `hash_array`/`vnoise_array` são o `_hash`/`_vnoise` do `look.py` vetorizados (os mesmos valores). Nada de `random`
+  nem relógio.
+- **Contrato do contexto (pré-roll).** Toda etapa tem memória finita e só olha o passado: o wow lê com atraso ≥
+  `BASE_DELAY` (10 amostras; a sinc de 16 pontos olha 8 à frente), a curva é um FIR de **fase mínima** (cepstro real, 4096
+  pontos, 85 ms; causal, sem atraso de grupo de um FIR de fase linear), a sala é um FIR de 0,85 s, os cliques são núcleos
+  curtos. `before` traz o som imediatamente antes do trecho (até `preroll_samples` = `PREROLL_S` 1,1 s; o que falta é
+  silêncio, que é o que o som inteiro tem antes do 0). Assim **um trecho dá as mesmas amostras que o mesmo pedaço do som
+  inteiro** (≤ 1e-6, só o arredondamento da FFT) e nada precisa de amostras depois do trecho (a exportação de um trecho não
+  tem o futuro). `process_wav` usa o mesmo contrato em blocos de `CHUNK_S` (memória limitada em som longo), lendo com
+  `audiomix.WavReader` e gravando PCM de 24 bits.
+- **Trilhas** (`TRACKS`, curva em dB interpolada no log da frequência). Fontes: curva da Academia (1938) — plana de 100 Hz a
+  1,6 kHz, −7 dB em 40 Hz, −10 dB em 5 kHz, −18 dB em 8 kHz (B. Florian, "Learning from History: Cinema Sound and EQ
+  Curves", Secrets of Home Theater and High Fidelity, jun. 2002; Encyclopaedia Britannica, "Academy Curve"); 16 mm ótico ~90
+  Hz a 6,5 kHz, sinal/ruído de 35 a 40 dB (SFU, notas de aula de som para cinema, "Optical Soundtrack" e "16mm film is
+  projected"); Super 8 magnético 80 Hz a 10 kHz a 18 qps e 12 kHz a 24 qps, ótico 80 Hz a 6 kHz (ficha do projetor Bauer T 190
+  ML e "Super 8 format standards", super8data/filmkorn.org); 35 mm ótico de área variável dos anos 70–80 ~40 Hz a 12 kHz
+  (aproximação). Chiado e ronco são níveis escolhidos dentro dessas relações sinal/ruído, não medidas. "Igual à bitola"
+  (`GAUGE_TRACK`): 16 mm/Super 16 → `otica_16`; Super 8/8 mm → `magnetica_s8`; o resto (35, 65, IMAX, nenhuma e as de foto) →
+  `otica_35`. Tudo sintetizado, sem amostras gravadas.
+- **Wow e flutter** (`wow_delay`). Atraso variável lido por sinc com janela de Hann (tabela de 1024 frações). A parte lenta
+  é `wow_curve` = o tremor vertical do quadro (`look.weave`, a mesma conta, sementes 103/104 e `tremor_vel`) com a parte de
+  cada quadro alisada pela curva do ruído de valor entre um quadro e o próximo: no instante do quadro N ela vale exatamente o
+  sorteio da imagem no quadro N (correlação com `u_shift` medida > 0,9 pela fase de um tom). Profundidade `WOW_S` × `weave`
+  da bitola × `somf_wow` (100%: ~0,2% eficaz no 35 mm, ~0,5% no Super 8). Mais o flutter da roda dentada: um seno na
+  frequência furos × fps (`PERFS`), 0,08% de afinação. **Decisão**: o som segue `look.weave` mesmo com o Projetor
+  desligado (é a mesma película correndo; a imagem só não mostra o tremor) — assim ligar o projetor não muda o som.
+- **Estalos** (`_pops`): clique de ruído preso à amostra (a primeira amostra é ±1 × força) e baque de 45–75 Hz, na amostra
+  `round(quadro / fps × taxa)`. **Poeira** (`_crackle`): no máximo um clique por célula de 2,5 ms, com probabilidade
+  `CRACKLE_RATE` × `somf_poeira` × (a *Poeira* da imagem com os Defeitos ligados, senão `DUST_BASE`). **Projetor**: um
+  clique de mecanismo por quadro projetado (`projection_fps`: o fps do vídeo, ou 18/24 com os rolos de Super 8), zumbido de
+  60 Hz com harmônicas e ventoinha (ruído pela curva `FAN_CURVE`), mono, −22 dB × `somf_projetor`. **Sala**: `room_ir`, L e
+  R diferentes, reflexões iniciais e cauda de 0,8 s nos graves e 0,35 s nos agudos, energia 1; seco × (1 − 0,3·sala) +
+  molhado × 0,5·sala.
+- **Custo**: ~20× o tempo real num núcleo (8 s de estéreo em ~0,35 s com tudo ligado; o wow é a metade).
+
+### 45.3 Eventos compartilhados com a imagem
+
+Refatoração do `look.py` sem mudar um bit (as referências de ouro passam):
+
+- `look.weave(t, quadro, vel)` → (x, y, rotação) de −1 a 1: `build_plan` multiplica pelos ajustes e pela bitola.
+- `look.emenda_frame(v, época, fps)`: o quadro da emenda dos Defeitos na época de 2,5 s (ou None); `build_plan` usa nos dois
+  lugares (o pulo e o `u_splice`). `look.emenda_frames(v, fps, a, b)`: os quadros de [a, b) em que a imagem mostra a emenda
+  (confere a época do quadro como o `build_plan`, inclusive o arredondamento a 25 e 29,97 fps).
+- `montagem_filme.splice_visible(v, corte)` (a fita aparece? `apply` usa) e `montagem_filme.splice_frames(seq, v, fps, a, b)`:
+  o primeiro quadro de cada corte pela mesma conta de `edit_info`, com a fita visível.
+- `somfilme.events_for(v, fps, quadros, seq)` junta os dois. Os testes comparam com os `u_splice` de `build_plan` e da
+  `Recipe` quadro a quadro.
+
+Sincronia: os estalos ficam no quadro da imagem (decisão da frente). O avanço real do som no projetor (21 quadros no 35 mm
+ótico, 26 no 16 mm, 18 no Super 8 magnético) só é citado na dica e no EFEITOS.md.
+
+O fps dos eventos é o da sequência ou do arquivo (o da prévia). Exportar com outra taxa troca os quadros da imagem para a
+taxa nova, mas o som continua no tempo da fonte: o estalo pode ficar até um quadro da saída longe da emenda redesenhada.
+As chaves de animação do look não entram no som (o motor lê os valores fixos do look).
+
+### 45.4 Onde liga
+
+- **Exportação** (`export._film_sound`, chamado em `run_job` logo depois da mixagem): com `somfilme.film_values(job.values,
+  no_effects)` (nada com *Sem efeitos*; o modo Edição sem película já exporta o preset "original", desligado) e áudio na saída,
+  `somfilme.export_sound` devolve um WAV novo que vira o `mix_path` do trabalho (`audio_codec` "pcm_s24le"). Montagem: processa
+  a mixagem do trecho, com a mixagem de ~1,1 s antes (`audiomix.render_mix(seq, …, início − pré, início)`) como `before`.
+  Arquivo direto: decodifica o trecho com o contexto antes (`decode_range`, as mesmas conversões de `decode_wav`) e pula o
+  contexto (`skip`). Por isso **o som do arquivo nunca é copiado** com o som de película: é recodificado do WAV (no MOV/MKV o
+  PCM do WAV pode ser copiado). Volume alvo e tamanho alvo medem o WAV processado. Desligado, `_film_sound` devolve None e o
+  comando é o de sempre. O terminal (`pelicula-cli exportar`) passa pelo mesmo `run_job`.
+- **Prévia** (`ui/som_pelicula_ui.SomPeliculaUI`, `MainWindow.som_pelicula`): `MainWindow._set_audio` passa por `route`, que
+  troca o som pedido (a mixagem da montagem ou o arquivo) pelo WAV processado por `process_wav` a partir da amostra 0 (o
+  arquivo é decodificado uma vez por `audiomix.decode_wav` e guardado enquanto caminho + data são os mesmos). A chave inclui o
+  caminho do som cru, `sound_key` dos valores, o fps e os eventos; então mudar um `somf_*`, a bitola, as emendas ou um corte da
+  V1 refaz **só o processamento** (a mixagem e o `mix_key` da janela não mudam). `store.changed`, `model.changed` e
+  `_update_label_proc` (modo, *Com película*, *Sem efeitos*) agendam `refresh` (350 ms). Enquanto processa, toca o som cru;
+  pronto, chega por sinal e `_set_audio` troca sem parar a reprodução. O medidor lê o WAV processado direto (tipo "seq").
+- **Sequência aninhada**: o som de dentro entra cru (o WAV de `nested_mix_path` nunca passa por aqui); o som de película dela só
+  vale aberta ou exportada, como o look (§42.2).
+- **Fora**: plugin do DaVinci e OpenFX (nenhum controle `somf_*`; `resolve`/`ofx` listam controles à mão), LUT, "Salvar quadro"
+  e o plano da imagem (`build_plan` não lê a seção: `test_image_lut_and_plugin_ignore_the_section`).
+
+### 45.5 Para a onda B
+
+Música, efeitos e narração entram na mixagem (§43) e chegam ao som de película sem nada novo. Quem quiser um evento sonoro
+preso a um quadro da imagem pode seguir `events_for` + `_pops` (amostra = quadro / fps × taxa). `process` serve a qualquer som
+de 48 kHz com o contrato do contexto (`before`).
+
+### 45.6 Presets com som de película
+
+Frente P2 da 1.8. Quatro presets novos no **fim** de `presets.BUILTIN`, depois dos da 1.6 (o índice dos antigos no
+*Preset* do OpenFX e a ordem dos nós DCTL não mudam; `tests/test_presets_16.py` confere os da 1.6 logo depois de
+"original"). A parte da imagem é **copiada** (valores escritos de novo, não `{**BY_ID[...]}`) do preset mais parecido:
+
+| Id | Imagem de | A mais na imagem | Som (`somf_*`) |
+|---|---|---|---|
+| `super8_caseiro_som` | `super8_kodachrome` | — | `magnetica_s8`; estalos 0,5, poeira 0,35, wow 0,6, projetor 0,4, sala 0,1 |
+| `16mm_arquivo_som` | `16mm_doc` | Defeitos (poeira 0,2, riscos 0,08) | `otica_16`; estalos 0,5, poeira 0,55, wow 0,4, projetor 0,15, sala 0,2 |
+| `cinema_anos_30` | `noir` | Defeitos (riscos 0,12, *Emendas* 0,2) | `otica_antiga`; estalos 0,6, poeira 0,5, wow 0,5, projetor 0,15, sala 0,3 |
+| `cine_de_bairro` | `copia_70` | — | `otica_35`; estalos 0,45, poeira 0,4, wow 0,35, projetor 0,25, sala 0,55 |
+
+A trilha é escrita (não `auto`) para o preset soar igual se a pessoa trocar a bitola. Os níveis são moderados e foram
+escolhidos **sem escuta**: confira de ouvido antes de mexer. Nenhum liga *A montagem na película* (os rolos de Super 8
+mudam a imagem e a taxa do projetor). O plugin do DaVinci e o OpenFX recebem os quatro como presets de imagem (o som não
+existe lá; `plugins/ofx/generated` refeito por `tools/gerar_ofx.py`). `modules.used_by` reconhece `somf_on`: aplicar um
+deles com o módulo desligado mostra o aviso de sempre. Testes: `tests/test_presets_som.py`.
+
+### 45.7 Estalo na troca de rolo de Super 8
+
+O único evento de troca de rolo que a imagem tem é o dos **Rolos de Super 8** (*A montagem na película*,
+`montagem_filme.apply`): no primeiro quadro do rolo novo o quadro **pula** (`u_shift`, `JUMP_PX` × 1,4) e o velamento do
+começo do rolo aparece. (As *Marcas de troca de rolo* dos Defeitos são os círculos do aviso ao projecionista do 35 mm, um
+desenho periódico sem troca de rolo; o som não usa.) Funções puras novas, com a mesma conta de `apply` (que passou a usar
+`roll_at` sem mudar um bit; as referências de ouro passam):
+
+- `montagem_filme.roll_at(v, quadro, fps)` → (rolo, segundos desde o começo dele).
+- `montagem_filme.reel_jump(v, quadro, fps)`: rolo > 0 e `tr × fps < 0,5` (a condição do pulo em `apply`).
+- `montagem_filme.reel_frames(v, fps, a, b)`: os quadros de [a, b) que pulam, com `mfilme_on` e `rolo_on`; um por troca, ou
+  nenhum quando nenhum quadro cai na primeira meia duração de quadro do rolo novo (pode acontecer, por exemplo, com
+  rolos de 150 s a 29,97 qps; a imagem também não pula).
+
+`somfilme.events_for` junta `reel_frames(v, fps, 0, quadros)` às emendas; os rolos contam o tempo da saída, então valem
+também no arquivo direto (sem `seq`). O estalo é o mesmo `_pops` das emendas, com o nível de `somf_estalos` (nenhum ajuste
+novo); um quadro que é emenda e troca ao mesmo tempo dá um estalo só. Como a prévia (`ui/som_pelicula_ui`) e a exportação
+(`export_sound`) já pedem os eventos a `events_for`, a troca de rolo entra nas duas pelo mesmo caminho, e `sound_key` já
+tinha `mfilme_on`, `rolo_on` e `rolo_cadencia`. Testes (`tests/test_somfilme_rolo.py`): `reel_frames` = os quadros em que
+`build_plan` desloca o quadro (cadências 18/24, de 18 a 60 qps), estalo na amostra exata, trecho com contexto = pedaço do
+som inteiro, nada sem os rolos, e prévia = exportação com rolos de 1 s (`ROLL_FRAMES` trocado no teste) num arquivo de 2 s.
+
+### 45.8 Aviso de "Copiar original"
+
+Com o som de película ligado o som do arquivo nunca é copiado (§45.4). `export.audio_reencoded_for_film(s, info, valores,
+seq)` devolve o modo que sai de fato — `_audio_mode` para um WAV PCM de 24 bits: AAC 320 no MP4, Opus no WebM, MP3 no AVI e
+"copy" (o PCM do WAV) no MOV e no MKV — ou "" quando não se aplica (outra escolha de áudio, sem som, som de película
+desligado ou *Desligar todos os efeitos*, e a montagem do modo Edição, cujo som já é a mixagem). `film_sound_note(...,
+done=)` monta o texto. Só informa, a exportação não muda:
+
+- **Janela** (`ExportDialog._film_note`, chamado em `_summary` depois de `_sync_rows`): a linha `audio_note` logo abaixo de
+  *Áudio*, escondida quando não se aplica (também com outra sequência escolhida, que traz o look dela).
+- **Terminal**: `cli._export_notes` recebe os valores e a sequência e imprime a nota no começo, com os outros avisos.
+- **Fim do trabalho**: `run_job` guarda a nota (`done=True`) e a junta a `job.note` depois dos créditos dos sons CC0; a fila,
+  a barra de status e o terminal já mostram `job.note`.
+
+Testes: `tests/test_export_film_note.py` (formatos, quando não se aplica, terminal e, na GPU, a nota no fim) e um caso em
+`tests/export_ui_cases.py` (a nota aparece e some).
+
+## 46. Música: batidas, encaixe e ducking
+
+Três ferramentas para a trilha musical do modo Edição (1.8, #39), todas em numpy e sem tipo de clipe novo: o que elas
+fazem na montagem são operações comuns (aparar, clipes novos do mesmo arquivo, `transicao`, chaves de volume), então a
+mixagem (§43), a exportação e o som de película (§45) não mudam. A interface fica em `ui/musica_ui.py` (`MusicUI`,
+`MainWindow.musica`); nada consulta `modules` (não é módulo: são ações do menu do clipe e um botão da barra). Única chave
+de projeto: a correção à mão das batidas na fonte (§46.5, `"batidas"`, id `batidas_corrigidas` em `timeline.FEATURES_V6`).
+
+### 46.1 Batidas (`batidas.py`)
+
+- **Decodificação**: `somlimpo.read_range` do arquivo inteiro, mono, 22,05 kHz (`RATE`), até `MAX_SECONDS`.
+- **Ataques**: espectrograma (Hann de 1024, passo de 256 ≈ 86 quadros de análise por segundo, zeros nas pontas), 40 bandas
+  mel de 30 Hz a 8 kHz, em dB (faixa de 80 dB). O fluxo é a subida em dB (retificada) média das bandas, menos a média móvel
+  de 1 s, retificado de novo (`onset_envelope`). O começo do arquivo (a janela com os zeros) não conta como ataque.
+- **Andamento** (`_tempo`): autocorrelação da raiz do fluxo (um ataque forte não apaga o mais fraco: bumbo e caixa
+  alternados não viram a metade), com desfoque de 1 quadro, pesada por uma gaussiana em oitavas em torno de 120 BPM
+  (`BPM_PRIOR`), de 60 a 200 BPM, com refinamento parabólico. A metade e o dobro vão em `candidates`.
+- **Batidas** (`_track`): programação dinâmica de Ellis (2007) — cada quadro soma a força do ataque e o melhor antecessor
+  a cerca de um período, com penalidade `TIGHTNESS`·log²(distância/período). As pontas sem ataque são aparadas. Cada batida
+  é afinada no ataque de verdade (`_refine`: energia em 2 ms, o primeiro ponto que chega a 75% da maior subida perto da
+  batida, a até 30 ms), então o tempo tocado à mão fica no clique, não na grade. O BPM final é a regressão das batidas.
+- **Compassos** (`_downbeats`): 4 batidas por compasso; a fase é a de maior acento médio (subida da energia dos graves +
+  força do ataque, cada um dividido pela média nas batidas). É uma estimativa (`bar_confidence`).
+- **Confiança**: produto da estabilidade do andamento em janelas de 12 s (passo de 6 s), do resíduo da regressão das
+  batidas e da força do pico da autocorrelação. `confident` = ≥ 0,5 e ≥ 8 batidas. Mudança de andamento, ruído e silêncio
+  ficam abaixo. Sem `random` nem relógio: o mesmo som dá as mesmas batidas.
+- **Cache**: `Beats.to_json` em `<PELICULA_SOM_CACHE ou temp>/pelicula_batidas/<sha1(caminho, tamanho, data, VERSION)>.json`
+  (arquivo parcial + `os.replace`) e um LRU de 64 na memória. `cached(path)` só lê; `analyze_file` analisa. Arquivo
+  mudado (tamanho ou data) = outra chave. Mudar o algoritmo = subir `VERSION`.
+- **Interface**: "Detectar batidas" no menu do clipe de som, e sozinho para clipes de arquivos **só de som** com mais de
+  20 s (`AUTO_MIN_S`) quando a estrutura da montagem muda (preferência `musica/batidas_auto`, ligada por padrão; a análise
+  que falhou ou foi cancelada não volta sozinha). Fila `jobs.CPU`, chave `detectar_batidas`, barra de status com Cancelar.
+  Reabrir o projeto lê o cache (`beats_for`). Sem a janela (testes da linha do tempo), o controlador preso à linha do tempo
+  não analisa sozinho.
+
+### 46.2 Marcas e ímã
+
+`musica.beat_frames(seq, clip, beats)` leva cada batida (segundo do arquivo) ao quadro da sequência: sem rampa,
+`start + (t − src_in) / velocidade × fps`; com rampa ou reverso, o inverso exato do mapa do clipe (`TimeMap.out_at`). Só as
+batidas dentro do clipe. `paint_beats` (gancho em `TimelineCanvas._paint_clip`, depois da forma de onda) desenha as marcas no
+pé do clipe — o começo de compasso mais alto e mais claro; batidas a menos de 4 px viram só os compassos, e nem eles se
+também não cabem. `snap_points` (gancho em `TimelineCanvas.snap_points`) junta as batidas de todos os clipes de som com
+batidas, menos os arrastados; vale com o ímã ligado e o botão **Ímã nas batidas** (`btn_beat_snap`, ao lado do ímã;
+preferência `musica/ima_batidas`, ligada por padrão; desabilitado com o ímã desligado). Sem atalho novo.
+
+### 46.3 Encaixar a música na duração do vídeo
+
+- **Alvo** (`fit_target`): o trecho In/Out (In sem Out = até o fim da imagem; Out sem In = do começo do clipe), senão do
+  começo do clipe ao fim do último clipe de imagem.
+- **Plano** (`fit_plan`): a música do clipe (o trecho aparado, na velocidade dele) e os começos de compasso dentro dela.
+  `KEEP_BARS` = 2 compassos ficam em cada ponta (a introdução e o final natural). Encurtar tira o **maior bloco contíguo de
+  compassos inteiros** que não deixa a música curta demais; alongar repete o **menor bloco** que basta (pedaços `[a, d_j)` +
+  `[d_i, b)`); se nem o meio inteiro basta, o meio inteiro n vezes e mais os r compassos antes do final. Entre os blocos
+  possíveis, o de centro mais perto do meio. O resto (menos de um compasso) sai do fim; mais que 0,25 s cortado pede
+  "Diminuir no fim" de até 2 s (`FADE_S`, no máximo metade do último pedaço).
+- **Tempo**: cada emenda cai num quadro inteiro e o pedaço seguinte começa um pouquinho antes ou depois do começo do
+  compasso, para os compassos continuarem na mesma grade (o teste confere a 128 BPM e 25 qps). Cada emenda leva a transição
+  de som que já existe (`transicao`, potência constante, centrada no corte, §16) de uma batida (no máximo 5 s).
+- **Recusas** (com a mensagem): batidas sem confiança, rampa/reverso, música curta demais (introdução + final + 1 compasso),
+  alvo menor que introdução + final, faixa travada, clipe ligado a outro, outro clipe na faixa dentro do alvo
+  (`fit_blockers`). Quando a música é mais longa que o alvo, a recusa oferece a saída simples (`fade_plan`: acabar no alvo
+  com "Diminuir no fim").
+- **Aplicar** (`apply_fit`): o primeiro pedaço é o próprio clipe; os outros, clipes novos do mesmo arquivo com os mesmos
+  ajustes (`fade_in` 0, `transicao` da emenda) e as chaves presas à música (`key_off` acompanha `src_in`); "Diminuir no fim"
+  só no último. Tudo por `TimelineModel.apply_edit(fn, kind)` (gancho novo: roda `fn(seq)` dentro de `keep_main` e grava
+  **um** passo do desfazer se a sequência mudou).
+
+### 46.4 Abaixar a música sob a voz
+
+- **Clipes**: os clipes de som selecionados (se o clicado está entre eles) ou só o clicado. **Faixas com voz**: diálogo com
+  as outras faixas de som, marcadas por padrão as que têm clipes tocando junto (`voice_tracks_for`), mais a profundidade
+  (−12 dB), a descida (0,3 s) e a volta (0,6 s), lembradas em `musica/ducking_db`, `musica/ducking_ataque` e
+  `musica/ducking_liberacao`.
+- **Voz**: `voice_mix` (cópia só com o som das faixas de voz, sem solo; o mudo vale) mixada por `audiomix.render_mix` no
+  trecho das músicas (o mesmo som da exportação), numa thread de trabalho (chave `abaixar_musica`).
+- **Fala** (`speech_regions`): mono a 16 kHz, janelas de 20 ms a cada 10 ms; fala = energia acima de (percentil 95 − 30 dB),
+  nunca abaixo de −55 dBFS, **e** planura espectral de 100 Hz a 4 kHz abaixo de 0,35 (ruído branco dá ~0,56: chiado e
+  vento não contam); cada janela vale mais 0,2 s; falas a menos de 1 s viram uma; trechos de menos de 0,1 s caem.
+- **Chaves** (`duck_spans` + `apply_duck`): por fala, chaves em `início − descida` (o volume de antes), `início` e `fim`
+  (o volume dali menos a profundidade, no mínimo −60 dB) e `fim + volta` (o volume de antes); descidas que se tocariam viram
+  uma; ponta fora do clipe = o clipe começa/acaba embaixo. São chaves de volume comuns (`ANIMATABLE_AUDIO`, interpoladas em
+  dB pela mixagem), editáveis depois. Chaves que já estavam dentro de uma descida (`duck_conflicts`): a interface pergunta
+  **Substituir** ou cancelar; substituir apaga essas e o volume de fora volta a valer nas pontas. Um passo do desfazer
+  (`apply_edit(…, "values")`).
+
+### 46.5 Correção à mão das batidas
+
+O detector às vezes acha a metade ou o dobro do andamento (87 em vez de 174 BPM) e só conhece compasso de 4. No menu do
+clipe de som com batidas: **Andamento ×2**, **Andamento ÷2**, **Compasso de 3** / **Compasso de 4** (marcado o de agora) e
+**Voltar ao detectado** (só com correção).
+
+- **Onde fica**: na **fonte** (o arquivo da música), não no clipe: `timeline.Source.beats_fix`, `"batidas"` no JSON da fonte,
+  `{"fator": 2 | 0.5, "compasso": 3}` com **só as chaves que não são neutras** (fator 1 e compasso 4 não se gravam; sem
+  correção o campo nem existe). `timeline.clean_beats_fix` confere na leitura. Uma linha em `timeline.FEATURES_V6`
+  (`batidas_corrigidas`): só com correção o projeto vai para o formato 6; sem ela a 1.7 ainda o abre. Vale para todos os clipes
+  do arquivo na sequência; cada sequência tem a sua fonte (uma música usada em duas sequências corrige-se em cada uma).
+- **O cache não muda**: `analyze_file`/`cached` guardam o resultado cru, pelo carimbo do arquivo. A correção é a função
+  pura `batidas.corrected(beats, factor, bar)` (`corrected_by(beats, fix)` com o dicionário da fonte): mesmo resultado em
+  qualquer máquina, sem decodificar nada. Sem correção devolve o próprio objeto.
+- **×2**: uma batida nova no meio exato `(t_i + t_{i+1}) / 2` de cada par (as de antes ficam); BPM × 2. **÷2**: uma batida
+  sim, outra não; a paridade que guarda **mais começos de compasso detectados** (desempate: maior acento somado; depois, a de
+  índice par); BPM ÷ 2. Os atalhos andam entre metade, detectado e dobro: ×2 sobre ÷2 volta ao detectado.
+- **Compasso**: o resultado cru guarda o **acento** de cada batida (`Beats.accents`, as mesmas contas do detector,
+  `_accents`; por isso `VERSION` do cache subiu para 2). Os compassos de `bar` batidas (3 ou 4) são refeitos pela fase de
+  maior acento médio (`_phase`, a conta do detector parametrizada) e `bar_confidence` é a dessa fase. Batida inserida pelo
+  ×2 tem acento 0 (contratempo). Sem acentos (resultado montado à mão) fica a fase que mantém o primeiro começo de compasso
+  que já havia. A confiança do andamento é a do detector (`confidence` não muda); `Beats.bar` diz 3 ou 4 e o texto da
+  interface passa a "compassos de 3 estimados".
+- **Quem usa**: `MusicUI.beats_for(path)` devolve as batidas **já corrigidas** (memória por arquivo, refeita se o cru ou a
+  correção mudam) e é o que usam as marcas do clipe, o ímã nas batidas, o encaixe (`fit_plan` corta nos compassos corrigidos)
+  e a descrição. `MusicUI.raw_beats(path)` é o cru. `MusicUI.set_fix(path, factor, bar, reset)` grava a correção num único
+  passo do desfazer (`apply_edit(…, "values")`); desfazer e refazer trazem as marcas de volta.
+
+
+## 47. Efeitos sonoros e sons CC0
+
+Frente X da 1.8 (#39, onda B). Módulo Beta `efeitos_sonoros` (grupo "audio", começa desligado; só esconde as
+ferramentas: o submenu "Efeito sonoro" e o "Buscar sons (CC0)…" no **Novo** da Mídia, o editor no inspetor de som, o botão
+**Efeitos** e o Ctrl+Alt+E). Três peças: efeitos feitos pelo app (`sfx.py`), pôr efeitos sozinho (`sfx_auto.py`) e a busca de
+sons CC0 com o crédito (`sons_cc0.py`). Interface em `ui/sfx_ui.py` (ponto único de ligação, `install(win)`),
+`ui/sons_cc0_ui.py` e `ui/pages/sons.py`. Testes: `tests/test_sfx.py`, `tests/test_sfx_auto.py`, `tests/test_sons_cc0.py` e
+`tests/sfx_ui_cases.py` (via `tests/test_sfx_ui.py`).
+
+### 47.1 A fonte "efeito" e o JSON
+
+- `timeline.SOURCE_KINDS` ganhou `"efeito"` (no fim). A fonte vem de `Source.virtual` com `has_video=False`,
+  `has_audio=True` e sem fim (como um título: o clipe dá a duração; `insert_media` cria só o clipe de som). Os dados em
+  `Source.data` ("dados" no JSON): `efeito` (id de `sfx.EFFECTS`), `nome`, os campos do tipo (`generators.Field`, chaves sem
+  acento: `intensidade`, `brilho`, `largura`, `semente` em todos; `tom` no riser; `grave` no impacto; `ritmo`, `sino` e
+  `tecla` na máquina; `intervalo` no obturador) e, postos pelo planejador, `toques`/`retornos` (segundos desde o começo do
+  clipe) e `auto` (a marca do que pediu o efeito).
+- `timeline.DEFAULT_SECONDS[tipo]` (novo, `fn(fonte) -> s`): a duração de um clipe novo de uma fonte sem fim; o efeito
+  registra `sfx.default_seconds` (whoosh 1 s, swish 0,4, riser 3, impacto 2, clique 0,2, máquina 3, obturador 0,5). Sem
+  registro, `IMAGE_SECONDS` como antes.
+- `FEATURES_V6`: `"efeito_sonoro"` (uma fonte usada de tipo "efeito") e `"credito_som"` (uma fonte usada com `credit`). A 1.7
+  leria a fonte "efeito" como um arquivo que não existe e perderia o crédito ao salvar, então recusa o projeto pelo formato 6.
+- `modules.used_by` marca `efeitos_sonoros` pela fonte "efeito" (e não marca mais `titulos_geradores` por ela).
+
+### 47.2 Síntese (`sfx.py`)
+
+Tudo em numpy, 48 kHz estéreo, sem amostras gravadas. **Determinismo**: o ruído é um hash inteiro de 32 bits (lowbias32) do
+índice da amostra e da `semente` (`white`, `_unit`); nada de `random` nem relógio. Ruído moldado (`shaped_noise`): STFT de
+1024 pontos com salto de 256 e janela seno (análise e síntese), um sino no log da frequência que anda no tempo, em blocos de
+`NOISE_BLOCK` quadros (memória limitada). `render(dados, n)`: o efeito em `n` amostras, fade de 4 ms no fim e o pico do
+trecho em `PEAK × intensidade` (−1 dBFS em 100%: nunca satura); passando de `MAX_SECONDS` (120 s), o resto é silêncio.
+
+| Efeito | Como é feito |
+|---|---|
+| whoosh / swish | ruído num passa-banda que sobe e desce (pico em 62% / 42% do clipe), envelope seno², passa de um lado ao outro com a largura |
+| riser | ruído que sobe de 220 Hz a ~6,5 kHz com volume em u^2,2, mais um tom em glissando de três oitavas (`tom`), desafinado ±4 cents entre os lados |
+| impacto | estrondo grave (38 Hz + queda exponencial), golpe de ruído brilhante (14 ms) e cauda que cabe no clipe (τ = clipe/4) |
+| clique | dois toques curtos (seno amortecido + sopro de ruído), 8 ms entre eles |
+| máquina | uma tecla por toque (estalo, corpo, "clac", variação por tecla) com o carro andando da esquerda para a direita; sino e retorno do carro (catraca + deslizar) na troca de linha; `tecla = "clique"` troca por cliques |
+| obturador | dois estalos mecânicos (abrir com a batida do espelho e fechar), `intervalo` ms entre eles |
+
+`VERSION` muda quando a síntese muda (os WAVs antigos deixam de valer pelo nome).
+
+### 47.3 Na mixagem: entrada derivada do clipe
+
+Decisão: o efeito **não** tem caminho próprio de som. `audiomix.segments` trata o clipe de efeito como um clipe de arquivo cuja
+entrada é um WAV gerado (`sfx.effect_input`, chamado antes de `somlimpo.clean_input`), como o WAV de uma aninhada (§41.5) e a
+entrada limpa (§44): o WAV cobre o trecho da fonte que o clipe mostra (`Sequence.source_range`) mais `MARGIN_S` (0,1 s) de
+silêncio e as sobras de uma transição; os tempos do "arquivo" (`src_in`; numa rampa/reverso, os pedaços e `length`) passam a
+contar do começo do WAV. O nome é o SHA-1 de (`VERSION`, `sound_data(dados)`, amostras antes/corpo/depois), na pasta
+`effect_dir()` (temporário do sistema, `pelicula_som_efeitos`, até 512 MB). `somcache.CONTENT_NAMED_DIRS` recebe
+`sfx.effect_dir` (a chave do pedaço usa só o caminho) e `somcache.PRERENDER` começa com `sfx.render_inputs` (antes da limpeza,
+que pode ler o WAV do efeito); o grafo único (`audiomix._render_nested`) chama os dois na mesma ordem (`_derived_inputs`).
+`mix_key` ganhou `"efeitos"` (os dados que mudam o som de cada fonte de efeito usada; nome e `auto` não contam), só quando
+há. Com isso volume, chaves, EQ, fades, balanço, velocidade, mudo/solo, ganho e balanço da faixa, stems, o som de película e
+as sequências aninhadas valem sem regra nova, e a chave do pedaço é (tipo, campos, `VERSION`, trecho) pelo nome do WAV.
+`audiomix.has_audio` passa a ver o efeito, então a exportação mixa uma montagem só com efeitos.
+
+### 47.4 Pôr efeitos sozinho (`sfx_auto.py`)
+
+`plan(seq, Options, glyphs=)` → `[Placement(effect, start, dur, tag, data)]` em quadros da sequência; `apply(seq, plano)`
+põe os clipes; a interface faz `commit` → `apply` dentro de `keep_main` → `_done("structure")` (um passo do desfazer).
+
+| Regra | Onde |
+|---|---|
+| whoosh (`transicoes`) | entrada ≠ corte: termina no fim da transição (`transition_frames`); saída ≠ corte: termina no fim do clipe (pula se o próximo colado tem entrada); dura a transição, de 0,4 a 2 s |
+| impacto (`impactos`, desligado) | corte seco na V1 com clipe colado antes de outra fonte; começa no corte |
+| swish (`titulos`) | título (fonte "texto") sem entrada "maquina": começa 0,17 s antes (o pico do swish de 0,4 s no 1º quadro) |
+| máquina (`maquina`, `tecla`) | título com entrada "maquina": um toque por letra no quadro em que `titles.motion` revela a letra (`floor(p·n)` com `clip_time`, como `titles.render`); k letras num quadro se espalham dentro dele; `retornos` 60 ms depois da última letra de cada linha; o clipe vai até a última tecla + 0,6 s |
+| obturador (`congelados`) | clipe congelado, ou imagem parada com clipe colado antes; começa no 1º quadro |
+| riser (`marcadores`, `cor_marcador`) | marcador com "!" no nome (ou da cor escolhida): termina no quadro do marcador, até 3 s (pula com menos de 0,5 s) |
+
+As letras de um título (`title_glyphs`) são contadas como `titles._glyph_map` (glifos das palavras, linha a linha, pelo
+`textrender`, que precisa de uma `QGuiApplication`); os testes podem passar `glyphs=`. **Sem repetir**: cada efeito leva
+`data["auto"]` = `transicao:<clipe>:entrada|saida`, `corte:<clipe>`, `titulo:<clipe>`, `parado:<clipe>` ou
+`marcador:<id>`, e `plan` pula as marcas das fontes usadas. **Faixa**: a primeira faixa de som destravada chamada
+"Efeitos" (ou o nome traduzido) livre no trecho; senão uma nova com esse nome. Nunca cobre clipe. Semente de cada efeito =
+crc32 da marca (cada whoosh soa um pouco diferente, sempre igual no mesmo lugar).
+
+### 47.5 Sons CC0 (`sons_cc0.py`, sem Qt)
+
+- **Openverse** sem chave: `GET https://api.openverse.org/v1/audio/?q=…&license=cc0&page_size=20` (duração em ms; `url` é o
+  arquivo e a prévia; `foreign_landing_url` é a página). **Freesound** só com a chave da pessoa (preferência
+  `sons_cc0/freesound_chave`, Configurações › Sons livres; nunca no projeto, mascarada na tela):
+  `GET https://freesound.org/apiv2/search/text/?query=…&filter=license:"Creative Commons 0"&fields=id,name,username,license,previews,duration,url&token=…`.
+  Do Freesound baixamos `preview-hq-mp3` (o original pede OAuth; a janela diz isso).
+- **Só CC0** (`is_cc0_openverse`: `license == "cc0"`; `is_cc0_freesound`: URL `publicdomain/zero` ou "Creative Commons 0"),
+  mesmo que a API mande outra coisa. `merge` tira o mesmo som das duas fontes (título e autor; fica o do Freesound).
+- **Rede**: `urllib` com `TIMEOUT` 10 s, `User-Agent: PeliculaConverter/<versão>` (nada da pessoa), JSON até 4 MB; erros
+  viram `NetError` com texto em PT-BR (chave recusada, muitas buscas, sem conexão, tempo esgotado, resposta estranha); uma
+  fonte que falha não derruba a outra. Download num `.parte` ao lado e troca no fim; limite de 200 MB (40 MB na prévia); já
+  baixado = reaproveitado. Nada vai para a rede antes de "Buscar"; nos testes o `opener` é falso e o `urlopen` de verdade falha.
+- **Pastas** (`target_dir`): `<projeto>_sons/` ao lado do `.plc`; sem projeto salvo, `config_dir()/sons_cc0/`. Prévias em
+  `<temp>/pelicula_sons_cc0_previa/`. Nome (`file_name`): título, autor, origem e id, sem caracteres proibidos.
+- **Crédito**: `Source.credit` (novo campo; `"credito": {"titulo","autor","licenca","url","origem"}` no JSON, só quando há,
+  conferido por `timeline.clean_credit`). "Adicionar à Mídia" abre o arquivo pelo `_probe_source` da janela e põe o crédito
+  na fonte (e na da montagem, se já estava lá).
+- **Exportação**: `export_credits(job, início, fim)` no fim de `export.run_job` (depois do `.srt`) e de `somexport.run`:
+  `credits_for(seq, a, b)` (clipes de som que tocam no trecho, mudo/solo valem, e dentro de aninhadas no trecho que o clipe
+  mostra) → `<saída sem extensão>.creditos.txt` (cabeçalho e uma linha por som: título — autor — licença — URL) e
+  `ExportJob.note` (novo) = "Créditos dos sons em …", mostrado na fila, na barra de status e no terminal. Falha ao gravar não
+  derruba a exportação (a nota diz o que faltou). `pelicula-cli info projeto.plc` lista os créditos (`"creditos"` no
+  `--json`; `project_credits`), e `exportar` grava o mesmo arquivo.
+
+### 47.6 Interface
+
+`sfx_ui.install(win)` (depois do `scrub_ui`): o submenu e o "Buscar sons (CC0)…" entram no menu do botão **Novo** da
+Mídia (`btn_new`, que é de `titulos_geradores`: `SfxUI.apply_modules` mostra o botão com qualquer um dos dois módulos e só os
+itens de cada um); `EffectEditor` no alto da página de som do inspetor (`SectionCard` de um `params.Schema` montado dos
+`Field`, % nos de 0 a 1; com `toques`, o "Teclas por segundo" some); o botão **Efeitos** entra na barra da linha do tempo logo
+depois de **Silêncios** só pela API do `QLayout` (`takeAt`/`addItem`, sem mexer em `timeline_view.py`) e vai para a lista
+`compact` da barra; `QShortcut` Ctrl+Alt+E (só no modo Edição e com o módulo). `sons_cc0_ui.SearchDialog` (não modal, a
+mesma janela volta) faz busca, prévia e download numa thread com uma ponte de sinais; "Ouvir" toca com `QMediaPlayer`.
+
+### 47.7 Para a onda B e depois
+
+- Um som novo preso a um quadro: crie uma fonte `sfx.new_source(id, seq, **campos)` e um clipe de som; ou registre um tipo
+  em `sfx.EFFECTS` (id ASCII no fim de `MENU_ORDER`; campos novos com padrão que não mude o som de antes, ou suba `VERSION`).
+- Outro planejador pode reaproveitar `sfx_auto.apply` (faixa "Efeitos", sem cobrir clipes) com marcas próprias em `auto`.
+- Música e narração baixadas de fora podem usar `Source.credit` e ganham o `.creditos.txt` sem nada novo.
+- Fora desta versão: forma de onda dos clipes de efeito na linha do tempo (`_peaks_for` devolve None para fonte sem arquivo),
+  paginação da busca, filtro por duração, guardar as escolhas da janela "Pôr efeitos sonoros…".
+
+## 48. Gravar narração
+
+Issue #39 (1.8, só o som; frente "narração" da onda B). Testes em `tests/test_narracao.py` (gravador, resample, pasta,
+intervalo, faixa) e `tests/narracao_ui_cases.py` (painel e janela, com microfone falso). Arquivos: `pelicula/narracao.py` (sem
+Qt) e `pelicula/ui/narracao_ui.py`.
+
+### 48.1 Decisões
+
+- **A gravação é um arquivo comum.** Nenhum tipo de clipe novo e nenhum campo novo no JSON do projeto (nada em
+  `FEATURES_V6`): o WAV entra na Mídia (`MainWindow.adopt_source`) e na linha do tempo como qualquer áudio
+  (`TimelineModel.insert_media`), então a mixagem (§43), o som de película (§45), os stems e o aninhar o tratam como os outros.
+  QtMultimedia (`QAudioSource`) e nada mais: sem dependência nova.
+- **Canais**: 1 canal vira estéreo centrado (L = R); 2 ficam como estão; mais de 2, só os dois primeiros. Média dos canais
+  foi descartada: uma interface com o microfone só na entrada 1 perderia 6 dB.
+- **Formato do arquivo**: 48 kHz, 24 bits, estéreo (`somcache.WavWriter`, o mesmo WAV de todo o som da montagem).
+- **Atraso do microfone** (`narracao/atraso_ms`): o começo do arquivo é cortado por esse tempo, **à amostra** (em vez de
+  adiantar o clipe em quadros): não depende do fps nem esbarra no quadro 0, e o clipe continua começando exatamente onde a
+  gravação começou. Para medir: grave uma palma junto com o bipe de **Novo ▸ Ponta com contagem** com a prévia tocando e veja na forma
+  de onda quantos milissegundos a palma ficou depois do bipe; digite esse valor.
+- **Sem módulo.** É parte da linha do tempo (como o mixer e o som ao arrastar o cursor), tem o próprio botão e não esconde
+  nada que a renderização use.
+
+### 48.2 O gravador (`pelicula/narracao.py`)
+
+- `Recorder(path, rate, channels, fmt, skip_s=, max_s=)`: `feed(bytes)` aceita blocos de qualquer tamanho (um quadro cortado
+  no meio fica para o próximo), nos formatos `uint8`, `int16`, `int32` e `float32`. Devolve o `Level` (pico e RMS lineares do
+  bloco). 48 kHz passa direto, sem conta nenhuma; as outras taxas vão pelo `Resampler`. Grava num parcial
+  (`system.partial_path`) e `finish()` troca de nome de uma vez, devolvendo a `Take` (caminho, amostras, pico); `cancel()`, uma
+  gravação vazia e um erro de escrita não deixam nem o parcial nem o arquivo. `full` fica verdadeiro quando chegou em
+  `max_s` (o arquivo é cortado na amostra e o resto é ignorado); `silent_run` conta os quadros seguidos de zeros exatos
+  (microfone mudo no sistema).
+- `Resampler(src, dst)`: sinc com janela de Kaiser (β 8,6; 24 pontos de cada lado; corte em 96% do Nyquist menor; ganho 1 em
+  DC), em fluxo. A posição da saída `n` é `n × src / dst` em aritmética inteira (parte inteira e fração exatas): a saída
+  não depende de como os blocos chegaram e não acumula erro. Total de saída = `round(entrada × dst / src)` (44,1 → 48 kHz:
+  1 s → 48000 amostras). Uns 0,2× do tempo real num núcleo.
+- `BackgroundRecorder`: o mesmo gravador numa thread (`narracao`) com uma fila; `feed` só põe os bytes. `level`, `frames`,
+  `full`, `silent_run` e `error` podem ser lidos de qualquer thread; `finish()` espera a fila esvaziar.
+- Contas: `take_folder(projeto)`, `next_take_path(pasta)`, `plan_span(quadro, entrada, saída, fps)`, `free_track(seq, início,
+  duração)` e `place_take(seq, fonte, início)`.
+
+### 48.3 O painel (`ui/narracao_ui.py`)
+
+- **Botão** do microfone (`TimelineEditor.btn_narrar`) e **Ctrl+Shift+R**: fechado, abre o painel; aberto, grava / para
+  (o atalho é da aplicação, então vale também com o foco no painel). O painel é uma janela de ferramenta sem modal: a prévia
+  e a linha do tempo continuam à mão.
+- **Microfone**: `QMediaDevices.audioInputs()`, o padrão do sistema pré-escolhido; a escolha fica em `narracao/dispositivo`
+  (id em hexadecimal). O `QAudioSource` abre no formato que o próprio microfone prefere (`preferredFormat`) e só é pedido
+  um formato simples (48 kHz, 1 canal, 16 bits) se esse não for legível. O medidor de nível anda assim que o painel abre
+  (a captura fica aberta enquanto o painel está; fechar o painel solta o microfone).
+- **Fluxo**: Gravar → `plan_span` (começa na **entrada** se marcada, senão no cursor; para sozinho na **saída** se ela vem
+  depois do começo) → pasta e nome do arquivo → contagem 3, 2, 1 com bipes (`Beeper`, o `QAudioSink` do scrub: sem tela nada
+  toca) → abre o `BackgroundRecorder` e, com **Tocar a montagem enquanto grava**, `MainWindow.start_play(início)` no mesmo
+  instante (o *Repetir* é desligado enquanto grava e volta depois) → Parar (ou a saída) → `finish()` → `_insert`.
+- **Inserção**: `media.probe_source` → `adopt_source` → `model.commit()` → `place_take` (a faixa de áudio **"Narração"** livre
+  em [início, início + duração) tem a preferência, senão a primeira destravada e livre; se nenhuma serve, cria uma "Narração"
+  nova) → `TimelineModel.insert_media(src, at=início, atrack=faixa)`. A faixa nova, o nome e o clipe entram **num passo só do
+  desfazer**; o clipe fica selecionado e o cursor volta ao começo dele. A faixa só é criada depois de parar (a duração real
+  decide se cabe).
+- **Arquivos**: `<projeto>_narracao/narracao_001.wav` ao lado do `.plc` salvo (o número é o maior da pasta + 1: nunca
+  sobrescreve); sem projeto salvo, `narracao/` na pasta do app (`deps.app_data_dir()`), com um aviso na barra de status.
+  Salvar o projeto depois não move nada: ele passa a apontar para os arquivos onde estão. Se a pasta do projeto não deixa
+  gravar, cai na do app com um aviso.
+- **Erros**, sempre com mensagem e sem nada inserido: sem microfone (botão desligado), acesso negado
+  (`QMicrophonePermission`; no Windows e no Linux costuma ser "pode"), dispositivo que não abre, microfone que falha ou
+  é desconectado durante a gravação (a gravação é descartada, inclusive o parcial), disco que falha, gravação vazia, e o
+  projeto trocado no meio (o WAV fica só na Mídia). Avisos sem descartar: só zeros por 1,5 s ("o microfone só está mandando
+  silêncio"), pico a 0 dBFS (estourou) e pico abaixo de −40 dBFS (muito baixa).
+- **Preferências** (`prefs.settings()`): `narracao/dispositivo`, `narracao/contagem` e `narracao/tocar` (`"true"`/`"false"`;
+  ligadas se não há valor) e `narracao/atraso_ms` (0 a 500).
+- **Testes**: `NarrationUI(win, device_factory=, devices=, beep=)`; os casos trocam os três e nunca abrem um dispositivo.
+
+### 48.4 Limites
+
+O som da prévia começa um pouco depois do microfone (o `QMediaPlayer` demora a tocar); por isso o atraso é um número que o
+usuário mede, e não uma constante. A gravação não passa pelo som de película nem por nada da cadeia do clipe antes de entrar:
+ela é o arquivo cru, e é a mixagem (§43) quem a trata. Dois microfones ao mesmo tempo e gravar em várias faixas ficaram de fora.

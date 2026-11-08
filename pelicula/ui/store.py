@@ -82,6 +82,27 @@ class ParamStore(QObject):
         if record:
             self.commit()
 
+    def history_state(self) -> tuple[list, int]:
+        """O desfazer de agora (1.8: cada look, o do projeto e o próprio de cada sequência, guarda o seu)."""
+        self.commit()
+        return list(self._hist), self._pos
+
+    def load(self, values: dict[str, Any], keys: dict | None, history: tuple[list, int] | None = None) -> None:
+        """Troca o look inteiro sem ser um passo do desfazer (1.8: outro look entrou em edição). `history`: o desfazer
+        que ele tinha (`history_state`); None = começa do zero."""
+        self._timer.stop()
+        self.values = self.schema.sanitize(values)
+        self.keys = keyframes.clean_keys(self.schema, keys or {})
+        if history is not None and history[0]:
+            self._hist, self._pos = list(history[0]), min(max(int(history[1]), 0), len(history[0]) - 1)
+            if self._hist[self._pos] != self._entry():
+                self._hist = self._hist[: self._pos + 1] + [self._entry()]
+                self._pos = len(self._hist) - 1
+        else:
+            self._hist, self._pos = [self._entry()], 0
+        self.changed.emit("*")
+        self.historyChanged.emit()
+
     def _auto_key(self, p: params.Param, value: Any, record: bool) -> None:
         """Ajuste animado mexido no controle: grava (ou troca) a chave do quadro do cursor, com a curva que a
         chave dali já tinha."""

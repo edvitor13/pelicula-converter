@@ -972,9 +972,10 @@ def test_the_frame_cache_depends_on_every_parameter(gl_engine, renderer, monkeyp
 # ------------------------------------------------------------------ som
 @pytest.fixture
 def mix_dir(tmp_path, monkeypatch):
-    """Os WAVs das sequências aninhadas numa pasta do teste."""
+    """Os WAVs das sequências aninhadas numa pasta do teste (e, desde a 1.8, o cache do som de cada clipe também)."""
     d = tmp_path / "som_aninhado"
     monkeypatch.setattr(audiomix, "nested_dir", lambda: d)
+    monkeypatch.setenv("PELICULA_SOM_CACHE", str(tmp_path / "som_clipes"))
     return d
 
 
@@ -1332,7 +1333,7 @@ def test_cli_exports_a_saved_project_with_a_nested_clip(gl_engine, clips_media, 
         assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "ffv1", "-q"]) == 0, capsys.readouterr().err
         got.append(_decoded(out, ffmpeg_ok, tmp_path))
     raw = project.load(str(tmp_path / "gemea.plc"))
-    assert raw.to_json()["formato"] == project.FORMAT
+    assert raw.to_json()["formato"] == project.FORMAT_17
     assert "sequencia_aninhada" in tl.Sequence.from_json(raw.sequence).features()
     (fa, sa), (fb, sb) = got
     assert len(fa) == len(fb) == flat.duration
@@ -1368,3 +1369,37 @@ def test_inner_sequence_at_another_fps_gives_its_own_frames_and_sound(gl_engine,
         b = gl_engine.compose(sequence.grab(inner, f, W, H, 16), inner, W, H, 16)
         assert np.array_equal(a, b), f"quadro {t}: {_first_diff(a, b)}"
     _same_sound(_mix(inner, tmp_path / "dentro.wav"), _mix(outer, tmp_path / "fora.wav"), 0.0)
+
+
+# ------------------------------------------------------------------ 1.8 (#67): look próprio da sequência de dentro
+@pytest.mark.gpu
+@pytest.mark.ffmpeg
+def test_inner_own_look_is_ignored_inside_and_used_when_it_is_exported(gl_engine, clips_media, qapp, ffmpeg_ok, tmp_path,
+                                                                      mix_dir, capsys):
+    """A decisão da #67: a sequência de dentro com look próprio entra sem look na de fora (a gêmea continua bit a bit com
+    o look de fora, uma vez) e, exportada sozinha (`--sequencia`), sai com o look dela."""
+    from pelicula import cli, project
+    other = "lab_technicolor3"
+    flat = e2e_montage(clips_media, qapp)
+    twin = twin_of(flat)
+    inner = twin.family()[1]
+    inner.look = tl.SeqLook(_look(other), other)
+    got = {}
+    runs = (("plano", flat, LOOK, []), ("plano_outro", flat, other, []), ("gemea", twin, LOOK, []),
+            ("dentro", twin, LOOK, ["--sequencia", inner.id]))
+    for name, seq, look, extra in runs:
+        plc = tmp_path / f"{name}.plc"
+        project.save(project.Project(values=_look(look), preset_id=look, sequence=seq.to_json()), str(plc))
+        out = tmp_path / f"{name}.mkv"
+        assert cli.main(["exportar", str(plc), "-o", str(out), "--qualidade", "ffv1", "-q", *extra]) == 0, \
+            capsys.readouterr().err
+        got[name] = _decoded(out, ffmpeg_ok, tmp_path)
+    raw = project.load(str(tmp_path / "gemea.plc")).to_json()
+    assert raw["formato"] == project.FORMAT and "look_proprio" in raw["recursos"]
+    for a_name, b_name in (("plano", "gemea"), ("plano_outro", "dentro")):
+        (fa, sa), (fb, sb) = got[a_name], got[b_name]
+        assert len(fa) == len(fb) == flat.duration
+        for t, (a, b) in enumerate(zip(fa, fb)):
+            assert np.array_equal(a, b), f"{b_name}, quadro {t}: {_first_diff(a, b)}"
+        _same_sound(sa, sb, 0.0)
+    assert not np.array_equal(got["plano"][0][30], got["plano_outro"][0][30])  # os dois looks são outros mesmo

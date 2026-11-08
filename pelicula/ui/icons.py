@@ -494,6 +494,38 @@ def _draw_edit(name: str, p: QPainter, c: QColor) -> None:
         p.setBrush(QBrush(c))
         p.drawRect(QRectF(7, 10, 2, 9))
         p.drawRect(QRectF(15, 7, 2, 12))
+    elif name == "mixer":
+        # 1.8, mixer: três faders com os botões em alturas diferentes.
+        _pen(p, c)
+        for x, y in ((6, 14), (12, 8), (18, 12)):
+            p.drawLine(QPointF(x, 4), QPointF(x, 20))
+            p.setBrush(QBrush(c))
+            p.drawRoundedRect(QRectF(x - 2.5, y - 1.5, 5, 3), 1, 1)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+    elif name == "scrub":
+        # 1.8, som ao arrastar o cursor: o cursor da linha do tempo com ondas de som dos dois lados.
+        _pen(p, c)
+        p.drawLine(QPointF(12, 3), QPointF(12, 21))
+        p.setBrush(QBrush(c))
+        p.drawPolygon([QPointF(9, 3), QPointF(15, 3), QPointF(12, 6.5)])
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawArc(QRectF(2.5, 9, 7, 8), 100 * 16, 160 * 16)
+        p.drawArc(QRectF(14.5, 9, 7, 8), -80 * 16, 160 * 16)
+    elif name == "mic":
+        # 1.8, gravar narração: microfone de mesa (cápsula, arco do suporte e pé).
+        _pen(p, c)
+        p.drawRoundedRect(QRectF(8.5, 3, 7, 11.5), 3.5, 3.5)
+        p.drawArc(QRectF(5, 8, 14, 11), 190 * 16, 160 * 16)
+        p.drawLine(QPointF(12, 19), QPointF(12, 21.5))
+        p.drawLine(QPointF(8.5, 21.5), QPointF(15.5, 21.5))
+    elif name == "beats":
+        # 1.8, ímã nas batidas: as marcas das batidas (o começo do compasso mais alto) sob um ímã pequeno.
+        _pen(p, c)
+        for x, top in ((4, 13), (9, 17), (14, 17), (19, 17)):
+            p.drawLine(QPointF(x, top), QPointF(x, 21))
+        p.drawArc(QRectF(8, 2.5, 9, 9), 0, -180 * 16)
+        p.drawLine(QPointF(8, 7), QPointF(8, 3))
+        p.drawLine(QPointF(17, 7), QPointF(17, 3))
     else:
         _draw_components(name, p, c)
 

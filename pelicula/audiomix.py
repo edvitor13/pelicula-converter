@@ -1,5 +1,9 @@
 """Mixagem do som da sequência do modo Edição com o ffmpeg (prévia e exportação usam a mesma função).
 
+1.8: `render_mix` renderiza cada clipe uma vez (a cadeia de filtros abaixo, sem o recorte do trecho nem o atraso) num
+cache e soma em numpy (`somcache.py`, ARQUITETURA §43). O grafo único descrito a seguir continua em `build_graph` e
+`render_mix_graph`, como referência.
+
 Cada clipe de som vira uma entrada do ffmpeg (`-ss`/`-t` no trecho usado do arquivo) e uma cadeia
 de filtros: velocidade (`atempo`), volume do clipe + da faixa, equalização (graves, médios,
 agudos), realce de voz, redução de ruído, normalização, balanço, fades, recorte para o trecho
@@ -39,7 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media, timeline
+from . import media, sfx, somlimpo, timeline
 from .i18n import _
 
 RATE = 48000
@@ -118,6 +122,8 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             if not has_audio(inner):
                 continue
             path = nested_mix_path(inner)
+        elif src is not None and src.kind == sfx.KIND:
+            path = ""  # 1.8: efeito sonoro feito pelo app (§47): o WAV dele entra no lugar do arquivo (`effect_input`)
         elif src is None or not src.is_file or not src.has_audio or not os.path.exists(c.src):
             continue  # clipes gerados não têm som
         else:
@@ -162,6 +168,7 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             "key_off": c.key_off,
             "fps": fps,
             "pre": pre,                                          # s antes do início do clipe (transição)
+            "post": post,                                        # s depois do fim do clipe (transição)
             "xf_in": sum(head) if head else 0.0,                 # transição de entrada (começa em 0)
             "xf_out": sum(tail) if tail else 0.0,                # transição de saída...
             "xf_out_st": pre + c.dur / fps - tail[0] if tail else 0.0,  # ...a partir daqui
@@ -174,6 +181,10 @@ def segments(seq: timeline.Sequence, start: int = 0, end: int = -1) -> list[dict
             out[-1]["pieces"] = m.pieces(-pre, c.dur / fps + post)
             out[-1]["reverse"] = c.reverse
             out[-1]["length"] = src.length
+        length = src.length if src is not None else 0.0
+        if src is not None and src.kind == sfx.KIND:
+            length = sfx.effect_input(out[-1], seq)
+        somlimpo.clean_input(out[-1], length)  # 1.8: ruído aprendido (§44)
     return out
 
 
@@ -254,6 +265,7 @@ def _chain_tail(seg: dict) -> list[str]:
         f.append(volume_envelope(vk, seg["pre"], seg["fps"], seg["key_off"], seg["track_db"]))
     elif abs(seg["gain_db"]) > 1e-6:
         f.append(f"volume={_fmt(seg['gain_db'])}dB")
+    f += somlimpo.hum_filters(v)  # 1.8: zumbido da rede (§44)
     if v["voz"]:
         f += ["highpass=f=90", "acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2"]
     if abs(v["graves"]) > 1e-6:
@@ -264,6 +276,7 @@ def _chain_tail(seg: dict) -> list[str]:
         f.append(f"treble=g={_fmt(v['agudos'])}:f=5000")
     if v["reducao_ruido"] > 0:
         f.append(f"afftdn=nr={_fmt(6 + 30 * v['reducao_ruido'])}:nf=-40")
+    f += somlimpo.after_eq_filters(v)  # 1.8: cortar graves/agudos e nivelar a voz (§44)
     if v["normalizar"]:
         f += ["loudnorm=I=-16:TP=-1.5:LRA=11", f"aresample={RATE}"]
     bal = float(v["balanco"])
@@ -474,9 +487,25 @@ def build_mix_cmd(seq: timeline.Sequence, out_path: str, start: int = 0, end: in
 
 
 def render_mix(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
-               cancel: threading.Event | None = None, perf: media.Perf | None = None) -> bool:
-    """Grava o som do trecho num WAV. False se o trecho não tem som ou foi cancelado; erro do ffmpeg vira RuntimeError
-    (também o de uma sequência aninhada, que é mixada antes com o mesmo `cancel`)."""
+               cancel: threading.Event | None = None, perf: media.Perf | None = None, *,
+               track_peaks: bool = False) -> bool:
+    """Grava o som do trecho num WAV (24 bits, 48 kHz estéreo). False se o trecho não tem som ou foi cancelado; erro do
+    ffmpeg vira RuntimeError (também o de uma sequência aninhada, que é mixada antes com o mesmo `cancel`).
+
+    1.8: o som de cada clipe sai do cache por clipe e a soma é feita em numpy (`somcache.mix`, ARQUITETURA §43); o
+    grafo único de antes ficou em `render_mix_graph`, a referência dos testes. `track_peaks`: grava ao lado do WAV os
+    picos de cada faixa a cada 10 ms (`somcache.save_peaks`; os medidores do mixer da prévia)."""
+    from . import somcache
+    res = somcache.mix(seq, out_path, start, end, cancel, perf, with_peaks=track_peaks)
+    if res is not None and track_peaks:
+        somcache.save_peaks(res)
+    return res is not None
+
+
+def render_mix_graph(seq: timeline.Sequence, out_path: str, start: int = 0, end: int = -1,
+                     cancel: threading.Event | None = None, perf: media.Perf | None = None) -> bool:
+    """O caminho de antes da 1.8: o trecho inteiro num grafo só do ffmpeg (`build_graph`). Fica como referência dos
+    testes (a soma do cache tem de dar o mesmo som) e para depurar. False se o trecho não tem som ou foi cancelado."""
     g = build_graph(seq, start, end)
     if g is None or not _render_nested(seq, start, end, cancel, perf):
         return False
@@ -541,6 +570,9 @@ def mix_key(seq: timeline.Sequence) -> str:
     tns = tones(seq)
     if tns:  # o bipe da ponta: muda com o clipe gerado (que é de vídeo)
         data["tons"] = sorted([t["onset"], t["samples"], t["freq"], t["gain_db"], t["phase"]] for t in tns)
+    effects = {p: sfx.sound_data(s.data) for p, s in seq.sources.items() if p in used and s.kind == sfx.KIND}
+    if effects:  # 1.8: os campos de um efeito sonoro (§47) mudam o som
+        data["efeitos"] = effects
     nested = {c.src: mix_key(inner) for c in clips if (inner := seq.nested(c)) is not None}
     if nested:  # 1.7: o som de dentro, em qualquer nível
         data["aninhadas"] = nested
@@ -579,10 +611,16 @@ def nested_mix_path(inner: timeline.Sequence) -> str:
 
 def _prune_nested(keep: set[str]) -> None:
     """Tira os WAVs mais antigos até caber em `NEST_MAX_BYTES`, menos os de `keep` e os usados há pouco."""
+    _prune_dir(nested_dir(), keep, NEST_MAX_BYTES)
+
+
+def _prune_dir(folder: Path, keep: set[str], max_bytes: int) -> None:
+    """A limpeza das pastas de cache de som (sequências aninhadas e, na 1.8, os pedaços de `somcache`): tira os WAVs mais
+    antigos até caber em `max_bytes`, menos os de `keep` e os usados há menos de `NEST_KEEP_S`."""
     now = time.time()
     found = []
     try:
-        for e in os.scandir(nested_dir()):
+        for e in os.scandir(folder):
             if e.is_file() and e.name.endswith(".wav"):
                 st = e.stat()
                 found.append((st.st_mtime, st.st_size, e.path))
@@ -590,7 +628,7 @@ def _prune_nested(keep: set[str]) -> None:
         return
     total = sum(f[1] for f in found)
     for mtime, size, path in sorted(found):
-        if total <= NEST_MAX_BYTES:
+        if total <= max_bytes:
             break
         if path in keep or now - mtime < NEST_KEEP_S:
             continue
@@ -600,17 +638,18 @@ def _prune_nested(keep: set[str]) -> None:
 
 
 def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threading.Event | None,
-                   perf: media.Perf | None) -> bool:
+                   perf: media.Perf | None, clean: bool = True) -> bool:
     """Deixa prontos os WAVs das sequências que tocam no trecho (`segments`), em qualquer nível. O WAV inteiro de cada uma:
     é ele que o nome identifica. Grava num parcial e troca no fim, então outra mixagem ao mesmo tempo nunca lê pela metade.
-    False se foi cancelado; erro do ffmpeg vira RuntimeError."""
+    `clean`: grava também as entradas limpas do trecho (§44; o grafo único precisa; o cache da §43 grava as dele pelo
+    `somcache.PRERENDER`, com os segmentos da sequência inteira). False se foi cancelado; erro do ffmpeg vira RuntimeError."""
     wanted = {}
     for seg in segments(seq, start, end):
         inner = seq.nested(seg["clip"])
         if inner is not None:
             wanted[seg["path"]] = inner
     if not wanted:
-        return True
+        return not clean or _derived_inputs(seq, start, end, cancel, perf)  # 1.8: efeitos e entradas limpas
     nested_dir().mkdir(parents=True, exist_ok=True)
     keep = {nested_mix_path(s) for root in wanted.values() for s in root.closure()}
     _prune_nested(keep)
@@ -630,7 +669,15 @@ def _render_nested(seq: timeline.Sequence, start: int, end: int, cancel: threadi
             os.replace(part, path)
         finally:
             _remove(part)
-    return True
+    return not clean or _derived_inputs(seq, start, end, cancel, perf)  # 1.8: depois das aninhadas
+
+
+def _derived_inputs(seq: timeline.Sequence, start: int, end: int, cancel: threading.Event | None,
+                    perf: media.Perf | None) -> bool:
+    """As entradas derivadas do trecho no grafo único (a mesma ordem de `somcache.PRERENDER`): os WAVs dos efeitos
+    sonoros (§47) e depois as entradas limpas (§44), que podem ler um deles."""
+    segs = segments(seq, start, end)
+    return sfx.render_inputs(segs, cancel, perf) and somlimpo.render_inputs(segs, cancel, perf)
 
 
 # ------------------------------------------------------------------ forma de onda
