@@ -1,3 +1,29 @@
+## Versión 1.9.0 — 9 de noviembre de 2026
+
+**Efectos visuales en el clip: recorte, máscaras, estabilización, luz, atmósfera y tiempo de la imagen.**
+
+- 🟩 **Recorte y máscaras (Beta).** Quitar el fondo verde, azul, de un color elegido o por el brillo, con supresión del reflejo del fondo y luz en el borde. Máscara de rectángulo, elipse o polígono para recortar, desenfocar o pixelar, con controles en la vista previa.
+- 🎥 **Estabilizar y seguir un punto (Beta).** *Analizar* mide el temblor una vez y lo guarda en el proyecto; *Seguir punto* sigue un punto y hace que el clip, un título encima o la máscara lo acompañen.
+- ✨ **Luz y atmósfera (Beta).** Lluvia, nieve, polvo y brasas, niebla por degradado, destello anamórfico, destellos de lente, rayos de luz y desenfoque de lente.
+- ⏱️ **Tiempo de la imagen (Beta).** Deflicker, reducción de ruido temporal con los fotogramas vecinos y cámara lenta por mezcla de fotogramas.
+- 🧩 **Capa de ajuste (Beta) y diez modos de fusión.** El color y los efectos de la capa valen para todo lo que está debajo; Diferencia, Luz suave, Color, Luminosidad y otros.
+- ⚙️ **Dónde activarlos.** Los recursos Beta empiezan desactivados: *Configuración › Recursos › Efectos visuales*. Los efectos de clip no van al plugin de DaVinci.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.9 solo abre en la 1.9 o más nueva; los antiguos abren y salen iguales.
+
+## Versión 1.8.0 — 9 de noviembre de 2026
+
+**El sonido del montaje: mezclador, limpieza, música, efectos de sonido, narración y sonido de película.**
+
+- 🎚️ **Mezclador.** Un canal por pista de sonido, con fader, panorama, silencio, solo y medidor, más la mezcla con pico y sonoridad (**Ctrl+Alt+M**). Arrastrar el cursor reproduce trocitos del sonido.
+- 🧹 **Limpiar el sonido.** Aprender el ruido y quitarlo del clip, quitar el zumbido de la red (60 o 50 Hz), cortar graves y agudos, nivelar la voz y preajustes como *Voz más clara* y *Podcast*.
+- 🔗 **Sincronizar por el sonido.** El sonido de una grabadora o de otra cámara se mueve hasta coincidir con el de la cámara, en un solo paso de deshacer.
+- 🎵 **Música.** Detectar pulsos y compases (con corrección manual), imán en los pulsos, ajustar la música a la duración del video y bajar la música bajo la voz.
+- 🎙️ **Grabar narración.** El botón del micrófono (**Ctrl+Shift+R**) graba en el cursor, con cuenta regresiva y el montaje sonando.
+- 💥 **Efectos de sonido y sonidos libres (Beta).** Whoosh, impacto, riser, máquina de escribir y otros hechos por la app, puestos solos en las transiciones y los títulos (**Ctrl+Alt+E**); búsqueda de sonidos de dominio público (CC0).
+- 📽️ **Sonido de película (Beta).** La pista óptica o magnética de cada formato, el temblor del proyector, el siseo, los chasquidos en los empalmes y la sala de cine, con cuatro preajustes nuevos.
+- 🎬 **Edición.** Cada secuencia puede tener su propio look; *Importar* solo pone los archivos en Medios; arrastrar varios clips elegidos mueve toda la selección. Exportar solo el sonido, o una pista por archivo.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.8 solo abre en la 1.8 o más nueva; los antiguos abren y salen iguales.
+
 ## Versión 1.7.0 — 30 de octubre de 2026
 
 **Varias secuencias, secuencia dentro de secuencia y el formato de cine en el montaje.**

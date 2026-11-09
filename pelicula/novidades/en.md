@@ -1,3 +1,29 @@
+## Version 1.9.0 — November 9, 2026
+
+**Visual effects on clips: keying, masks, stabilization, light, atmosphere and image timing.**
+
+- 🟩 **Keying and masks (Beta).** Remove a green, blue, picked-color or brightness background, with spill suppression and light wrap. Rectangle, ellipse or polygon masks to cut out, blur or pixelate, with handles on the preview.
+- 🎥 **Stabilize and track a point (Beta).** *Analyze* measures the shake once and stores it in the project; *Track point* follows a point and makes the clip, a title above it or the mask follow it.
+- ✨ **Light and atmosphere (Beta).** Rain, snow, dust and embers, gradient fog, anamorphic streak, lens flares, light rays and lens blur.
+- ⏱️ **Image timing (Beta).** Deflicker, temporal noise reduction from neighboring frames and slow motion by frame blending.
+- 🧩 **Adjustment layer (Beta) and ten blend modes.** The layer's color and effects apply to everything below it; Difference, Soft Light, Color, Luminosity and more.
+- ⚙️ **Where to turn them on.** Beta features start off: *Settings › Features › Visual effects*. Clip effects don't go into the DaVinci plugin.
+- 📂 **Projects.** A project that uses something new from 1.9 only opens in 1.9 or newer; older projects open and render the same.
+
+## Version 1.8.0 — November 9, 2026
+
+**Sound in the edit: mixer, cleanup, music, sound effects, voice-over and film sound.**
+
+- 🎚️ **Mixer.** One channel per audio track, with fader, pan, mute, solo and meter, plus the mix with peak and loudness (**Ctrl+Alt+M**). Dragging the playhead plays bits of the sound.
+- 🧹 **Clean up the sound.** Learn the noise and remove it from the clip, remove mains hum (60 or 50 Hz), cut lows and highs, level the voice, and presets like *Clearer voice* and *Podcast*.
+- 🔗 **Sync by sound.** Audio from a recorder or another camera moves until it matches the camera's, in a single undo step.
+- 🎵 **Music.** Detect beats and bars (with manual correction), snap to beats, fit the music to the video length and duck the music under the voice.
+- 🎙️ **Record voice-over.** The microphone button (**Ctrl+Shift+R**) records at the playhead, with a countdown and the edit playing.
+- 💥 **Sound effects and free sounds (Beta).** Whoosh, impact, riser, typewriter and more made by the app, placed automatically on transitions and titles (**Ctrl+Alt+E**); search for public-domain (CC0) sounds.
+- 📽️ **Film sound (Beta).** The optical or magnetic track of each gauge, projector wow and flutter, hiss, splice pops and the cinema room, with four new presets.
+- 🎬 **Editing.** Each sequence can have its own look; *Import* only adds files to Media; dragging several selected clips moves the whole selection. Export only the sound, or one track per file.
+- 📂 **Projects.** A project that uses something new from 1.8 only opens in 1.8 or newer; older projects open and render the same.
+
 ## Version 1.7.0 — October 30, 2026
 
 **Multiple sequences, sequences inside sequences and cinema formats in the edit.**
