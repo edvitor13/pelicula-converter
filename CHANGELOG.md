@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Planejado
+- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
+  desativados).
+
+## [1.8.0] - 2026-11-09
+
 ### Adicionado
 - **Look de película de cada sequência** (#67): uma sequência pode ter o look dela (preset, ajustes e chaves de animação)
   no lugar do look do projeto, que continua sendo o padrão (*Igual ao do projeto*). A escolha fica no painel de ajustes, no
@@ -60,10 +66,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Arrastar vários clipes escolhidos** (#63) move a seleção inteira, com o mesmo deslocamento, as mesmas distâncias entre
   faixas e um passo só do desfazer; antes só o clipe sob o mouse andava. No modo inserir, abre um espaço só, do tamanho do
   bloco. Aparar as bordas continua só no clipe clicado.
-
-### Planejado
-- Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
-  desativados).
 
 ## [1.7.0] - 2026-10-30
 
