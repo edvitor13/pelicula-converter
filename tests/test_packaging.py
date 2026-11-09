@@ -192,3 +192,22 @@ def test_spec_bundles_the_settings_pages():
     assert "componentes" in listed
     for name in listed:
         assert (pages / f"{name}.py").is_file() and not name.startswith("_")
+
+
+def test_spec_bundles_modules_imported_by_name():
+    """vfx.py (EFFECT_PACKAGES) e ui/vfx_ui.py (FRONT_UIS) importam módulos pelo nome com importlib: o spec
+    precisa pô-los em hiddenimports, senão o executável da 1.9 fechava ao abrir (No module named
+    'pelicula.ui.recorte_ui')."""
+    spec = (ROOT / "PeliculaConverter.spec").read_text(encoding="utf-8")
+    assert re.search(r"hiddenimports=\[[^\]]*\*DYNAMIC_MODULES", spec)
+    start = spec.index("import ast\n")
+    end = spec.index("# Ícone só no Windows")
+    ns = {"os": __import__("os"), "ROOT": str(ROOT)}
+    exec(spec[start:end], ns)
+    from pelicula import vfx
+    from pelicula.ui import vfx_ui
+    expected = {f"pelicula.{n}" for n in vfx.EFFECT_PACKAGES} | {f"pelicula.ui.{n}" for n in vfx_ui.FRONT_UIS}
+    assert "pelicula.ui.recorte_ui" in expected
+    assert set(ns["DYNAMIC_MODULES"]) == expected
+    for mod in expected:
+        assert (ROOT / (mod.replace(".", "/") + ".py")).is_file() or (ROOT / mod.replace(".", "/")).is_dir(), mod

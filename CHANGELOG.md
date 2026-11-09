@@ -11,7 +11,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).
 
-## [1.9.0] - 2026-11-09
+## [1.9.1] - 2026-11-09
 
 ### Adicionado
 - **Camada de ajuste** (#68, Beta): *Mídia › Novo › Camada de ajuste*. A cor e os efeitos dela valem para tudo o que está

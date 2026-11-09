@@ -1,4 +1,4 @@
-## Versão 1.9.0 — 9 de novembro de 2026
+## Versão 1.9.1 — 9 de novembro de 2026
 
 **Efeitos visuais no clipe: recorte, máscaras, estabilização, luz, atmosfera e tempo da imagem.**
 
