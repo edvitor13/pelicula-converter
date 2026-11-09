@@ -1,3 +1,15 @@
+## Version 1.9.0 — November 9, 2026
+
+**Visual effects on clips: keying, masks, stabilization, light, atmosphere and image timing.**
+
+- 🟩 **Keying and masks (Beta).** Remove a green, blue, picked-color or brightness background, with spill suppression and light wrap. Rectangle, ellipse or polygon masks to cut out, blur or pixelate, with handles on the preview.
+- 🎥 **Stabilize and track a point (Beta).** *Analyze* measures the shake once and stores it in the project; *Track point* follows a point and makes the clip, a title above it or the mask follow it.
+- ✨ **Light and atmosphere (Beta).** Rain, snow, dust and embers, gradient fog, anamorphic streak, lens flares, light rays and lens blur.
+- ⏱️ **Image timing (Beta).** Deflicker, temporal noise reduction from neighboring frames and slow motion by frame blending.
+- 🧩 **Adjustment layer (Beta) and ten blend modes.** The layer's color and effects apply to everything below it; Difference, Soft Light, Color, Luminosity and more.
+- ⚙️ **Where to turn them on.** Beta features start off: *Settings › Features › Visual effects*. Clip effects don't go into the DaVinci plugin.
+- 📂 **Projects.** A project that uses something new from 1.9 only opens in 1.9 or newer; older projects open and render the same.
+
 ## Version 1.8.0 — November 9, 2026
 
 **Sound in the edit: mixer, cleanup, music, sound effects, voice-over and film sound.**

@@ -11,6 +11,32 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Suporte ao macOS (o código, o `PeliculaConverter.spec` e o job do CI já estão preparados, mas
   desativados).
 
+## [1.9.0] - 2026-11-09
+
+### Adicionado
+- **Camada de ajuste** (#68, Beta): *Mídia › Novo › Camada de ajuste*. A cor e os efeitos dela valem para tudo o que está
+  embaixo, só no tempo dela, com opacidade, mesclagem e transições como qualquer clipe.
+- **Dez modos de mesclagem novos** (#68): Diferença, Exclusão, Luz suave, Luz forte, Subtrair, Dividir, Matiz, Saturação,
+  Cor e Luminosidade.
+- **Recorte e máscaras** (#68, Beta): tirar o fundo verde, azul, de uma cor escolhida com o conta-gotas ou pelo brilho,
+  com tolerância, suavidade, encolher a borda, tirar o reflexo do fundo e a luz do fundo na borda. Máscara de retângulo,
+  elipse ou polígono (até 32 pontos) para recortar, desfocar ou pixelar, com alças na prévia (arrastar, girar, desenhar
+  o polígono com cliques) e chaves no cursor.
+- **Estabilizar e rastrear ponto** (#68, Beta): *Analisar* mede o tremor do arquivo uma vez (pela vid.stab do ffmpeg ou
+  por um método próprio) e guarda no projeto; *Suavizar*, *Corrigir a rotação*, *Bordas* e *Zoom a mais* acertam o
+  resultado. *Rastrear ponto* segue um ponto clicado na prévia e *Aplicar a…* faz o próprio clipe, um título acima ou a
+  máscara do clipe acompanhá-lo, com chaves de animação comuns.
+- **Luz e atmosfera** (#68, Beta): partículas (chuva, neve, poeira, brasas, em três camadas de profundidade), névoa por
+  degradê com nuvens que andam, listra anamórfica, flares, raios de luz e desfoque de lente (disco ou hexágono) na
+  imagem toda, por um degradê ou dentro/fora da máscara do clipe.
+- **Tempo da imagem** (#68, Beta): deflicker (pela análise do brilho de cada quadro), ruído temporal (pelos quadros
+  vizinhos, sem fantasma no que se mexe) e câmera lenta por mistura de quadros.
+
+### Mudado
+- Projeto com algo da 1.9 (camada de ajuste, mesclagem nova, efeito visual, análise de estabilização ou de deflicker) é
+  gravado no **formato 7**, que a 1.8 recusa com aviso. Sem isso, o arquivo sai igual ao da 1.8.
+- Os efeitos visuais de clipe ficam no modo Edição: não vão para o plugin do DaVinci Resolve, que continua só com o look.
+
 ## [1.8.0] - 2026-11-09
 
 ### Adicionado
@@ -50,23 +76,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   em *Configurações › Sons livres*. Cada exportação que usa um deles grava ao lado um `.creditos.txt`.
 - **Gravar narração** (#39): o botão do microfone na linha do tempo (ou **Ctrl+Shift+R**) grava no cursor, com contagem
   3, 2, 1 e a montagem tocando, e põe a gravação numa faixa *Narração*.
-- **Camada de ajuste** (#68, Beta): *Mídia › Novo › Camada de ajuste*. A cor e os efeitos dela valem para tudo o que está
-  embaixo, só no tempo dela, com opacidade, mesclagem e transições como qualquer clipe.
-- **Dez modos de mesclagem novos** (#68): Diferença, Exclusão, Luz suave, Luz forte, Subtrair, Dividir, Matiz, Saturação,
-  Cor e Luminosidade.
-- **Recorte e máscaras** (#68, Beta): tirar o fundo verde, azul, de uma cor escolhida com o conta-gotas ou pelo brilho,
-  com tolerância, suavidade, encolher a borda, tirar o reflexo do fundo e a luz do fundo na borda. Máscara de retângulo,
-  elipse ou polígono (até 32 pontos) para recortar, desfocar ou pixelar, com alças na prévia (arrastar, girar, desenhar
-  o polígono com cliques) e chaves no cursor.
-- **Estabilizar e rastrear ponto** (#68, Beta): *Analisar* mede o tremor do arquivo uma vez (pela vid.stab do ffmpeg ou
-  por um método próprio) e guarda no projeto; *Suavizar*, *Corrigir a rotação*, *Bordas* e *Zoom a mais* acertam o
-  resultado. *Rastrear ponto* segue um ponto clicado na prévia e *Aplicar a…* faz o próprio clipe, um título acima ou a
-  máscara do clipe acompanhá-lo, com chaves de animação comuns.
-- **Luz e atmosfera** (#68, Beta): partículas (chuva, neve, poeira, brasas, em três camadas de profundidade), névoa por
-  degradê com nuvens que andam, listra anamórfica, flares, raios de luz e desfoque de lente (disco ou hexágono) na
-  imagem toda, por um degradê ou dentro/fora da máscara do clipe.
-- **Tempo da imagem** (#68, Beta): deflicker (pela análise do brilho de cada quadro), ruído temporal (pelos quadros
-  vizinhos, sem fantasma no que se mexe) e câmera lenta por mistura de quadros.
 
 ### Mudado
 - **Importar só põe na Mídia** (#64): o botão *Importar…*, o **Ctrl+I** e os arquivos soltos na janela deixam os
@@ -77,9 +86,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **A mixagem é feita clipe a clipe e guardada** (até 2 GiB na pasta temporária): mexer num clipe refaz só o som dele. O
   clipe de som agora cai na amostra exata; num projeto antigo ele pode andar até 0,5 ms (inaudível), então o som
   exportado não sai idêntico, bit a bit, ao da 1.7.
-- Projeto com algo da 1.9 (camada de ajuste, mesclagem nova, efeito visual, análise de estabilização ou de deflicker) é
-  gravado no **formato 7**, que a 1.8 recusa com aviso. Sem isso, o arquivo sai igual ao da 1.8.
-- Os efeitos visuais de clipe ficam no modo Edição: não vão para o plugin do DaVinci Resolve, que continua só com o look.
 - Com o som de película ligado, *Copiar original* recodifica o som. A janela de exportação, a fila e o terminal avisam.
 
 ### Corrigido

@@ -1,3 +1,15 @@
+## Versión 1.9.0 — 9 de noviembre de 2026
+
+**Efectos visuales en el clip: recorte, máscaras, estabilización, luz, atmósfera y tiempo de la imagen.**
+
+- 🟩 **Recorte y máscaras (Beta).** Quitar el fondo verde, azul, de un color elegido o por el brillo, con supresión del reflejo del fondo y luz en el borde. Máscara de rectángulo, elipse o polígono para recortar, desenfocar o pixelar, con controles en la vista previa.
+- 🎥 **Estabilizar y seguir un punto (Beta).** *Analizar* mide el temblor una vez y lo guarda en el proyecto; *Seguir punto* sigue un punto y hace que el clip, un título encima o la máscara lo acompañen.
+- ✨ **Luz y atmósfera (Beta).** Lluvia, nieve, polvo y brasas, niebla por degradado, destello anamórfico, destellos de lente, rayos de luz y desenfoque de lente.
+- ⏱️ **Tiempo de la imagen (Beta).** Deflicker, reducción de ruido temporal con los fotogramas vecinos y cámara lenta por mezcla de fotogramas.
+- 🧩 **Capa de ajuste (Beta) y diez modos de fusión.** El color y los efectos de la capa valen para todo lo que está debajo; Diferencia, Luz suave, Color, Luminosidad y otros.
+- ⚙️ **Dónde activarlos.** Los recursos Beta empiezan desactivados: *Configuración › Recursos › Efectos visuales*. Los efectos de clip no van al plugin de DaVinci.
+- 📂 **Proyectos.** Un proyecto que usa algo nuevo de la 1.9 solo abre en la 1.9 o más nueva; los antiguos abren y salen iguales.
+
 ## Versión 1.8.0 — 9 de noviembre de 2026
 
 **El sonido del montaje: mezclador, limpieza, música, efectos de sonido, narración y sonido de película.**
