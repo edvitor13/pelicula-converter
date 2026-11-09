@@ -41,6 +41,27 @@ SETTINGS_PAGES = sorted(
     "pelicula.ui.pages." + _f[:-3] for _f in os.listdir(os.path.join(ROOT, "pelicula", "ui", "pages"))
     if _f.endswith(".py") and not _f.startswith("_"))
 
+# Frentes da 1.9: vfx.py (EFFECT_PACKAGES) e ui/vfx_ui.py (FRONT_UIS) também importam módulos pelo nome com
+# importlib. As listas são lidas do código-fonte (sem importar o pacote); sem isto o executável fecha ao abrir
+# ("No module named 'pelicula.ui.recorte_ui'").
+import ast
+
+
+def _name_tuple(rel, var):
+    with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
+        if isinstance(target, ast.Name) and target.id == var:
+            return list(ast.literal_eval(node.value))
+    raise SystemExit(f"{var} não encontrado em {rel}: atualize PeliculaConverter.spec.")
+
+
+DYNAMIC_MODULES = sorted(
+    ["pelicula." + _n for _n in _name_tuple("pelicula/vfx.py", "EFFECT_PACKAGES")]
+    + ["pelicula.ui." + _n for _n in _name_tuple("pelicula/ui/vfx_ui.py", "FRONT_UIS")])
+
 # Ícone só no Windows (.ico). No Linux o ícone vem do tema / arquivo .desktop.
 ICON = os.path.join(ROOT, "assets", "logo.ico") if sys.platform == "win32" else None
 
@@ -100,7 +121,7 @@ COMMON = dict(
     pathex=[ROOT],
     binaries=[],
     datas=DATAS,
-    hiddenimports=["glcontext", *GL_BACKENDS, *SETTINGS_PAGES],
+    hiddenimports=["glcontext", *GL_BACKENDS, *SETTINGS_PAGES, *DYNAMIC_MODULES],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -1,4 +1,4 @@
-## Version 1.9.0 — November 9, 2026
+## Version 1.9.1 — November 9, 2026
 
 **Visual effects on clips: keying, masks, stabilization, light, atmosphere and image timing.**
 
